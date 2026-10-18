@@ -1,0 +1,116 @@
+{
+  "schema": "canary-retained-build-notices-v1",
+  "native_revision": "dde09517344925f51fb8bada367a104895f6582c",
+  "native_sha256": "0dd57cdbb104de56cf385cf76528e12c1f6cf20b21d42a84867670dca8ae6c55",
+  "retained_build_archive_sha256": "8ec090a9164a34a652726f3e3013906e8e8de626569759571489b9bfad277d47",
+  "components": [
+    {
+      "component": "cuda_nvcc",
+      "component_version": "13.1.115",
+      "component_download": {
+        "url": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvcc/linux-x86_64/cuda_nvcc-linux-x86_64-13.1.115-archive.tar.xz",
+        "sha256": "858a74e6caa36fc9b4fa1ec5e8d38f568ab8046ef93dca9ba8b3f01dee09f30d",
+        "size": "29853656",
+        "members": 16,
+        "top_level": [
+          "cuda_nvcc-linux-x86_64-13.1.115-archive"
+        ]
+      },
+      "retained_member": "cuda-13.1.1-components-v1/toolkit/notices/cuda_nvcc/LICENSE",
+      "notice_file": "cuda_nvcc.txt",
+      "notice_bytes": 67876,
+      "notice_sha256": "72c22161fc1ebf242443d45158a7dd382d68597b00eeb7a7f539be5c6114be33"
+    },
+    {
+      "component": "libnvvm",
+      "component_version": "13.1.115",
+      "component_download": {
+        "url": "https://developer.download.nvidia.com/compute/cuda/redist/libnvvm/linux-x86_64/libnvvm-linux-x86_64-13.1.115-archive.tar.xz",
+        "sha256": "9038a2bf1237d9decdf99d90c4b43639536c9dbe4b3a40d1e6add5413a02096f",
+        "size": "44800332",
+        "members": 13,
+        "top_level": [
+          "libnvvm-linux-x86_64-13.1.115-archive"
+        ]
+      },
+      "retained_member": "cuda-13.1.1-components-v1/toolkit/notices/libnvvm/LICENSE",
+      "notice_file": "libnvvm.txt",
+      "notice_bytes": 67876,
+      "notice_sha256": "72c22161fc1ebf242443d45158a7dd382d68597b00eeb7a7f539be5c6114be33"
+    },
+    {
+      "component": "cuda_crt",
+      "component_version": "13.1.115",
+      "component_download": {
+        "url": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_crt/linux-x86_64/cuda_crt-linux-x86_64-13.1.115-archive.tar.xz",
+        "sha256": "e2861bbc6400815be6689cdc84afddfedc51103189888c8e51a2e9543e55a5b3",
+        "size": "79628",
+        "members": 29,
+        "top_level": [
+          "cuda_crt-linux-x86_64-13.1.115-archive"
+        ]
+      },
+      "retained_member": "cuda-13.1.1-components-v1/toolkit/notices/cuda_crt/LICENSE",
+      "notice_file": "cuda_crt.txt",
+      "notice_bytes": 67876,
+      "notice_sha256": "72c22161fc1ebf242443d45158a7dd382d68597b00eeb7a7f539be5c6114be33"
+    },
+    {
+      "component": "cuda_cudart",
+      "component_version": "13.1.80",
+      "component_download": {
+        "url": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-13.1.80-archive.tar.xz",
+        "sha256": "b626f4790f46bc9324a1047f2fbcc9a42bc4a722b053056e61cc00da54ad6f32",
+        "size": "1549648",
+        "members": 108,
+        "top_level": [
+          "cuda_cudart-linux-x86_64-13.1.80-archive"
+        ]
+      },
+      "retained_member": "cuda-13.1.1-components-v1/toolkit/notices/cuda_cudart/LICENSE",
+      "notice_file": "cuda_cudart.txt",
+      "notice_bytes": 67876,
+      "notice_sha256": "72c22161fc1ebf242443d45158a7dd382d68597b00eeb7a7f539be5c6114be33"
+    },
+    {
+      "component": "cuda_cccl",
+      "component_version": "13.1.115",
+      "component_download": {
+        "url": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/linux-x86_64/cuda_cccl-linux-x86_64-13.1.115-archive.tar.xz",
+        "sha256": "b0fff2704e59d4e6f6f4b7b5b64f96a7bf86760a5696fd6cb6936f8f9cd92d4c",
+        "size": "1094324",
+        "members": 2005,
+        "top_level": [
+          "cuda_cccl-linux-x86_64-13.1.115-archive"
+        ]
+      },
+      "retained_member": "cuda-13.1.1-components-v1/toolkit/notices/cuda_cccl/LICENSE",
+      "notice_file": "cuda_cccl.txt",
+      "notice_bytes": 67876,
+      "notice_sha256": "72c22161fc1ebf242443d45158a7dd382d68597b00eeb7a7f539be5c6114be33"
+    },
+    {
+      "component": "cuda_cuobjdump",
+      "component_version": "13.1.115",
+      "component_download": {
+        "url": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cuobjdump/linux-x86_64/cuda_cuobjdump-linux-x86_64-13.1.115-archive.tar.xz",
+        "sha256": "ead244f805ce4616bcc9ecb5b6d993926522b825cfc1dcfff0b1113b6ac656d9",
+        "size": "264760",
+        "members": 4,
+        "top_level": [
+          "cuda_cuobjdump-linux-x86_64-13.1.115-archive"
+        ]
+      },
+      "retained_member": "cuda-13.1.1-components-v1/toolkit/notices/cuda_cuobjdump/LICENSE",
+      "notice_file": "cuda_cuobjdump.txt",
+      "notice_bytes": 67876,
+      "notice_sha256": "72c22161fc1ebf242443d45158a7dd382d68597b00eeb7a7f539be5c6114be33"
+    }
+  ],
+  "scope": "Exact notices from six build-toolkit components; no toolkit binaries or system libraries copied.",
+  "limitations": [
+    "Not a license determination or completed distribution dependency closure.",
+    "The full external host compiler and transitive runtime closure remains incomplete.",
+    "Source port provenance and validation-environment inventories remain separate requirements."
+  ]
+}

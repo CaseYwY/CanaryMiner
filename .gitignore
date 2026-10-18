@@ -1,0 +1,44 @@
+build/
+canaryminer
+tests/__pycache__/
+*.o
+*.log
+
+# build-binary variants and experiment scratch binaries (never commit these)
+canaryminer-*
+sm-*
+build13
+canaryminer-13
+build120/
+scratchpad/
+scripts/__pycache__/
+tools/__pycache__/
+*.d
+evidence/
+
+# Compiled binaries in tests/. Matches on the ABSENCE of an extension rather
+# than on a name prefix, because the prefix version was still a list in
+# disguise. It also replaces ~25 hand-listed entries that used to sit here, one
+# of which had already been forgotten - a 39 KB ELF got committed as a result.
+# Sources and scripts carry an extension, so un-ignoring anything with a dot
+# keeps them tracked, and !tests/*/ keeps subdirectories.
+tests/*
+!tests/*.*
+!tests/*/
+# Dependency files also have an extension; keep them ignored after the source
+# exception above so CPU regression runs do not pollute the working tree.
+tests/*.d
+# Re-ignored: the un-ignore above brings subdirectories back, including this
+# one, which an earlier explicit rule had covered.
+tests/__pycache__/
+
+# local secret deny-list for tools/check_secrets.py (never commit)
+.secrets.local
+build/
+*.pyc
+__pycache__/
+
+# local smoke-test runtime values (never commit)
+.smoke.local
+# bulky per-task evidence (logs, dumps)
+ops/evidence/

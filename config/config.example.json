@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "wallet": "REPLACE_WITH_YOUR_PUBLIC_PRL_PAYOUT_ADDRESS",
+  "worker": "rig_1",
+  "pools": [
+    "kryptex"
+  ],
+  "devices": [
+    "all"
+  ],
+  "api": {
+    "enabled": true,
+    "bind": "127.0.0.1",
+    "port": 8085
+  },
+  "log": {
+    "dir": "logs",
+    "max_file_bytes": 10485760,
+    "max_files": 5,
+    "redact_worker": false
+  },
+  "state_dir": "state",
+  "donation": true,
+  "shutdown": {
+    "drain_seconds": 10
+  }
+}

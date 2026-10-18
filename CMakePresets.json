@@ -1,0 +1,17 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 31, "patch": 0 },
+  "configurePresets": [
+    { "name": "production-sm120", "displayName": "Blackwell SM120 native (needs nvcc 13.1)", "binaryDir": "${sourceDir}/build/production-sm120",
+      "cacheVariables": { "CANARY_PROFILE": "production-sm120", "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "tests", "displayName": "CPU-only host tests (no CUDA, no GPU)", "binaryDir": "${sourceDir}/build/tests",
+      "cacheVariables": { "CANARY_PROFILE": "tests", "CMAKE_BUILD_TYPE": "Release" } }
+  ],
+  "buildPresets": [
+    { "name": "production-sm120", "configurePreset": "production-sm120", "targets": ["canaryminer"] },
+    { "name": "tests", "configurePreset": "tests" }
+  ],
+  "testPresets": [
+    { "name": "tests", "configurePreset": "tests", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-config-v1",
+  "title": "CanaryMiner configuration, schema_version 1",
+  "description": "Unknown keys are errors at every level. CLI options override the file. There is no automatic migration between schema versions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "wallet": { "type": "string", "description": "Public PRL payout address." },
+    "worker": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$", "default": "canary" },
+    "pools": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "description": "Ordered. Failover is not implemented in this build: the first entry is used.",
+      "items": {
+        "oneOf": [
+          { "type": "string", "description": "A preset (kryptex, herominers, f2pool) or HOST:PORT." },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url"],
+            "properties": {
+              "url": { "type": "string" },
+              "network": { "enum": ["mainnet"], "default": "mainnet" },
+              "target_semantics": { "enum": ["base-before-penalty", "final-adjusted-bound"], "default": "base-before-penalty" },
+              "compression": { "enum": ["auto", "off"], "default": "auto", "description": "auto offers the gzip v2 dialect at login for the kryptex and f2pool presets only, and uses it only when the pool answers type v2; off never offers it. Custom HOST:PORT endpoints never offer it." },
+              "account": { "type": "string", "pattern": "^[A-Za-z0-9_]{0,64}$", "default": "", "description": "v2 login account; empty uses the payout address." }
+            }
+          }
+        ]
+      }
+    },
+    "devices": {
+      "type": "array",
+      "maxItems": 16,
+      "description": "all, a device index, a GPU UUID, or a PCI bus id. This build drives one device per process.",
+      "items": { "oneOf": [ { "type": "string" }, { "type": "integer", "minimum": 0, "maximum": 15 } ] }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "bind": { "enum": ["127.0.0.1", "::1", "localhost"], "default": "127.0.0.1" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 8085 }
+      }
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string", "description": "Empty or absent: console only." },
+        "max_file_bytes": { "type": "integer", "minimum": 4096, "maximum": 4294967296, "default": 10485760 },
+        "max_files": { "type": "integer", "minimum": 1, "maximum": 100, "default": 5 },
+        "redact_worker": { "type": "boolean", "default": false }
+      }
+    },
+    "state_dir": { "type": "string", "default": "state" },
+    "donation": { "type": "boolean", "default": true, "description": "optional 1% developer donation (99:1 per 100 productive minutes); false turns it off" },
+    "shutdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "drain_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 10 } }
+    }
+  }
+}

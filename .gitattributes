@@ -1,0 +1,11 @@
+# Shell fixtures and launchers must stay runnable in Linux source archives,
+# including archives created on Windows with core.autocrlf enabled.
+*.sh text eol=lf
+packaging/config.txt text eol=lf
+scripts/pearl_sustained_public_*.py text eol=lf
+scripts/pearl_sustained_telemetry_smoke.py text eol=lf
+tests/test_pearl_sustained_public_*.py text eol=lf
+docs/sustained-public-wrapper-cpu-tests-20260905.txt text eol=lf
+
+# Preserve exact upstream notice bytes in source archives.
+LICENSES/NVIDIA-CUDA-13.1.1/*.txt -text

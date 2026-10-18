@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-stats-v1",
+  "title": "GET /api/v1/stats (DRAFT)",
+  "description": "Read-only, loopback-only. No wallet, worker name or credential ever appears. Rates carry unit and basis. Draft: fields may change before the first release.",
+  "type": "object",
+  "required": ["schema", "version", "state", "uptime_seconds", "pool", "devices", "outcomes", "donation"],
+  "properties": {
+    "schema": { "const": "canaryminer-stats-v1" },
+    "version": { "type": "string" },
+    "state": { "enum": ["starting", "running", "draining", "stopping", "stopped"] },
+    "uptime_seconds": { "type": "number", "minimum": 0 },
+    "pool": {
+      "type": "object",
+      "required": ["endpoint", "preset", "state", "last_error"],
+      "properties": {
+        "endpoint": { "type": "string", "description": "host:port, no credentials" },
+        "preset": { "type": "string" },
+        "state": { "enum": ["none", "connecting", "mining"] },
+        "last_error": { "type": "string" }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "uuid", "pci_bus", "name", "family", "compute_capability", "rate", "rate_average", "attempts_per_second", "power_watts", "temperature_c", "outcomes"],
+        "properties": {
+          "index": { "type": "integer" },
+          "uuid": { "type": "string" },
+          "pci_bus": { "type": "string" },
+          "name": { "type": "string" },
+          "family": { "enum": ["SM120"] },
+          "compute_capability": { "type": "string" },
+          "rate": { "$ref": "#/$defs/rate" },
+          "rate_average": { "$ref": "#/$defs/rate" },
+          "attempts_per_second": { "type": "number" },
+          "power_watts": { "type": ["number", "null"] },
+          "temperature_c": { "type": ["integer", "null"] },
+          "outcomes": { "$ref": "#/$defs/outcomes" }
+        }
+      }
+    },
+    "outcomes": { "$ref": "#/$defs/outcomes" },
+    "donation": {
+      "type": "object",
+      "required": ["enabled", "state", "destination_configured", "destination_sha256", "cycle_minutes", "window_minutes", "cycle", "user_seconds", "donation_seconds", "debt_seconds", "window_active", "pool_failures", "windows_completed", "pool", "login", "outcomes", "note"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "state": { "enum": ["off", "not_active", "user", "donation"] },
+        "destination_configured": { "type": "boolean" },
+        "destination_sha256": { "type": "string" },
+        "cycle_minutes": { "type": "integer" },
+        "window_minutes": { "type": "integer" },
+        "cycle": { "type": "integer" },
+        "user_seconds": { "type": "integer" },
+        "donation_seconds": { "type": "integer" },
+        "debt_seconds": { "type": "integer" },
+        "window_active": { "type": "boolean" },
+        "pool_failures": { "type": "integer" },
+        "windows_completed": { "type": "integer" },
+        "pool": { "type": "string" },
+        "login": { "type": "string" },
+        "outcomes": { "$ref": "#/$defs/outcomes" },
+        "note": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "description": "GET /api/v1/version",
+      "type": "object",
+      "required": ["schema", "name", "version", "build_arch", "stats_schema"],
+      "properties": {
+        "schema": { "const": "canaryminer-version-v1" },
+        "name": { "const": "canaryminer" },
+        "version": { "type": "string" },
+        "build_arch": { "enum": ["SM120", "host-only"] },
+        "stats_schema": { "const": "canaryminer-stats-v1" }
+      }
+    },
+    "rate": {
+      "type": "object",
+      "required": ["value", "unit", "basis"],
+      "properties": {
+        "value": { "type": "number" },
+        "unit": { "const": "T MAC/s" },
+        "basis": { "enum": ["interval_native", "since_start_native"] }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "required": ["submitted", "acknowledged", "accepted", "rejected", "stale", "unknown", "pending", "guard_retired", "host_invalid", "submit_failed", "local_stale"],
+      "description": "rejected counts pool rejections only; local_stale counts candidates retired or superseded before sending; submit_failed counts real delivery failures; unknown is a submitted share whose outcome was never learned (terminal, never replayed).",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    }
+  }
+}
