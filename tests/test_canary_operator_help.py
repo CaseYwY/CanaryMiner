@@ -48,7 +48,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
 
     def test_pearl_help_is_truthful_and_retains_real_defaults(self):
         help_text = self.cli('--help').stdout.decode()
-        for text in ('CanaryMiner (CUDA) - Pearl-only development build',
+        for text in ('CanaryMiner 1.0.1 (CUDA, NVIDIA Blackwell)',
                 'pearl-pow only (default pearl-pow)', 'worker name (default canary)',
                 'logical work-unit budget (default 4194304)', 'fixed synthetic fixture height 1851444',
                 'canary-miner list-devices', 'base-before-penalty|final-adjusted-bound',
@@ -56,6 +56,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                 'canary-miner status', '--config FILE', '--api-port N', "Supported devices are listed by 'list-devices'"):
             with self.subTest(text=text):
                 self.assertIn(text, help_text)
+        self.assertNotIn('development', help_text.lower())
 
     def test_pearl_help_does_not_advertise_other_algorithms_or_unsupported_options(self):
         help_text = self.cli('--help').stdout.decode()
@@ -87,7 +88,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
     def test_subcommands_that_need_no_pool(self):
         version = self.cli('version')
         self.assertEqual(version.returncode, 0)
-        self.assertIn(b'canaryminer 1.0.0', version.stdout)
+        self.assertIn(b'CanaryMiner 1.0.1', version.stdout)
         # the fee destination is public (H-018b): the version line carries its 64-hex SHA-256
         self.assertRegex(version.stdout, rb'fee_destination_sha256=[0-9a-f]{64}\n')
         self.assertEqual(self.cli('--version').stdout, version.stdout)

@@ -131,7 +131,7 @@ inline void applyProductFixedSelection() {
 
 inline std::string versionText() {
     const std::string digest = feeDestinationDigest();
-    return std::string("canaryminer ") + CANARY_MINER_VERSION + "  build=" + buildArchLabel() + "  donation-policy=" + feePolicyBuildLabel() + "  fee_destination_sha256=" +
+    return std::string("CanaryMiner ") + CANARY_MINER_VERSION + "  build=" + buildArchLabel() + "  donation-policy=" + feePolicyBuildLabel() + "  fee_destination_sha256=" +
            (digest.empty() ? std::string("not configured in this build") : digest);
 }
 
@@ -249,9 +249,15 @@ class FeeStatsObserver final : public RunObserver {
     }
     /** A window opened (true) or closed (false): fold the finished window's counters into the carried fee totals. */
     void boundary(bool opening) {
-        (void)opening;
         StatsObserver::carryInto(&carry_, last_);
         carry_.pending = 0;
+        if (!opening) {
+            // Per-window counts for the operator and the gate; the totals keep accumulating in stats.donation.outcomes.
+            fprintf(stderr, "donation window closed: %llu accepted, %llu rejected, %llu host_invalid, %llu submit_failed (totals: %llu accepted, %llu rejected)\n",
+                    static_cast<unsigned long long>(last_.accepted), static_cast<unsigned long long>(last_.rejected),
+                    static_cast<unsigned long long>(last_.hostInvalid), static_cast<unsigned long long>(last_.submitFailed),
+                    static_cast<unsigned long long>(carry_.accepted), static_cast<unsigned long long>(carry_.rejected));
+        }
         last_ = StatsOutcomes{};
         publish();
     }
@@ -277,8 +283,8 @@ class FeeStatsObserver final : public RunObserver {
 class ShutdownDriver {
    public:
     ShutdownDriver(uint64_t drainMs, ShutdownHooks hooks, volatile sig_atomic_t *stopFlag, std::atomic<bool> *runLoopDone,
-                   std::function<void(const char *)> stateSink)
-        : stopFlag_(stopFlag), runLoopDone_(runLoopDone), stateSink_(std::move(stateSink)) {
+                   std::function<void(const char *)> stateSink, volatile sig_atomic_t *closeFlag = nullptr)
+        : stopFlag_(stopFlag), closeFlag_(closeFlag), runLoopDone_(runLoopDone), stateSink_(std::move(stateSink)) {
         std::atomic<bool> *done = runLoopDone;
         hooks.drained = [done] { return done->load(); };
         machine_.reset(new ShutdownMachine(drainMs, std::move(hooks)));
@@ -293,6 +299,7 @@ class ShutdownDriver {
 
    private:
     volatile sig_atomic_t *stopFlag_;
+    volatile sig_atomic_t *closeFlag_;   // console close/logoff/shutdown: skip the drain
     std::atomic<bool> *runLoopDone_;
     std::function<void(const char *)> stateSink_;
     std::unique_ptr<ShutdownMachine> machine_;
@@ -310,7 +317,12 @@ class ShutdownDriver {
 
     void loop() {
         while (!machine_->done()) {
-            if (stopFlag_ && *stopFlag_) machine_->requestStop("signal");
+            if (closeFlag_ && *closeFlag_ && !machine_->stopRequested()) {
+                machine_->setDrainMs(0);
+                machine_->requestStop("console-close");
+            } else if (stopFlag_ && *stopFlag_) {
+                machine_->requestStop("signal");
+            }
             const ShutdownState s = machine_->step(steadyNowMs());
             if (s != lastShown_) { lastShown_ = s; if (stateSink_) stateSink_(publicName(s)); }
             if (machine_->done()) break;

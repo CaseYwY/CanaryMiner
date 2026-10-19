@@ -2,6 +2,8 @@
 """Kernel invariant: per-kernel SASS .text of the Blackwell native must equal tools/gate1a/final-sass.json (67 SM120).
 
 usage: check_sass_invariant.py [--toolkit DIR] [--jobs N] [--keep DIR]
+       check_sass_invariant.py --platform windows --binary canary-miner.exe [--toolkit DIR]
+       (windows: digests the given MSVC binary; tools/gate1a/windows-name-map.json pairs the size_t-mangled names; nothing else is mapped)
 
 Builds the recipe native (tools/build_natives.py) for SM120 from this tree, digests every kernel
 (tools/sass_digest.py) and compares with the 'recipe' section of final-sass.json. Mandatory stage of tools/test_all.sh:
@@ -15,12 +17,31 @@ ap=argparse.ArgumentParser()
 ap.add_argument('--toolkit',default=os.environ.get('CANARY_TOOLKIT'))
 ap.add_argument('--jobs',type=int,default=4)
 ap.add_argument('--keep',default=None,help='keep the build output in this directory')
+ap.add_argument('--platform',choices=['linux','windows'],default='linux',help='windows: digest an existing --binary and apply tools/gate1a/windows-name-map.json only')
+ap.add_argument('--binary',default=None,help='windows: the MSVC-built canary-miner.exe to digest')
 a=ap.parse_args()
-if not a.toolkit or not (pathlib.Path(a.toolkit)/'bin'/'nvcc').exists():
+EXE='.exe' if a.platform=='windows' else ''
+if not a.toolkit or not (pathlib.Path(a.toolkit)/'bin'/('nvcc'+EXE)).exists():
     print('check_sass_invariant: FAILED - set CANARY_TOOLKIT (or --toolkit) to a CUDA 13.1 toolkit root; this stage is mandatory and never skipped')
     sys.exit(2)
 tk=pathlib.Path(a.toolkit)
 final=json.load(open(HERE/'gate1a'/'final-sass.json'))
+if a.platform=='windows':
+    # Explicit pairing only: each mapped Windows name must be a Linux kernel with identical bytes; every other name must match.
+    if not a.binary: print('check_sass_invariant: FAILED - --platform windows needs --binary'); sys.exit(2)
+    import importlib.util
+    spec=importlib.util.spec_from_file_location('sass_digest',HERE/'sass_digest.py'); sd=importlib.util.module_from_spec(spec); spec.loader.exec_module(sd)
+    want=final['sm120']['recipe']; got=sd.digests(a.binary,str(tk/'bin'/('cuobjdump'+EXE)))
+    mapping=json.load(open(HERE/'gate1a'/'windows-name-map.json'))
+    for lk,wk in mapping.items():
+        if lk not in want or wk not in got or lk in got or want[lk]!=got[wk]:
+            print('check_sass_invariant: FAILED - windows-name-map entry does not pair two identical kernels:',lk); sys.exit(1)
+        got[lk]=got.pop(wk)
+    diff=[k for k in sorted(set(want)|set(got)) if want.get(k)!=got.get(k)]
+    print(f'windows: final-sass {len(want)} kernels, built {len(got)} kernels (after {len(mapping)} mapped names),',('EQUAL' if not diff else f'DIFFERENT ({len(diff)}): {diff[:4]}'))
+    if diff: sys.exit(1)
+    print('check_sass_invariant: OK (%d/%d windows SM120 per-kernel SASS equal, %d mapped names)' % (len(want),len(want),len(mapping)))
+    sys.exit(0)
 rc=0
 work=pathlib.Path(a.keep) if a.keep else pathlib.Path(tempfile.mkdtemp(prefix='canary-sass-'))
 work.mkdir(parents=True,exist_ok=True)

@@ -67,6 +67,10 @@ public:
         return true;
     }
     Step step(uint64_t now) {
+#if defined(_WIN32)
+        // No owned anonymous-pipe guard channel on Windows: fail closed (see pearl_guard_retirement_channel.h).
+        (void)now; fail(); return Step::Failed;
+#else
         if(!live(now) || !boundAnonymousPipe(in_) || !boundAnonymousPipe(out_)) { fail(); return Step::Failed; }
         pollfd p{in_.fd,POLLIN,0}; const int polled=poll(&p,1,0);
         if(polled<0 || (polled && p.revents!=POLLIN)) { fail(); return Step::Failed; }
@@ -100,6 +104,7 @@ public:
             phase_=2; // This is NOT yet a terminal outcome.
         }
         return Step::Waiting;
+#endif
     }
     bool ordinary(Ordinary verdict,uint64_t now) {
         // Unknown is recorded even after a malformed/missing control failure;

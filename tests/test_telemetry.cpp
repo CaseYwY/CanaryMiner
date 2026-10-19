@@ -7,7 +7,13 @@
 #include <cstring>
 #include <string>
 
+#ifdef _WIN32
+#include <io.h>
+#define dup _dup
+#define dup2 _dup2
+#else
 #include <unistd.h>
+#endif
 
 #include "../src/core/telemetry.h"
 

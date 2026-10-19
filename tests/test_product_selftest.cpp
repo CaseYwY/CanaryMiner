@@ -8,6 +8,11 @@
 #include "../src/algos/pearl-pow/tma_fused_scan_policy.h"
 #include "product_test_util.h"
 
+#ifdef _WIN32
+// An empty value deletes the variable in the MSVC CRT.
+#define unsetenv(name) _putenv_s((name), "")
+#endif
+
 using namespace om;
 
 namespace {

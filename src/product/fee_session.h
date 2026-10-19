@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include <functional>
+#include <mutex>
 #include <string>
 
 #include "../core/run.h"
@@ -78,6 +79,7 @@ class FeeSession {
 
     /** Load the persisted state. A damaged file starts a fresh cycle with a warning; it never blocks mining or skips the fee. */
     void load() {
+        std::lock_guard<std::recursive_mutex> lock(mu_);
         FeeState st;
         const auto r = file_.load(&st);
         if (r == FeeStateFile::LoadResult::Corrupt) {
@@ -94,6 +96,7 @@ class FeeSession {
 
     /** Persist now (also marks the scheduler clean). A write failure is logged once and never stops mining. */
     void save() {
+        std::lock_guard<std::recursive_mutex> lock(mu_);
         std::string err;
         if (file_.save(sched_.state(), &err)) {
             sched_.markSaved();
@@ -105,7 +108,16 @@ class FeeSession {
         lastSaveMs_ = deps_.nowMs();
     }
 
+    /** Shutdown flush (any thread): saves the donation state unconditionally when the fee is enabled, under the same lock as the
+     *  run thread's hooks, so the file is a consistent snapshot even when the run loop is still winding down. */
+    void flushForShutdown() {
+        if (!enabled()) return;
+        std::lock_guard<std::recursive_mutex> lock(mu_);
+        save();
+    }
+
     FeeStatus status(bool windowActive) const {
+        std::lock_guard<std::recursive_mutex> lock(mu_);
         FeeStatus s;
         s.configured = enabled();
         s.windowActive = windowActive;
@@ -144,6 +156,7 @@ class FeeSession {
      *  exit code only when it was the operator stop (0); otherwise the user run is meant to resume. */
     int runFeeWindow(const RunOptions &userOpt) {
         const uint64_t t0 = deps_.nowMs();
+        std::unique_lock<std::recursive_mutex> lock(mu_);
         // Setup, connect and prepare are not productive: stop the clock, keep the window open.
         sched_.advance(t0, false, true, true);
         windowStartMs_ = t0;
@@ -173,7 +186,11 @@ class FeeSession {
         feeOpt.loopHook = &hook;
         inWindow_ = true;
         publish(true);
+        lock.unlock();  // the run below calls the hooks, which take the lock; never hold it across the run
+        deps_.log("lane start: donation window");
         const int rc = deps_.run(feeOpt);
+        deps_.log("lane end: donation window rc=" + std::to_string(rc));
+        lock.lock();
         inWindow_ = false;
         const uint64_t t1 = deps_.nowMs();
         sched_.advance(t1, false, true, true);  // credit the last stretch to the window it belonged to, then stop the clock
@@ -207,6 +224,7 @@ class FeeSession {
     /** Called when the user run (or the whole session) ends: keeps the unmet window as debt on disk. */
     void finish() {
         if (!enabled()) return;
+        std::lock_guard<std::recursive_mutex> lock(mu_);
         sched_.advance(deps_.nowMs(), false, true);
         save();
     }
@@ -216,6 +234,7 @@ class FeeSession {
     }
 
    private:
+    mutable std::recursive_mutex mu_;  // guards sched_ and the counters: the run thread's hooks, the window code, and the shutdown flush
     FeeScheduler sched_;
     FeeStateFile file_;
     std::string destination_;
@@ -233,6 +252,7 @@ class FeeSession {
     }
 
     int userTop(bool searchCompleted) {
+        std::lock_guard<std::recursive_mutex> lock(mu_);
         const uint64_t now = deps_.nowMs();
         const FeeMode m = sched_.advance(now, searchCompleted, true);
         if (m == FeeMode::Fee) return kRunFeeWindow;
@@ -242,6 +262,7 @@ class FeeSession {
     }
 
     int windowTop(bool searchCompleted) {
+        std::lock_guard<std::recursive_mutex> lock(mu_);
         const uint64_t now = deps_.nowMs();
         if (searchCompleted) {
             lastProductiveMs_ = now;
@@ -273,7 +294,9 @@ inline int runOuterLoop(const RunOptions &userOpt, FeeSession *fee, FeeLoopDeps 
     for (;;) {
         RunOptions o = userOpt;
         if (fee && fee->enabled()) o.loopHook = fee->userHook();
+        deps.log("lane start: user");
         rc = deps.run(o);
+        deps.log("lane end: user rc=" + std::to_string(rc));
         if (fee && fee->enabled() && rc == kRunFeeWindow) {
             if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
             if (fee->runFeeWindow(userOpt) == 0) { rc = exitOk; break; }

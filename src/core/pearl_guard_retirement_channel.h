@@ -6,9 +6,12 @@
 #include <cstring>
 #include <cstdio>
 #include <fcntl.h>
-#include <poll.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#if !defined(_WIN32)
+#include <poll.h>
 #include <unistd.h>
+#endif
 
 namespace om { namespace retirement_experiment {
 using Digest = std::array<uint8_t,32>;
@@ -59,6 +62,22 @@ inline bool decode(const void *data,size_t size,Frame *out) {
     *out=f;
     return true;
 }
+#if defined(_WIN32)
+// Windows has no owned anonymous-pipe guard channel (the miner is never run under an external guard on Windows).
+// Every admission fails closed, so --pearl-guard-control is rejected. The kernel translation unit is unchanged.
+struct PipeBinding { int fd=-1; dev_t device=0; ino_t inode=0; int direction=-1; };
+class Channel {
+public:
+    bool admit(PipeBinding,PipeBinding,uint8_t,uint8_t,uint8_t) { return fail(); }
+    bool quiescent() { return fail(); }
+    bool offer(Frame *) { return fail(); }
+    bool receipt(const Frame &) { return fail(); }
+    bool failed() const { return failed_; }
+private:
+    bool fail() { failed_=true; return false; }
+    bool failed_=false;
+};
+#else
 struct PipeBinding { int fd=-1; dev_t device=0; ino_t inode=0; int direction=-1; };
 // Expected binding must come from the trusted supervisor's own os.pipe/pipe2
 // inventory. fstat or /proc alone does not prove which process created a pipe.
@@ -114,6 +133,7 @@ private:
     bool fail() { failed_=true; return false; }
     PipeBinding in_{},out_{}; bool admitted_=false,failed_=false;
 };
+#endif
 
 // Detached CPU prototype ledger; not the production source counters/auditor.
 // All submitted proofs consume their quota permanently, including retirement.

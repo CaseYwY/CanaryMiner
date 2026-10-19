@@ -60,6 +60,8 @@ class ShutdownMachine {
     }
 
     bool stopRequested() const { return requested_.load(); }
+    /** Watcher thread only, before requestStop(): a close event skips the drain (deadline = now). */
+    void setDrainMs(uint64_t ms) { drainMs_ = ms; }
     ShutdownState state() const { return state_.load(); }
     bool done() const { return state_.load() == ShutdownState::Done; }
     bool forced() const { return forced_; }

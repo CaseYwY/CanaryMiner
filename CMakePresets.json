@@ -4,11 +4,15 @@
   "configurePresets": [
     { "name": "production-sm120", "displayName": "Blackwell SM120 native (needs nvcc 13.1)", "binaryDir": "${sourceDir}/build/production-sm120",
       "cacheVariables": { "CANARY_PROFILE": "production-sm120", "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "production-sm120-windows", "displayName": "Blackwell SM120 native, Windows (MSVC + nvcc 13.1; CUDA_PATH must point at v13.1)", "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/production-sm120-windows", "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "CANARY_PROFILE": "production-sm120", "CMAKE_BUILD_TYPE": "Release", "CMAKE_CUDA_COMPILER": "$env{CUDA_PATH}/bin/nvcc.exe" } },
     { "name": "tests", "displayName": "CPU-only host tests (no CUDA, no GPU)", "binaryDir": "${sourceDir}/build/tests",
       "cacheVariables": { "CANARY_PROFILE": "tests", "CMAKE_BUILD_TYPE": "Release" } }
   ],
   "buildPresets": [
     { "name": "production-sm120", "configurePreset": "production-sm120", "targets": ["canaryminer"] },
+    { "name": "production-sm120-windows", "configurePreset": "production-sm120-windows", "targets": ["canaryminer"] },
     { "name": "tests", "configurePreset": "tests" }
   ],
   "testPresets": [

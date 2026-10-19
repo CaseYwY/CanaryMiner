@@ -10,7 +10,7 @@
 // established by probing a live pool because nothing documents it:
 //
 //   -> {"id":1,"method":"mining.authorize","params":{"wallet":"prl1...",
-//         "worker":"rig1","pass":"x","agent":"CanaryMiner/1.0.0"}}
+//         "worker":"rig1","pass":"x","agent":"CanaryMiner/1.0.1"}}
 //   <- {"id":1,"error":null,"result":true}
 //   <- {"id":null,"method":"mining.notify","params":{
 //         "job_id":"00000000_2097152",
@@ -71,9 +71,7 @@
 #include "submit_outcome.h"
 #include "run.h"
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
-#ifdef _WIN32
-#error "Guard retirement experiment requires owned Linux anonymous pipes"
-#endif
+// On Windows the guard channel is an inert stub (fails closed); see pearl_guard_retirement_channel.h.
 #include "pearl_guard_retirement_v2.h"
 #endif
 

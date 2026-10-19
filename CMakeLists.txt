@@ -57,10 +57,17 @@ if(CANARY_FEE_TEST_POLICY)
 endif()
 # Host code is compiled with -Wall -Wformat and format problems are errors (a printf format bug, e.g. a bare '%' in a
 # string passed as the format, must fail the build). Device code is unaffected by host flags.
-target_compile_options(canaryminer PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
-  $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wformat,-Werror=format>)
+target_compile_options(canaryminer PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+# MSVC spelling of the same host check: C4473/C4474/C4477 (printf-style format mismatches) are errors.
+if(MSVC)
+  target_compile_options(canaryminer PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/W3,/we4473,/we4474,/we4477,/utf-8>)
+else()
+  target_compile_options(canaryminer PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wformat,-Werror=format>)
+endif()
 target_include_directories(canaryminer PRIVATE ${CANARY_INCLUDE_DIRS})
-message(STATUS "CanaryMiner profile ${CANARY_PROFILE} (CUDA architecture ${CMAKE_CUDA_ARCHITECTURES}); internal build, not a release")
+if(NOT CANARY_PROFILE STREQUAL "production-sm120")
+  message(STATUS "CanaryMiner profile ${CANARY_PROFILE} (CUDA architecture ${CMAKE_CUDA_ARCHITECTURES}); internal build, not a release")
+endif()
 
 # NVML is loaded at runtime (dlopen/LoadLibrary); only the loader needs linking on Unix.
 if(UNIX)

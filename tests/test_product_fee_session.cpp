@@ -311,6 +311,28 @@ int main() {
         CHECK(next.scheduler().state().feeMs == kMin);
     }
 
+    // ---- shutdown flush: a forced stop (console close, drain timeout) writes the donation state even with no change since the
+    //      last save; a disabled fee writes nothing
+    {
+        const std::string dir = makeScratchDir("fee-flush");
+        Sim sim;
+        FixedRandom rng(0);
+        FeeLoopDeps deps = sim.deps();
+        FeeSession s(productFeePolicy(), &rng, FeeStateFile(dir), kDest, deps);
+        s.load();
+        std::filesystem::remove(FeeStateFile(dir).path());  // no file yet; the flush must create it
+        CHECK(!std::filesystem::exists(FeeStateFile(dir).path()));
+        s.flushForShutdown();
+        FeeState onDisk;
+        CHECK(std::filesystem::exists(FeeStateFile(dir).path()));
+        CHECK(FeeStateFile(dir).load(&onDisk) == FeeStateFile::LoadResult::Loaded && onDisk == s.scheduler().state());
+
+        const std::string off = makeScratchDir("fee-flush-off");
+        FeeSession disabled(productFeePolicy(), &rng, FeeStateFile(off), std::string(), deps);
+        disabled.flushForShutdown();
+        CHECK(!std::filesystem::exists(FeeStateFile(off).path()));
+    }
+
     // ---- corrupt state file: warning, fresh state, mining and the fee both go on
     {
         const std::string dir = makeScratchDir("fee-corrupt");

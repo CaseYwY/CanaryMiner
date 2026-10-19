@@ -42,3 +42,6 @@ __pycache__/
 .smoke.local
 # bulky per-task evidence (logs, dumps)
 ops/evidence/
+
+# H-028 release artifacts (archive, checksums, release notes) stay local
+dist/

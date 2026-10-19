@@ -39,11 +39,21 @@ namespace om { bool pearlCudaExperimentCompiled(const char *) noexcept;
 bool pearlCudaShapeExperimentCompiled() noexcept; }
 
 static volatile sig_atomic_t g_stop = 0;
+static volatile sig_atomic_t g_closeRequested = 0;  // console close/logoff/shutdown: the drain is skipped
 static void onSignal(int) { g_stop = 1; }
 
 #if defined(_WIN32)
+static HANDLE g_shutdownDone = nullptr;  // signalled after the shutdown record and state are written
 static BOOL WINAPI consoleHandler(DWORD type) {
-    if (type == CTRL_C_EVENT || type == CTRL_CLOSE_EVENT || type == CTRL_BREAK_EVENT) {
+    if (type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) {
+        // Windows ends the process as soon as this handler returns, so block until the shutdown record and state are
+        // written. Hard cap 4.5 s, under the system's 5 s grace period; then return regardless.
+        g_closeRequested = 1;
+        g_stop = 1;
+        if (g_shutdownDone) WaitForSingleObject(g_shutdownDone, 4500);
+        return TRUE;
+    }
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT) {
         g_stop = 1;
         return TRUE;
     }
@@ -141,6 +151,10 @@ int main(int argc, char **argv) {
         if (a == "--algo") algoName = next();
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
         else if (a == "--pearl-guard-control") {
+#if defined(_WIN32)
+            fprintf(stderr, "--pearl-guard-control is not supported on Windows\n");
+            return 1;
+#endif
             if(!guardControlText.empty()) return 1;
             guardControlText=next();
             if(guardControlText.empty()) return 1;
@@ -266,7 +280,7 @@ int main(int argc, char **argv) {
             return 0;
         } else if (a == "--help" || a == "-h") {
             printf(
-                "CanaryMiner (CUDA) - Pearl-only development build\n\n"
+                "CanaryMiner 1.0.1 (CUDA, NVIDIA Blackwell)\n\n"
                 "usage: canary-miner [run] [options]    mine (default)\n"
                 "       canary-miner list-devices       GPU identity and whether it is supported\n"
                 "       canary-miner selftest           offline kernel + proof self-test per device\n"
@@ -317,8 +331,7 @@ int main(int argc, char **argv) {
                 "                    also requires --plain --batch 4194304\n"
                 "                    --interval 5; rejects tuning/OC controls\n"
                 "  --bench-height H  fixed synthetic fixture height 1851444 only\n"
-                "\nDevelopment profile: no cross-device performance guarantee.\n"
-                "Supported devices are listed by 'list-devices'.\n"
+                "\nSupported devices are listed by 'list-devices'.\n"
             );
             return 0;
         }
@@ -722,6 +735,7 @@ int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);  // a pool disconnecting mid-send must not kill us
 #endif
 #if defined(_WIN32)
+    g_shutdownDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     SetConsoleCtrlHandler(consoleHandler, TRUE);
 #endif
 
@@ -795,6 +809,7 @@ int main(int argc, char **argv) {
     std::unique_ptr<StatsObserver> statsObserver;
     std::unique_ptr<ShutdownDriver> shutdownDriver;
     std::atomic<bool> runLoopDone{false};
+    std::atomic<om::FeeSession *> feeForShutdown{nullptr};  // set once the fee session exists; the shutdown persist step flushes it
     if (plainRun) {
         redactor.addSecret(cfg.wallet, true);
         if (cfg.log.redactWorker) redactor.addSecret(cfg.worker);
@@ -861,7 +876,9 @@ int main(int argc, char **argv) {
                 o.pending = o.pending > n ? o.pending - n : 0;
             });
         };
-        hooks.persist = [&cfg, &statsPublisher](bool forced, uint64_t unknown, const std::string &reason) {
+        hooks.persist = [&cfg, &statsPublisher, &feeForShutdown](bool forced, uint64_t unknown, const std::string &reason) {
+            // The donation state goes first: forced exits (console close, a drain timeout) never reach the fee session's finish().
+            if (om::FeeSession *fee = feeForShutdown.load()) fee->flushForShutdown();
             if (cfg.stateDir.empty()) return true;
             std::string writeError;
             return writeFileAtomic((std::filesystem::path(cfg.stateDir) / "shutdown-record.json").string(),
@@ -877,7 +894,7 @@ int main(int argc, char **argv) {
         shutdownDriver.reset(new ShutdownDriver(static_cast<uint64_t>(cfg.drainSeconds) * 1000u, std::move(hooks), &g_stop, &runLoopDone,
                                                 [&statsPublisher](const char *state) {
                                                     statsPublisher.update([state](StatsSnapshot *s) { s->state = state; });
-                                                }));
+                                                }, &g_closeRequested));
         shutdownDriver->start();
     }
 
@@ -921,6 +938,7 @@ int main(int argc, char **argv) {
         feeSession.reset(new om::FeeSession(om::productFeePolicy(), feeRandom.get(),
                                             om::FeeStateFile(!cfg.log.dir.empty() ? cfg.log.dir : cfg.stateDir), feeDestination(), feeDeps));
         feeSession->load();
+        feeForShutdown.store(feeSession.get());
         fprintf(stderr, "donation-policy: %s\n", feePolicyBuildLabel());
         fprintf(stderr, "developer donation: 1%% (99:1 per 100 productive minutes), mined on F2Pool account %s (payout %s); disable with --no-donation\n",
                 CANARY_FEE_POOL_ACCOUNT, feeDestination().c_str());
@@ -935,6 +953,9 @@ int main(int argc, char **argv) {
         shutdownDriver->join();
         forcedShutdown = shutdownDriver->machine().forced();
         if (outputTee) outputTee->stop();
+#if defined(_WIN32)
+        if (g_shutdownDone) SetEvent(g_shutdownDone);  // release a console-close handler that is waiting
+#endif
     }
     if (opt.pearlSustainedSeconds || opt.pearlProduction) algo.reset();
     platformShutdown();
