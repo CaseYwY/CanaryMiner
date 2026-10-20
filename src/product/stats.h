@@ -117,7 +117,7 @@ inline std::string statsToJson(const StatsSnapshot &s) {
     j += "],\"outcomes\":" + outcomesJson(statsTotals(s));
     j += ",\"donation\":{\"enabled\":" + std::string(s.fee.enabled ? "true" : "false") + ",\"state\":" + jsonQuote(s.fee.state) +
          ",\"destination_configured\":" + (s.fee.destinationConfigured ? "true" : "false") +
-         ",\"destination_sha256\":" + jsonQuote(s.fee.destinationSha256) + ",\"cycle_minutes\":" + std::to_string(s.fee.cycleMinutes) +
+         ",\"cycle_minutes\":" + std::to_string(s.fee.cycleMinutes) +
          ",\"window_minutes\":" + std::to_string(s.fee.windowMinutes) + ",\"cycle\":" + std::to_string(s.fee.cycle) +
          ",\"user_seconds\":" + std::to_string(s.fee.userSeconds) + ",\"donation_seconds\":" + std::to_string(s.fee.feeSeconds) +
          ",\"debt_seconds\":" + std::to_string(s.fee.debtSeconds) + ",\"window_active\":" + (s.fee.windowActive ? "true" : "false") +
@@ -125,6 +125,88 @@ inline std::string statsToJson(const StatsSnapshot &s) {
          ",\"pool\":" + jsonQuote(s.fee.pool) + ",\"login\":" + jsonQuote(s.fee.login) +
          ",\"outcomes\":" + outcomesJson(s.fee.outcomes) + ",\"note\":" + jsonQuote(s.fee.note) + "}}";
     return j;
+}
+
+/** Reads one stats-v1 document back into a snapshot (the supervisor aggregates its workers' endpoints this way). Unknown members are
+ *  ignored; numbers that are missing read as zero, and power/temperature `null` read as "not available" (-1). */
+inline bool statsFromJson(const JsonValue &root, StatsSnapshot *out, std::string *error) {
+    auto str = [](const JsonValue *v) { return v && v->isString() ? v->text : std::string(); };
+    auto num = [](const JsonValue *v) { return v && v->isNumber() ? atof(v->text.c_str()) : 0.0; };
+    auto u64 = [](const JsonValue *v) {
+        uint64_t x = 0;
+        return v && v->asUint64(&x) ? x : uint64_t{0};
+    };
+    auto outcomes = [&](const JsonValue *o) {
+        StatsOutcomes r;
+        if (!o || !o->isObject()) return r;
+        r.submitted = u64(o->find("submitted"));
+        r.acknowledged = u64(o->find("acknowledged"));
+        r.accepted = u64(o->find("accepted"));
+        r.rejected = u64(o->find("rejected"));
+        r.stale = u64(o->find("stale"));
+        r.unknown = u64(o->find("unknown"));
+        r.pending = u64(o->find("pending"));
+        r.guardRetired = u64(o->find("guard_retired"));
+        r.hostInvalid = u64(o->find("host_invalid"));
+        r.submitFailed = u64(o->find("submit_failed"));
+        r.localStale = u64(o->find("local_stale"));
+        return r;
+    };
+    if (!root.isObject() || str(root.find("schema")) != kStatsSchemaId) {
+        if (error) *error = std::string("not a ") + kStatsSchemaId + " document";
+        return false;
+    }
+    StatsSnapshot s;
+    s.version = str(root.find("version"));
+    s.state = str(root.find("state"));
+    s.uptimeSeconds = num(root.find("uptime_seconds"));
+    if (const JsonValue *pool = root.find("pool")) {
+        s.poolEndpoint = str(pool->find("endpoint"));
+        s.poolPreset = str(pool->find("preset"));
+        s.poolState = str(pool->find("state"));
+        s.poolLastError = str(pool->find("last_error"));
+    }
+    if (const JsonValue *devs = root.find("devices")) {
+        for (const JsonValue &d : devs->items) {
+            if (!d.isObject()) continue;
+            StatsDevice dev;
+            dev.index = static_cast<int>(u64(d.find("index")));
+            dev.uuid = str(d.find("uuid"));
+            dev.pciBus = str(d.find("pci_bus"));
+            dev.name = str(d.find("name"));
+            dev.family = str(d.find("family"));
+            const std::string cc = str(d.find("compute_capability"));
+            dev.ccMajor = atoi(cc.c_str());
+            const size_t dot = cc.find('.');
+            dev.ccMinor = dot == std::string::npos ? 0 : atoi(cc.c_str() + dot + 1);
+            dev.rateTmacs = num(d.find("rate") ? d.find("rate")->find("value") : nullptr);
+            dev.rateAvgTmacs = num(d.find("rate_average") ? d.find("rate_average")->find("value") : nullptr);
+            dev.attemptsPerSecond = num(d.find("attempts_per_second"));
+            const JsonValue *w = d.find("power_watts"), *t = d.find("temperature_c");
+            dev.powerWatts = w && w->isNumber() ? num(w) : -1;
+            dev.temperatureC = t && t->isNumber() ? static_cast<int>(num(t)) : -1;
+            dev.outcomes = outcomes(d.find("outcomes"));
+            s.devices.push_back(dev);
+        }
+    }
+    if (const JsonValue *f = root.find("donation")) {
+        s.fee.enabled = f->find("enabled") && f->find("enabled")->isBool() ? f->find("enabled")->boolean : true;
+        s.fee.state = str(f->find("state"));
+        s.fee.destinationConfigured = f->find("destination_configured") && f->find("destination_configured")->boolean;
+        s.fee.cycle = u64(f->find("cycle"));
+        s.fee.userSeconds = u64(f->find("user_seconds"));
+        s.fee.feeSeconds = u64(f->find("donation_seconds"));
+        s.fee.debtSeconds = u64(f->find("debt_seconds"));
+        s.fee.windowActive = f->find("window_active") && f->find("window_active")->boolean;
+        s.fee.poolFailures = u64(f->find("pool_failures"));
+        s.fee.windowsCompleted = u64(f->find("windows_completed"));
+        s.fee.pool = str(f->find("pool"));
+        s.fee.login = str(f->find("login"));
+        s.fee.outcomes = outcomes(f->find("outcomes"));
+        s.fee.note = str(f->find("note"));
+    }
+    *out = s;
+    return true;
 }
 
 inline std::string versionToJson(const std::string &version, const std::string &arch) {

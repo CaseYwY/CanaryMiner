@@ -1,0 +1,30 @@
+(o> CanaryMiner 1.0.2  -  rig1
+mining | PRL | Pool pool.example:5500 | Worker rig1
+Connection Authorized | Mining session 01:02:05
+Current 112.70 TH/s    Session average 110.20 TH/s    GPU power 157 W
+
+HARDWARE
+-----------------------------------------------------------------------------------------------------------------------
+GPU           Current TH/s    Power   Temp   Fan  Core MHz   Mem MHz  State
+RTX 5070 #0         112.70  156.9 W   56 C   80%     2,542     7,001  Mining
+
+SESSION SHARES
+-----------------------------------------------------------------------------------------------------------------------
+GPU             Submitted  Accepted  Retired Stale local/pool  Rejected  Invalid  Pending
+RTX 5070 #0         4,122     4,000        3              1/2         5        0        1
+TOTAL               4,122     4,000        3              1/2         5        0        1
+Donation               28        27        0              0/0         1        0        0
+Local stale was not sent. Rejected = pool rejections only. Donation = the developer donation, separate from your shares.
+
+RECENT EVENTS - UTC
+-----------------------------------------------------------------------------------------------------------------------
+12:00:01  GPU 0: worker started
+12:00:04  GPU 0: accepted +2 share(s)
+12:00:09  GPU 1: donation window start
+12:03:10  GPU 1: donation window end (+27 accepted)
+12:05:00  GPU 0: pool connection lost, reconnecting
+12:05:30  GPU 0: connected to the pool
+12:06:00  GPU 0: exited with code 9; restart in 10 s (restart 1)
+Rows 1-27/27 | Up/Down or PgUp/PgDn scroll
+Data age 9.3s | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit
+(o> CanaryMiner 1.0.2  -  rig1

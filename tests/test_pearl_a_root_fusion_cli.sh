@@ -55,7 +55,7 @@ for endpoint in localhost:1 127.0.0.2:1 example.invalid:1; do
         "CANARY_PEARL_EXPERIMENT=$wm8" "$capable" $(live_at "$endpoint")
 done
 for endpoint in 127.0.0.1:0 127.0.0.1:65536; do
-    check invalid-port 3 'neither a preset (kryptex, herominers, f2pool) nor HOST:PORT' CANARY_PEARL_A_ROOT_FUSION=a-root-commit-v1 \
+    check invalid-port 3 'neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT' CANARY_PEARL_A_ROOT_FUSION=a-root-commit-v1 \
         "CANARY_PEARL_EXPERIMENT=$wm8" "$capable" $(live_at "$endpoint")
 done
 check wrong-algorithm 1 "$refusal" CANARY_PEARL_A_ROOT_FUSION=a-root-commit-v1 \

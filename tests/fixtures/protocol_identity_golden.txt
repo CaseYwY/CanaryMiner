@@ -1,8 +1,8 @@
 # SHA-256 of the probe output values, produced on the pre-debrand seed tree (Gate 1a seed 999cd17) and reproduced on every later tree.
 # PROOF = serialized dense PlainProof (hex); SUBMIT = mining.submit body; AUTH_EXPLICIT = mining.authorize body with an explicit agent;
 # EXTRA = packed job extra (header hex + certificate version).
-# AUTH_EXPLICIT re-pinned for the CanaryMiner/1.0.1 agent (H-028b); the 1.0.0 body hashes to e99addf7... and PROOF/SUBMIT/EXTRA are unchanged.
+# AUTH_EXPLICIT re-pinned for the CanaryMiner/1.0.2 agent (v1.0.2; earlier 1.0.1 per H-028b); the 1.0.0 body hashes to e99addf7... and PROOF/SUBMIT/EXTRA are unchanged.
 PROOF 8e3de8b70206a726537197baf724b39bfd3fc290ccf1ba922815bd1a1646dd49
 SUBMIT fec1ad0540fee41dd0b7230b74d7cae8081f8ef25a4aabaf9f0b6308b082f5e7
-AUTH_EXPLICIT 3313317e624bcd32e02cbcb72b288d025e958522141395360c167064e4cfe7d7
+AUTH_EXPLICIT 9eef77df7ed89e0b117bf008a47647c70eafe6bbc7f2b9c3fbf7b92ae60bcf99
 EXTRA a39a144a5b56889cd3e022f71d25e8401728e679ce89c108eb031b1156a462ad

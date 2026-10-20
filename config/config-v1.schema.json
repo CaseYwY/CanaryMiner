@@ -64,6 +64,21 @@
       "type": "object",
       "additionalProperties": false,
       "properties": { "drain_seconds": { "type": "integer", "minimum": 1, "maximum": 600, "default": 10 } }
+    },
+    "tuning": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "GPU tuning: accepted but ignored (not supported in this release). Comma-separated values follow devices order; a single value applies to every selected GPU.",
+      "properties": {
+        "gpu_cclock": { "type": "string", "pattern": "^[0-9]{1,4}(:[0-9]{1,4})?(,[0-9]{1,4}(:[0-9]{1,4})?)*$", "description": "Core MHz values or MIN:MAX ranges." },
+        "gpu_mclock": { "type": "string", "pattern": "^[0-9]{1,5}(,[0-9]{1,5})*$", "description": "Memory MHz values (100..10000)." },
+        "gpu_coffset": { "type": "string", "pattern": "^[+-]?[0-9]{1,4}(,[+-]?[0-9]{1,4})*$", "description": "Core clock offsets in MHz." },
+        "gpu_moffset": { "type": "string", "pattern": "^[+-]?[0-9]{1,4}(,[+-]?[0-9]{1,4})*$", "description": "Memory clock offsets in MHz." },
+        "gpu_plimit": { "type": "string", "pattern": "^[0-9]{1,7}(,[0-9]{1,7})*$", "description": "Power limits in watts." },
+        "gpu_fan": { "type": "string", "pattern": "^[0-9]{1,3}(,[0-9]{1,3})*$", "description": "Manual fan percentages." },
+        "oc_delay": { "type": "integer", "minimum": 0, "maximum": 4294967295, "default": 0, "description": "Seconds after supervisor start." },
+        "oc_reset_only": { "type": "boolean", "default": false, "description": "Restore stock tuning and exit." }
+      }
     }
   }
 }

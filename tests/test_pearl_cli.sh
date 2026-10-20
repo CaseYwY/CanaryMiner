@@ -7,7 +7,7 @@ bin=${1:?usage: test_pearl_cli.sh <canaryminer binary>}
 out=$(mktemp "${TMPDIR:-/tmp}/canary-pearl-cli.XXXXXX")
 trap 'rm -f "$out"' EXIT HUP INT TERM
 
-"$bin" --help >"$out"
+"$bin" --help-all >"$out"
 grep -F -- '--pool HOST:PORT  Pearl pool endpoint; requires --wallet and' "$out" >/dev/null
 grep -F -- '--pearl-network mainnet' "$out" >/dev/null
 grep -F -- '--pearl-target-semantics base-before-penalty|final-adjusted-bound' "$out" >/dev/null

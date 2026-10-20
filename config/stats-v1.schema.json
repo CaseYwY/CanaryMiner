@@ -44,12 +44,11 @@
     "outcomes": { "$ref": "#/$defs/outcomes" },
     "donation": {
       "type": "object",
-      "required": ["enabled", "state", "destination_configured", "destination_sha256", "cycle_minutes", "window_minutes", "cycle", "user_seconds", "donation_seconds", "debt_seconds", "window_active", "pool_failures", "windows_completed", "pool", "login", "outcomes", "note"],
+      "required": ["enabled", "state", "destination_configured", "cycle_minutes", "window_minutes", "cycle", "user_seconds", "donation_seconds", "debt_seconds", "window_active", "pool_failures", "windows_completed", "pool", "login", "outcomes", "note"],
       "properties": {
         "enabled": { "type": "boolean" },
         "state": { "enum": ["off", "not_active", "user", "donation"] },
         "destination_configured": { "type": "boolean" },
-        "destination_sha256": { "type": "string" },
         "cycle_minutes": { "type": "integer" },
         "window_minutes": { "type": "integer" },
         "cycle": { "type": "integer" },

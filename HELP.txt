@@ -1,0 +1,187 @@
+CanaryMiner - help
+==================
+
+CanaryMiner mines Pearl (PRL) on NVIDIA RTX 50-series GPUs (Blackwell). This file explains the everyday tasks in plain
+words. Every option is listed by:   canary-miner --help   (Windows: canary-miner.exe --help)
+
+Contents
+  1. First start
+  2. Change your wallet (payout address)
+  3. Change your pool
+  4. Name your rig (worker)
+  5. Choose which GPUs mine
+  6. Tune your GPUs (clocks, power, fans) with your own tools
+  7. The dashboard
+  8. The developer donation
+  9. Using a config file
+ 10. The stats endpoint
+ 11. Problems and fixes
+
+
+1. First start
+--------------
+  Windows: right-click start.bat, choose Edit, replace YOUR_PRL_ADDRESS with your PRL address (it starts with prl1),
+           save, then double-click start.bat.
+  Linux:   open start.sh in a text editor, replace YOUR_PRL_ADDRESS, save, then run:   ./start.sh
+
+  Stop the miner with Ctrl+C (on Windows you can also close the window). The miner stops cleanly and saves its state.
+  Allow about 5 minutes for the hashrate to stabilize after a start.
+
+  Use a public payout address only. Never put a seed phrase, private key or password in any of these files.
+
+
+2. Change your wallet (payout address)
+--------------------------------------
+  Your address is the part after --wallet in the start file:
+
+      --wallet prl1yourpublicaddress.rig1
+
+  Replace the prl1... part with your new address and keep ".rig1" (or your own rig name). Save and restart the miner.
+
+  F2Pool account users: you can mine to your F2Pool account instead of a prl1 address:
+
+      --wallet YOUR_F2POOL_ACCOUNT.rig1
+
+  In start-advanced.bat / start-advanced.sh, change the WALLET line instead.
+
+
+3. Change your pool
+-------------------
+  The pool is the part after --pool. Easiest: use the start file made for your pool.
+
+      start-f2pool     F2Pool      (pearl.f2pool.com:5500)
+      start-kryptex    Kryptex     (prl-us.kryptex.network:7048)
+      start-herominers HeroMiners  (us2.pearl.herominers.com:1200)
+
+  Or edit --pool in any start file. These forms all work:
+
+      --pool f2pool                               a known pool by name (f2pool, kryptex, herominers)
+      --pool pearl.f2pool.com:5500                any Pearl pool as HOST:PORT
+      --pool stratum+tcp://pearl.f2pool.com:5500  the same with the scheme written out
+
+  Encrypted connections (stratum+ssl://) are not supported yet. Only one pool is used; there is no automatic failover.
+  F2Pool and Kryptex are tested. HeroMiners and other Pearl pools should work but are not tested with this build.
+
+
+4. Name your rig (worker)
+-------------------------
+  The worker name is the part after the dot in --wallet (".rig1"). Give each computer its own name so the pool shows
+  them separately, for example  --wallet prl1yourpublicaddress.office  . You can also pass  --worker office  .
+
+
+5. Choose which GPUs mine
+-------------------------
+  By default every supported GPU mines. To list your GPUs:
+
+      canary-miner list-devices
+
+  To pick some, add --gpu-id to the start file:
+
+      --gpu-id 0          only GPU 0
+      --gpu-id 0,2        GPUs 0 and 2
+      --gpu-id all        every supported GPU (the default)
+
+  Each GPU runs in its own worker. If one stops unexpectedly it is restarted after 10 seconds (at most 3 times an hour)
+  while the others keep mining. Only RTX 50-series (Blackwell) GPUs are supported; other GPUs are skipped.
+
+
+6. Tune your GPUs (clocks, power, fans) with your own tools
+-----------------------------------------------------------
+  CanaryMiner does not change GPU settings. It mines with whatever is applied when it starts. Set your tuning first,
+  then start the miner. Flags such as --gpu-cclock, --gpu-mclock, --gpu-coffset, --gpu-moffset, --gpu-plimit, --gpu-fan,
+  --oc-delay and --oc-reset-only are accepted, so command lines from other miners keep working, but they are ignored with
+  a notice.
+
+  Tuning can make a GPU unstable. Change one setting at a time, watch the miner for errors, and go back to stock if a
+  GPU stops, crashes or shows rejected or invalid shares.
+
+  Windows - MSI Afterburner (or a similar tool such as your card maker's utility)
+    1. Install and open MSI Afterburner.
+    2. Set the Power Limit, Core Clock (offset), Memory Clock (offset) and Fan Speed as you want them.
+    3. Click Apply, then save the settings to a profile slot (the disk icon, then a number).
+    4. Optional: enable "Apply overclocking at system startup" in Afterburner's settings.
+    5. Start CanaryMiner.
+    For locked clocks, Afterburner's curve editor (Ctrl+F) lets you flatten the curve at the clock you want.
+
+  Linux - nvidia-smi (comes with the NVIDIA driver; needs sudo)
+    Replace 0 with your GPU index from  nvidia-smi -L  , or leave out "-i 0" to change every GPU.
+
+      sudo nvidia-smi -pm 1                     keep the driver loaded (persistence mode)
+      sudo nvidia-smi -i 0 -pl 175              power limit in watts
+      sudo nvidia-smi -i 0 -lgc 2400,2400       lock the core clock (MIN,MAX in MHz)
+      sudo nvidia-smi -i 0 -lmc 7001,7001       lock the memory clock (MHz)
+
+    Check what is applied (current values only):
+      nvidia-smi --query-gpu=index,power.limit,clocks.sm,clocks.mem,fan.speed --format=csv
+
+    Back to stock:
+      sudo nvidia-smi -i 0 -rgc                 reset the core clock lock
+      sudo nvidia-smi -i 0 -rmc                 reset the memory clock lock
+      sudo nvidia-smi -i 0 -pl <default>        default power limit (see: nvidia-smi -q -d POWER)
+      A reboot also returns every setting to stock.
+
+    Clock offsets and manual fan speed are not available in nvidia-smi. They need nvidia-settings with a running
+    X server and "Coolbits" enabled, or a tool made for your mining OS. Apply offsets only once you know the base
+    settings above are stable. After any change, check the kernel log for GPU errors:
+      sudo journalctl -k --since "10 min ago" | grep -i xid
+
+    Settings made with nvidia-smi last until the next reboot. Put the commands in a script you run before the miner
+    if you want them every time.
+
+
+7. The dashboard
+----------------
+  In a terminal the miner shows a live dashboard: hashrate, power, temperature, fan, clocks and shares for each GPU,
+  the donation row and recent events.
+
+      Q   quit (stops the miner cleanly)
+      D   details: PCI bus, pool state, restarts and the last error for each GPU
+      L   log: recent miner output
+
+  Add --no-dashboard for plain timestamped lines (also used automatically when the output goes to a file).
+  Rates are shown in TH/s.
+
+
+8. The developer donation
+-------------------------
+  On by default: about 1% of productive mining time (one minute in every 100) is mined on F2Pool to the developer.
+  Your own shares and the donation shares are counted separately. To turn it off:
+
+      add --no-donation to the start file
+      or set DONATION to off in start-advanced (Linux: DONATION="off", Windows: set "DONATION=off")
+      or set "donation": false in a config file
+
+  The miner is fully supported either way.
+
+
+9. Using a config file
+----------------------
+  Instead of options in the start file you can keep your settings in a file:
+    1. Copy config.example.json to config.json.
+    2. Edit "wallet", "worker", "pools" (for example ["f2pool"] or ["pearl.f2pool.com:5500"]) and "devices".
+    3. Start with:   canary-miner --config config.json
+  Options on the command line win over the file.
+
+
+10. The stats endpoint
+----------------------
+  The miner serves its numbers as JSON on this computer only (loopback):
+      http://127.0.0.1:8085/api/v1/stats
+      http://127.0.0.1:8085/api/v1/version
+  --api-enable uses port 21550 instead (unless you give --api-port N). --api-port 0 turns it off.
+
+
+11. Problems and fixes
+----------------------
+  "Windows protected your PC"      The binary is not code-signed yet. Check the download's SHA-256 against SHA256SUMS
+                                   from the release, then click "More info" and "Run anyway".
+  Missing DLL on Windows           Install "Microsoft Visual C++ Redistributable (x64)" from Microsoft.
+  "no usable supported device"     Only RTX 50-series GPUs are supported. Update the NVIDIA driver (it must support
+                                   CUDA 13.1) and run  canary-miner list-devices  .
+  Low hashrate right after start   Normal: allow about 5 minutes for the hashrate to stabilize.
+  Pool keeps disconnecting         Check the pool address and port, your wallet or account name, and your firewall.
+  Rejected or invalid shares       Usually unstable tuning: go back to stock clocks and try again.
+  A GPU keeps restarting           Look at the D (details) page for the last error; undo any recent tuning.
+  Linux: permission denied         Make the files executable:  chmod +x canary-miner start*.sh
+
+  Report problems on the project page: https://github.com/bucnazty2020/CanaryMiner/issues

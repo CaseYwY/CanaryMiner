@@ -21,7 +21,6 @@ The optional 1% developer donation described in the [README](README.md) is on by
 `--no-donation` or `"donation": false`. Running CanaryMiner with the donation off is official and supported: it is still
 "CanaryMiner" and needs no new name. Only a renamed or modified fork must follow the naming rules above. The MIT License also
 allows anyone to fork the code and change the donation; such a fork must not present itself as the official CanaryMiner build.
-Donation windows mine on F2Pool account `bucnazty90`, which pays out to the public donation address documented in the README;
-they do not use the miner's configured pool or account.
+Donation windows mine on F2Pool to the developer's account; they do not use the miner's configured pool or account.
 
 Questions about this policy or licensing: open an issue on this repository, or contact [@bucnazty2020](https://github.com/bucnazty2020) on GitHub.

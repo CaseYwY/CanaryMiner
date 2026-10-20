@@ -130,9 +130,9 @@ inline void applyProductFixedSelection() {
 }
 
 inline std::string versionText() {
-    const std::string digest = feeDestinationDigest();
-    return std::string("CanaryMiner ") + CANARY_MINER_VERSION + "  build=" + buildArchLabel() + "  donation-policy=" + feePolicyBuildLabel() + "  fee_destination_sha256=" +
-           (digest.empty() ? std::string("not configured in this build") : digest);
+    // H-031 Amendment 2: the donation destination is never presented (no address, account or digest).
+    return std::string("CanaryMiner ") + CANARY_MINER_VERSION + "  build=" + buildArchLabel() + "  donation-policy=" + feePolicyBuildLabel() +
+           "  donation=" + (feeDestinationConfigured() ? "compiled-in" : "not compiled in");
 }
 
 /** `status`: GET the local stats endpoint of a running miner. */

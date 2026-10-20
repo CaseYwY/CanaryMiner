@@ -31,6 +31,8 @@
 #include "../product/selftest.h"
 #include "../product/restart_budget.h"
 #include "../product/fee_session.h"
+#include "../product/supervisor.h"
+#include "../product/gpu_tuning.h"
 #include <chrono>
 #include <thread>
 
@@ -121,6 +123,7 @@ int main(int argc, char **argv) {
             return kExitConfig;
         }
     }
+    GpuTuningPlatform tuningPlatform = currentGpuTuningPlatform();
     if (cli.command == Command::Status) return commandStatus(cfg, cli.ov.json);
 
     std::string algoName = defaultAlgorithmName;
@@ -135,6 +138,9 @@ int main(int argc, char **argv) {
     unsigned benchHeightCount = 0, benchEpochSecondsCount = 0;
     unsigned mclkCount = 0, memOcCount = 0;
     std::string batchText, intervalText, benchHeightText;
+    // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
+    bool workerChild = false, noDashboard = false;
+    std::string workerIdText;
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
     std::string guardControlText;
     PearlGuardControlLaunch guardControl;
@@ -270,6 +276,9 @@ int main(int argc, char **argv) {
             opt.plain = true;
         }
         else if (a == "--ascii") om::g_asciiOnly = true;
+        else if (a == "--no-dashboard") noDashboard = true;
+        else if (a == "--worker-child") workerChild = true;
+        else if (a == "--worker-id") workerIdText = next();
         else if (a == "--interval") {
             intervalCount++;
             intervalText = next();
@@ -279,8 +288,11 @@ int main(int argc, char **argv) {
             for (const auto &n : availableAlgorithms()) printf("%s\n", n.c_str());
             return 0;
         } else if (a == "--help" || a == "-h") {
+            printf("%s", productHelpText().c_str());
+            return 0;
+        } else if (a == "--help-all") {
             printf(
-                "CanaryMiner 1.0.1 (CUDA, NVIDIA Blackwell)\n\n"
+                "CanaryMiner " CANARY_MINER_VERSION " (CUDA, NVIDIA Blackwell) - all options\n\n"
                 "usage: canary-miner [run] [options]    mine (default)\n"
                 "       canary-miner list-devices       GPU identity and whether it is supported\n"
                 "       canary-miner selftest           offline kernel + proof self-test per device\n"
@@ -289,14 +301,15 @@ int main(int argc, char **argv) {
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"
-                "  --devices LIST    all | index | GPU-uuid | pci id, comma separated; this\n"
-                "                    build drives one device per process (alias --device)\n"
+                "  --devices LIST    all | index | GPU-uuid | pci id, comma separated; one\n"
+                "                    worker per selected GPU, supervised (alias --device)\n"
                 "  --pool HOST:PORT  Pearl pool endpoint; requires --wallet and\n"
                 "                    both explicit policy options below (a preset name such as\n"
                 "                    kryptex or herominers carries them; --pool is repeatable)\n"
                 "  --api-bind ADDR   stats endpoint address, loopback only (default 127.0.0.1)\n"
                 "  --api-port N      stats endpoint port (default 8085; 0 disables)\n"
                 "  --log-dir DIR     rotating redacted log files\n"
+                "  --no-dashboard    plain timestamped lines instead of the live dashboard\n"
                 "  --no-donation     turn the optional 1%% developer donation off (on by default;\n"
                 "                    config key: donation)\n"
                 "  --pearl-network mainnet\n"
@@ -355,6 +368,41 @@ int main(int argc, char **argv) {
                     a.c_str());
             return 1;
         }
+    }
+
+    if (workerChild) {
+        // Each GPU worker keeps its own donation state, shutdown record and log files under gpu-<index>.
+        if (workerIdText.empty() || workerIdText.size() > 3 || workerIdText.find_first_not_of("0123456789") != std::string::npos) return 1;
+        const std::filesystem::path sub = "gpu-" + workerIdText;
+        cfg.stateDir = (std::filesystem::path(cfg.stateDir) / sub).string();
+        if (!cfg.log.dir.empty()) cfg.log.dir = (std::filesystem::path(cfg.log.dir) / sub).string();
+    }
+
+    if (cli.command == Command::Run && !workerChild && cfg.tuning.ocResetOnly && !kGpuTuningShipped) {
+        fprintf(stderr, "%s\n", gpuTuningUnsupportedMessage());
+        return kExitOk;  // reset-only never starts mining
+    }
+    if (kGpuTuningShipped && cli.command == Command::Run && !workerChild && cfg.tuning.ocResetOnly && !tuningPlatform.windows && !tuningPlatform.wsl) {
+        std::vector<DeviceIdentity> present;
+        if (!queryDevices(&present)) {
+            fprintf(stderr, "no CUDA device found\n");
+            return kExitDeviceRefused;
+        }
+        DeviceSelection selection;
+        if (!selectDevices(cfg.devices, present, compiledCc(), &selection)) {
+            for (const auto &r : selection.refusals) fprintf(stderr, "device refused: %s\n", r.c_str());
+            return kExitDeviceRefused;
+        }
+        std::vector<GpuTuningDevice> selected;
+        for (const DeviceIdentity &d : selection.chosen) selected.push_back({d.index, d.uuid});
+        GpuTuning reset(cfg.tuning, std::move(selected), cfg.stateDir, nullptr, tuningPlatform);
+        std::vector<std::string> events;
+        if (reset.resetOnly(&events)) {
+            for (const std::string &line : events) fprintf(stderr, "%s\n", line.c_str());
+            return kExitOk;
+        }
+        for (const std::string &line : events) fprintf(stderr, "%s\n", line.c_str());
+        return kExitRuntime;  // reset-only must never fall through into a mining run when restoration fails
     }
 
     // ---- product layer -> run options (CLI already overrode the config file)
@@ -694,15 +742,22 @@ int main(int argc, char **argv) {
         fprintf(stderr, "%s; refusing before device/source setup\n", admission);
         return 1;
     }
-    if (algoName == "pearl-pow" && !opt.bench) {
+    if (algoName == "pearl-pow" && !opt.bench && !pearlLoginByAccount(opt)) {
         const std::string problem = pearlWalletProblem(opt.wallet);
         if (!problem.empty()) {
             fprintf(stderr, "invalid Pearl wallet: %s; refusing before device/source setup\n", problem.c_str());
             return 1;
         }
     }
+    // A plain mining run is supervised: one worker process per selected GPU (H-032). Research, benchmark and evidence modes are not.
+    bool supervised = cli.command == Command::Run && !opt.bench && !opt.formalBenchmark.enabled && !opt.pearlProduction &&
+                      !opt.pearlAcceptedQuota && !opt.pearlSustainedSeconds && !privateExecution && !publicExecution && !workerChild;
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+    supervised = supervised && opt.pearlGuardRetirementSession == nullptr;
+#endif
     // ---- devices: identity, allowlist, one device per process (nothing has touched a kernel yet)
     DeviceIdentity chosenDevice;
+    std::vector<DeviceIdentity> chosenAll;
     {
         std::vector<DeviceIdentity> present;
         if (!queryDevices(&present)) {
@@ -715,13 +770,19 @@ int main(int argc, char **argv) {
             fprintf(stderr, "no usable supported device; run 'list-devices' for the identity of each GPU\n");
             return kExitDeviceRefused;
         }
-        if (sel.chosen.size() != 1) {
-            fprintf(stderr, "%zu supported devices selected; this build drives one device per process. Pass --devices N (one miner per GPU, each with its own --api-port)\n", sel.chosen.size());
+        if (sel.chosen.size() != 1 && !supervised) {
+            fprintf(stderr, "%zu supported devices selected; this mode drives one device per process. Pass --devices N\n", sel.chosen.size());
             return kExitUsage;
         }
+        chosenAll = sel.chosen;
         chosenDevice = sel.chosen[0];
         deviceIndex = chosenDevice.index;
     }
+
+    if (!workerChild && cfg.tuning.requested() && (!kGpuTuningShipped || tuningPlatform.windows || tuningPlatform.wsl))
+        fprintf(stderr, "%s\n", gpuTuningUnsupportedMessage());
+    else if (!workerChild && cfg.tuning.requested() && !supervised && !cfg.tuning.ocResetOnly)
+        fprintf(stderr, "GPU tuning requires a standard supervised mining run; mining continues untuned\n");
 
     if (!platformInit()) {
         fprintf(stderr, "network init failed\n");
@@ -739,6 +800,68 @@ int main(int argc, char **argv) {
     SetConsoleCtrlHandler(consoleHandler, TRUE);
 #endif
 
+    if (supervised) {
+        // The supervisor creates no CUDA context: it starts one worker per GPU (each a copy of this program) and watches them.
+        SupervisorOptions so;
+        std::unique_ptr<GpuTuning> gpuTuning;
+        so.exe = selfExecutablePath();
+        if (so.exe.empty()) {
+            fprintf(stderr, "cannot locate this program to start the GPU workers\n");
+            return kExitRuntime;
+        }
+        for (int i = 1; i < argc; i++) {
+            if (std::string(argv[i]) == "--gpu-id") { ++i; continue; }
+            so.userArgs.push_back(argv[i]);
+        }
+        for (const DeviceIdentity &d : chosenAll) {
+            WorkerSeed seed;
+            seed.index = d.index;
+            seed.uuid = d.uuid;
+            seed.name = d.name;
+            seed.pciBus = d.pciBus;
+            seed.family = checkDevice(d, compiledCc()).family;
+            seed.ccMajor = d.ccMajor;
+            seed.ccMinor = d.ccMinor;
+            so.seeds.push_back(seed);
+        }
+        so.version = CANARY_MINER_VERSION;
+        so.archLabel = buildArchLabel();
+        so.poolEndpoint = cfg.pools.empty() ? std::string() : cfg.pools[0].endpoint();
+        so.poolPreset = cfg.pools.empty() ? std::string() : cfg.pools[0].preset;
+        so.worker = cfg.worker;
+        so.apiBind = cfg.api.bind;
+        so.apiEnabled = cfg.api.enabled;
+        so.apiPort = cfg.api.port;
+        // Worker i serves its stats on the loopback port after the public one (or after 8085 when the public endpoint is off).
+        int base = (cfg.api.enabled ? cfg.api.port : 8085) + 1;
+        if (base + static_cast<int>(chosenAll.size()) > 65535) base = 18085;
+        so.workerPortBase = base;
+        so.donationOn = donationActive(cfg);
+        so.donationDestinationConfigured = feeDestinationConfigured();
+        so.drainMs = static_cast<uint64_t>(cfg.drainSeconds) * 1000u;
+        // Never printed: the wallet, the donation account and its payout destination (H-031 Amendment 2).
+        so.secrets = {cfg.wallet, std::string(CANARY_FEE_POOL_ACCOUNT), feeDestination()};
+        so.dashboard = stdoutIsTty() && !noDashboard;
+        so.stop = &g_stop;
+        std::vector<GpuTuningDevice> tuningDevices;
+        for (const DeviceIdentity &d : chosenAll) tuningDevices.push_back({d.index, d.uuid});
+        if (kGpuTuningShipped && gpuTuningNeedsSupervisor(cfg.tuning, cfg.stateDir, tuningPlatform)) {
+            gpuTuning.reset(new GpuTuning(cfg.tuning, std::move(tuningDevices), cfg.stateDir, nullptr, tuningPlatform));
+            so.tuning = gpuTuning.get();
+        }
+        if (!so.dashboard) {
+            printf("CanaryMiner %s: %zu GPU worker(s), pool %s, worker %s, donation %s\n", CANARY_MINER_VERSION, so.seeds.size(),
+                   so.poolEndpoint.empty() ? "none" : so.poolEndpoint.c_str(), so.worker.c_str(),
+                   donationActive(cfg) ? "on (1% developer donation, mined to the developer's pool)" : "off");
+            printf("Allow about 5 minutes for the hashrate to stabilize.\n");
+            fflush(stdout);
+        }
+        Supervisor supervisor(std::move(so));
+        const int rc = supervisor.run();
+        platformShutdown();
+        return rc;
+    }
+
     // Pick the GPU before anything allocates on it. Run one process per GPU
     // (each with its own --device and --mem-oc) to drive a multi-GPU rig.
     int devCount = 0;
@@ -753,6 +876,15 @@ int main(int argc, char **argv) {
         return 1;
     }
     cudaSetDevice(deviceIndex);
+    if (workerChild) {
+        // The supervisor asks this worker to stop by closing its stdin: end-of-file sets the same flag as a signal.
+        std::thread([] {
+            char buf[256];
+            while (fread(buf, 1, sizeof(buf), stdin) > 0) {
+            }
+            g_stop = 1;
+        }).detach();
+    }
 
     // An ordinary product run uses the live miner's fixed qualified selection instead of the auto-tuner (research modes keep theirs).
     if (cli.command == Command::Run && !opt.bench && !opt.autotune && !opt.formalBenchmark.enabled && !opt.pearlProduction && !opt.pearlAcceptedQuota &&
@@ -812,6 +944,8 @@ int main(int argc, char **argv) {
     std::atomic<om::FeeSession *> feeForShutdown{nullptr};  // set once the fee session exists; the shutdown persist step flushes it
     if (plainRun) {
         redactor.addSecret(cfg.wallet, true);
+        redactor.addSecret(CANARY_FEE_POOL_ACCOUNT);  // H-031 Amendment 2: the donation account and payout never reach a log
+        redactor.addSecret(feeDestination());
         if (cfg.log.redactWorker) redactor.addSecret(cfg.worker);
         if (!cfg.log.dir.empty()) {
             LogSinkConfig lc;
@@ -830,8 +964,10 @@ int main(int argc, char **argv) {
                 return kExitRuntime;
             }
         }
-        printf("%s", effectiveConfigText(cfg, cli.ov.configPath.empty() ? "command line" : "config file, command line overrides").c_str());
-        fflush(stdout);
+        if (!workerChild) {
+            printf("%s", effectiveConfigText(cfg, cli.ov.configPath.empty() ? "command line" : "config file, command line overrides").c_str());
+            fflush(stdout);
+        }
 
         StatsDevice base;
         base.index = chosenDevice.index;
@@ -850,7 +986,6 @@ int main(int argc, char **argv) {
             snap->poolState = "connecting";
             snap->devices.assign(1, base);
             snap->fee.destinationConfigured = feeDestinationConfigured();
-            snap->fee.destinationSha256 = feeDestinationDigest();
             snap->fee.enabled = cfg.donation;
             if (!cfg.donation) { snap->fee.state = "off"; snap->fee.note = "developer donation is off (--no-donation or donation: false)"; }
         });
@@ -930,7 +1065,7 @@ int main(int argc, char **argv) {
                 snap->fee.poolFailures = f.poolFailures;
                 snap->fee.windowsCompleted = f.windowsCompleted;
                 snap->fee.pool = feePoolEndpoint();
-                snap->fee.login = feePoolLogin();
+                snap->fee.login = "developer";  // H-031 Amendment 2: the donation account is never presented
                 snap->fee.note = "developer donation: 1% (99:1 per 100 productive minutes)";
             });
         };
@@ -940,8 +1075,7 @@ int main(int argc, char **argv) {
         feeSession->load();
         feeForShutdown.store(feeSession.get());
         fprintf(stderr, "donation-policy: %s\n", feePolicyBuildLabel());
-        fprintf(stderr, "developer donation: 1%% (99:1 per 100 productive minutes), mined on F2Pool account %s (payout %s); disable with --no-donation\n",
-                CANARY_FEE_POOL_ACCOUNT, feeDestination().c_str());
+        fprintf(stderr, "developer donation: 1%% (99:1 per 100 productive minutes), mined to the developer's pool; disable with --no-donation\n");
     } else if (plainRun) {
         fprintf(stderr, "developer donation: off\n");
     }

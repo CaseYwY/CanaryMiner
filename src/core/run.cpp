@@ -273,7 +273,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         fprintf(stderr, "%s; refusing before device telemetry/source setup\n", admission);
         return 1;
     }
-    if (!opt.bench && !std::strcmp(algo->name(), "pearl-pow")) {
+    if (!opt.bench && !std::strcmp(algo->name(), "pearl-pow") && !pearlLoginByAccount(opt)) {
         const std::string problem = pearlWalletProblem(opt.wallet);
         if (!problem.empty()) {
             fprintf(stderr, "invalid Pearl wallet: %s; refusing before telemetry/source setup\n", problem.c_str());
@@ -422,7 +422,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         // one with "Invalid Pearl address", which does not say that the
         // launcher's placeholder was never edited - the single most likely
         // reason to see it.
-        const std::string walletProblem = pearlWalletProblem(opt.wallet);
+        const std::string walletProblem = pearlLoginByAccount(opt) ? std::string() : pearlWalletProblem(opt.wallet);
         if (!walletProblem.empty()) {
             logLine(tty, "error",
                     opt.wallet.empty()

@@ -71,6 +71,21 @@ inline void enableAnsiOnWindows() {
 #endif
     if (!SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
         g_asciiOnly = true;  // no VT support: fall back to a plain frame
+
+    // A click in a classic console starts QuickEdit selection, and Windows then blocks every write to the console until the
+    // selection ends, which freezes the dashboard (and anything waiting on it). Turn QuickEdit off for this run, as other miners
+    // do, and give the console its original input mode back when the process exits.
+#ifndef ENABLE_QUICK_EDIT_MODE
+#define ENABLE_QUICK_EDIT_MODE 0x0040
+#endif
+#ifndef ENABLE_EXTENDED_FLAGS
+#define ENABLE_EXTENDED_FLAGS 0x0080
+#endif
+    static DWORD savedInputMode = 0;
+    HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+    if (in != INVALID_HANDLE_VALUE && GetConsoleMode(in, &savedInputMode) &&
+        SetConsoleMode(in, (savedInputMode | ENABLE_EXTENDED_FLAGS) & ~static_cast<DWORD>(ENABLE_QUICK_EDIT_MODE)))
+        atexit([] { SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), savedInputMode); });
 #endif
 }
 

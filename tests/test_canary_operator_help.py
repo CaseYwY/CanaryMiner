@@ -46,9 +46,17 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertEqual(long.stdout, short.stdout)
         self.assertEqual(long.stderr + short.stderr, b'')
 
-    def test_pearl_help_is_truthful_and_retains_real_defaults(self):
+    def test_standard_help_is_short_and_grouped(self):
         help_text = self.cli('--help').stdout.decode()
-        for text in ('CanaryMiner 1.0.1 (CUDA, NVIDIA Blackwell)',
+        for text in ('NVIDIA Blackwell (RTX 50-series) only', '--pool', '--wallet', '--gpu-id', '--api-enable',
+                '--no-donation', '--help-all'):
+            with self.subTest(text=text):
+                self.assertIn(text, help_text)
+        self.assertNotIn('development', help_text.lower())
+
+    def test_pearl_help_is_truthful_and_retains_real_defaults(self):
+        help_text = self.cli('--help-all').stdout.decode()
+        for text in ('(CUDA, NVIDIA Blackwell) - all options',
                 'pearl-pow only (default pearl-pow)', 'worker name (default canary)',
                 'logical work-unit budget (default 4194304)', 'fixed synthetic fixture height 1851444',
                 'canary-miner list-devices', 'base-before-penalty|final-adjusted-bound',
@@ -88,9 +96,10 @@ class CanaryOperatorHelpTests(unittest.TestCase):
     def test_subcommands_that_need_no_pool(self):
         version = self.cli('version')
         self.assertEqual(version.returncode, 0)
-        self.assertIn(b'CanaryMiner 1.0.1', version.stdout)
-        # the fee destination is public (H-018b): the version line carries its 64-hex SHA-256
-        self.assertRegex(version.stdout, rb'fee_destination_sha256=[0-9a-f]{64}\n')
+        self.assertIn(b'CanaryMiner 1.0.2', version.stdout)
+        # H-031 Amendment 2: the version line names no donation address, account or digest
+        self.assertRegex(version.stdout, rb'donation=compiled-in\n')
+        self.assertNotIn(b'sha256', version.stdout)
         self.assertEqual(self.cli('--version').stdout, version.stdout)
         unknown = self.cli('frobnicate')
         self.assertEqual(unknown.returncode, 2)

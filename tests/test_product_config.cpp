@@ -85,6 +85,8 @@ int main(int argc, char **argv) {
     CHECK(contains(errorOf("{\"schema_version\":1,\"api\":{\"prot\":1}}"), "unknown key 'prot' in api"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"log\":{\"size\":1}}"), "unknown key 'size' in log"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"shutdown\":{\"x\":1}}"), "unknown key 'x' in shutdown"));
+    CHECK(contains(errorOf("{\"schema_version\":1,\"tuning\":{\"gpu_fan\":80}}"), "must be a string"));
+    CHECK(contains(errorOf("{\"schema_version\":1,\"tuning\":{\"gpu_fann\":\"80\"}}"), "unknown key 'gpu_fann' in tuning"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[{\"url\":\"kryptex\",\"fee\":1}]}"), "unknown key 'fee' in a pool entry"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"schema_version\":1}"), "duplicate key"));
     CHECK(contains(errorOf("[1]"), "must be a JSON object"));
@@ -105,8 +107,10 @@ int main(int argc, char **argv) {
 
     CHECK(parses("{\"schema_version\":1,\"wallet\":\"W\",\"worker\":\"rig_1\",\"pools\":[\"kryptex\",\"herominers\",{\"url\":\"pool.example.net:3333\","
                  "\"target_semantics\":\"final-adjusted-bound\"}],\"devices\":[0,\"GPU-abc\"],\"api\":{\"port\":9000},\"log\":{\"dir\":\"l\","
-                 "\"max_files\":3,\"max_file_bytes\":8192,\"redact_worker\":true},\"state_dir\":\"s\",\"shutdown\":{\"drain_seconds\":30}}",
-                 &c));
+                  "\"max_files\":3,\"max_file_bytes\":8192,\"redact_worker\":true},\"state_dir\":\"s\",\"shutdown\":{\"drain_seconds\":30},"
+                  "\"tuning\":{\"gpu_cclock\":\"2550:2600,2400\",\"gpu_mclock\":\"7001\",\"gpu_coffset\":\"+599\","
+                  "\"gpu_moffset\":\"0\",\"gpu_plimit\":\"175\",\"gpu_fan\":\"80\",\"oc_delay\":5,\"oc_reset_only\":false}}",
+                  &c));
     CHECK(c.pools.size() == 3 && c.pools[0].preset == "kryptex" && c.pools[0].endpoint() == "prl-us.kryptex.network:7048" &&
           c.pools[1].endpoint() == "us2.pearl.herominers.com:1200" && c.pools[2].endpoint() == "pool.example.net:3333" &&
           c.pools[2].targetSemantics == "final-adjusted-bound" && c.pools[0].targetSemantics == "base-before-penalty" && c.pools[0].network == "mainnet");
@@ -114,6 +118,12 @@ int main(int argc, char **argv) {
     CHECK(c.pools[0].policyKnown && c.pools[2].policyKnown);
     CHECK(c.api.port == 9000 && c.log.dir == "l" && c.log.maxFiles == 3 && c.log.maxFileBytes == 8192 && c.log.redactWorker && c.stateDir == "s" &&
           c.drainSeconds == 30);
+    CHECK(c.tuning.gpuCclockSet && c.tuning.gpuCclock == "2550:2600,2400" && c.tuning.gpuMclockSet && c.tuning.gpuMclock == "7001");
+    CHECK(c.tuning.gpuCoffsetSet && c.tuning.gpuCoffset == "+599" && c.tuning.gpuMoffsetSet && c.tuning.gpuMoffset == "0");
+    CHECK(c.tuning.gpuPlimitSet && c.tuning.gpuPlimit == "175" && c.tuning.gpuFanSet && c.tuning.gpuFan == "80");
+    CHECK(c.tuning.ocDelaySet && c.tuning.ocDelaySeconds == 5 && !c.tuning.ocResetOnly);
+    CHECK(parses("{\"schema_version\":1,\"tuning\":{\"oc_reset_only\":true}}", &c) && c.tuning.ocResetOnly);
+    CHECK(contains(errorOf("{\"schema_version\":1,\"tuning\":{\"oc_delay\":4294967296}}"), "between 0 and 4294967295"));
 
     // cross-field validation
     ProductConfig d;
@@ -186,12 +196,14 @@ int main(int argc, char **argv) {
         ProductConfig base;
         parseConfig("{\"schema_version\":1,\"wallet\":\"FILEWALLET\",\"worker\":\"fileworker\",\"pools\":[\"herominers\"],\"api\":{\"port\":9000},"
                     "\"log\":{\"dir\":\"filelogs\"},\"devices\":[\"0\"]}", &base, &e);
-        CliParse o = parseArgs({"--pool", "kryptex", "--pool", "a.b:5", "--worker", "clirig", "--api-port", "9100", "--devices", "all"});
+        CliParse o = parseArgs({"--pool", "kryptex", "--pool", "a.b:5", "--worker", "clirig", "--api-port", "9100", "--devices", "all",
+                                "--gpu-fan", "80", "--oc-delay", "10", "--oc-reset-only"});
         CHECK(applyOverrides(o.ov, &base, &e));
         CHECK(base.pools[0].policyKnown && !base.pools[1].policyKnown);  // preset carries its policy; a bare HOST:PORT does not
         CHECK(base.pools.size() == 2 && base.pools[0].preset == "kryptex" && base.pools[1].endpoint() == "a.b:5");
         CHECK(base.wallet == "FILEWALLET" && base.worker == "clirig" && base.api.port == 9100 && base.log.dir == "filelogs");
         CHECK(base.devices.size() == 1 && base.devices[0] == "all");
+        CHECK(base.tuning.gpuFanSet && base.tuning.gpuFan == "80" && base.tuning.ocDelaySeconds == 10 && base.tuning.ocResetOnly);
         CliParse off = parseArgs({"--api-port", "0"});
         CHECK(applyOverrides(off.ov, &base, &e) && !base.api.enabled);
         CliParse bad = parseArgs({"--pool", "no-port"});

@@ -23,5 +23,6 @@
   "donation": true,
   "shutdown": {
     "drain_seconds": 10
-  }
+  },
+  "tuning": {}
 }

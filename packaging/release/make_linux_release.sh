@@ -11,11 +11,11 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
-  echo "usage: $0 --source <source.tar> --toolkit <cuda-13.1-root> --version <X.Y.Z> --epoch <unix-seconds> --min-driver <text> --out <dir>" >&2
+  echo "usage: $0 --source <source.tar> --toolkit <cuda-13.1-root> --version <X.Y.Z> --epoch <unix-seconds> --min-driver <text> --out <dir> [--work <dir>] [--deny-file <file>]" >&2
   exit 2
 }
 
-source_tar=""; toolkit=""; version=""; epoch=""; min_driver=""; out=""
+source_tar=""; toolkit=""; version=""; epoch=""; min_driver=""; out=""; work=""; deny_file=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --source) source_tar="${2:-}"; shift 2 ;;
@@ -24,6 +24,8 @@ while [ $# -gt 0 ]; do
     --epoch) epoch="${2:-}"; shift 2 ;;
     --min-driver) min_driver="${2:-}"; shift 2 ;;
     --out) out="${2:-}"; shift 2 ;;
+    --work) work="${2:-}"; shift 2 ;;
+    --deny-file) deny_file="${2:-}"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -41,7 +43,11 @@ case "$cmake_version" in
   *) echo "make_linux_release: cmake $cmake_version is older than 3.31" >&2; exit 1 ;;
 esac
 
-work="$(mktemp -d)"
+# Build in a fixed, neutral folder (default /build/canaryminer-<version>) so no home or user path is compiled into the binary.
+# The toolkit should also sit at a neutral path (for example /opt/cuda-13.1): nvcc embeds its include directories.
+[ -n "$work" ] || work="/build/canaryminer-$version"
+case "$toolkit$work" in */home/*|*/Users/*|*/mnt/*) echo "make_linux_release: toolkit and work dir must not be under /home, /Users or /mnt" >&2; exit 1 ;; esac
+rm -rf "$work"; mkdir -p "$work"
 trap 'rm -rf "$work"' EXIT
 
 mkdir -p "$work/src"
@@ -60,9 +66,43 @@ stage="$work/stage/$name"
 mkdir -p "$stage"
 cp "$native" "$stage/canary-miner"
 strip --strip-all "$stage/canary-miner"
-cp "$work/src/launchers/canaryminer.sh" "$stage/canaryminer.sh"
+
+# Refuse to ship a binary that names a build machine. Two checks on the stripped binary's printable strings:
+#  1. home/user paths and WSL mounts (always);
+#  2. the owner's local deny-list, through tools/check_secrets.py, so the exact public tokens (the maintainer handle and the
+#     donation account) stay allowed and everything else on the list fails (only when --deny-file is given).
+leaks="$(grep -aoE '/home/[^/[:space:]]+|/Users/[^/[:space:]]+|[A-Za-z]:[\/]Users[\/][^\/[:space:]]+|/mnt/[a-z]/' "$stage/canary-miner" | sort -u || true)"
+if [ -n "$leaks" ]; then
+  echo "make_linux_release: the binary embeds build-machine paths; not packaging:" >&2
+  printf '%s\n' "$leaks" >&2
+  exit 1
+fi
+if [ -n "$deny_file" ]; then
+  CANARY_SECRETS_FILE="$deny_file" python3 - "$work/src/tools" "$stage/canary-miner" <<'PY' || exit 1
+import re, sys
+sys.path.insert(0, sys.argv[1])
+import check_secrets as c
+_, local = c.local_patterns('.')
+data = open(sys.argv[2], 'rb').read()
+text = '\n'.join(m.group().decode() for m in re.finditer(rb'[\x20-\x7e]{6,}', data))
+# The compiled-in donation address is public by design (README, src/product/fee.h); drop exactly that string.
+fee = re.search(r'#define CANARY_FEE_DESTINATION "(prl1[a-z0-9]+)"', open(sys.argv[1] + '/../src/product/fee.h').read()).group(1)
+# The compiler may store it split or merged with a neighbouring string, so mask every run that starts with its first 30 chars.
+text = re.sub(re.escape(fee[:30]) + r'[a-z0-9]*', '<donation-address>', text)
+findings = []
+c.scan_text('canary-miner', text.encode(), local, findings)
+bad = sorted({f[2] for f in findings})
+if bad:
+    print('make_linux_release: the binary matches the deny-list: ' + ', '.join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
+fi
+# The standard layout (H-031 amendment): one binary, ready-to-edit start files, plain-text readme, licences.
+for f in start.sh start-f2pool.sh start-kryptex.sh start-herominers.sh start-advanced.sh; do
+  cp "$work/src/launchers/$f" "$stage/$f"
+done
 cp "$work/src/config/config.example.json" "$stage/config.example.json"
-cp "$work/src/README.md" "$work/src/LICENSE" "$work/src/TRADEMARK.md" "$work/src/THIRD_PARTY.md" "$stage/"
+cp "$work/src/LICENSE" "$work/src/THIRD_PARTY.md" "$work/src/HELP.txt" "$stage/"
 cp -r "$work/src/LICENSES" "$stage/LICENSES"
 
 # Runtime dependencies: only the driver's libcuda.so.1 and the system C/C++ runtime may be needed.
@@ -75,12 +115,22 @@ fi
 glibc="$(objdump -T "$stage/canary-miner" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1 | sed 's/GLIBC_//')"
 
 sed -e "s|@VERSION@|$version|g" -e "s|@MIN_DRIVER@|$min_driver|g" -e "s|@GLIBC@|$glibc|g" \
-  "$here/QUICKSTART.txt" >"$stage/QUICKSTART.txt"
+  "$here/README-linux.txt" >"$stage/README.txt"
 
 # Normalize modes so the archive does not depend on the build host's umask.
 find "$stage" -type d -exec chmod 755 {} +
 find "$stage" -type f -exec chmod 644 {} +
-chmod 755 "$stage/canary-miner" "$stage/canaryminer.sh"
+chmod 755 "$stage/canary-miner" "$stage"/start*.sh
+
+# The archive holds exactly the standard layout: a file added or dropped by mistake fails the release here.
+want="$(printf '%s\n' HELP.txt LICENSE LICENSES README.txt THIRD_PARTY.md canary-miner config.example.json \
+  start-advanced.sh start-f2pool.sh start-herominers.sh start-kryptex.sh start.sh)"
+got="$(cd "$stage" && LC_ALL=C ls -A1)"
+if [ "$got" != "$want" ]; then
+  echo "make_linux_release: the archive does not match the standard layout:" >&2
+  diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") >&2 || true
+  exit 1
+fi
 
 mkdir -p "$out"
 archive="$out/$name-linux-x86_64.tar.gz"

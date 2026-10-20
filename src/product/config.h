@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #include <cctype>
+#include <climits>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -63,6 +64,29 @@ struct LogConfig {
     bool redactWorker = false;
 };
 
+/** Raw GPU tuning values. Lists use comma-separated values in selected-device order; syntax/ranges are checked at runtime. */
+struct GpuTuningConfig {
+    bool gpuCclockSet = false;
+    std::string gpuCclock;
+    bool gpuMclockSet = false;
+    std::string gpuMclock;
+    bool gpuCoffsetSet = false;
+    std::string gpuCoffset;
+    bool gpuMoffsetSet = false;
+    std::string gpuMoffset;
+    bool gpuPlimitSet = false;
+    std::string gpuPlimit;
+    bool gpuFanSet = false;
+    std::string gpuFan;
+    bool ocDelaySet = false;
+    uint64_t ocDelaySeconds = 0;
+    bool ocResetOnly = false;
+
+    bool requested() const {
+        return gpuCclockSet || gpuMclockSet || gpuCoffsetSet || gpuMoffsetSet || gpuPlimitSet || gpuFanSet || ocDelaySet || ocResetOnly;
+    }
+};
+
 struct ProductConfig {
     unsigned schemaVersion = kConfigSchemaVersion;
     std::string wallet;
@@ -74,6 +98,7 @@ struct ProductConfig {
     std::string stateDir = "state";
     unsigned drainSeconds = 10;
     bool donation = true;  // developer donation (1%, 99:1); on by default, opt out with "donation": false or --no-donation
+    GpuTuningConfig tuning;
 };
 
 struct PoolPreset {
@@ -117,7 +142,19 @@ inline bool parseEndpoint(const std::string &text, std::string *host, int *port)
     return true;
 }
 
-/** A pool given as a preset name or HOST:PORT (CLI --pool and string entries in the config). */
+/** True when `host` is `domain` or a subdomain of it ("us2.pearl.herominers.com" matches "herominers.com"). */
+inline bool hostInDomain(const std::string &host, const char *domain) {
+    const std::string d = domain;
+    if (host.size() < d.size()) return false;
+    if (host.compare(host.size() - d.size(), d.size(), d) != 0) return false;
+    return host.size() == d.size() || host[host.size() - d.size() - 1] == '.';
+}
+
+/**
+ * A pool given as a preset name, HOST:PORT, or stratum+tcp://HOST:PORT (CLI --pool and string entries in the config).
+ * A host of a known pool gets that pool's preset name, so its quirks apply (v2 gzip login for kryptex and f2pool). The
+ * endpoint stays the one the user typed. stratum+ssl:// is refused until TLS exists.
+ */
 inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *error) {
     size_t n = 0;
     const PoolPreset *presets = poolPresets(&n);
@@ -132,10 +169,20 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
             return true;
         }
     }
-    if (!parseEndpoint(spec, &e.host, &e.port)) {
-        if (error) *error = "pool '" + spec + "' is neither a preset (kryptex, herominers, f2pool) nor HOST:PORT";
+    std::string endpoint = spec;
+    if (endpoint.rfind("stratum+ssl://", 0) == 0) {
+        if (error) *error = "TLS not supported yet: stratum+ssl:// needs TLS, which this build does not have; use stratum+tcp:// or HOST:PORT";
         return false;
     }
+    if (endpoint.rfind("stratum+tcp://", 0) == 0) endpoint = endpoint.substr(std::string("stratum+tcp://").size());
+    if (!parseEndpoint(endpoint, &e.host, &e.port)) {
+        if (error) *error = "pool '" + spec + "' is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT";
+        return false;
+    }
+    if (hostInDomain(e.host, "kryptex.network")) e.preset = "kryptex";
+    else if (hostInDomain(e.host, "herominers.com")) e.preset = "herominers";
+    else if (hostInDomain(e.host, "f2pool.com")) e.preset = "f2pool";
+    e.policyKnown = !e.preset.empty();
     *out = e;
     return true;
 }
@@ -207,7 +254,7 @@ inline bool parseConfig(const std::string &text, ProductConfig *cfg, std::string
         return fail(error, "config schema_version " + std::to_string(version) + " is not supported; this build reads schema_version " +
                                std::to_string(kConfigSchemaVersion) +
                                " only. There is no automatic migration: edit the file to the config-v1 layout (see config.example.json)");
-    if (!onlyKeys(root, "the config", {"schema_version", "wallet", "worker", "pools", "devices", "api", "log", "state_dir", "shutdown", "donation"}, error))
+    if (!onlyKeys(root, "the config", {"schema_version", "wallet", "worker", "pools", "devices", "api", "log", "state_dir", "shutdown", "donation", "tuning"}, error))
         return false;
 
     ProductConfig out;
@@ -215,6 +262,31 @@ inline bool parseConfig(const std::string &text, ProductConfig *cfg, std::string
     if (!getString(root, "worker", "the config", &out.worker, error)) return false;
     if (!getString(root, "state_dir", "the config", &out.stateDir, error)) return false;
     if (!getBool(root, "donation", "the config", &out.donation, error)) return false;
+
+    if (const JsonValue *tuning = root.find("tuning")) {
+        if (!tuning->isObject()) return fail(error, "'tuning' must be an object");
+        if (!onlyKeys(*tuning, "tuning", {"gpu_cclock", "gpu_mclock", "gpu_coffset", "gpu_moffset", "gpu_plimit", "gpu_fan", "oc_delay", "oc_reset_only"}, error))
+            return false;
+        out.tuning.gpuCclockSet = tuning->find("gpu_cclock") != nullptr;
+        out.tuning.gpuMclockSet = tuning->find("gpu_mclock") != nullptr;
+        out.tuning.gpuCoffsetSet = tuning->find("gpu_coffset") != nullptr;
+        out.tuning.gpuMoffsetSet = tuning->find("gpu_moffset") != nullptr;
+        out.tuning.gpuPlimitSet = tuning->find("gpu_plimit") != nullptr;
+        out.tuning.gpuFanSet = tuning->find("gpu_fan") != nullptr;
+        if (!getString(*tuning, "gpu_cclock", "tuning", &out.tuning.gpuCclock, error) ||
+            !getString(*tuning, "gpu_mclock", "tuning", &out.tuning.gpuMclock, error) ||
+            !getString(*tuning, "gpu_coffset", "tuning", &out.tuning.gpuCoffset, error) ||
+            !getString(*tuning, "gpu_moffset", "tuning", &out.tuning.gpuMoffset, error) ||
+            !getString(*tuning, "gpu_plimit", "tuning", &out.tuning.gpuPlimit, error) ||
+            !getString(*tuning, "gpu_fan", "tuning", &out.tuning.gpuFan, error))
+            return false;
+        uint64_t delay = 0;
+        if (!getUint(*tuning, "oc_delay", "tuning", 0, UINT_MAX, &delay, error) ||
+            !getBool(*tuning, "oc_reset_only", "tuning", &out.tuning.ocResetOnly, error))
+            return false;
+        out.tuning.ocDelaySet = tuning->find("oc_delay") != nullptr;
+        out.tuning.ocDelaySeconds = delay;
+    }
 
     if (const JsonValue *pools = root.find("pools")) {
         if (!pools->isArray() || pools->items.empty()) return fail(error, "'pools' must be a non-empty array");

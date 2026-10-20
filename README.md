@@ -26,48 +26,37 @@ Your numbers depend on your card, clocks and power limit.
 Download a prebuilt binary for Linux or Windows from the [Releases page](https://github.com/bucnazty2020/CanaryMiner/releases)
 (see [Download](#download)), or build from source.
 
-## Developer donation
+## Contents
 
-CanaryMiner can donate **1% of your productive mining time** to the developer. It is voluntary and **on by default**; you can
-turn it off at any time and the miner is exactly as supported without it.
+- [Download](#download)
+- [Windows guide](#windows-guide)
+- [Linux guide](#linux-guide)
+- [Pools, wallets and workers](#pools-wallets-and-workers)
+- [Several GPUs](#several-gpus)
+- [GPU tuning (clocks, power, fans)](#gpu-tuning-clocks-power-fans)
+- [The dashboard](#the-dashboard)
+- [Config file](#config-file)
+- [Stats endpoint](#stats-endpoint)
+- [Share counters](#share-counters)
+- [Developer donation](#developer-donation)
+- [Troubleshooting](#troubleshooting)
+- [Build from source](#build-from-source)
 
-- **Turn it off:** pass `--no-donation`, or set `"donation": false` in the config file. The command-line flag wins over the
-  config. When it is off the miner prints `developer donation: off`, never connects for a donation, and writes no donation
-  state. The stats endpoint then reports `donation.enabled: false`.
-- **What it does when on:** mining runs in 100-minute productive cycles split 99:1 between your payout address and the
-  donation address. At a random point inside each cycle your mining pauses between two search batches (never mid-search),
-  then the donation window mines on the fixed F2Pool endpoint `pearl.f2pool.com:5500`, preset `f2pool`, as
-  `bucnazty90.canaryfee`. This is independent of your pool, account, TLS, proxy, and compression settings. The F2Pool account
-  `bucnazty90` pays out to the donation address below. After about one minute the miner reconnects with your original settings
-  and carries on. Each switch costs a reconnect and a job preparation (about 1-2 seconds measured on an RTX 5080).
-- Donation address (public PRL address): `prl1p9cspyppry9vh38rs78k8s5n44qy9k9jn25pl7wwsvj4emegu9shssjs2jc`
-  Its SHA-256: `7a805305cf1f57d4512dc9d4594fc5936c09d9576c71b04ab32c0d7ce58420b2`. `canary-miner version` prints the digest for the
-  destination a binary uses, so you can check it. The address is set in `src/product/fee.h`; a build may override it with
-  `-DCANARY_FEE_DESTINATION`. A build compiled without one never donates.
-- Your shares and the donation shares are never mixed: the stats endpoint keeps them under `donation.outcomes`, separate
-  from your device and total counters. `donation.pool` and `donation.login` report the fixed donation endpoint and login.
-- Only productive time counts: time spent connecting, without a job, or stopped never accrues. Progress is saved in
-  `donation-state.json` (in the log directory, or the state directory when no log directory is set); a damaged file is
-  ignored with a warning and a fresh cycle starts.
-- If the donation pool is unreachable or sends no work for 60 seconds, the window is abandoned, your mining resumes at once,
-  and the unmet time is carried as debt (never more than one extra minute). The window is retried after 10 minutes. A
-  failure never stops your mining and never counts as a failure of your own pool connection. If you stop the miner during a
-  window, the unmet part is carried over to the next start.
+Short how-tos for everyday tasks (changing pools and wallets, tuning, general use) are in [HELP.txt](HELP.txt), which is
+also in every release archive.
 
-Running with the donation off is official and supported; it is still CanaryMiner. See [TRADEMARK.md](TRADEMARK.md) for what a
-renamed fork must call itself.
 
 ## Download
 
 Prebuilt binaries for RTX 50-series GPUs are on the [Releases page](https://github.com/bucnazty2020/CanaryMiner/releases),
-starting with v1.0.1 (v1.0.0 is a source-only release):
+starting with v1.0.2 (v1.0.0 and v1.0.1 are source-only releases):
 
 - **Linux x86-64:** `canaryminer-<version>-linux-x86_64.tar.gz`. It needs glibc 2.34 or newer (Ubuntu 22.04, 24.04 and later).
 - **Windows 10/11 x64:** `canaryminer-<version>-windows-x86_64.zip`. The binary is not code-signed, so Windows SmartScreen or
   your antivirus may warn on first start. Check the checksum below before you allow it.
 
 Both need an NVIDIA driver that supports CUDA 13.1 (tested with driver 616.92). The CUDA toolkit is not needed. Each archive
-has a `QUICKSTART.txt`.
+has a `README.txt` (quick start for that system) and `HELP.txt` (everyday tasks).
 
 Check the download against `SHA256SUMS` from the same release:
 
@@ -80,6 +69,267 @@ On Windows (PowerShell): `Get-FileHash <file> -Algorithm SHA256` and compare wit
 The binaries are built from the tagged source: Linux on Ubuntu 22.04 with g++ 11.4 and CUDA 13.1.115, Windows with MSVC
 19.44 and CUDA 13.1.115. Rebuilds are not yet byte-identical (nvcc embeds temporary file names), so a rebuild will not match
 the published checksum exactly.
+
+## Windows guide
+
+### Requirements
+
+- Windows 10 or 11, 64-bit, and an NVIDIA RTX 50-series GPU.
+- An NVIDIA driver that supports CUDA 13.1 (616.92 or newer was tested).
+- The Microsoft Visual C++ 2015-2022 x64 runtime. If `canary-miner.exe` reports a missing DLL, install
+  "Microsoft Visual C++ Redistributable (x64)" from Microsoft.
+
+### Install and first start
+
+1. Download `canaryminer-<version>-windows-x86_64.zip` and check its SHA-256 (see [Download](#download)).
+2. Right-click the zip, choose **Extract All**, and pick a folder you own, for example `C:\CanaryMiner`. Run the miner from
+   the extracted folder, not from inside the zip.
+3. Right-click `start.bat`, choose **Edit**, and replace `YOUR_PRL_ADDRESS` with your public PRL payout address (it starts
+   with `prl1`). The `.rig1` after it is your rig name on the pool. Save.
+4. Double-click `start.bat`. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**.
+5. The dashboard appears. Allow about 5 minutes for the hashrate to stabilize.
+6. Stop with **Ctrl+C**, the **Q** key, or by closing the window. The miner stops cleanly and saves its state.
+
+### Files in the Windows archive
+
+| File | What it is |
+|---|---|
+| `canary-miner.exe` | the miner |
+| `start.bat` | basic launcher (F2Pool); edit your address and double-click |
+| `start-f2pool.bat`, `start-kryptex.bat`, `start-herominers.bat` | the same, pre-filled for each pool |
+| `start-advanced.bat` | settings at the top (wallet, worker, pool, donation, extra options) and an automatic restart after the miner stops |
+| `config.example.json` | example config file (see [Config file](#config-file)) |
+| `README.txt`, `HELP.txt` | quick start and everyday tasks |
+| `LICENSE.txt`, `THIRD_PARTY.txt`, `LICENSES\` | licences |
+
+### Command line
+
+Open a Command Prompt or PowerShell in the folder and run, for example:
+
+```bat
+canary-miner.exe --pool f2pool --wallet YOUR_PRL_ADDRESS.rig1
+canary-miner.exe --pool kryptex --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0 --no-donation
+canary-miner.exe list-devices
+canary-miner.exe selftest
+canary-miner.exe --help
+```
+
+### Tuning on Windows
+
+CanaryMiner does not change clocks, power or fans. Set them with MSI Afterburner (or a similar tool) before you start the
+miner; see [GPU tuning](#gpu-tuning-clocks-power-fans).
+
+## Linux guide
+
+### Requirements
+
+- x86-64 Linux with glibc 2.34 or newer (Ubuntu 22.04, 24.04 and later), and an NVIDIA RTX 50-series GPU.
+- An NVIDIA driver that supports CUDA 13.1 (616.92 or newer was tested). The driver's `libcuda.so.1` is the only NVIDIA
+  library the miner needs; the CUDA toolkit is not needed.
+- The miner does not need root.
+
+### Install and first start
+
+```bash
+tar -xzf canaryminer-<version>-linux-x86_64.tar.gz
+cd canaryminer-<version>
+nano start.sh          # replace YOUR_PRL_ADDRESS with your prl1... address; keep .rig1 or rename it
+./start.sh
+```
+
+Allow about 5 minutes for the hashrate to stabilize. Stop with **Ctrl+C** or the **Q** key.
+
+To keep the miner running after you log out of an SSH session, start it inside `tmux` or `screen`:
+
+```bash
+tmux new -s canary ./start.sh       # detach with Ctrl+B then D; reattach with: tmux attach -t canary
+```
+
+### Files in the Linux archive
+
+| File | What it is |
+|---|---|
+| `canary-miner` | the miner |
+| `start.sh` | basic launcher (F2Pool); edit your address and run |
+| `start-f2pool.sh`, `start-kryptex.sh`, `start-herominers.sh` | pre-filled per pool; extra options pass through, for example `./start-kryptex.sh --gpu-id 0` |
+| `start-advanced.sh` | settings at the top (wallet, worker, pool, donation, extra options) and an automatic restart; `RESTART=0` runs it once |
+| `config.example.json` | example config file (see [Config file](#config-file)) |
+| `README.txt`, `HELP.txt` | quick start and everyday tasks |
+| `LICENSE`, `THIRD_PARTY.md`, `LICENSES/` | licences |
+
+### Command line
+
+```bash
+./canary-miner --pool f2pool --wallet YOUR_PRL_ADDRESS.rig1
+./canary-miner --pool stratum+tcp://prl-us.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0,1
+./canary-miner list-devices
+./canary-miner selftest
+./canary-miner --help
+```
+
+If a file is not executable after extracting, run `chmod +x canary-miner start*.sh`.
+
+### Tuning on Linux
+
+CanaryMiner does not change clocks, power or fans. Set them with `nvidia-smi` (or your mining OS's tool) before you start
+the miner; see [GPU tuning](#gpu-tuning-clocks-power-fans).
+
+## Pools, wallets and workers
+
+| Option | Meaning |
+|---|---|
+| `-o`, `--pool SPEC` | `f2pool`, `kryptex`, `herominers`, `HOST:PORT`, or `stratum+tcp://HOST:PORT` |
+| `-u`, `--wallet ADDR[.WORKER]` | your public PRL payout address; the part after the dot is the rig name. F2Pool account users can pass `ACCOUNT.WORKER` |
+| `--worker NAME` | rig name (overrides the part after the dot) |
+| `-p`, `--password P` | pool password field (default `x`) |
+
+| Preset | Host | Status |
+|---|---|---|
+| `f2pool` | `pearl.f2pool.com:5500` | qualified (accepted shares, 0 rejects) |
+| `kryptex` | `prl-us.kryptex.network:7048` | qualified (accepted shares, 0 rejects) |
+| `herominers` | `us2.pearl.herominers.com:1200` | available, not tested with this build |
+
+- **Change your wallet:** edit the address after `--wallet` in your start file (or `WALLET` in `start-advanced`), save, and
+  restart the miner. Use a public payout address only; never put a seed phrase, private key or password in any file.
+- **Change your pool:** use the start file for that pool, or edit `--pool`. Any Pearl pool works as `HOST:PORT`.
+- **Not supported yet:** TLS (`stratum+ssl://`) and pool failover (only the first pool is used).
+
+## Several GPUs
+
+One command mines on every supported GPU. `--gpu-id` picks some of them: `all` (the default), indexes such as `0,1`, a
+`GPU-...` UUID, or a PCI bus id. Run `list-devices` to see them.
+
+Each selected GPU runs in its own worker process with its own donation scheduler, state and log folder (`gpu-<index>`).
+A worker that exits unexpectedly is restarted after 10 seconds, at most 3 times an hour per GPU; the other GPUs keep mining.
+Ctrl-C stops every worker. GPUs that are not RTX 50-series are skipped.
+
+## GPU tuning (clocks, power, fans)
+
+CanaryMiner mines with whatever GPU settings are applied when it starts; it does not change them. Apply your tuning first,
+then start the miner. The tuning flags used by other miners (`--gpu-cclock`, `--gpu-mclock`, `--gpu-coffset`,
+`--gpu-moffset`, `--gpu-plimit`, `--gpu-fan`, `--oc-delay`, `--oc-reset-only`) are accepted, so existing command lines keep
+working, but they are ignored with a notice. Built-in tuning may come back in a later release.
+
+Tuning can make a GPU unstable. Change one setting at a time, watch for errors and rejected shares, and go back to stock if
+something goes wrong.
+
+### Windows: MSI Afterburner
+
+1. Install and open MSI Afterburner (or your card maker's tool).
+2. Set **Power Limit**, **Core Clock** (offset), **Memory Clock** (offset) and **Fan Speed**.
+3. Click **Apply** and save to a profile slot. Optionally enable "Apply overclocking at system startup".
+4. For a locked core clock, open the curve editor (Ctrl+F) and flatten the curve at the clock you want.
+5. Start CanaryMiner.
+
+### Linux: nvidia-smi
+
+`nvidia-smi` ships with the NVIDIA driver and needs `sudo`. `-i 0` picks GPU 0 (see `nvidia-smi -L`); leave it out to change
+every GPU.
+
+```bash
+sudo nvidia-smi -pm 1                     # persistence mode
+sudo nvidia-smi -i 0 -pl 175              # power limit, watts
+sudo nvidia-smi -i 0 -lgc 2400,2400       # lock the core clock, MHz (MIN,MAX)
+sudo nvidia-smi -i 0 -lmc 7001,7001       # lock the memory clock, MHz
+
+nvidia-smi --query-gpu=index,power.limit,clocks.sm,clocks.mem,fan.speed --format=csv   # what is applied now
+
+sudo nvidia-smi -i 0 -rgc                 # back to stock: core clock
+sudo nvidia-smi -i 0 -rmc                 # back to stock: memory clock
+sudo nvidia-smi -i 0 -pl <default>        # default power limit, from: nvidia-smi -q -d POWER
+```
+
+Settings last until the next reboot; put them in a script you run before the miner if you want them every time. Clock
+offsets and manual fan speed are not available in `nvidia-smi`; they need `nvidia-settings` with an X server and Coolbits,
+or your mining OS's tool. Apply offsets only after the base settings are stable, and check the kernel log after a change:
+
+```bash
+sudo journalctl -k --since "10 min ago" | grep -i xid
+```
+
+## The dashboard
+
+On a terminal the miner shows a live dashboard: per GPU hashrate (TH/s, the same figure as T MAC/s in the stats endpoint),
+power, temperature, fan, clocks and shares, a donation row and recent events. Keys: **Q** quit, **D** details (PCI bus, pool
+state, restarts, last error per GPU), **L** log. `--no-dashboard`, or output that is not a terminal, gives plain timestamped
+lines. Allow about 5 minutes after a start for the hashrate to stabilize.
+
+## Config file
+
+Settings can live in a JSON file instead of the command line. Copy `config.example.json` to `config.json`, edit it, and
+start with `--config config.json`. Command-line options win over the file.
+
+| Key | Meaning |
+|---|---|
+| `wallet` | your public PRL payout address |
+| `worker` | rig name |
+| `pools` | a list; the first entry is used: a preset (`"f2pool"`), `"HOST:PORT"`, or an object such as `{"url": "f2pool", "account": "YOUR_F2POOL_ACCOUNT"}` |
+| `devices` | `["all"]`, or indexes, UUIDs or PCI bus ids |
+| `api` | stats endpoint: `enabled`, `bind` (loopback only), `port` |
+| `log` | `dir`, `max_file_bytes`, `max_files`, `redact_worker` |
+| `state_dir` | where the miner keeps its state |
+| `donation` | `true` (default) or `false` |
+| `shutdown.drain_seconds` | how long a stop waits for work in flight (1-600, default 10) |
+
+The full schema is [config/config-v1.schema.json](config/config-v1.schema.json).
+
+## Stats endpoint
+
+The miner serves JSON on loopback only, at `127.0.0.1:8085` by default: `/api/v1/stats` and `/api/v1/version`.
+`--api-enable` moves it to `127.0.0.1:21550` unless you give `--api-port N`; `--api-port 0` turns it off. The stats report one
+`devices[]` entry per GPU plus totals, and keep donation shares under `donation.outcomes`, separate from yours.
+
+## Share counters
+
+Share outcomes keep pool verdicts separate from local handling: `rejected` counts pool rejections only; `stale` counts
+shares the pool marked stale; `local_stale` counts candidates retired or superseded before sending; `submit_failed` counts
+delivery failures; and `host_invalid` counts candidates that failed local verification. These local counters do not
+increase the pool-rejection count.
+
+## Developer donation
+
+CanaryMiner can donate **1% of your productive mining time** to the developer. It is voluntary and **on by default**; you can
+turn it off at any time and the miner is exactly as supported without it.
+
+- **Turn it off:** pass `--no-donation`, or set `"donation": false` in the config file. The command-line flag wins over the
+  config. When it is off the miner prints `developer donation: off`, never connects for a donation, and writes no donation
+  state. The stats endpoint then reports `donation.enabled: false`.
+- **What it does when on:** mining runs in 100-minute productive cycles split 99:1 between you and the developer. At a
+  random point inside each cycle your mining pauses between two search batches (never mid-search), then about one minute is
+  mined on F2Pool (`pearl.f2pool.com:5500`) to the developer's F2Pool account. This is independent of your own pool and
+  settings. After the window the miner reconnects with your settings and carries on. Each switch costs a reconnect and a job
+  preparation (about 1-2 seconds measured on an RTX 5080).
+- The developer's account is compiled in (`src/product/fee.h`); a build compiled without it never donates, and
+  `canary-miner version` says `donation=compiled-in` or `donation=not compiled in`.
+- Your shares and the donation shares are never mixed: the stats endpoint keeps them under `donation.outcomes`, separate
+  from your device and total counters. `donation.pool` reports the donation pool host and `donation.login` reads `developer`.
+- Only productive time counts: time spent connecting, without a job, or stopped never accrues. Progress is saved in
+  `donation-state.json` (in the log directory, or the state directory when no log directory is set); a damaged file is
+  ignored with a warning and a fresh cycle starts.
+- If the donation pool is unreachable or sends no work for 60 seconds, the window is abandoned, your mining resumes at once,
+  and the unmet time is carried as debt (never more than one extra minute). The window is retried after 10 minutes. A
+  failure never stops your mining and never counts as a failure of your own pool connection. If you stop the miner during a
+  window, the unmet part is carried over to the next start.
+
+Running with the donation off is official and supported; it is still CanaryMiner. See [TRADEMARK.md](TRADEMARK.md) for what a
+renamed fork must call itself.
+
+## Troubleshooting
+
+| Problem | What to do |
+|---|---|
+| "Windows protected your PC" | The binary is not code-signed yet. Check the SHA-256, then **More info** and **Run anyway**. |
+| Missing DLL (Windows) | Install "Microsoft Visual C++ Redistributable (x64)". |
+| `no usable supported device` | Only RTX 50-series GPUs are supported. Update the driver (CUDA 13.1 support) and run `list-devices`. |
+| Low hashrate right after start | Normal; allow about 5 minutes. |
+| Pool keeps disconnecting | Check the pool host and port, your wallet or account, and your firewall. |
+| Rejected or invalid shares | Usually unstable tuning; go back to stock clocks. |
+| A GPU keeps restarting | Open the **D** page for its last error; undo recent tuning. |
+| `Permission denied` (Linux) | `chmod +x canary-miner start*.sh` |
+| `GLIBC_2.34 not found` (Linux) | Your distribution is too old; use Ubuntu 22.04 or newer. |
+
+Report bugs on the [issue tracker](https://github.com/bucnazty2020/CanaryMiner/issues); see [SECURITY.md](SECURITY.md)
+for vulnerabilities.
 
 ## Build from source
 
@@ -119,44 +369,6 @@ ctest --preset tests
 
 The full verification script is `tools/test_all.sh`. It also needs the pinned CUDA toolkit and verifier paths; see
 [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Quick start
-
-1. Copy the example configuration and set your public PRL payout address:
-
-   ```bash
-   cp config/config.example.json config.json
-   ```
-
-   Edit `wallet` in `config.json`. Use a public payout address only; never put wallet secrets or passwords in the file.
-
-2. Check your GPUs and run the offline self-test:
-
-   ```bash
-   ./canary-miner list-devices
-   ./canary-miner selftest
-   ```
-
-3. Start mining:
-
-   ```bash
-   ./canary-miner --config config.json
-   ```
-
-   Run `./canary-miner --help` for every option. The stats endpoint is loopback-only at `127.0.0.1:8085` by default
-   (`/api/v1/stats` and `/api/v1/version`).
-
-   Share outcomes keep pool verdicts separate from local handling: `rejected` counts pool rejections only; `stale` counts
-   shares the pool marked stale; `local_stale` counts candidates retired or superseded before sending; `submit_failed` counts
-   delivery failures; and `host_invalid` counts candidates that failed local verification. These local counters do not increase
-   the pool-rejection count.
-
-Pool presets: `f2pool` and `kryptex` are qualified (tested with accepted shares and 0 rejects). On F2Pool, set your F2Pool
-account name as the pool's `account`; the login becomes `account.worker`. `herominers` is available but not tested with
-this build. Other Pearl pools can be configured explicitly but are not qualified.
-
-On Windows, use `canary-miner.exe` (or `canaryminer.bat`) instead of `./canary-miner`. Ctrl-C or closing the console
-window stops the miner cleanly and saves its state.
 
 ## Third-party software
 

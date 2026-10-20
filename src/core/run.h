@@ -225,6 +225,11 @@ inline void recordSynchronousAcceptance(MinerStats *stats) {
     saturatingCounterIncrement(&stats->accepted);
 }
 
+struct RunOptions;
+/** True when the pool login is ACCOUNT.WORKER (F2Pool account via the v2 dialect): the wallet field is not used, so it is not
+ *  required to be a prl1 address (H-031). Defined after RunOptions. */
+inline bool pearlLoginByAccount(const RunOptions &opt);
+
 struct RunOptions {
     RunObserver *observer = nullptr;  // optional; never owned
     RunLoopHook *loopHook = nullptr;  // optional; never owned. Pool runs only; used by the fee scheduler.
@@ -358,7 +363,7 @@ inline const char *pearlRuntimeAdmissionProblem(
         return "Pearl pool requires explicit --pearl-network and --pearl-target-semantics";
     if (opt.pearlPolicy.network != PearlNetwork::Mainnet)
         return "canonical Pearl live runtime supports mainnet only; non-mainnet networks are unsupported in this milestone";
-    if (opt.wallet.empty()) return "Pearl pool requires --wallet";
+    if (opt.wallet.empty() && !pearlLoginByAccount(opt)) return "Pearl pool requires --wallet";
     return nullptr;
 }
 
@@ -516,5 +521,7 @@ constexpr int kRunFeeWindowDone = 10;
 int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
              double gpuMemGB, const char *archLabel, volatile sig_atomic_t *stop,
              const char *gpuUuid = nullptr, unsigned telemetryDeviceIndex = 0);
+
+inline bool pearlLoginByAccount(const RunOptions &opt) { return !opt.poolAccount.empty() && opt.poolProofCompression; }
 
 }  // namespace om
