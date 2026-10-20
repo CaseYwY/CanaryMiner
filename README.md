@@ -20,8 +20,19 @@ off). This README says plainly what has and has not been tested.
 | Other Pearl pools | configurable | not tested |
 | HiveOS and other mining distributions | not supported yet | no |
 
-Measured on the RTX 5080: about 213 T MAC/s, the same speed as the maintainer's private miner with the same kernels.
-Your numbers depend on your card, clocks and power limit.
+### Measured speed and power
+
+| | RTX 5080 |
+|---|---|
+| Hashrate | about 200 T MAC/s (median 201.5; 10-minute average 197.0) |
+| Board power | about 240 W (median 240.3 W; average 235.4 W), as reported by the driver |
+| Efficiency | about 0.84 T MAC/s per watt |
+| Settings | core clock 2655 MHz, memory clock 7001 MHz, power limit 389 W (not reached), fans 80% |
+| Setup | v1.0.2 release build, Windows 11, driver 616.92, Kryptex, donation off |
+
+Measured over 10 minutes, after a 5-minute warm-up, with samples every 15 seconds from the miner's stats endpoint and
+`nvidia-smi`. Board power is the GPU's own reading, not wall power. Your numbers depend on your card, clocks, power limit
+and cooling.
 
 Download a prebuilt binary for Linux or Windows from the [Releases page](https://github.com/bucnazty2020/CanaryMiner/releases)
 (see [Download](#download)), or build from source.
