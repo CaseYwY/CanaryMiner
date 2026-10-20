@@ -1,4 +1,4 @@
-(o> CanaryMiner 1.0.2  -  rig1
+(o> CanaryMiner 1.0.3  -  rig1
 mining | PRL | Pool pool.example:5500 | Worker rig1
 Connection Authorized | Mining session 01:02:05
 Current 225.90 TH/s    Session average 220.65 TH/s    GPU power 314 W
@@ -30,4 +30,4 @@ RECENT EVENTS - UTC
 12:06:00  GPU 0: exited with code 9; restart in 10 s (restart 1)
 Rows 1-30/30 | Up/Down or PgUp/PgDn scroll
 Data age 9.4s | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit
-(o> CanaryMiner 1.0.2  -  rig1
+(o> CanaryMiner 1.0.3  -  rig1

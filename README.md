@@ -106,8 +106,9 @@ the published checksum exactly.
 | File | What it is |
 |---|---|
 | `canary-miner.exe` | the miner |
-| `start.bat` | basic launcher (F2Pool); edit your address and double-click |
-| `start-f2pool.bat`, `start-kryptex.bat`, `start-herominers.bat` | the same, pre-filled for each pool |
+| `start.bat` | basic launcher (Kryptex); edit your PRL address and double-click |
+| `start-kryptex.bat`, `start-herominers.bat` | the same, pre-filled for each pool |
+| `start-f2pool.bat` | F2Pool; edit your F2Pool account name (not a PRL address) |
 | `start-advanced.bat` | settings at the top (wallet, worker, pool, donation, extra options) and an automatic restart after the miner stops |
 | `config.example.json` | example config file (see [Config file](#config-file)) |
 | `README.txt`, `HELP.txt` | quick start and everyday tasks |
@@ -118,8 +119,9 @@ the published checksum exactly.
 Open a Command Prompt or PowerShell in the folder and run, for example:
 
 ```bat
-canary-miner.exe --pool f2pool --wallet YOUR_PRL_ADDRESS.rig1
-canary-miner.exe --pool kryptex --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0 --no-donation
+canary-miner.exe --pool kryptex --wallet YOUR_PRL_ADDRESS.rig1
+canary-miner.exe --pool f2pool --wallet YOUR_F2POOL_ACCOUNT.rig1
+canary-miner.exe --pool herominers --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0 --no-donation
 canary-miner.exe list-devices
 canary-miner.exe selftest
 canary-miner.exe --help
@@ -161,8 +163,9 @@ tmux new -s canary ./start.sh       # detach with Ctrl+B then D; reattach with: 
 | File | What it is |
 |---|---|
 | `canary-miner` | the miner |
-| `start.sh` | basic launcher (F2Pool); edit your address and run |
-| `start-f2pool.sh`, `start-kryptex.sh`, `start-herominers.sh` | pre-filled per pool; extra options pass through, for example `./start-kryptex.sh --gpu-id 0` |
+| `start.sh` | basic launcher (Kryptex); edit your PRL address and run |
+| `start-kryptex.sh`, `start-herominers.sh` | pre-filled per pool; extra options pass through, for example `./start-kryptex.sh --gpu-id 0` |
+| `start-f2pool.sh` | F2Pool; edit your F2Pool account name (not a PRL address) |
 | `start-advanced.sh` | settings at the top (wallet, worker, pool, donation, extra options) and an automatic restart; `RESTART=0` runs it once |
 | `config.example.json` | example config file (see [Config file](#config-file)) |
 | `README.txt`, `HELP.txt` | quick start and everyday tasks |
@@ -171,7 +174,8 @@ tmux new -s canary ./start.sh       # detach with Ctrl+B then D; reattach with: 
 ### Command line
 
 ```bash
-./canary-miner --pool f2pool --wallet YOUR_PRL_ADDRESS.rig1
+./canary-miner --pool kryptex --wallet YOUR_PRL_ADDRESS.rig1
+./canary-miner --pool f2pool --wallet YOUR_F2POOL_ACCOUNT.rig1
 ./canary-miner --pool stratum+tcp://prl-us.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0,1
 ./canary-miner list-devices
 ./canary-miner selftest
@@ -190,7 +194,7 @@ the miner; see [GPU tuning](#gpu-tuning-clocks-power-fans).
 | Option | Meaning |
 |---|---|
 | `-o`, `--pool SPEC` | `f2pool`, `kryptex`, `herominers`, `HOST:PORT`, or `stratum+tcp://HOST:PORT` |
-| `-u`, `--wallet ADDR[.WORKER]` | your public PRL payout address; the part after the dot is the rig name. F2Pool account users can pass `ACCOUNT.WORKER` |
+| `-u`, `--wallet ADDR[.WORKER]` | your public PRL payout address; the part after the dot is the rig name. On F2Pool use `ACCOUNT.WORKER` instead |
 | `--worker NAME` | rig name (overrides the part after the dot) |
 | `-p`, `--password P` | pool password field (default `x`) |
 
@@ -203,6 +207,9 @@ the miner; see [GPU tuning](#gpu-tuning-clocks-power-fans).
 - **Change your wallet:** edit the address after `--wallet` in your start file (or `WALLET` in `start-advanced`), save, and
   restart the miner. Use a public payout address only; never put a seed phrase, private key or password in any file.
 - **Change your pool:** use the start file for that pool, or edit `--pool`. Any Pearl pool works as `HOST:PORT`.
+- **F2Pool logs in with your F2Pool account name, not a PRL address.** Create an F2Pool account, set your PRL payout
+  address in its settings, and pass `--wallet YOUR_F2POOL_ACCOUNT.rig1`. A prl1 address on F2Pool is refused at start-up.
+  Kryptex and HeroMiners take your prl1 address directly.
 - **Not supported yet:** TLS (`stratum+ssl://`) and pool failover (only the first pool is used).
 
 ## Several GPUs
@@ -274,7 +281,7 @@ start with `--config config.json`. Command-line options win over the file.
 |---|---|
 | `wallet` | your public PRL payout address |
 | `worker` | rig name |
-| `pools` | a list; the first entry is used: a preset (`"f2pool"`), `"HOST:PORT"`, or an object such as `{"url": "f2pool", "account": "YOUR_F2POOL_ACCOUNT"}` |
+| `pools` | a list; the first entry is used: a preset (`"kryptex"`), `"HOST:PORT"`, or an object; F2Pool needs `{"url": "f2pool", "account": "YOUR_F2POOL_ACCOUNT"}` |
 | `devices` | `["all"]`, or indexes, UUIDs or PCI bus ids |
 | `api` | stats endpoint: `enabled`, `bind` (loopback only), `port` |
 | `log` | `dir`, `max_file_bytes`, `max_files`, `redact_worker` |
@@ -333,7 +340,7 @@ renamed fork must call itself.
 | Missing DLL (Windows) | Install "Microsoft Visual C++ Redistributable (x64)". |
 | `no usable supported device` | Only RTX 50-series GPUs are supported. Update the driver (CUDA 13.1 support) and run `list-devices`. |
 | Low hashrate right after start | Normal; allow about 5 minutes. |
-| Pool keeps disconnecting | Check the pool host and port, your wallet or account, and your firewall. |
+| Pool keeps disconnecting | Check the pool host and port, your wallet or account, and your firewall. On F2Pool, use your account name, not a prl1 address. |
 | Rejected or invalid shares | Usually unstable tuning; go back to stock clocks. |
 | A GPU keeps restarting | Open the **D** page for its last error; undo recent tuning. |
 | `Permission denied` (Linux) | `chmod +x canary-miner start*.sh` |

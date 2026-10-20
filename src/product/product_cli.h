@@ -399,7 +399,7 @@ inline std::string productHelpText() {
         "                        stratum+ssl:// (TLS) is not supported yet.\n"
         "  -u, --wallet ADDR     your PRL payout address (prl1...). Add .WORKER to name the rig:\n"
         "                        ADDR.rig1 (the part after the first dot is the worker).\n"
-        "                        On F2Pool, ACCOUNT.WORKER uses your F2Pool account instead.\n"
+        "                        F2Pool needs ACCOUNT.WORKER: your F2Pool account name, not a prl1 address.\n"
         "      --worker NAME     rig name; overrides the WORKER part of --wallet (default canary)\n"
         "  -p, --password P      pool password field (default x)\n"
         "\n"
@@ -430,8 +430,9 @@ inline std::string productHelpText() {
         "  Accepted and ignored: --algorithm pearl, --disable-cpu.\n"
         "\n"
         "Examples\n"
-        "  Windows:  canary-miner.exe --pool stratum+tcp://pearl.f2pool.com:5500 --wallet YOUR_PRL_ADDRESS.rig1\n"
-        "  Linux:    ./canary-miner --pool stratum+tcp://pearl.f2pool.com:5500 --wallet YOUR_PRL_ADDRESS.rig1\n";
+        "  Windows:  canary-miner.exe --pool stratum+tcp://prl-us.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS.rig1\n"
+        "  F2Pool:   canary-miner.exe --pool f2pool --wallet YOUR_F2POOL_ACCOUNT.rig1\n"
+        "  Linux:    ./canary-miner --pool stratum+tcp://prl-us.kryptex.network:7048 --wallet YOUR_PRL_ADDRESS.rig1\n";
 }
 
 }  // namespace om

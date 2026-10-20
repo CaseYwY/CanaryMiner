@@ -22,21 +22,22 @@ Requirements
    Double-click start.bat. The window shows the miner's output. Stop with Ctrl+C, or close the window.
 
 Launchers in this folder
-   start.bat            the basic launcher (F2Pool), two lines to edit
-   start-f2pool.bat     F2Pool, pre-filled
+   start.bat            the basic launcher (Kryptex), two lines to edit
+   start-f2pool.bat     F2Pool, pre-filled: put your F2Pool account name, not a prl1 address
    start-kryptex.bat    Kryptex, pre-filled
    start-herominers.bat HeroMiners, pre-filled
    start-advanced.bat   editable settings (wallet, worker, pool, donation, extra options) and a restart after the
                         miner stops; press Ctrl+C and then Y to quit
    Any option works on the command line too, for example:
-                        canary-miner.exe --pool f2pool --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0
+                        canary-miner.exe --pool kryptex --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0
 
 Pools
    --pool f2pool | kryptex | herominers   the known pools (the preset sets the pool's rules)
    --pool HOST:PORT                       any other Pearl pool
    --pool stratum+tcp://HOST:PORT         the same, with the scheme spelled out
    stratum+ssl:// (TLS) is not supported yet.
-   F2Pool account users: --wallet YOUR_ACCOUNT.rig1 uses your F2Pool account instead of a prl1 address.
+   F2Pool logs in with your F2Pool account name, not a prl1 address: --wallet YOUR_F2POOL_ACCOUNT.rig1
+   (set your PRL payout address in your F2Pool account settings).
 
 Options (canary-miner.exe --help lists them all)
    -o, --pool SPEC        pool, as above

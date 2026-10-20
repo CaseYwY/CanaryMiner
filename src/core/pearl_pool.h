@@ -10,7 +10,7 @@
 // established by probing a live pool because nothing documents it:
 //
 //   -> {"id":1,"method":"mining.authorize","params":{"wallet":"prl1...",
-//         "worker":"rig1","pass":"x","agent":"CanaryMiner/1.0.2"}}
+//         "worker":"rig1","pass":"x","agent":"CanaryMiner/1.0.3"}}
 //   <- {"id":1,"error":null,"result":true}
 //   <- {"id":null,"method":"mining.notify","params":{
 //         "job_id":"00000000_2097152",

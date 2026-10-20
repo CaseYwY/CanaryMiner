@@ -20,6 +20,8 @@ Contents
 
 1. First start
 --------------
+  start.bat / start.sh mine on Kryptex. For F2Pool use start-f2pool instead (see section 2).
+
   Windows: right-click start.bat, choose Edit, replace YOUR_PRL_ADDRESS with your PRL address (it starts with prl1),
            save, then double-click start.bat.
   Linux:   open start.sh in a text editor, replace YOUR_PRL_ADDRESS, save, then run:   ./start.sh
@@ -38,7 +40,8 @@ Contents
 
   Replace the prl1... part with your new address and keep ".rig1" (or your own rig name). Save and restart the miner.
 
-  F2Pool account users: you can mine to your F2Pool account instead of a prl1 address:
+  F2Pool is different: it logs in with your F2Pool account name, not a prl1 address. Create an F2Pool account, set
+  your PRL payout address in the account settings, then use:
 
       --wallet YOUR_F2POOL_ACCOUNT.rig1
 
@@ -49,9 +52,9 @@ Contents
 -------------------
   The pool is the part after --pool. Easiest: use the start file made for your pool.
 
-      start-f2pool     F2Pool      (pearl.f2pool.com:5500)
-      start-kryptex    Kryptex     (prl-us.kryptex.network:7048)
-      start-herominers HeroMiners  (us2.pearl.herominers.com:1200)
+      start-kryptex    Kryptex     (prl-us.kryptex.network:7048)   your prl1 address
+      start-f2pool     F2Pool      (pearl.f2pool.com:5500)         your F2Pool account name
+      start-herominers HeroMiners  (us2.pearl.herominers.com:1200) your prl1 address
 
   Or edit --pool in any start file. These forms all work:
 
@@ -158,7 +161,7 @@ Contents
 ----------------------
   Instead of options in the start file you can keep your settings in a file:
     1. Copy config.example.json to config.json.
-    2. Edit "wallet", "worker", "pools" (for example ["f2pool"] or ["pearl.f2pool.com:5500"]) and "devices".
+    2. Edit "wallet", "worker", "pools" (for example ["kryptex"] or ["prl-us.kryptex.network:7048"]; F2Pool needs {"url": "f2pool", "account": "YOUR_ACCOUNT"}) and "devices".
     3. Start with:   canary-miner --config config.json
   Options on the command line win over the file.
 
@@ -180,6 +183,7 @@ Contents
                                    CUDA 13.1) and run  canary-miner list-devices  .
   Low hashrate right after start   Normal: allow about 5 minutes for the hashrate to stabilize.
   Pool keeps disconnecting         Check the pool address and port, your wallet or account name, and your firewall.
+  "F2Pool needs your F2Pool ..."   F2Pool logs in with your account name: --wallet YOUR_F2POOL_ACCOUNT.rig1
   Rejected or invalid shares       Usually unstable tuning: go back to stock clocks and try again.
   A GPU keeps restarting           Look at the D (details) page for the last error; undo any recent tuning.
   Linux: permission denied         Make the files executable:  chmod +x canary-miner start*.sh

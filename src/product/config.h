@@ -378,6 +378,14 @@ inline bool parseConfig(const std::string &text, ProductConfig *cfg, std::string
 }
 
 /** Cross-field checks that apply to the final (file + CLI) configuration. `forRun` demands what mining needs. */
+/** F2Pool logs in with the F2Pool account name only; the PRL payout address is set inside the F2Pool account. */
+inline bool checkPoolLogin(const ProductConfig &cfg, std::string *error) {
+    if (!cfg.pools.empty() && cfg.pools[0].preset == "f2pool" && cfg.pools[0].account.empty())
+        return config_detail::fail(error, "F2Pool needs your F2Pool account name, not a PRL address: use --wallet YOUR_F2POOL_ACCOUNT.rig1 "
+                                          "(set your PRL payout address in your F2Pool account settings), or use another pool such as kryptex");
+    return true;
+}
+
 inline bool validateConfig(const ProductConfig &cfg, bool forRun, std::string *error) {
     using config_detail::fail;
     if (cfg.worker.empty() || cfg.worker.size() > 64) return fail(error, "worker must be 1 to 64 characters");
@@ -388,6 +396,7 @@ inline bool validateConfig(const ProductConfig &cfg, bool forRun, std::string *e
         return fail(error, "api.bind must be a loopback address (127.0.0.1, ::1 or localhost): the stats endpoint is local only");
     if (cfg.drainSeconds < 1 || cfg.drainSeconds > 600) return fail(error, "shutdown.drain_seconds must be 1..600");
     if (forRun) {
+        if (!checkPoolLogin(cfg, error)) return false;
         if (cfg.wallet.empty()) return fail(error, "no wallet: set \"wallet\" in the config or pass --wallet");
         if (cfg.pools.empty()) return fail(error, "no pool: set \"pools\" in the config or pass --pool (kryptex, herominers, f2pool or HOST:PORT)");
     }

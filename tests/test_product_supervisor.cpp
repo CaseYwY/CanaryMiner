@@ -301,7 +301,7 @@ DashGpu synthGpu(int index, const std::string &state) {
 /** Synthetic rig: one donation window on GPU 1 when there are two or more GPUs, one restarting GPU when there are eight. */
 DashModel synthModel(int gpus) {
     DashModel m;
-    m.version = "1.0.2";
+    m.version = "1.0.3";
     m.poolEndpoint = "pool.example:5500";
     m.worker = "rig1";
     m.connection = "Authorized";
@@ -426,7 +426,7 @@ void testDashboardContent() {
     DashModel m = synthModel(2);
     DashView v = plainView(80);
     const std::string frame = renderDashboard(m, v);
-    const std::string title = "(o> CanaryMiner 1.0.2  -  rig1";
+    const std::string title = "(o> CanaryMiner 1.0.3  -  rig1";
     CHECK(has(frame, title.c_str()));  // the title, with the bird mark
     CHECK(has(frame, "mining | PRL | Pool pool.example:5500 | Worker rig1"));
     CHECK(has(frame, "Connection Authorized | Mining session 01:02:05"));

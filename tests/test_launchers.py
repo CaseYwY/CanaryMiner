@@ -67,7 +67,7 @@ class StartFileTests(unittest.TestCase):
     def test_every_start_file_has_the_one_address_to_edit(self):
         for name in self.SH_START + self.BAT_START:
             with self.subTest(name=name):
-                self.assertTrue('YOUR_PRL_ADDRESS' in read(name) or PLACEHOLDER in read(name))
+                self.assertTrue('YOUR_PRL_ADDRESS' in read(name) or PLACEHOLDER in read(name) or 'YOUR_F2POOL_ACCOUNT' in read(name))
 
     def test_batch_files_use_crlf_line_endings(self):
         for name in self.BAT_START + ['canaryminer.bat']:
@@ -123,7 +123,7 @@ class StartFileTests(unittest.TestCase):
             r = subprocess.run(['sh', os.path.join(d, 'start.sh'), '--gpu-id', '0'], capture_output=True, text=True)
             self.assertEqual(r.returncode, 4)
             self.assertEqual(r.stdout.strip(),
-                             '[--pool][stratum+tcp://pearl.f2pool.com:5500][--wallet][YOUR_PRL_ADDRESS.rig1][--gpu-id][0]')
+                             '[--pool][stratum+tcp://prl-us.kryptex.network:7048][--wallet][YOUR_PRL_ADDRESS.rig1][--gpu-id][0]')
 
     @unittest.skipIf(os.name == 'nt' or shutil.which('sh') is None, 'POSIX shell required')
     def test_advanced_sh_refuses_the_placeholder_before_starting_the_miner(self):
@@ -157,7 +157,7 @@ class StartFileTests(unittest.TestCase):
             r = subprocess.run(['sh', script], capture_output=True, text=True)
             self.assertEqual(r.returncode, 0)
             first, second = r.stdout.splitlines()[:2]
-            self.assertEqual(first, 'CanaryMiner: pool f2pool, worker rig1, donation off.')
+            self.assertEqual(first, 'CanaryMiner: pool kryptex, worker rig1, donation off.')
             self.assertIn('--no-donation', second)
             self.assertNotIn(TEST_WALLET, first)
 

@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
     {
         std::string cfgError;
         if (!loadProductConfig(cli.ov.configPath, &cfg, &cfgError) || !applyOverrides(cli.ov, &cfg, &cfgError) ||
-            !validateConfig(cfg, false, &cfgError)) {
+            !validateConfig(cfg, false, &cfgError) || (cli.command == Command::Run && !checkPoolLogin(cfg, &cfgError))) {
             fprintf(stderr, "%s%s", cfgError.c_str(), "\n");
             return kExitConfig;
         }

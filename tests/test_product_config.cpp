@@ -133,6 +133,12 @@ int main(int argc, char **argv) {
     CHECK(!validateConfig(d, true, &e) && contains(e, "no pool"));
     d.pools.resize(1);
     CHECK(validateConfig(d, true, &e));
+    // F2Pool logs in with an account name: a payout address alone is refused with a hint
+    d.pools[0].preset = "f2pool";
+    CHECK(!validateConfig(d, true, &e) && contains(e, "F2Pool needs your F2Pool account name"));
+    d.pools[0].account = "myaccount";
+    CHECK(validateConfig(d, true, &e));
+    d.pools[0] = PoolEntry{};
     d.api.bind = "0.0.0.0";
     CHECK(!validateConfig(d, false, &e) && contains(e, "loopback"));
     d.api.bind = "::1";

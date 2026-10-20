@@ -19,21 +19,22 @@ Requirements
    The terminal shows the miner's output. Stop with Ctrl+C.
 
 Launchers in this folder
-   start.sh             the basic launcher (F2Pool), two lines to edit
-   start-f2pool.sh      F2Pool, pre-filled
+   start.sh             the basic launcher (Kryptex), two lines to edit
+   start-f2pool.sh      F2Pool, pre-filled: put your F2Pool account name, not a prl1 address
    start-kryptex.sh     Kryptex, pre-filled
    start-herominers.sh  HeroMiners, pre-filled
    start-advanced.sh    editable settings (wallet, worker, pool, donation, extra options) and a restart after the
                         miner stops; set RESTART=0 to run it once
    Any option works on the command line too, for example:
-                        ./canary-miner --pool f2pool --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0
+                        ./canary-miner --pool kryptex --wallet YOUR_PRL_ADDRESS.rig1 --gpu-id 0
 
 Pools
    --pool f2pool | kryptex | herominers   the known pools (the preset sets the pool's rules)
    --pool HOST:PORT                       any other Pearl pool
    --pool stratum+tcp://HOST:PORT         the same, with the scheme spelled out
    stratum+ssl:// (TLS) is not supported yet.
-   F2Pool account users: --wallet YOUR_ACCOUNT.rig1 uses your F2Pool account instead of a prl1 address.
+   F2Pool logs in with your F2Pool account name, not a prl1 address: --wallet YOUR_F2POOL_ACCOUNT.rig1
+   (set your PRL payout address in your F2Pool account settings).
 
 Options (./canary-miner --help lists them all)
    -o, --pool SPEC        pool, as above

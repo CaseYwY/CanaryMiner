@@ -10,8 +10,9 @@ rem Your public PRL payout address. The launcher refuses to start until you chan
 set "WALLET=PUT_YOUR_PRL_ADDRESS_HERE"
 rem Rig name shown by the pool.
 set "WORKER=rig1"
-rem Pool: f2pool, kryptex, herominers, or your own HOST:PORT / stratum+tcp://HOST:PORT.
-set "POOL=f2pool"
+rem Pool: kryptex, herominers, f2pool, or your own HOST:PORT / stratum+tcp://HOST:PORT.
+rem For f2pool, set WALLET to your F2Pool account name (your PRL address is set in your F2Pool account).
+set "POOL=kryptex"
 rem Developer donation: on (1%) or off.
 set "DONATION=on"
 rem Any extra options, for example --gpu-id 0 or --api-enable. Leave empty for none.

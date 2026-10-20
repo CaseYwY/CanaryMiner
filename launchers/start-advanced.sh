@@ -7,8 +7,9 @@
 WALLET="PUT_YOUR_PRL_ADDRESS_HERE"
 # Rig name shown by the pool.
 WORKER="rig1"
-# Pool: f2pool, kryptex, herominers, or your own HOST:PORT / stratum+tcp://HOST:PORT.
-POOL="f2pool"
+# Pool: kryptex, herominers, f2pool, or your own HOST:PORT / stratum+tcp://HOST:PORT.
+# For f2pool, set WALLET to your F2Pool account name (your PRL address is set in your F2Pool account).
+POOL="kryptex"
 # Developer donation: on (1%) or off.
 DONATION="on"
 # Extra options, for example "--gpu-id 0" or "--api-enable". Leave empty for none.

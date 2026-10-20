@@ -96,7 +96,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
     def test_subcommands_that_need_no_pool(self):
         version = self.cli('version')
         self.assertEqual(version.returncode, 0)
-        self.assertIn(b'CanaryMiner 1.0.2', version.stdout)
+        self.assertIn(b'CanaryMiner 1.0.3', version.stdout)
         # H-031 Amendment 2: the version line names no donation address, account or digest
         self.assertRegex(version.stdout, rb'donation=compiled-in\n')
         self.assertNotIn(b'sha256', version.stdout)
@@ -128,6 +128,16 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                     result = self.cli('--config', str(path))
                     self.assertEqual(result.returncode, 3)
                     self.assertIn(expected, result.stderr)
+
+    def test_f2pool_with_a_prl_address_is_refused_before_any_device_access(self):
+        address = 'prl1' + 'q' * 59
+        result = self.cli('--pool', 'f2pool', '--wallet', address + '.rig1')
+        self.assertEqual(result.returncode, 3)
+        self.assertIn(b'F2Pool needs your F2Pool account name', result.stderr)
+        # the same pool with an account name passes this check (the stub then stops at device setup)
+        account = subprocess.run([str(self.binaries['1']), '--pool', 'f2pool', '--wallet', 'myaccount.rig1'],
+                                 cwd=ROOT, capture_output=True, timeout=5)
+        self.assertNotIn(b'F2Pool needs', account.stderr)
 
     def test_config_supplies_pool_and_policy_and_cli_overrides_it(self):
         with tempfile.TemporaryDirectory() as d:
