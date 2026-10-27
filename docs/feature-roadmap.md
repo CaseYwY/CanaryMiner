@@ -2,6 +2,8 @@
 
 This fork is an incremental development branch, not a replacement release or a claim of upstream acceptance. No upstream issue or pull request has been submitted for this roadmap.
 
+The detailed [architecture book](architecture/README.md) now owns stable requirements, final valuation semantics, module/task/test traceability and current status. The first-slice description below remains historical evidence; subsequent Details/Log controls and the financial presentation contract are documented in [display settings](display-settings.md).
+
 ## Implemented in the first slice
 
 - Native settings state machine and renderer, entered with **S** in the supervised terminal dashboard.
