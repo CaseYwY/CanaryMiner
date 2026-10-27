@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-ui-preferences-v2",
+  "title": "CanaryMiner presentation preferences, version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "refresh_ms": {"enum": [100, 250, 500, 1000], "default": 500},
+    "show_events": {"type": "boolean", "default": true},
+    "hide_worker": {"type": "boolean", "default": false},
+    "color": {"type": "boolean", "default": true},
+    "details_enabled": {"type": "boolean", "default": true},
+    "log_enabled": {"type": "boolean", "default": true},
+    "details_identity": {"type": "boolean", "default": true},
+    "details_pool": {"type": "boolean", "default": true},
+    "details_restarts": {"type": "boolean", "default": true},
+    "details_errors": {"type": "boolean", "default": true},
+    "log_severity": {"enum": [0, 1, 2], "default": 0, "description": "All, warning/error, or error; unclassified has its own control."},
+    "log_unclassified": {"type": "boolean", "default": true},
+    "log_rows": {"enum": [25, 50, 100, 200], "default": 200, "description": "Number of records, not wrapped terminal lines."},
+    "log_timestamps": {"type": "boolean", "default": false},
+    "log_iso_time": {"type": "boolean", "default": false},
+    "log_follow": {"type": "boolean", "default": true}
+  }
+}

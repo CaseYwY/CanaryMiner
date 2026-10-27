@@ -62,6 +62,7 @@ def main():
                         if not data:
                             raise AssertionError("unexpected terminal EOF")
                         transcript += data
+                return transcript
 
             try:
                 if supervisor:
@@ -114,12 +115,26 @@ def main():
                 until(b"Saved.")
                 os.write(terminal, b"\x1b")
                 until(b"[S]", fresh=True)
+                os.write(terminal, b"s")
+                until(b"CanaryMiner / Settings", fresh=True)
+                os.write(terminal, b"\x1b[C" * 9 + b"\t " + b"\x1b[C" + b" v\r")
+                until(b"Saved.", fresh=True)
+                os.write(terminal, b"\x1b")
+                main = until(b"[S]", fresh=True)
+                assert b"[D]" not in main and b"[L]" not in main
+                os.write(terminal, b"dl")
+                main = until(b"[S]", fresh=True)
+                assert b"WORKER OUTPUT" not in main and b"DETAILS" not in main
                 os.write(terminal, b"q")
 
             session(dashboard_edit, 100, str(Path(sys.argv[2]).resolve()))
-        assert set(json.loads(preferences.read_text())) == {"schema_version", "refresh_ms", "show_events", "hide_worker", "color"}
+        assert set(json.loads(preferences.read_text())) == {
+            "schema_version", "refresh_ms", "show_events", "hide_worker", "color", "details_enabled", "log_enabled",
+            "details_identity", "details_pool", "details_restarts", "details_errors", "log_severity", "log_unclassified",
+            "log_rows", "log_timestamps", "log_iso_time", "log_follow"}
+        assert json.loads(preferences.read_text())["schema_version"] == 2
         checks += 1
-        print(f"settings_terminal: {checks} checks, 0 failures")
+        print("settings_terminal: redirected rejection and all requested PTY scenarios passed")
 
 
 if __name__ == "__main__":

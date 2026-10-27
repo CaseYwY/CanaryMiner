@@ -560,6 +560,7 @@ class Supervisor {
                 for (int n = 0; n < 32; ++n) {
                     const int key = keys.poll();
                     if (!key) break;
+                    view_.options = ui_;  // a saved page switch also governs the very next queued shortcut
                     if (settings_.visible) {
                         const auto result = settings_.key(key, [this](const UiPreferences &p, std::string *error) {
                             if (uiStore_ && !uiStore_->save(p, error)) return false;
@@ -693,6 +694,7 @@ class Supervisor {
     std::vector<std::pair<size_t, std::string>> inbox_;  // (worker, line) from the readers, guarded by mu_
     std::vector<DashEvent> events_;
     std::deque<std::string> log_;
+    std::deque<DashLogEntry> logEntries_;
     DashView view_;  // page, scroll and terminal size of the dashboard
     UiPreferences ui_;
     std::unique_ptr<UiPreferencesStore> uiStore_;
@@ -852,6 +854,9 @@ class Supervisor {
             const std::string tagged = "GPU " + std::to_string(workers_[entry.first]->view.seed.index) + ": " + text;
             log_.push_back(tagged);
             if (log_.size() > 200) log_.pop_front();
+            const auto observedAt = time(nullptr);
+            logEntries_.push_back({tagged, utcClock(observedAt), utcIsoClock(observedAt), DashLogSeverity::Unclassified});
+            if (logEntries_.size() > 200) logEntries_.pop_front();
             if (!tty) printLine(tagged);
         }
     }
@@ -868,7 +873,9 @@ class Supervisor {
         for (auto &w : workers_) views.push_back(w->view);
         const double up = static_cast<double>(now - t0) / 1000.0;
         const StatsSnapshot agg = aggregateSnapshot(opt_, views, up, "running");
-        return dashboardModel(opt_, views, agg, up, now, events_, log_);
+        DashModel model = dashboardModel(opt_, views, agg, up, now, events_, log_);
+        model.logEntries.assign(logEntries_.begin(), logEntries_.end());
+        return model;
     }
 
     void frame(uint64_t now, uint64_t t0, bool tty) {
@@ -881,6 +888,7 @@ class Supervisor {
         view_.color = ui_.color ? detectColorLevel() : ColorLevel::None;
         view_.showEvents = ui_.showEvents;
         view_.hideWorker = ui_.hideWorker;
+        view_.options = ui_;
         dash_detail::g_dashBoxRules = !g_asciiOnly;
         // Erase to the end of every line: a shorter line must not leave the previous frame's characters behind.
         const std::string text = settings_.visible ? settings_.render(view_.columns, view_.rows, view_.color) : renderDashboard(m, view_);

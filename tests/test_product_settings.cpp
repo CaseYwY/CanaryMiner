@@ -112,7 +112,7 @@ static void storeTests() {
     std::string error;
     CHECK(parseUiPreferences(uiPreferencesJson(p), &p, &error));
     const auto before = p;
-    for (const std::string invalid : {"{}", "[]", "{\"schema_version\":2}", "{\"schema_version\":1,\"refresh_ms\":1}",
+    for (const std::string invalid : {"{}", "[]", "{\"schema_version\":3}", "{\"schema_version\":1,\"refresh_ms\":1}",
                                       "{\"schema_version\":1,\"hide_worker\":1}", "{\"schema_version\":1,\"unknown\":true}",
                                       "{\"schema_version\":1,\"schema_version\":1}"}) {
         CHECK(!parseUiPreferences(invalid, &p, &error));
@@ -143,6 +143,19 @@ static void storeTests() {
     CHECK(second.save(loaded, &error));  // replacement must work on Windows too
     { std::ofstream file(path); file << std::string(16385, 'x'); }
     CHECK(!second.load(&loaded, &error));
+    CHECK(std::filesystem::remove(path));
+    { std::ofstream file(path); file << "{\"schema_version\":1,\"hide_worker\":true}"; }
+    UiPreferencesStore legacy(path);
+    CHECK(legacy.load(&loaded, &error) && loaded.hideWorker && loaded.detailsEnabled && loaded.logEnabled);
+    auto backup = path;
+    backup += ".v1.bak";
+    { std::ofstream file(backup); file << "invalid synthetic rollback"; }
+    CHECK(!legacy.save(loaded, &error));
+    CHECK(legacy.load(&loaded, &error) && loaded.hideWorker);
+    CHECK(std::filesystem::remove(backup));
+    CHECK(legacy.save(loaded, &error));
+    CHECK(std::filesystem::exists(backup));
+    CHECK(std::filesystem::remove(backup));
     CHECK(std::filesystem::remove(path));
     CHECK(std::filesystem::remove(dir));
 }

@@ -21,6 +21,7 @@ class SettingsPanel {
     bool visible = false;
     bool groupsFocused = true;
     int group = 0, field = 0;
+    int reviewOffset = 0;
     SettingsPage page = SettingsPage::Browse;
     UiPreferences active, draft;
     std::string message;
@@ -30,16 +31,17 @@ class SettingsPanel {
         visible = true;
         groupsFocused = true;
         page = SettingsPage::Browse;
+        reviewOffset = 0;
         message.clear();
     }
     bool dirty() const { return active != draft; }
 
     static const std::vector<std::string> &groups() {
         static const std::vector<std::string> names = {"Display", "Automatic mining", "Electricity", "Market and timing", "Profiles and tests",
-                                                      "Games", "Pools and TLS", "Language", "Privacy"};
+                                                      "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 0 ? 3 : group == 8 ? 1 : 0; }
+    int fields() const { return group == 0 ? 3 : group == 8 ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
 
     SettingsResult key(int key, const Save &save) {
         if (key == 3 || key == 'q' || key == 'Q') return SettingsResult::Quit;
@@ -51,6 +53,9 @@ class SettingsPanel {
         }
         if (page == SettingsPage::Review) {
             if (key == 27) { page = SettingsPage::Browse; message.clear(); }
+            else if (key == kKeyUp || key == kKeyPageUp) reviewOffset = std::max(0, reviewOffset - (key == kKeyUp ? 1 : 5));
+            else if (key == kKeyDown || key == kKeyPageDown)
+                reviewOffset = std::min(std::max(0, static_cast<int>(changes().size()) - 1), reviewOffset + (key == kKeyDown ? 1 : 5));
             else if (key == '\r' || key == '\n' || key == kKeyF2) {
                 std::string error;
                 if (save && save(draft, &error)) {
@@ -66,6 +71,7 @@ class SettingsPanel {
             else { visible = false; return SettingsResult::Close; }
         } else if (key == kKeyF2 || key == 'v' || key == 'V') {
             page = SettingsPage::Review;
+            reviewOffset = 0;
         } else if (key == '\t' || key == kKeyBackTab) {
             groupsFocused = !groupsFocused;
         } else if (key == kKeyLeft || key == kKeyRight) {
@@ -89,6 +95,16 @@ class SettingsPanel {
         if (active.color != draft.color) result.push_back("Terminal color: " + on(active.color) + " -> " + on(draft.color));
         if (active.showEvents != draft.showEvents) result.push_back("Recent events: " + on(active.showEvents) + " -> " + on(draft.showEvents));
         if (active.hideWorker != draft.hideWorker) result.push_back("Hide worker label: " + on(active.hideWorker) + " -> " + on(draft.hideWorker));
+        const std::pair<const char *, std::pair<bool, bool>> switches[] = {
+            {"Details page", {active.detailsEnabled, draft.detailsEnabled}}, {"Log page", {active.logEnabled, draft.logEnabled}},
+            {"Details identity", {active.detailsIdentity, draft.detailsIdentity}}, {"Details pool", {active.detailsPool, draft.detailsPool}},
+            {"Details restarts", {active.detailsRestarts, draft.detailsRestarts}}, {"Details errors", {active.detailsErrors, draft.detailsErrors}},
+            {"Unclassified logs", {active.logUnclassified, draft.logUnclassified}}, {"Log timestamps", {active.logTimestamps, draft.logTimestamps}},
+            {"ISO UTC time", {active.logIsoTime, draft.logIsoTime}}, {"Log follow", {active.logFollow, draft.logFollow}}};
+        for (const auto &item : switches) if (item.second.first != item.second.second)
+            result.push_back(std::string(item.first) + ": " + on(item.second.first) + " -> " + on(item.second.second));
+        if (active.logSeverity != draft.logSeverity) result.push_back("Log level: " + level(active.logSeverity) + " -> " + level(draft.logSeverity));
+        if (active.logRows != draft.logRows) result.push_back("Log records: " + std::to_string(active.logRows) + " -> " + std::to_string(draft.logRows));
         return result;
     }
 
@@ -97,6 +113,10 @@ class SettingsPanel {
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
         const bool compact = rows > 0 && rows < 20;
         if (rows > 0 && rows < 12) return "Terminal too short.\nResize to 12+ rows.\n[Q] Stop [Esc] Back\n";
+        const std::string footer = page == SettingsPage::Review ? "[Enter/F2] Save  [Esc] Edit  [Q] Stop" :
+                                   "[Arrows] Move [Tab] Pane [Space/Enter] Change [V/F2] Review [Esc] Back [Q] Stop";
+        const auto footerRows = wrapText(footer, width);
+        const size_t budget = rows > 0 ? static_cast<size_t>(std::max(1, rows - static_cast<int>(footerRows.size()) - 2)) : 1000;
         std::vector<Line> body;
         body.push_back(one("(o> CanaryMiner / Settings" + std::string(dirty() ? " * unsaved" : ""), Tone::Canary));
         if (!compact) {
@@ -104,10 +124,11 @@ class SettingsPanel {
             body.push_back(one(""));
         }
         if (page == SettingsPage::Review) {
-            body.push_back(one("Review changes / live after save", Tone::Canary));
             const auto diff = changes();
+            body.push_back(one("Review " + std::to_string(diff.size()) + " changes / arrows scroll", Tone::Canary));
             if (diff.empty()) body.push_back(one("No changes."));
-            for (const auto &line : diff) body.push_back(one(line));
+            const size_t start = diff.empty() ? 0 : std::min(static_cast<size_t>(reviewOffset), diff.size() - 1);
+            for (size_t i = start; i < diff.size(); ++i) body.push_back(one(diff[i]));
             body.push_back(one("Mining config, donation and hardware settings are untouched."));
         } else if (page == SettingsPage::Leave) {
             body.push_back(one("Unsaved changes", Tone::Canary));
@@ -126,14 +147,12 @@ class SettingsPanel {
                 }
             } else {
                 body.push_back(one("< " + groups()[group] + " >  (Left/Right: group)", Tone::Canary));
-                for (const auto &line : content) body.push_back(Line{line});
+                const size_t available = budget > body.size() + 1 ? budget - body.size() - 1 : 1;
+                const size_t start = !groupsFocused && static_cast<size_t>(field) >= available ? static_cast<size_t>(field) - available + 1 : 0;
+                for (size_t i = start; i < content.size() && i < start + available; ++i) body.push_back(Line{content[i]});
             }
             body.push_back(one(groupsFocused ? "Focus: groups / Tab or Enter to edit" : "Focus: fields / Tab to choose a group", Tone::Plain));
         }
-        const std::string footer = page == SettingsPage::Review ? "[Enter/F2] Save  [Esc] Edit  [Q] Stop" :
-                                   "[Arrows] Move [Tab] Pane [Space/Enter] Change [V/F2] Review [Esc] Back [Q] Stop";
-        const auto footerRows = wrapText(footer, width);
-        const size_t budget = rows > 0 ? static_cast<size_t>(std::max(1, rows - static_cast<int>(footerRows.size()) - 2)) : body.size();
         if (body.size() > budget) body.resize(budget);
         std::string output;
         for (const auto &line : body) output += paintLine(fitLine(line, width), color) + "\n";
@@ -145,6 +164,7 @@ class SettingsPanel {
 
    private:
     static std::string on(bool value) { return value ? "on" : "off"; }
+    static std::string level(unsigned value) { return value == 1 ? "warnings/errors" : value == 2 ? "errors" : "all"; }
     void change() {
         message.clear();
         if (group == 8) draft.hideWorker = !draft.hideWorker;
@@ -154,6 +174,20 @@ class SettingsPanel {
                 for (size_t i = 0; i < 4; ++i) if (draft.refreshMs == choices[i]) { draft.refreshMs = choices[(i + 1) % 4]; break; }
             } else if (field == 1) draft.color = !draft.color;
             else draft.showEvents = !draft.showEvents;
+        } else if (group == 9) {
+            bool *values[] = {&draft.detailsEnabled, &draft.detailsIdentity, &draft.detailsPool, &draft.detailsRestarts, &draft.detailsErrors};
+            *values[field] = !*values[field];
+        } else if (group == 10) {
+            if (field == 0) draft.logEnabled = !draft.logEnabled;
+            else if (field == 1) draft.logSeverity = (draft.logSeverity + 1) % 3;
+            else if (field == 2) draft.logUnclassified = !draft.logUnclassified;
+            else if (field == 3) {
+                const unsigned choices[] = {25, 50, 100, 200};
+                for (size_t i = 0; i < 4; ++i) if (draft.logRows == choices[i]) { draft.logRows = choices[(i + 1) % 4]; break; }
+            } else if (field == 4) draft.logTimestamps = !draft.logTimestamps;
+            else if (field == 5) draft.logIsoTime = !draft.logIsoTime;
+            else if (field == 6) draft.logFollow = !draft.logFollow;
+            else message = "Raw lines remain unclassified; filtering does not stop pipe draining.";
         } else message = "Not implemented yet; no switch or mining behaviour was changed.";
     }
     std::vector<dash_detail::Seg> fieldsText() const {
@@ -163,6 +197,7 @@ class SettingsPanel {
             result.push_back({std::string(!groupsFocused && field == index ? "> " : "  ") + text,
                               !groupsFocused && field == index ? Tone::Canary : Tone::Plain});
         };
+        auto toggle = [&](int index, const char *name, bool value) { row(index, std::string(name) + (value ? " [x]" : " [ ]")); };
         if (group == 0) {
             row(0, "Display refresh    < " + std::to_string(draft.refreshMs) + " ms >");
             row(1, std::string("Terminal color     [") + (draft.color ? "x" : " ") + "]");
@@ -174,6 +209,23 @@ class SettingsPanel {
             row(0, std::string("Hide worker label  [") + (draft.hideWorker ? "x" : " ") + "]");
             result.push_back({"Presentation only, not a diagnostic scrubber.", Tone::Plain});
             result.push_back({"Logs, API and files are not anonymized by it.", Tone::Plain});
+        } else if (group == 9) {
+            toggle(0, "Details page", draft.detailsEnabled);
+            toggle(1, "Device identity", draft.detailsIdentity);
+            toggle(2, "Pool state", draft.detailsPool);
+            toggle(3, "Restart count", draft.detailsRestarts);
+            toggle(4, "Last error", draft.detailsErrors);
+            result.push_back({"Main safety/status remain visible.", Tone::Plain});
+        } else if (group == 10) {
+            toggle(0, "Log page", draft.logEnabled);
+            row(1, "Severity < " + level(draft.logSeverity) + " >");
+            toggle(2, "Include unclassified", draft.logUnclassified);
+            row(3, "Records shown < " + std::to_string(draft.logRows) + " >");
+            toggle(4, "Show observed time", draft.logTimestamps);
+            row(5, std::string("Time format < ") + (draft.logIsoTime ? "ISO UTC" : "UTC HH:MM:SS") + " >");
+            toggle(6, "Follow new output", draft.logFollow);
+            result.push_back({"Raw severity: unclassified", Tone::Plain});
+            result.push_back({"Off freezes this view, not data collection.", Tone::Plain});
         } else {
             result.push_back({"Not implemented in this development slice.", Tone::Plain});
             result.push_back({"No actionable switch until its backend", Tone::Plain});

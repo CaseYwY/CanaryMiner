@@ -22,6 +22,8 @@
 #include "../core/platform.h"  // winsock2.h must come before windows.h
 #include "stats.h"
 #include "terminal_keys.h"
+#include "ui_preferences.h"
+#include "financial_view.h"
 
 #if defined(_WIN32)
 #include <conio.h>
@@ -63,6 +65,12 @@ struct DashEvent {
     std::string text;
 };
 
+enum class DashLogSeverity { Unclassified, Info, Warning, Error };
+struct DashLogEntry {
+    std::string text, utc, isoUtc;
+    DashLogSeverity severity = DashLogSeverity::Unclassified;
+};
+
 struct DashModel {
     std::string version, poolEndpoint, worker;
     std::string connection = "Connecting";  // Authorized | Connecting | Error | Stopped
@@ -72,6 +80,8 @@ struct DashModel {
     bool donationOn = true;
     std::vector<DashEvent> events;  // oldest first
     std::vector<std::string> log;   // redacted worker output, oldest first ([L])
+    std::vector<DashLogEntry> logEntries;  // structured provenance when available; raw output is unclassified
+    FinancialView finances;
 };
 
 /** What the terminal shows: the page, the scroll position, and the terminal size and colour. */
@@ -83,6 +93,9 @@ struct DashView {
     ColorLevel color = ColorLevel::None;
     bool showEvents = true;
     bool hideWorker = false;
+    UiPreferences options;
+    bool logFrozen = false, logScrollHeld = false;
+    std::vector<DashLogEntry> frozenLog;
 };
 
 namespace dash_detail {
@@ -324,6 +337,13 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
     out.push_back(one(""));
 
     // SESSION SHARES: per GPU, a TOTAL, then the donation (kept apart from the shares).
+    if (m.finances.enabled) {
+        section(out, "PRODUCTION AND REFERENCE VALUATION", w);
+        for (const auto &line : financialViewLines(m.finances))
+            for (const auto &part : wrapText(line, w)) out.push_back(one(part));
+        out.push_back(one(""));
+    }
+
     section(out, "SESSION SHARES", w);
     auto shareHead = [&]() {
         Line head{cell("GPU", 14, false, Tone::Plain)};
@@ -377,29 +397,47 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
 }
 
 /** Details page: per GPU, the PCI bus, pool state, restarts and last error. */
-inline std::vector<Line> detailsPage(const DashModel &m, size_t w) {
+inline std::vector<Line> detailsPage(const DashModel &m, size_t w, const UiPreferences &options = UiPreferences{}) {
     std::vector<Line> out;
     section(out, "DETAILS", w);
     if (m.gpus.empty()) out.push_back(one("no GPUs", Tone::Dark));
     for (const DashGpu &g : m.gpus) {
-        out.push_back(Line{Seg{shortName(g.name) + " #" + std::to_string(g.index), Tone::Canary},
-                           Seg{"  pci " + (g.pciBus.empty() ? std::string("-") : g.pciBus), Tone::Dark}});
-        out.push_back(Line{Seg{"  State ", Tone::Plain}, Seg{g.state, stateTone(g.state)},
-                           Seg{"  Pool " + g.poolState + "  Restarts " + std::to_string(g.restarts), Tone::Plain}});
+        if (options.detailsIdentity)
+            out.push_back(Line{Seg{shortName(g.name) + " #" + std::to_string(g.index), Tone::Canary},
+                               Seg{"  pci " + (g.pciBus.empty() ? std::string("-") : g.pciBus), Tone::Dark}});
+        else out.push_back(one("GPU " + std::to_string(g.index), Tone::Canary));
+        Line state{Seg{"  State ", Tone::Plain}, Seg{g.state, stateTone(g.state)}};
+        if (options.detailsPool) state.push_back({"  Pool " + g.poolState, Tone::Plain});
+        if (options.detailsRestarts) state.push_back({"  Restarts " + std::to_string(g.restarts), Tone::Plain});
+        out.push_back(state);
         const bool faulty = g.state == "Error" || g.state == "Restarting";
-        out.push_back(one("  Last error: " + (faulty && !g.detail.empty() ? g.detail : std::string("none")), faulty ? Tone::Amber : Tone::Dark));
+        if (options.detailsErrors)
+            out.push_back(one("  Last error: " + (faulty && !g.detail.empty() ? g.detail : std::string("none")), faulty ? Tone::Amber : Tone::Dark));
         out.push_back(one(""));
     }
     return out;
 }
 
 /** Log page: the redacted worker output, newest last. */
-inline std::vector<Line> logPage(const DashModel &m, size_t w) {
+inline std::vector<Line> logPage(const std::vector<DashLogEntry> &entries, size_t w, const UiPreferences &options) {
     std::vector<Line> out;
     section(out, "WORKER OUTPUT (redacted)", w);
-    if (m.log.empty()) out.push_back(one("none yet", Tone::Dark));
-    for (const std::string &text : m.log)
-        for (const std::string &part : wrapText(text, w)) out.push_back(one(part));
+    std::vector<const DashLogEntry *> selected;
+    for (const auto &entry : entries) {
+        const bool unknown = entry.severity == DashLogSeverity::Unclassified;
+        const bool matches = options.logSeverity == 0 || (options.logSeverity == 1 && entry.severity >= DashLogSeverity::Warning) ||
+                             (options.logSeverity == 2 && entry.severity == DashLogSeverity::Error);
+        if (unknown ? options.logUnclassified : matches) selected.push_back(&entry);
+    }
+    if (selected.empty()) out.push_back(one(entries.empty() ? "none yet" : "no matching entries (raw lines are unclassified)", Tone::Dark));
+    const size_t from = selected.size() > options.logRows ? selected.size() - options.logRows : 0;
+    for (size_t i = from; i < selected.size(); ++i) {
+        const auto &entry = *selected[i];
+        const auto &time = options.logIsoTime ? entry.isoUtc : entry.utc;
+        const std::string prefix = options.logTimestamps ? "[" + (time.empty() ? std::string("time unavailable") : time) + "] " : "";
+        const Tone tone = entry.severity == DashLogSeverity::Error ? Tone::Red : entry.severity == DashLogSeverity::Warning ? Tone::Amber : Tone::Plain;
+        for (const std::string &part : wrapText(prefix + entry.text, w)) out.push_back(one(part, tone));
+    }
     return out;
 }
 
@@ -418,6 +456,18 @@ inline std::string utcClock(time_t t) {
     return b;
 }
 
+inline std::string utcIsoClock(time_t t) {
+    struct tm g {};
+#if defined(_WIN32)
+    gmtime_s(&g, &t);
+#else
+    gmtime_r(&t, &g);
+#endif
+    char b[32];
+    strftime(b, sizeof(b), "%Y-%m-%dT%H:%M:%SZ", &g);
+    return b;
+}
+
 /**
  * Full-screen frame for `view`. The page scrolls inside the terminal rows; the row counter, the data age and the key list stay
  * at the bottom, and the title closes the frame. `view.scroll` is clamped to the page. Colour follows `view.color`.
@@ -426,15 +476,29 @@ inline std::string renderDashboard(const DashModel &input, DashView &view) {
     using namespace dash_detail;
     DashModel m = input;
     if (view.hideWorker) m.worker = "[hidden]";
+    if ((view.page == DashPage::Details && !view.options.detailsEnabled) || (view.page == DashPage::Log && !view.options.logEnabled)) {
+        view.page = DashPage::Main;
+        view.scroll = 0;
+    }
+    if (m.logEntries.empty()) for (const auto &text : m.log) m.logEntries.push_back({text, "", "", DashLogSeverity::Unclassified});
+    if (view.page != DashPage::Log || view.options.logFollow) {
+        view.logFrozen = false;
+        view.frozenLog.clear();
+    } else if (!view.logFrozen) {
+        view.frozenLog = m.logEntries;
+        view.logFrozen = true;
+    }
     const size_t W = static_cast<size_t>(view.columns < 60 ? 60 : view.columns);
-    const std::vector<Line> body = view.page == DashPage::Details ? detailsPage(m, W)
-                                   : view.page == DashPage::Log    ? logPage(m, W)
+    const std::vector<Line> body = view.page == DashPage::Details ? detailsPage(m, W, view.options)
+                                   : view.page == DashPage::Log    ? logPage(view.logFrozen ? view.frozenLog : m.logEntries, W, view.options)
                                                                     : mainPage(m, W, view.showEvents);
 
     double age = -1;
     for (const DashGpu &g : m.gpus) age = std::max(age, g.sampleAgeS);
     const std::string dataLine = std::string("Data age ") + (age < 0 ? std::string("N/A") : fixed(age, 1) + "s") +
-                                 " | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit [S] Settings";
+        " | Current: 10s | Average: mining session |" + (view.options.detailsEnabled ? " [D] Details" : "") +
+        (view.options.logEnabled ? " [L] Log" : "") + " [M] Main [Q] Quit [S] Settings" +
+        (view.page == DashPage::Log ? std::string(" | ") + (view.logFrozen ? "Frozen" : view.logScrollHeld ? "Scroll held [F] Follow" : "Following") : "");
     const std::vector<std::string> dataRows = wrapText(dataLine, W);
 
     // Footer = row counter + data rows; the title is the last line. The page gets what is left of the rows (one spare row
@@ -444,6 +508,7 @@ inline std::string renderDashboard(const DashModel &input, DashView &view) {
     size_t budget = n;
     if (view.rows > 0) budget = static_cast<size_t>(std::max<long>(1, static_cast<long>(view.rows) - 1 - extra));
     const size_t maxScroll = n > budget ? n - budget : 0;
+    if (view.page == DashPage::Log && view.options.logFollow && !view.logScrollHeld) view.scroll = static_cast<int>(maxScroll);
     if (view.scroll < 0) view.scroll = 0;
     if (static_cast<size_t>(view.scroll) > maxScroll) view.scroll = static_cast<int>(maxScroll);
     const size_t from = static_cast<size_t>(view.scroll);
@@ -466,22 +531,35 @@ inline bool handleDashKey(DashView &view, int key) {
     switch (key) {
         case 'd':
         case 'D':
+            if (!view.options.detailsEnabled) return false;
             view.page = view.page == DashPage::Details ? DashPage::Main : DashPage::Details;
             view.scroll = 0;
             return true;
         case 'l':
         case 'L':
+            if (!view.options.logEnabled) return false;
             view.page = view.page == DashPage::Log ? DashPage::Main : DashPage::Log;
             view.scroll = 0;
+            view.logFrozen = false;
+            view.logScrollHeld = false;
             return true;
         case 'm':
         case 'M':
             view.page = DashPage::Main;
             view.scroll = 0;
             return true;
-        case kKeyUp: view.scroll = std::max(0, view.scroll - 1); return true;
+        case 'f':
+        case 'F':
+            if (view.page != DashPage::Log || !view.options.logFollow) return false;
+            view.logScrollHeld = false;
+            return true;
+        case kKeyUp:
+            if (view.page == DashPage::Log) view.logScrollHeld = true;
+            view.scroll = std::max(0, view.scroll - 1); return true;
         case kKeyDown: view.scroll += 1; return true;  // the renderer clamps it to the page
-        case kKeyPageUp: view.scroll = std::max(0, view.scroll - page); return true;
+        case kKeyPageUp:
+            if (view.page == DashPage::Log) view.logScrollHeld = true;
+            view.scroll = std::max(0, view.scroll - page); return true;
         case kKeyPageDown: view.scroll += page; return true;
         default: return false;
     }
