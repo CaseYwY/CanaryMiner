@@ -51,6 +51,7 @@
 #include "product_cli.h"
 #include "redact.h"
 #include "restart_budget.h"
+#include "settings.h"
 #include "stats.h"
 #include "stats_server.h"
 
@@ -368,6 +369,7 @@ struct SupervisorOptions {
     bool dashboard = false;                // TTY dashboard; otherwise plain timestamped lines
     volatile sig_atomic_t *stop = nullptr; // set by the console handler or SIGTERM
     SupervisorTuning *tuning = nullptr;
+    std::string uiPreferencesPath;         // optional presentation file; never the mining config
 };
 
 /** What the supervisor knows about one worker at one moment. */
@@ -517,6 +519,11 @@ class Supervisor {
     /** Returns kExitOk when every worker stopped on request, kExitRuntime when a worker could not be kept running. */
     int run() {
         const uint64_t t0 = supervisorNowMs();
+        if (!opt_.uiPreferencesPath.empty() && opt_.dashboard) {
+            uiStore_.reset(new UiPreferencesStore(opt_.uiPreferencesPath));
+            std::string error;
+            if (!uiStore_->load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
+        }
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
             std::unique_ptr<Worker> w(new Worker());
             w->view.seed = opt_.seeds[i];
@@ -550,9 +557,29 @@ class Supervisor {
         for (;;) {
             const uint64_t now = supervisorNowMs();
             if (tty) {
-                for (int key = keys.poll(); key; key = keys.poll()) {
-                    if (key == 'q' || key == 'Q') quit = true;
-                    else handleDashKey(view_, key);
+                for (int n = 0; n < 32; ++n) {
+                    const int key = keys.poll();
+                    if (!key) break;
+                    if (settings_.visible) {
+                        const auto result = settings_.key(key, [this](const UiPreferences &p, std::string *error) {
+                            if (uiStore_ && !uiStore_->save(p, error)) return false;
+                            ui_ = p;
+                            return true;
+                        });
+                        if (result == SettingsResult::Quit) {
+                            settings_.visible = false;
+                            nextFrame_ = 0;
+                            quit = true;
+                        }
+                    } else if (key == 'q' || key == 'Q' || key == 3) quit = true;
+                    else if (key == 's' || key == 'S') {
+                        std::string error;
+                        UiPreferences loaded;
+                        if (uiStore_ && uiStore_->load(&loaded, &error)) ui_ = loaded;
+                        settings_.open(ui_);
+                        if (!error.empty()) settings_.message = error;
+                    } else handleDashKey(view_, key);
+                    if (quit) break;
                 }
             }
             const bool stopRequested = quit || (opt_.stop && *opt_.stop);
@@ -577,7 +604,10 @@ class Supervisor {
             for (size_t i = 0; i < workers_.size(); ++i) {
                 Worker &w = *workers_[i];
                 if (w.proc && w.proc->started() && !w.proc->finished()) {
-                    sample(i);
+                    if (now >= w.nextSampleAt) {
+                        sample(i);
+                        w.nextSampleAt = now + (tty ? 500 : 250);
+                    }
                     int code = 0;
                     if (w.proc->exited(&code)) {
                         w.proc->joinReader();
@@ -608,7 +638,7 @@ class Supervisor {
                 printf("%s\n", renderPlainSummary(buildModel(now, t0), time(nullptr)).c_str());
                 fflush(stdout);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(tty ? 500 : 250));
+            std::this_thread::sleep_for(std::chrono::milliseconds(tty ? 50 : 250));
         }
         for (auto &w : workers_) {
             if (!w->proc) continue;
@@ -647,6 +677,7 @@ class Supervisor {
         bool restartPending = false;
         bool stopping = false;
         uint64_t restartAt = 0;
+        uint64_t nextSampleAt = 0;
         unsigned restarts = 0;
         // last observed values, for the events
         bool seen = false;
@@ -663,6 +694,10 @@ class Supervisor {
     std::vector<DashEvent> events_;
     std::deque<std::string> log_;
     DashView view_;  // page, scroll and terminal size of the dashboard
+    UiPreferences ui_;
+    std::unique_ptr<UiPreferencesStore> uiStore_;
+    SettingsPanel settings_;
+    uint64_t nextFrame_ = 0;
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
@@ -838,13 +873,17 @@ class Supervisor {
 
     void frame(uint64_t now, uint64_t t0, bool tty) {
         if (!tty) return;
+        if (now < nextFrame_) return;
+        nextFrame_ = now + (settings_.visible ? 50 : ui_.refreshMs);
         const DashModel m = buildModel(now, t0);
         view_.columns = terminalColumns(80);
         view_.rows = terminalRows(24);
-        view_.color = detectColorLevel();
+        view_.color = ui_.color ? detectColorLevel() : ColorLevel::None;
+        view_.showEvents = ui_.showEvents;
+        view_.hideWorker = ui_.hideWorker;
         dash_detail::g_dashBoxRules = !g_asciiOnly;
         // Erase to the end of every line: a shorter line must not leave the previous frame's characters behind.
-        const std::string text = renderDashboard(m, view_);
+        const std::string text = settings_.visible ? settings_.render(view_.columns, view_.rows, view_.color) : renderDashboard(m, view_);
         std::string out;
         out.reserve(text.size() + 256);
         for (char ch : text) {

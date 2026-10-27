@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-ui-preferences-v1",
+  "title": "CanaryMiner local presentation preferences",
+  "description": "A separate local file in the configured state directory; never a mining configuration or a shared diagnostic export.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "refresh_ms": {"enum": [100, 250, 500, 1000], "default": 500, "description": "Display refresh only; not a telemetry or mining interval."},
+    "show_events": {"type": "boolean", "default": true},
+    "hide_worker": {"type": "boolean", "default": false, "description": "Hides the dashboard label only, not logs, API data or local files."},
+    "color": {"type": "boolean", "default": true, "description": "When true, terminal capability and NO_COLOR still apply."}
+  }
+}

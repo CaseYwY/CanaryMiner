@@ -21,6 +21,7 @@
 
 #include "../core/platform.h"  // winsock2.h must come before windows.h
 #include "stats.h"
+#include "terminal_keys.h"
 
 #if defined(_WIN32)
 #include <conio.h>
@@ -33,9 +34,6 @@
 #endif
 
 namespace om {
-
-/** Keys that are not one character; KeyReader::poll() returns these. */
-constexpr int kKeyUp = 0x10001, kKeyDown = 0x10002, kKeyPageUp = 0x10003, kKeyPageDown = 0x10004;
 
 enum class ColorLevel { None, Basic16, Palette256, TrueColor };
 enum class DashPage { Main, Details, Log };
@@ -83,6 +81,8 @@ struct DashView {
     int columns = 80;
     int rows = 0;             // 0 = no limit
     ColorLevel color = ColorLevel::None;
+    bool showEvents = true;
+    bool hideWorker = false;
 };
 
 namespace dash_detail {
@@ -270,7 +270,7 @@ inline Line titleLine(const DashModel &m) {
 }
 
 /** Main page: header, HARDWARE, SESSION SHARES, RECENT EVENTS. Widths: 80 drops Submitted and Retired; 100 and wider is full. */
-inline std::vector<Line> mainPage(const DashModel &m, size_t w) {
+inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents = true) {
     const bool wide = w >= 100, full = w >= 79;
     std::vector<Line> out;
     double rate = 0, avg = 0, power = 0;
@@ -368,9 +368,11 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w) {
         out.push_back(one(line, Tone::Dark));
     out.push_back(one(""));
 
-    section(out, "RECENT EVENTS - UTC", w);
-    if (m.events.empty()) out.push_back(one("none yet", Tone::Dark));
-    for (const DashEvent &e : m.events) out.push_back(Line{Seg{e.utc, Tone::Dark}, Seg{"  ", Tone::Plain}, Seg{e.text, eventTone(e.text)}});
+    if (showEvents) {
+        section(out, "RECENT EVENTS - UTC", w);
+        if (m.events.empty()) out.push_back(one("none yet", Tone::Dark));
+        for (const DashEvent &e : m.events) out.push_back(Line{Seg{e.utc, Tone::Dark}, Seg{"  ", Tone::Plain}, Seg{e.text, eventTone(e.text)}});
+    }
     return out;
 }
 
@@ -420,17 +422,19 @@ inline std::string utcClock(time_t t) {
  * Full-screen frame for `view`. The page scrolls inside the terminal rows; the row counter, the data age and the key list stay
  * at the bottom, and the title closes the frame. `view.scroll` is clamped to the page. Colour follows `view.color`.
  */
-inline std::string renderDashboard(const DashModel &m, DashView &view) {
+inline std::string renderDashboard(const DashModel &input, DashView &view) {
     using namespace dash_detail;
+    DashModel m = input;
+    if (view.hideWorker) m.worker = "[hidden]";
     const size_t W = static_cast<size_t>(view.columns < 60 ? 60 : view.columns);
     const std::vector<Line> body = view.page == DashPage::Details ? detailsPage(m, W)
                                    : view.page == DashPage::Log    ? logPage(m, W)
-                                                                   : mainPage(m, W);
+                                                                    : mainPage(m, W, view.showEvents);
 
     double age = -1;
     for (const DashGpu &g : m.gpus) age = std::max(age, g.sampleAgeS);
     const std::string dataLine = std::string("Data age ") + (age < 0 ? std::string("N/A") : fixed(age, 1) + "s") +
-                                 " | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit";
+                                 " | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit [S] Settings";
     const std::vector<std::string> dataRows = wrapText(dataLine, W);
 
     // Footer = row counter + data rows; the title is the last line. The page gets what is left of the rows (one spare row
@@ -587,37 +591,32 @@ class KeyReader {
 #if defined(_WIN32)
         if (!_kbhit()) return 0;
         const int c = _getch();
-        if (c == 0 || c == 0xE0) {  // an arrow or paging key: a prefix byte, then the scan code
-            if (!_kbhit()) return 0;
-            switch (_getch()) {
+        if (windowsPrefix_ || c == 0 || c == 0xE0) {  // preserve a prefix if the scan code arrives later
+            const int scan = windowsPrefix_ ? c : (_kbhit() ? _getch() : -1);
+            windowsPrefix_ = scan < 0;
+            if (scan < 0) return 0;
+            switch (scan) {
                 case 72: return kKeyUp;
                 case 80: return kKeyDown;
                 case 73: return kKeyPageUp;
                 case 81: return kKeyPageDown;
+                case 75: return kKeyLeft;
+                case 77: return kKeyRight;
+                case 15: return kKeyBackTab;
+                case 60: return kKeyF2;
                 default: return 0;
             }
         }
         return c;
 #else
         if (!active_) return 0;
+        const auto now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+        if (const int queued = decoder_.poll(now)) return queued;
         unsigned char c = 0;
-        if (read(STDIN_FILENO, &c, 1) != 1) return 0;
-        if (c != 27) return c;
-        // ESC [ A / ESC [ B for the arrows, ESC [ 5 ~ / ESC [ 6 ~ for the paging keys; a lone ESC is ignored.
-        unsigned char bracket = 0, code = 0, tilde = 0;
-        if (read(STDIN_FILENO, &bracket, 1) != 1 || bracket != '[') return 0;
-        if (read(STDIN_FILENO, &code, 1) != 1) return 0;
-        switch (code) {
-            case 'A': return kKeyUp;
-            case 'B': return kKeyDown;
-            case '5':
-                if (read(STDIN_FILENO, &tilde, 1) != 1 || tilde != '~') return 0;
-                return kKeyPageUp;
-            case '6':
-                if (read(STDIN_FILENO, &tilde, 1) != 1 || tilde != '~') return 0;
-                return kKeyPageDown;
-            default: return 0;
-        }
+        // Bound input work so paste/key-repeat cannot starve worker/safety polling.
+        for (int n = 0; n < 256 && read(STDIN_FILENO, &c, 1) == 1; ++n) decoder_.feed(c, now);
+        return decoder_.poll(now);
 #endif
     }
 
@@ -625,6 +624,9 @@ class KeyReader {
 #if !defined(_WIN32)
     termios saved_{};
     bool active_ = false;
+    TerminalKeyDecoder decoder_;
+#else
+    bool windowsPrefix_ = false;
 #endif
 };
 

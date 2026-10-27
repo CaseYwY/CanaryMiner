@@ -444,6 +444,7 @@ void testDashboardContent() {
     CHECK(has(frame, "12:03:10  GPU 1: donation window end (+27 accepted)"));
     CHECK(has(frame, "Data age 9.4s"));
     CHECK(has(frame, "[D] Details [L] Log [M]"));
+    CHECK(has(frame, "[S] Settings"));
     CHECK(has(frame, "Quit"));
     CHECK(has(frame, "Rows 1-"));
     // the title closes the frame
@@ -674,11 +675,11 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
 }
 
 #if defined(_WIN32)
-/** Exit 0 when the handle value named on the command line is NOT a valid handle here (it was not inherited), 5 when it is. */
+/** Try to signal the parent's event. A reused numeric handle in this process is NOT evidence of inheritance. */
 int handleProbeChild(const char *value) {
     const HANDLE h = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(strtoull(value, nullptr, 10)));
-    DWORD flags = 0;
-    return GetHandleInformation(h, &flags) ? 5 : 0;
+    SetEvent(h);  // a missing/different handle cannot signal the exact object the parent observes
+    return 0;
 }
 
 /** A pipe end and an unrelated inheritable event are both inheritable in the parent. Only the pipe ends may reach the worker. */
@@ -695,8 +696,26 @@ void testHandleListInheritance() {
     CHECK(child.start(selfExecutablePath(), {kHandleProbe, value}, [](const std::string &) {}, &err));
     int code = -1;
     CHECK(child.waitFor(15000, &code));
-    CHECK_MSG("unrelated inheritable handle is not inherited by the worker", code == 0);
+    CHECK(code == 0);
+    CHECK_MSG("unrelated event object is not inherited by the worker", WaitForSingleObject(unrelated, 0) == WAIT_TIMEOUT);
     child.joinReader();
+
+    // Positive control: unrestricted inheritance really must signal this exact parent event.
+    // This proves the oracle would detect removing the production handle allow-list.
+    const std::string command = "\"" + selfExecutablePath() + "\" " + kHandleProbe + " " + value;
+    std::vector<char> mutableCommand(command.begin(), command.end());
+    mutableCommand.push_back('\0');
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessA(nullptr, mutableCommand.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process);
+    CHECK_MSG("positive control starts with unrestricted inheritance", created != FALSE);
+    if (created) {
+        CHECK(WaitForSingleObject(process.hProcess, 15000) == WAIT_OBJECT_0);
+        CHECK_MSG("inherited event is observable in the parent", WaitForSingleObject(unrelated, 0) == WAIT_OBJECT_0);
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+    }
     CloseHandle(unrelated);
 }
 #endif
@@ -738,9 +757,23 @@ void testSupervisedRestartBudget() {
 int main(int argc, char **argv) {
 #if defined(_WIN32)
     if (argc >= 3 && std::string(argv[1]) == kHandleProbe) return handleProbeChild(argv[2]);
+    if (argc == 2 && std::string(argv[1]) == "--handle-isolation-test") {
+        testHandleListInheritance();
+        return finishTests("handle_isolation");
+    }
 #endif
     if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang))
         return fakeChild(argv[1]);
+    if (argc == 3 && std::string(argv[1]) == "--dashboard-session-test") {
+        SupervisorOptions options = baseOptions();
+        options.exe = selfExecutablePath();
+        options.userArgs = {kFakeChild};
+        options.seeds = {seed(0)};
+        options.dashboard = true;
+        options.uiPreferencesPath = (std::filesystem::path(argv[2]) / "ui-preferences.json").string();
+        Supervisor supervisor(std::move(options));
+        return supervisor.run();
+    }
     testFeedLines();
     testWorkerArgs();
     testStatsRoundTrip();

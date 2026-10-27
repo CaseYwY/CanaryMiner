@@ -38,7 +38,7 @@
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings };
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -118,8 +118,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "selftest") r.command = Command::Selftest;
         else if (c == "status") r.command = Command::Status;
         else if (c == "version") r.command = Command::Version;
+        else if (c == "settings") r.command = Command::Settings;
         else {
-            if (error) *error = "unknown command '" + c + "' (run, list-devices, selftest, status, version; or start with an option, e.g. --pool)";
+            if (error) *error = "unknown command '" + c + "' (run, list-devices, selftest, status, version, settings; or start with an option, e.g. --pool)";
             return false;
         }
         r.commandExplicit = true;
@@ -392,6 +393,7 @@ inline std::string productHelpText() {
         "       canary-miner selftest           offline kernel + proof self-test per device\n"
         "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
         "       canary-miner version\n"
+        "       canary-miner settings          edit presentation without starting mining\n"
         "\n"
         "Pool\n"
         "  -o, --pool SPEC       HOST:PORT, stratum+tcp://HOST:PORT, or a preset: f2pool, kryptex,\n"

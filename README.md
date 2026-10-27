@@ -267,6 +267,15 @@ sudo journalctl -k --since "10 min ago" | grep -i xid
 
 ## The dashboard
 
+On this development branch, **S** opens native settings in the supervised terminal dashboard. Use arrows/Tab to navigate,
+Space/Enter to change a supported value, V/F2 to review, and Enter/F2 to save. Esc returns; Q/Ctrl+C stops without implicitly
+saving. Current controls are presentation-only: display refresh, color, recent events and hiding the worker label.
+
+`canary-miner settings [--config FILE]` opens the same preferences without starting mining. Preferences are stored separately
+as `ui-preferences.json` in the configured state directory; this does not rewrite mining config. Advanced groups are explicitly
+unavailable until their implementations land. See [the staged feature roadmap](docs/feature-roadmap.md). These changes have not
+been submitted to or accepted by upstream; there is no new qualified production release for this branch.
+
 On a terminal the miner shows a live dashboard: per GPU hashrate (TH/s, the same figure as T MAC/s in the stats endpoint),
 power, temperature, fan, clocks and shares, a donation row and recent events. Keys: **Q** quit, **D** details (PCI bus, pool
 state, restarts, last error per GPU), **L** log. `--no-dashboard`, or output that is not a terminal, gives plain timestamped

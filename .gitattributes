@@ -8,6 +8,7 @@ packaging/config.txt text eol=lf
 scripts/pearl_sustained_public_*.py text eol=lf
 scripts/pearl_sustained_telemetry_smoke.py text eol=lf
 tests/test_pearl_sustained_public_*.py text eol=lf
+tests/fixtures/dashboard_*.txt text eol=lf
 docs/sustained-public-wrapper-cpu-tests-20260905.txt text eol=lf
 
 # Preserve exact upstream notice bytes in source archives.

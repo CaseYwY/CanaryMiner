@@ -36,6 +36,9 @@ int main() {
     // ---- no subcommand is needed; the run command is the default
     CHECK(parseArgs({"--pool", "f2pool", "-u", "prl1abc.rig1"}).command == Command::Run);
     CHECK(parseArgs({"run", "-o", "f2pool"}).command == Command::Run);
+    CHECK(parseArgs({"settings"}).command == Command::Settings);
+    CHECK(parseArgs({"settings", "--help"}).help);
+    CHECK(contains(productHelpText(), "canary-miner settings"));
 
     // ---- pool forms: preset, HOST:PORT, stratum+tcp://, known hosts map to their preset, TLS refused
     {

@@ -45,3 +45,12 @@ ops/evidence/
 
 # H-028 release artifacts (archive, checksums, release notes) stay local
 dist/
+
+# Runtime data belongs to the local user, never the public contribution.
+/config.json
+/config.local.json
+/state/
+/logs/
+ui-preferences.json
+ui-preferences.json.lock/
+ui-preferences.json.tmp-*

@@ -125,6 +125,13 @@ int main(int argc, char **argv) {
     }
     GpuTuningPlatform tuningPlatform = currentGpuTuningPlatform();
     if (cli.command == Command::Status) return commandStatus(cfg, cli.ov.json);
+    if (cli.command == Command::Settings) {
+        if (cli.help) { printf("canary-miner settings [--config FILE]\nEdit presentation preferences without starting mining.\n"); return kExitOk; }
+        if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
+        signal(SIGINT, onSignal);
+        signal(SIGTERM, onSignal);
+        return runSettingsCommand(cfg.stateDir, &g_stop);
+    }
 
     std::string algoName = defaultAlgorithmName;
     RunOptions opt;
@@ -842,6 +849,7 @@ int main(int argc, char **argv) {
         // Never printed: the wallet, the donation account and its payout destination (H-031 Amendment 2).
         so.secrets = {cfg.wallet, std::string(CANARY_FEE_POOL_ACCOUNT), feeDestination()};
         so.dashboard = stdoutIsTty() && !noDashboard;
+        so.uiPreferencesPath = (std::filesystem::path(cfg.stateDir) / "ui-preferences.json").string();
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;
         for (const DeviceIdentity &d : chosenAll) tuningDevices.push_back({d.index, d.uuid});

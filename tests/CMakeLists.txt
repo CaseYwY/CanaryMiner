@@ -289,6 +289,9 @@ add_test(NAME py_test_pearl_e2e_counters COMMAND ${Python3_EXECUTABLE} -B tests/
 add_test(NAME py_test_pearl_e2e_conservation COMMAND ${Python3_EXECUTABLE} -B tests/test_pearl_e2e_conservation.py WORKING_DIRECTORY ${R})
 add_test(NAME py_test_pearl_e2e_unknown_deadline COMMAND ${Python3_EXECUTABLE} -B tests/test_pearl_e2e_unknown_deadline.py WORKING_DIRECTORY ${R})
 add_test(NAME test_pearl_pool_source COMMAND $<TARGET_FILE:test_pearl_pool_source> WORKING_DIRECTORY ${R})
+if(NOT WIN32)
+  add_test(NAME settings_terminal COMMAND ${Python3_EXECUTABLE} -B tests/test_settings_terminal.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:test_product_supervisor> WORKING_DIRECTORY ${R})
+endif()
 add_test(NAME test_pearl_gzip COMMAND $<TARGET_FILE:test_pearl_gzip> WORKING_DIRECTORY ${R})
 add_test(NAME py_test_pearl_gzip COMMAND ${Python3_EXECUTABLE} -B tests/test_pearl_gzip.py $<TARGET_FILE:test_pearl_gzip> ${CMAKE_BINARY_DIR}/gzip-check WORKING_DIRECTORY ${R})
 
@@ -322,7 +325,7 @@ add_test(NAME protocol_identity COMMAND ${Python3_EXECUTABLE} tests/check_protoc
 endif()
 
 # ---- product layer (Gate 1b-1): config, CLI, devices, shutdown, fee, stats, log sink, selftest logic ----------------
-foreach(name config cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning)
+foreach(name config cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning settings)
   add_executable(test_product_${name} ${R}/tests/test_product_${name}.cpp)
   target_compile_features(test_product_${name} PRIVATE cxx_std_17)
   target_include_directories(test_product_${name} PRIVATE ${R}/src)
@@ -331,7 +334,7 @@ foreach(name config cli log devices shutdown fee fee_session stats selftest supe
   target_link_libraries(test_product_${name} PRIVATE $<$<PLATFORM_ID:Linux>:dl>)
 endforeach()
 add_test(NAME product_config COMMAND $<TARGET_FILE:test_product_config> ${R}/config/config.example.json WORKING_DIRECTORY ${R})
-foreach(name cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning)
+foreach(name cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning settings)
   add_test(NAME product_${name} COMMAND $<TARGET_FILE:test_product_${name}> WORKING_DIRECTORY ${R})
 endforeach()
 
@@ -345,6 +348,11 @@ target_link_libraries(test_product_fee_test_policy PRIVATE $<$<PLATFORM_ID:Linux
 add_test(NAME product_fee_test_policy COMMAND $<TARGET_FILE:test_product_fee_test_policy> WORKING_DIRECTORY ${R})
 
 # The selftest host test checks the one (SM120) build tile, so it defines the SM120 lineage text.
+add_executable(canary_settings_preview ${R}/tools/settings_preview.cpp)
+target_compile_features(canary_settings_preview PRIVATE cxx_std_17)
+target_include_directories(canary_settings_preview PRIVATE ${R}/src)
+target_compile_options(canary_settings_preview PRIVATE ${CANARY_TEST_WARN} ${CANARY_O1})
+
 target_compile_definitions(test_product_selftest PRIVATE CANARY_PEARL_ENABLE_SM120_NATIVE_EVIDENCE=1)
 
 add_executable(test_prepare_cancel ${R}/tests/test_prepare_cancel.cpp)

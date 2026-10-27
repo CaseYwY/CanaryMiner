@@ -28,5 +28,5 @@ RECENT EVENTS - UTC
 12:05:30  GPU 0: connected to the pool
 12:06:00  GPU 0: exited with code 9; restart in 10 s (restart 1)
 Rows 1-29/29 | Up/Down or PgUp/PgDn scroll
-Data age 9.4s | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit
+Data age 9.4s | Current: 10s | Average: mining session | [D] Details [L] Log [M] Main [Q] Quit [S] Settings
 (o> CanaryMiner 1.0.3  -  rig1
