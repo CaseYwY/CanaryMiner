@@ -79,6 +79,17 @@ struct Param {
 };
 }  // namespace
 
+bool validCreditSourceContract(const CreditSourceContract &c) { return validContract(c); }
+bool sameCreditSourceContract(const CreditSourceContract &a, const CreditSourceContract &b) { return bindingText(a) == bindingText(b); }
+bool boundedCreditBatchInput(const CreditBatch &b, int64_t now) {
+    if (!validContract(b.binding) || !instant(now) || !instant(b.observedAtMs) || b.observedAtMs > now || !instant(b.sourceAsOfMs) || b.sourceAsOfMs > b.observedAtMs ||
+        b.sourceAsOfMs < b.binding.historyStartMs-1 || !b.sequence || b.sequence > static_cast<uint64_t>(INT64_MAX) || !identifier(b.snapshotId) || b.records.size() > 512 || b.coverage.size() > 128) return false;
+    std::set<std::string> ids;
+    for (const auto &r : b.records) if (!validRecord(r,b.binding,b.sourceAsOfMs) || !ids.insert(r.id).second) return false;
+    for (const auto &c : b.coverage) if (c.fromExclusiveMs < b.binding.historyStartMs-1 || c.fromExclusiveMs >= c.throughInclusiveMs || c.throughInclusiveMs > b.sourceAsOfMs) return false;
+    return true;
+}
+
 const char *creditLedgerStatusName(CreditLedgerStatus status) {
     switch (status) {
         case CreditLedgerStatus::Ok: return "ok";

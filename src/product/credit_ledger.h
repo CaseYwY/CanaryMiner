@@ -49,6 +49,10 @@ struct CreditBatch {
     // Replaces, never silently unions with, previous completeness claims. Empty means unknown coverage, not zero income.
     std::vector<CreditCoverage> coverage;
 };
+// Pure bounded input checks shared by IPC/queue admission; they do not qualify a real provider or consult a store.
+bool validCreditSourceContract(const CreditSourceContract &contract);
+bool sameCreditSourceContract(const CreditSourceContract &a, const CreditSourceContract &b);
+bool boundedCreditBatchInput(const CreditBatch &batch, int64_t nowUtcMs);
 struct CreditLedgerLimits {
     size_t maxRecords = 100000, maxVersions = 400000;
     size_t maxSnapshots = 400000;

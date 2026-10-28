@@ -32,6 +32,8 @@ Test actual credits versus balance/payout/pending/share count; worker versus wal
 
 [P-07a](../credit-ledger.md) executes the synthetic durable-core scope, including exact millisecond boundaries, identity/revision/coverage semantics, SQLite crash-before-commit recovery and rejected-database preservation. This does not establish a real pool's credit contract, collection owner/UI activation or today's forecast. Store calls remain outside the production supervisor.
 
+[P-07b](../credit-owner.md) additionally executes native helper/IPC and bounded background ownership, backpressure, generation/stop isolation and explicit exact-batch recovery after a lost post-commit acknowledgement. It does not turn userspace stalls into genuine kernel/D-state qualification or supply real credit collection, persistent pending-journal/recovery UI or production activation.
+
 ## T-FORECAST
 
 Test today's actual-so-far plus remaining eligible expected income, calendar 23/24/25-hour days, delayed/incomplete current-day credits, uncertain schedules, switching/donation/fees without double deduction, and the separate rolling-24h row. Test no-tariff row omission versus configured zero/negative rate, missing price/FX/reward/cost data, negative valid estimated net values and matching revenue/cost horizons. Labels must say estimated, not realized.

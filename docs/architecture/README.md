@@ -18,6 +18,8 @@
 
 **Credit core:** P-07a adds a [durable exact posted-credit ledger](../credit-ledger.md) for synthetic-source qualification, with revision/provenance/coverage recovery and pure latest-price references. No real provider, background collection, calendar forecast or financial dashboard activation is supplied.
 
+**Credit ownership:** P-07b adds [bounded isolated local ledger jobs](../credit-owner.md) and immutable generation-bound results with explicit lost-acknowledgement reconciliation. It does not qualify a real provider, persist pending jobs, supply recovery/collection UI or enable production financial rows.
+
 **Electricity/time core:** P-05a/P-08a adds [optional offline IANA civil time, exact sample-and-hold energy and supported declared tariffs](../electricity-core.md), including pure full-remainder whole-meter counterfactuals. No real plan certification, telemetry/settings activation, income/net forecast or optimizer is supplied.
 
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
