@@ -117,6 +117,8 @@ Possible states: `Stopped`, `Starting`, `MiningNormal`, `MiningCoexist`, `Calibr
 
 Use transactional/idempotent history and credit stores with versioned records, one-writer/concurrency policy, bounded retention/compaction and tested crash recovery. The engine must preserve all-time aggregates while pruning expired detail and show the retained-detail coverage.
 
-Local accepted history now uses optional system SQLite behind a single background owner; see [D-17 implementation](../accepted-history.md). This commits counters, lifetime totals and window records atomically and preserves unknown/corrupt/newer stores without resetting them. Credit storage still needs a precise financial schema/scope decision. Never silently delete corrupt user records, initialize them as a zero lifetime total, or publish them as test fixtures.
+Local accepted history now uses optional system SQLite behind a single background owner; see [D-17 implementation](../accepted-history.md). This commits counters, lifetime totals and window records atomically and preserves unknown/corrupt/newer stores without resetting them. Production credit-source mapping and background ownership remain open; the initial fixture schema is described below. Never silently delete corrupt user records, initialize them as a zero lifetime total, or publish them as test fixtures.
+
+The initial [P-07a credit store](../credit-ledger.md) now implements a separate, fixture-only exact posted-credit/replacement/coverage schema and shared storage-only file lease. It is synchronous and not connected to the supervisor; real source contracts and a bounded background owner remain gates. It never reads accepted counters or infers income from them.
 
 Presentation preferences already use a small independent atomic JSON store; this is not a justification to rewrite large financial/history files synchronously on each screen frame.

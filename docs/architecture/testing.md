@@ -30,6 +30,8 @@ Executed transport-only slice: [P-06a](../public-https.md), including separate d
 
 Test actual credits versus balance/payout/pending/share count; worker versus wallet attribution; inclusive/exclusive time boundaries; pagination/retries/revisions/reversals and late discoveries. Test that market updates preserve token facts while changing **latest-price production valuation**. Two differently priced credit events at the same latest price must value as their total tokens times that latest price, not the historical weighted sum. Optional historical estimates remain separate. Sale status stays unknown, even after a transfer/deposit; missing/partial data never becomes zero or complete lifetime revenue.
 
+[P-07a](../credit-ledger.md) executes the synthetic durable-core scope, including exact millisecond boundaries, identity/revision/coverage semantics, SQLite crash-before-commit recovery and rejected-database preservation. This does not establish a real pool's credit contract, collection owner/UI activation or today's forecast. Store calls remain outside the production supervisor.
+
 ## T-FORECAST
 
 Test today's actual-so-far plus remaining eligible expected income, calendar 23/24/25-hour days, delayed/incomplete current-day credits, uncertain schedules, switching/donation/fees without double deduction, and the separate rolling-24h row. Test no-tariff row omission versus configured zero/negative rate, missing price/FX/reward/cost data, negative valid estimated net values and matching revenue/cost horizons. Labels must say estimated, not realized.

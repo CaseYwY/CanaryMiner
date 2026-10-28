@@ -16,6 +16,8 @@
 
 **Market core:** P-06b adds [exact price/FX adapters, immutable cache ownership and a native projection](../market-data.md), verified with synthetic/offline data. No production supervisor activates it; unqualified provider candles, income, manual-user import and native-trust/release gates remain unfinished.
 
+**Credit core:** P-07a adds a [durable exact posted-credit ledger](../credit-ledger.md) for synthetic-source qualification, with revision/provenance/coverage recovery and pure latest-price references. No real provider, background collection, calendar forecast or financial dashboard activation is supplied.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order
@@ -50,6 +52,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Display refresh, terminal color, recent events and hiding worker label | Implemented, local presentation preferences only |
 | Durable 24h/7d/30d/all accepted counters | Implemented for observed user-share counters; partial coverage and clock/recovery warnings explicit |
 | Market adapters and native market projection | Offline-tested exact market core/owner/projection; not production-activated or live-qualified |
+| Exact posted-credit storage/valuation core | Implemented and tested for synthetic contracts only; no real source or runtime activation |
 | Actual-credit adapters and financial income dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
 | International tariff calculation and automatic profitability selection | Not implemented |

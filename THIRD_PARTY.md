@@ -99,11 +99,11 @@ component.)
 
 ## 6. Optional system SQLite runtime (development history feature)
 
-Local accepted-share history loads the OS `winsqlite3.dll` on Windows or the distribution `libsqlite3.so.0` on Linux.
+Local accepted-share history and the fixture-qualified credit core load the OS `winsqlite3.dll` on Windows or the distribution `libsqlite3.so.0` on Linux.
 This change includes no SQLite implementation, header, library binary or source archive. SQLite's upstream public-domain
 statement is at <https://www.sqlite.org/copyright.html>; Windows system components remain subject to their platform terms.
 The required ABI floor is 3.31.0, not a patch/security baseline. Keep the selected system runtime serviced. Any future bundled
-build requires its own exact artifact/provenance and licence inventory. See `docs/accepted-history.md` for limits and recovery.
+build requires its own exact artifact/provenance and licence inventory. See `docs/accepted-history.md` and `docs/credit-ledger.md` for separate scopes, limits and recovery.
 
 ## 7. Optional public JSON HTTPS development backend
 

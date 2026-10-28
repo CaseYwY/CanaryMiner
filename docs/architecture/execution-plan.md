@@ -12,7 +12,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 | P-04 | Durable accepted history with coverage/recovery and 24h/7d/30d/all display | Storage ADR, P-02 | DONE local observed-counter slice; see history validation, not complete pool history |
 | P-05 | Portable tariff primitives, state, counterfactual costs and validated plan adapters | Time/decimal ADR, researched rule evidence | PLANNED |
 | P-06 | Replaceable bounded price/FX/reward providers, fresh 1h/latest quote snapshots | HTTPS/backend ADR, typed contracts | PARTIAL: P-06a HTTPS/isolation; P-06b exact adapters, bounded cache owner and native projection; live qualification, manual input and supervisor activation remain |
-| P-07 | Attributable actual-credit ledger, current production valuation and optional historical references | Storage/decimal ADR, P-06 | PLANNED |
+| P-07 | Attributable actual-credit ledger, current production valuation and optional historical references | Storage/decimal ADR, P-06 | PARTIAL: P-07a durable exact fixture ledger/revisions/coverage/latest valuation; qualified provider, background/runtime activation and optional historical references remain |
 | P-08 | Energy integration, today's forecast and optional estimated net-USD view | P-05, P-06, P-07 | PLANNED |
 | P-09 | Bounded local curve measurement and invalidation | P-03, P-08 | PLANNED |
 | P-10 | Economic candidate selector and independent schedule controls | P-03, P-05 through P-09 | PLANNED |
@@ -34,7 +34,9 @@ Task order below is a dependency plan, not a promise that every module lands in 
 - P-06a adds a [default-off public HTTPS foundation](../public-https.md): curl/c-ares, strict TLS, fixed public request identifiers, bounded JSON/IPC and an owned native helper process so synchronous trust checks cannot block the miner's stop. Native trust auxiliary egress and production packaging remain release gates. No polling or live financial provider is enabled.
 - P-06b adds [exact adapters and a bounded market owner](../market-data.md), retained stale facts, independent clocks, finite backoff, generation-safe cancellation and a read-only native projection. Only synthetic candles accept the unqualified minute-start dialect; no supervisor starts the owner or supplies live financial data. The development preview is clearly synthetic and cannot fetch or mine.
 - P-06b evidence: Windows focused CTest 28/28 and backend-enabled market/HTTPS 7/7; Windows/Linux each 20,302 decimal, 87 adapter/window and 111 owner checks, plus 1500 oracle cases and 12 native mode/width scenarios. Linux ASan/UBSan and rebuilt display/settings/synthetic-supervisor regressions pass. These are not live/GPU/release qualification; see the linked evidence for failures and limits.
-- Next executable batch: P-06 public-contract/terms/trust-egress qualification, explicit manual/offline user input and reviewed native activation. Exact credit-source semantics remain insufficient; build the independently testable ledger/tariff/energy core without inventing credits while provider qualification proceeds. P-03 live activation/config review and P-12 Stratum transport/endpoint decisions remain separate follow-ups.
+- P-07a adds a [durable exact posted-credit core](../credit-ledger.md), immutable scope/precision/time/revision binding, audited replacement revisions/posted adjustments, explicit coverage, millisecond windows, process-crash rollback and latest-price references. Only synthetic source qualification is accepted; no supervisor opens it and no actual-income row is enabled. Source qualification and bounded background/UI integration remain separate.
+- P-07a evidence: Windows/Linux each 99 ledger checks and 40 process/provenance/integrity checks; Windows focused CTest 30/30, Linux ASan/UBSan and rebuilt accepted-history 290 checks pass. No real pool/account/credit source or production miner was contacted or started.
+- Next executable batch: portable tariff/energy and named-time/calendar foundations, plus bounded credit ownership and explicit manual/offline user input. Review P-06 public contracts/terms/trust-egress before native activation. Exact real credit-source semantics remain insufficient; never bypass that gap with balances or shares. P-03 live activation/config review and P-12 Stratum transport/endpoint decisions remain separate follow-ups.
 - No upstream issue/PR or new production binary has been published for these advanced features. Do not replace an existing user's installed miner as an implicit development step.
 
 ## Definition of done for each batch
@@ -50,7 +52,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 
 ## Questions that block implementation, not the whole roadmap
 
-- Accepted-history storage is settled for the observed-counter slice; financial credit exact-number/scope schema remains open.
+- Accepted-history storage is settled for the observed-counter slice. P-07a settles the initial fixture posted-ms/replacement/net/declared-precision credit schema; real provider qualification/mapping, background activation and recovery/export UX remain open.
 - P-06a settles the initial HTTPS backend/process boundary, not native-trust egress, release packaging, Stratum backends or supported secure preset/donation endpoints and migration semantics.
 - Exact credit-provider attribution and interval granularity: the reviewed Kryptex schema does not establish stable/revisioned attributable credits or exact rolling24h; actual-income rows remain unavailable. Never solve this by silently using wallet totals.
 - Timezone/decimal/Unicode implementation dependencies and supported platform versions.
