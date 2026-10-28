@@ -3,6 +3,7 @@
 // "test these nonces".
 
 #include "run.h"
+#include "host_work_wait.h"
 #include "submit_outcome.h"
 #include "pearl_build_profile.h"
 #include "pearl_job_extra.h"
@@ -131,6 +132,10 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         Algorithm *algorithm;
         ~LookaheadExit() { if (algorithm) algorithm->discardPearlLookahead(); }
     } lookaheadExit{algo};
+    if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
+        fprintf(stderr, "host work wait is unavailable in research/pipeline/evidence modes\n");
+        return 1;
+    }
     // Direct run-loop callers must honor the same profile boundary as the CLI.
     // Removed transports must never fall through to another source family.
     if (!algo || !algo->name() || !buildAllowsAlgorithm(algo->name())) {
@@ -567,6 +572,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     auto tEpoch = tStart;
     std::string prefetchNote;
     bool searchDone = false;  // an iteration finished its search and reconciliation since the loop hook last looked
+    bool workWaitDue = false;
 
     while (!*stop) {
 #ifdef CANARY_PEARL_ASYNC_SUBMIT_EXPERIMENT
@@ -604,6 +610,18 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
                 return hookExit;
             }
         }
+        if (workWaitDue && opt.workWaitMs) {
+            // No lookahead GPU work may overlap a host-idle interval. Hinting below is disabled in this mode.
+            if (!algo->discardPearlLookahead()) return 1;
+            const auto result = waitAfterWork(opt.workWaitMs, [&] { return *stop != 0; }, [] {
+                return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
+            }, [](uint64_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });
+            if (result == WorkWaitResult::Stopped) break;
+            if (result != WorkWaitResult::Ready) return 1;
+            workWaitDue = false;
+        }
+        // Fetch again AFTER waiting, so a newly arrived job supersedes old work before any new GPU search.
         if (!opt.bench) {
             Job fresh;
             bool fetched = false;
@@ -822,7 +840,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         uint64_t rangeNext=0;
         const bool rangeHasNext = !opt.pearlWorkRange.enabled ||
             opt.pearlWorkRange.next(nonceCounter,batch.nonces,&rangeNext);
-        const bool hint = rangeHasNext && batch.nonces == 1 && !opt.formalBenchmark.enabled &&
+        const bool hint = !opt.workWaitMs && rangeHasNext && batch.nonces == 1 && !opt.formalBenchmark.enabled &&
             !*stop && algo && !std::strcmp(algo->name(),"pearl-pow");
         const uint64_t nextHint = opt.pearlWorkRange.enabled ? rangeNext : noncePrefix | ((nonceCounter + batch.nonces) & nonceMask);
         algo->pearlNextAttemptHint(hint,nextHint);
@@ -993,6 +1011,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             return restartable ? kRunGuardStop : 1;
         }
         searchDone = job.valid;
+        workWaitDue = job.valid;
 #ifdef CANARY_PEARL_ASYNC_SUBMIT_EXPERIMENT
         // Accepted-quota qualification must settle the submitted proof before
         // deciding whether another search is allowed to start.

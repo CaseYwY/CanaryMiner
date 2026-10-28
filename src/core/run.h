@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "algo.h"
+#include "host_work_wait.h"
 #include "pearl_private_execution.h"
 #include "pearl_authorization.h"
 #include "pearl_work_range.h"
@@ -234,6 +235,7 @@ struct RunOptions {
     RunObserver *observer = nullptr;  // optional; never owned
     RunLoopHook *loopHook = nullptr;  // optional; never owned. Pool runs only; used by the fee scheduler.
     uint64_t batch = 1ULL << 22;
+    unsigned workWaitMs = 0;  // host wait after a whole reconciled batch; zero preserves the original schedule
     // Default-off completion qualification. Captured from the exact environment
     // opt-in at CLI admission; never inferred from a reply or periodic report.
     unsigned pearlAcceptedQuota = 0;
@@ -331,6 +333,8 @@ inline const char *pearlRuntimeAdmissionProblem(
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
     authorizationResearch = authorizationResearch || opt.pearlGuardRetirementSession != nullptr;
 #endif
+    if (opt.workWaitMs > kMaxWorkWaitMs || (opt.workWaitMs && (!pearl || opt.bench || opt.formalBenchmark.enabled || authorizationResearch)))
+        return "--work-wait-ms supports 0..1000 ms in ordinary Pearl pool mining only";
     if (!pearlSoloAuthorizationAllowed(opt.pearlSoloAuthorization, algorithmName,
             opt.bench, !opt.poolHost.empty(), authorizationResearch))
         return "SOLO authorization requires a normal Pearl pool run without research guards";
@@ -482,7 +486,7 @@ inline bool canonicalFormalBenchmarkRunOptions(const RunOptions &opt,
            opt.reportSeconds ==
                static_cast<int>(kPearlFormalBenchmarkReportSeconds) &&
            opt.benchEpoch == kPearlBenchmarkEpoch &&
-           opt.benchEpochSeconds == 0 && opt.memOffsetMhz == 0 &&
+           opt.benchEpochSeconds == 0 && opt.memOffsetMhz == 0 && opt.workWaitMs == 0 &&
            !opt.memOc;
 }
 

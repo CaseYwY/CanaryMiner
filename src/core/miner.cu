@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "run.h"
+#include "host_work_wait.h"
 #include "pearl_build_profile.h"
 #include "pearl_pool.h"
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
@@ -147,6 +148,7 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
+    bool workWaitSeen = false;
     std::string workerIdText;
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
     std::string guardControlText;
@@ -162,6 +164,13 @@ int main(int argc, char **argv) {
             return (i + 1 < cli.rest.size()) ? cli.rest[++i] : std::string();
         };
         if (a == "--algo") algoName = next();
+        else if (a == "--work-wait-ms") {
+            if (workWaitSeen || !parseWorkWaitMs(next(), &opt.workWaitMs)) {
+                fprintf(stderr, "--work-wait-ms requires one integer from 0 to 1000 milliseconds\n");
+                return kExitUsage;
+            }
+            workWaitSeen = true;
+        }
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
         else if (a == "--pearl-guard-control") {
 #if defined(_WIN32)
@@ -377,6 +386,10 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
+        fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
+        return kExitUsage;
+    }
     if (workerChild) {
         // Each GPU worker keeps its own donation state, shutdown record and log files under gpu-<index>.
         if (workerIdText.empty() || workerIdText.size() > 3 || workerIdText.find_first_not_of("0123456789") != std::string::npos) return 1;

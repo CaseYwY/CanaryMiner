@@ -37,7 +37,7 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-ENG-001 | Integrate W over actual elapsed time into energy; support labelled board/system/incremental-wall measurement adapters with timestamp validity. | M-ENERGY | P-08 | T-ENERGY | PLANNED |
 | R-PRO-001 | Measure per-device/software/environment curves with warm-up, repeats, time/energy budgets and confidence/coverage metadata. | M-PROFILES | P-09 | T-PROFILES | PLANNED |
 | R-PRO-002 | Invalidate/revalidate profiles on relevant GPU/driver/kernel/throttle/environment changes, drift or faults; do not copy profiles by model name alone. | M-PROFILES | P-09 | T-PROFILES | PLANNED |
-| R-PRO-003 | Prefer host-side throttling between complete work units; waiting is milliseconds, not duty-cycle percent; zero is valid. | M-SUPERVISOR | P-03 | T-INTENT, T-PROFILES | PLANNED |
+| R-PRO-003 | Prefer host-side throttling between complete work units; waiting is milliseconds, not duty-cycle percent; zero is valid. | M-SUPERVISOR | P-03 | T-INTENT, T-PROFILES | PARTIAL |
 | R-OPT-001 | Independently opt in to automation; maximize estimated net return per real elapsed time among measured eligible candidates, not peak rate or efficiency alone. | M-OPTIMIZER | P-10 | T-OPTIMIZER | PLANNED |
 | R-OPT-002 | Evaluate on explicit start and periodically; independently configure policy interval, market refresh/lookback, telemetry, warm-up/test duration and recalibration. | M-OPTIMIZER | P-10 | T-OPTIMIZER | PLANNED |
 | R-OPT-003 | Pause without eligible positive candidates; use bounded resume hysteresis/cooldowns, uncertainty and transition/test cost; do not pretend a heuristic margin is a confidence bound. | M-OPTIMIZER | P-10 | T-OPTIMIZER | PLANNED |

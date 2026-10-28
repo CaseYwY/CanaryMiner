@@ -429,6 +429,7 @@ inline std::string productHelpText() {
         "                        Config key: \"donation\": false. The flag wins over the config.\n"
         "\n"
         "Other\n"
+        "      --work-wait-ms N  wait 0..1000 ms between complete work batches (default 0; not a duty cycle)\n"
         "      --config FILE     config-v1 JSON file; command-line options override it\n"
         "      --log-dir DIR     rotating redacted log files\n"
         "      --json            (status) raw JSON\n"

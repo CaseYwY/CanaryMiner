@@ -148,7 +148,7 @@ void testFeedLines() {
 
 void testWorkerArgs() {
     const std::vector<std::string> user = {"run", "--pool", "pearl.example:5500", "--wallet", "prl1-example", "--devices", "all",
-                                           "--api-port", "8085", "--no-dashboard", "--worker", "rig1"};
+                                           "--api-port", "8085", "--no-dashboard", "--worker", "rig1", "--work-wait-ms", "200"};
     const std::vector<std::string> args = workerArgs(user, seed(1), 8087);
     CHECK(args.size() >= 4 && args[0] == "run");
     CHECK(args[2] == "pearl.example:5500");
@@ -171,6 +171,8 @@ void testWorkerArgs() {
     CHECK(devices == 1);
     CHECK(sawApiPort);
     CHECK(sawChild);
+    const auto wait = std::find(args.begin(), args.end(), "--work-wait-ms");
+    CHECK(wait != args.end() && wait + 1 != args.end() && *(wait + 1) == "200");
     CHECK(args[args.size() - 2] == "--worker-id" && args[args.size() - 1] == "1");
 }
 

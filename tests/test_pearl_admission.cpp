@@ -291,6 +291,23 @@ int main() {
         ok &= check(algo.configured == before, "refusal must precede configure");
     };
     ok &= check(!pearlRuntimeAdmissionProblem(live(), "pearl-pow", cuda), "live canonical pool admitted");
+    auto waiting = live();
+    waiting.workWaitMs = 1001;
+    rejected(waiting, "host wait range refused before device/source");
+    waiting.workWaitMs = 1;
+    waiting.bench = true;
+    rejected(waiting, "host wait benchmark combination refused before device/source");
+    waiting = live();
+    waiting.workWaitMs = 200;
+    for (const char *name : {"CANARY_PEARL_LOCAL_RETIREMENTS", "CANARY_PEARL_NATIVE_EVIDENCE", "CANARY_PEARL_INTEGRATED_PIPELINE",
+            "CANARY_PEARL_SHAPE_EXPERIMENT", "CANARY_PEARL_ATTEMPT_OVERLAP", "CANARY_PEARL_A_ROOT_FUSION", "CANARY_PEARL_EXPERIMENT",
+            "CANARY_PEARL_PROFILE_INTERVAL", "CANARY_PEARL_ASYNC_SUBMIT"}) {
+        SavedEnvironment isolated(name);
+        setenv(name, "1", 1);
+        const int configuredBefore = algo.configured;
+        ok &= check(runMiner(&algo, waiting, "must-not-probe", 0, "test", &stop) == 1 && algo.configured == configuredBefore,
+                    "host wait/evidence selector combination refused before configure/device/source");
+    }
     for (auto network : {PearlNetwork::Mainnet, PearlNetwork::Testnet,
                          PearlNetwork::Testnet2, PearlNetwork::Regtest}) {
         for (auto semantics : {PearlTargetSemantics::BaseBeforePenalty,

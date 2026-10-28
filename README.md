@@ -284,6 +284,10 @@ user counts for 24h/7d/30d/all-local windows with coverage warnings; `--no-histo
 system SQLite runtime and is not complete pool history. A financial renderer contract exists, but live market/credit providers
 and electricity-profit calculations are not yet integrated; synthetic tests and accepted counts are not live income.
 
+The development CLI also accepts [`--work-wait-ms 0..1000`](docs/work-wait.md) between completed work batches, default 0.
+This is a cancellable host wait, not duty cycle or a GPU clock change; runtime menu controls and real GPU/energy qualification
+remain pending. No waiting value is promised profitable or game-qualified.
+
 On a terminal the miner shows a live dashboard: per GPU hashrate (TH/s, the same figure as T MAC/s in the stats endpoint),
 power, temperature, fan, clocks and shares, a donation row and recent events. Keys: **Q** quit, **D** details (PCI bus, pool
 state, restarts, last error per GPU), **L** log. `--no-dashboard`, or output that is not a terminal, gives plain timestamped

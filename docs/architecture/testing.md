@@ -42,6 +42,8 @@ Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/neg
 
 Test zero-ms throttle semantics and safe complete-work-unit boundaries, warm-up/exclusion, repeated windows, bounded time/energy costs, cancellation and faults. Test profile fingerprints, import hints versus measured eligibility, drift/software/environment invalidation and no full-speed sweep during play. No arbitrary device whitelist or kernel-math expansion as a side effect.
 
+P-03b [host-wait evidence](../work-wait.md) covers deterministic wait clocks, CLI admission and actual Linux `run.cpp` early-refusal wrappers. It does not qualify a production GPU's wait/energy/game behavior or implement measured profile selection.
+
 ## T-OPTIMIZER
 
 Test best eligible estimated net per elapsed time, no-data/nonpositive pause, all configured timers independently, source/curve expiry, hysteresis/cooldowns, switch/test costs and stale asynchronous results. Test current prices rather than historical per-credit valuations, joint-meter interactions and separate normal/game candidates. Heuristic margins are not statistical confidence bounds.

@@ -23,7 +23,7 @@ no current authorized intent > latched fault > thermal/critical telemetry
 
 Game linkage is independently off/pause/coexist. Opted-in game control with an unavailable detector fails closed to a pause, not normal mining; detected coexistence requires a qualified profile. Opted-in economics without valid data or a positive eligible candidate pauses. Disabled economics/detection do not create a dependency on unimplemented providers.
 
-These game/economic constraints are **unit-tested contracts only**. The running supervisor currently uses the session authorization portion, not an invented game detector, economic selector or thermal policy. Hardware tuning remains disabled as before. Runtime setting activation/override review, the safe complete-work-unit wait and integration with later policy modules are still P-03 work; no settings or provider callback starts mining.
+These game/economic constraints are **unit-tested contracts only**. The running supervisor currently uses the session authorization portion, not an invented game detector, economic selector or thermal policy. Hardware tuning remains disabled as before. The subsequent [P-03b host-wait slice](work-wait.md) adds a manual CLI wait. Runtime setting activation/override review and later policy integrations are still P-03 work; no settings or provider callback starts mining.
 
 ## Validation
 
