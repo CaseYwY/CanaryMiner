@@ -2,6 +2,8 @@
 
 P-05a / P-08a implements **pure local host-side foundations**, not production financial activation, a tariff catalogue, certified bills, sensor collection, today's revenue forecast or an optimizer. `FinancialView.enabled` remains false by default; no supervisor calls these APIs. No personal plan, measurement, price or account was used.
 
+The later [P-05b/P-08b native session slice](session-energy.md) separately adds reviewed **flat energy-only** declarations and a default-off streaming GPU-board model from existing telemetry. It does not activate this full-bill/counterfactual API, combined-rule settings, persistent billing state, actual-income/net forecasts or hardware qualification. Its explicit mapped-UTC guard is an adapter/model contract, not a change to this pure function's exact input-clock rules.
+
 Code: `src/product/civil_time.*`, `src/product/electricity.*`; target: `canary_economics`. Related requirements: R-TAR-001–005, R-ENG-001; test families T-TARIFF/T-ENERGY and calendar prerequisites of T-FORECAST. All input declarations remain caller assertions, not provider qualification.
 
 ## Time ADR

@@ -67,6 +67,8 @@ Owns timestamped power/energy adapters and integration. Board, whole-system and 
 
 The initial [P-05a/P-08a core](../electricity-core.md) is synchronous/pure and unused by the production supervisor. Explicit optional offline IANA data, rational W·ms/costs and declared full-remainder scenarios do not replace a bounded telemetry/economic owner, persisted billing-state adapter or qualified supplier plan. No core calculation belongs in the render/mining/safety loop.
 
+[P-05b/P-08b](../session-energy.md) adds a separate default-off in-memory session owner. The supervisor only admits fixed-size generation-bound raw integer-milliwatt/absence observations from existing NVML reads; exact accumulation and prevalidated view formatting are background work. Its fixed GPU-board basis, explicit origin, UTC mapping guard and drop continuity cannot become whole-meter/baseline evidence. Reviewed flat-energy defaults are frozen per parent session; the full bill/time core, source-qualified forecasts and persistent billing state remain separate. Existing synchronous preference saves/native driver calls still need OS-stall qualification.
+
 ### M-PROFILES
 
 Owns bounded measurement plans, profile eligibility/fingerprints, drift detection and evidence. It requests safe session transitions but cannot override user stop, thermal limits or a game's test permission. Imported/model-based curves are hints until locally validated.

@@ -56,6 +56,8 @@ Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/neg
 
 [P-08a](../electricity-core.md) executes bounded exact sample-and-hold integration with explicit scope/basis and UTC/monotonic consistency/coverage, not a real telemetry adapter, matched hardware baseline, persistent measurement store or live net-income estimate.
 
+[P-05b/P-08b](../session-energy.md) adds native settings/store tests, explicit NVML missing-versus-zero power, generation/origin-bound streaming accumulation, effective-version/clock guards and a queue-drop continuity oracle. POSIX actual-CLI/fake-supervisor PTY verifies independent saves, frozen current/next-start activation, CLI suppression, display/collection separation and Ctrl+C through an owned controlling terminal/stop flag. Synthetic data and host tests do not qualify native NVML accuracy/stalls, whole-PC/incremental baselines, persistent energy history, bill rules or net income.
+
 ## T-PROFILES
 
 Test zero-ms throttle semantics and safe complete-work-unit boundaries, warm-up/exclusion, repeated windows, bounded time/energy costs, cancellation and faults. Test profile fingerprints, import hints versus measured eligibility, drift/software/environment invalidation and no full-speed sweep during play. No arbitrary device whitelist or kernel-math expansion as a side effect.

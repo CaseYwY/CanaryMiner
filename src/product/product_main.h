@@ -174,7 +174,7 @@ class StatsObserver final : public RunObserver {
         d.attemptsPerSecond = s.attemptsPerSecond;
         d.powerWatts = -1;
         d.temperatureC = -1;
-        if (g.valid) { d.powerWatts = g.powerMilliwatts / 1000.0; d.temperatureC = static_cast<int>(g.temperatureC); }
+        if (g.valid) { if (g.powerValid) d.powerWatts = g.powerMilliwatts / 1000.0; d.temperatureC = static_cast<int>(g.temperatureC); }
         last_ = statsOutcomesFromRun(s);
         d.outcomes = last_;
         carryInto(&d.outcomes, carry_);

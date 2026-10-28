@@ -25,6 +25,7 @@
 #include "ui_preferences.h"
 #include "financial_view.h"
 #include "market_view.h"
+#include "energy_view.h"
 #include "accepted_history_view.h"
 
 #if defined(_WIN32)
@@ -85,6 +86,7 @@ struct DashModel {
     std::vector<DashLogEntry> logEntries;  // structured provenance when available; raw output is unclassified
     FinancialView finances;
     PublicMarketView publicMarket;
+    EnergyView energy;
     AcceptedHistoryView history;
 };
 
@@ -370,6 +372,12 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
         section(out, m.publicMarket.heading, w);
         for (const auto &line : m.publicMarket.lines)
             for (const auto &part : wrapText(line, w)) out.push_back(one(part));
+        out.push_back(one(""));
+    }
+
+    if (m.energy.enabled) {
+        section(out,"SESSION GPU-BOARD ENERGY / DECLARED ENERGY-ONLY COST",w);
+        for(const auto &line:m.energy.lines)for(const auto &part:wrapText(line,w))out.push_back(one(part));
         out.push_back(one(""));
     }
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CanaryMiner session GPU-board energy / declared flat ENERGY-ONLY defaults v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rule_model", "measurement_basis", "collect_energy", "show_energy", "tariff_enabled", "exclusions_acknowledged", "record_interval_ms", "maximum_gap_ms", "country", "region", "supplier", "product", "version", "currency", "rate_per_kwh", "clock", "fixed_offset_seconds", "effective_from_utc", "effective_through_utc", "confirmed_utc"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "rule_model": {"const": "flat_energy_only"},
+    "measurement_basis": {"const": "gpu_board_proxy"},
+    "collect_energy": {"type": "boolean"},
+    "show_energy": {"type": "boolean"},
+    "tariff_enabled": {"type": "boolean"},
+    "exclusions_acknowledged": {"type": "boolean"},
+    "record_interval_ms": {"type": "integer", "minimum": 500, "maximum": 60000},
+    "maximum_gap_ms": {"type": "integer", "minimum": 500, "maximum": 60000},
+    "country": {"type": "string", "maxLength": 64, "pattern": "^[ -~]*$"},
+    "region": {"type": "string", "maxLength": 64, "pattern": "^[ -~]*$"},
+    "supplier": {"type": "string", "maxLength": 64, "pattern": "^[ -~]*$"},
+    "product": {"type": "string", "maxLength": 64, "pattern": "^[ -~]*$"},
+    "version": {"type": "string", "maxLength": 64, "pattern": "^[ -~]*$"},
+    "currency": {"type": "string", "pattern": "^(|[A-Z]{3})$"},
+    "rate_per_kwh": {"type": "string", "maxLength": 64, "pattern": "^(|-?[0-9]+(\\.[0-9]+)?)$"},
+    "clock": {"enum": ["utc", "fixed_standard"]},
+    "fixed_offset_seconds": {"type": "integer", "minimum": -64800, "maximum": 64800, "multipleOf": 60},
+    "effective_from_utc": {"type": "integer", "minimum": 0, "maximum": 253402300799},
+    "effective_through_utc": {"type": "integer", "minimum": 0, "maximum": 253402300799},
+    "confirmed_utc": {"type": "integer", "minimum": 0, "maximum": 253402300799}
+  },
+  "$comment": "Native validation also checks gap>=selection, enabled tariff metadata/rate/ordered validity/confirmation, UTC offset=0, signed decimal capacity, trimmed ASCII identifiers and explicit exclusions acknowledgement. This model never flattens tier/TOU/dynamic/fees/taxes/shared-meter billing. It is not a qualified utility tariff, whole-PC measurement, FX or net-income forecast."
+}

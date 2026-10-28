@@ -11,11 +11,12 @@
 #include "ui_preferences.h"
 #include "runtime_settings.h"
 #include "manual_market_settings.h"
+#include "electricity_settings.h"
 
 namespace om {
 
 enum class SettingsPage { Browse, Review, Leave };
-enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket };
+enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket, OpenElectricity };
 
 class SettingsPanel {
    public:
@@ -29,6 +30,7 @@ class SettingsPanel {
     std::string message;
     RuntimeSettingsPanel runtime;
     ManualMarketSettingsPanel manual;
+    ElectricitySettingsPanel electricity;
 
     void open(const UiPreferences &value) {
         active = draft = value;
@@ -39,6 +41,7 @@ class SettingsPanel {
         message.clear();
         runtime.visible = false;
         manual.visible = false;
+        electricity.visible = false;
     }
     bool dirty() const { return active != draft; }
 
@@ -47,9 +50,10 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 0 ? 3 : (group == 1 || group == 3) ? 1 : group == 8 ? 2 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 0 ? 3 : (group == 1 || group == 2 || group == 3) ? 1 : group == 8 ? 2 : group == 9 ? 5 : group == 10 ? 7 : 0; }
 
-    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0) {
+    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}) {
+        if (electricity.visible) return electricity.key(key,electricitySave,nowUtc) == ElectricitySettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (manual.visible) return manual.key(key, manualSave, nowUtc) == ManualMarketSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (runtime.visible) return runtime.key(key, runtimeSave) == RuntimeSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (key == 3 || key == 'q' || key == 'Q') return SettingsResult::Quit;
@@ -94,6 +98,7 @@ class SettingsPanel {
             if (groupsFocused) groupsFocused = false;
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3) return SettingsResult::OpenManualMarket;
+            else if (group == 2) return SettingsResult::OpenElectricity;
             else change();
         }
         return SettingsResult::None;
@@ -119,6 +124,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if (electricity.visible) return electricity.render(columns,rows,color);
         if (manual.visible) return manual.render(columns, rows, color);
         if (runtime.visible) return runtime.render(columns, rows, color);
         using namespace dash_detail;
@@ -230,6 +236,10 @@ class SettingsPanel {
             row(0, "Manual/offline price references [Enter]");
             result.push_back({"Default off; user-declared PRL/USDT and independent FX.", Tone::Plain});
             result.push_back({"No provider polling, 1h series, actual income or optimizer.", Tone::Plain});
+        } else if (group == 2) {
+            row(0,"Session board energy / declared flat energy-only rate [Enter]");
+            result.push_back({"Default off; next explicit session only, no miner restart.",Tone::Plain});
+            result.push_back({"Not whole-PC/incremental energy, shared utility bill or net income.",Tone::Plain});
         } else if (group == 9) {
             toggle(0, "Details page", draft.detailsEnabled);
             toggle(1, "Device identity", draft.detailsIdentity);
@@ -282,8 +292,14 @@ inline void openManualMarketControls(SettingsPanel *panel, ManualMarketStore *st
     if (!store->load(&configured,&error)) { panel->message = "Offline-market settings unavailable: "+error; return; }
     panel->manual.open(configured,context);
 }
+inline void openElectricityControls(SettingsPanel *panel,ElectricityPreferencesStore *store,const ElectricitySettingsContext &context) {
+    if(!store){panel->message="Electricity settings unavailable: no local target.";return;}
+    ElectricityPreferences p;std::string error;
+    if(!store->load(&p,&error)){panel->message="Electricity settings unavailable: "+error;return;}
+    panel->electricity.open(p,context);
+}
 
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false) {
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -295,6 +311,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
     ManualMarketStore manualStore(std::filesystem::u8path(stateDir) / "manual-market-preferences.json");
+    ElectricityPreferencesStore electricityStore(std::filesystem::u8path(stateDir) / "electricity-preferences.json");
     UiPreferences preferences;
     std::string error;
     if (!store.load(&preferences, &error)) { fprintf(stderr, "%s\n", error.c_str()); return 3; }
@@ -309,9 +326,11 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
             if (!key) break;
             const auto result = panel.key(key, [&](const UiPreferences &p, std::string *e) { return store.save(p, e); },
                 [&](const RuntimePreferences &p, std::string *e) { return runtimeStore.save(p, e); },
-                [&](ManualMarketPreferences &p, std::string *e) { return confirmManualMarket(&p,static_cast<uint64_t>(time(nullptr)),e) && manualStore.save(p,e); }, static_cast<uint64_t>(time(nullptr)));
+                [&](ManualMarketPreferences &p, std::string *e) { return confirmManualMarket(&p,static_cast<uint64_t>(time(nullptr)),e) && manualStore.save(p,e); }, static_cast<uint64_t>(time(nullptr)),
+                [&](ElectricityPreferences &p,std::string *e){return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),e)&&electricityStore.save(p,e);});
             if (result == SettingsResult::OpenRuntime) openRuntimeControls(&panel, &runtimeStore, {});
             else if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.cliDisabled=noMarket; openManualMarketControls(&panel,&manualStore,context); }
+            else if (result == SettingsResult::OpenElectricity) {ElectricitySettingsContext context;context.cliNoEnergy=noEnergy;openElectricityControls(&panel,&electricityStore,context);}
             else if (result != SettingsResult::None) { panel.visible = false; break; }
         }
         const auto color = panel.active.color ? detectColorLevel() : ColorLevel::None;

@@ -53,6 +53,7 @@
 #include "redact.h"
 #include "restart_budget.h"
 #include "settings.h"
+#include "energy_owner.h"
 #include "session_intent.h"
 #include "accepted_history.h"
 #include "stats.h"
@@ -382,6 +383,9 @@ struct SupervisorOptions {
     std::string manualMarketPreferencesPath;
     ManualMarketFactory manualMarketFactory;
     bool noMarket = false;
+    std::string electricityPreferencesPath;
+    SessionEnergyFactory energyFactory;
+    bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
 
@@ -446,7 +450,7 @@ inline StatsSnapshot aggregateSnapshot(const SupervisorOptions &opt, const std::
         d.ccMajor = v.seed.ccMajor;
         d.ccMinor = v.seed.ccMinor;
         if (v.telValid) {
-            d.powerWatts = v.tel.powerMilliwatts / 1000.0;
+            d.powerWatts = v.tel.powerValid ? v.tel.powerMilliwatts / 1000.0 : -1;
             d.temperatureC = static_cast<int>(v.tel.temperatureC);
         }
         d.outcomes.pending = v.haveStats ? d.outcomes.pending : 0;  // a stopped run has nothing in flight
@@ -557,6 +561,20 @@ class Supervisor {
             w->nvmlOk = w->nvml.openByUuid(opt_.seeds[i].uuid);
             workers_.push_back(std::move(w));
         }
+        if(!opt_.electricityPreferencesPath.empty()) {
+            electricityStore_.reset(new ElectricityPreferencesStore(std::filesystem::u8path(opt_.electricityPreferencesPath)));
+            if(!opt_.noEnergy) {
+                std::string error;
+                if(!electricityStore_->load(&electricityEffective_,&error))addEvent("Electricity/energy unavailable: "+error);
+                else if(electricityEffective_.collectEnergy && opt_.energyFactory && !workers_.empty()) {
+                    energy_=opt_.energyFactory();
+                    const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                    if(!energy_ || !energy_->start(sessionToken_.epoch,utc>0?static_cast<uint64_t>(utc):0,supervisorNowMs(),static_cast<unsigned>(workers_.size()),electricityEffective_,PowerOrigin::ObservedTelemetry)) {
+                        energy_.reset();addEvent("Session board-energy collection unavailable; mining settings unchanged.");
+                    }
+                }
+            }
+        }
         if (opt_.tuning) {
             std::vector<std::string> events;
             opt_.tuning->start(t0, &events);
@@ -602,9 +620,13 @@ class Supervisor {
                             auto projection=opt_.manualMarketFactory?opt_.manualMarketFactory(p,utc,now):ManualMarketProjector{};
                             if (!manualStore_->save(p,error)) return false;
                             manualEffective_=p; manualProjection_=std::move(projection); return true;
-                        },static_cast<uint64_t>(time(nullptr)));
+                        },static_cast<uint64_t>(time(nullptr)),[this](ElectricityPreferences &p,std::string *error){
+                            if(!electricityStore_){if(error)*error="Electricity target unavailable.";return false;}
+                            return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),error)&&electricityStore_->save(p,error);
+                        });
                         if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
                         if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.running=true; context.cliDisabled=opt_.noMarket; context.effective=manualEffective_; openManualMarketControls(&settings_,manualStore_.get(),context); }
+                        if(result==SettingsResult::OpenElectricity){ElectricitySettingsContext context;context.running=true;context.cliNoEnergy=opt_.noEnergy;context.effective=electricityEffective_;context.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;openElectricityControls(&settings_,electricityStore_.get(),context);}
                         if (result == SettingsResult::Quit) {
                             settings_.visible = false;
                             nextFrame_ = 0;
@@ -696,6 +718,7 @@ class Supervisor {
             for (const std::string &event : events) addEvent(event);
         }
         if (history_) history_->stop();  // worker drains/safety stop complete before optional persistence shutdown
+        if (energy_) energy_->stop();
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -723,6 +746,7 @@ class Supervisor {
         bool stopping = false;
         uint64_t restartAt = 0;
         uint64_t nextSampleAt = 0;
+        uint64_t nextEnergyAt = 0;
         uint64_t historyGeneration = 0;
         uint64_t historyCounter = 0;
         int64_t historyLastUtc = 0;
@@ -750,6 +774,9 @@ class Supervisor {
     std::unique_ptr<ManualMarketStore> manualStore_;
     ManualMarketPreferences manualEffective_;
     ManualMarketProjector manualProjection_;
+    std::unique_ptr<ElectricityPreferencesStore> electricityStore_;
+    ElectricityPreferences electricityEffective_;
+    std::unique_ptr<SessionEnergySink> energy_;
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
     std::unique_ptr<AcceptedHistory> history_;
@@ -803,6 +830,7 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        if(energy_)energy_->requestStop();
         addEvent("stopping: draining every GPU");
         for (auto &w : workers_) {
             w->restartPending = false;
@@ -886,6 +914,16 @@ class Supervisor {
             w.view.tel = w.nvml.sample();
             w.view.telValid = w.view.tel.valid;
         }
+        if(energy_ && intent_.permits(sessionToken_)) {
+            const auto mono=supervisorNowMs();
+            if(mono>=w.nextEnergyAt) {
+                w.nextEnergyAt=mono+electricityEffective_.recordIntervalMs;
+                const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                SessionPowerInput input;input.channel=static_cast<unsigned>(i);input.monotonicMs=mono;input.utcMs=utc>0?static_cast<uint64_t>(utc):0;
+                if(w.nvmlOk&&w.view.telValid&&w.view.tel.powerValid)input.milliwatts=w.view.tel.powerMilliwatts;
+                energy_->submit(sessionToken_.epoch,input);
+            }
+        }
         if (w.view.haveStats) {
             const bool donating = w.view.stats.fee.state == "donation";
             const uint64_t t = supervisorNowMs();
@@ -963,6 +1001,11 @@ class Supervisor {
         if (history_) model.history = history_->snapshot();
         if (history_) for (const auto &worker : workers_) if (!worker->historySeen || worker->historyOutage) model.history.gaps = true;
         if (opt_.dashboard && !opt_.noMarket && manualProjection_ && intent_.permits(sessionToken_)) model.publicMarket=manualProjection_(static_cast<uint64_t>(time(nullptr)),now);
+        if(energy_&&intent_.permits(sessionToken_)) {
+            const auto energy=energy_->snapshot();model.energy=energy->view;
+            if(model.energy.enabled&&now>=energy->throughMonoMs&&now-energy->throughMonoMs>electricityEffective_.maximumGapMs)
+                model.energy.lines.push_back("No recent energy observation; known totals retained, current tail unavailable.");
+        }
         return model;
     }
 

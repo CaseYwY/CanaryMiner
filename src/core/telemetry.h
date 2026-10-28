@@ -118,6 +118,7 @@ struct GpuTelemetry {
     unsigned fanPercent = 0;
     unsigned smClockMhz = 0;
     unsigned memClockMhz = 0;
+    bool powerValid = false; // device availability is not proof of a successful power read; zero can be valid
 };
 
 /** Runtime-loaded NVML. Optional by design. */
@@ -219,7 +220,7 @@ class Nvml {
         if (!ok_) return t;
         t.deviceUuid = uuid_;
         unsigned v = 0;
-        if (getPower_ && getPower_(dev_, &v) == 0) t.powerMilliwatts = v;
+        if (getPower_ && getPower_(dev_, &v) == 0) { t.powerMilliwatts = v; t.powerValid = true; }
         if (getTemp_ && getTemp_(dev_, 0, &v) == 0) t.temperatureC = v;
         if (getFan_ && getFan_(dev_, &v) == 0) t.fanPercent = v;
         if (getClock_ && getClock_(dev_, 1, &v) == 0) t.smClockMhz = v;

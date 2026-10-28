@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy);
     }
 
     std::string algoName = defaultAlgorithmName;
@@ -330,6 +330,7 @@ int main(int argc, char **argv) {
                 "  --no-dashboard    plain timestamped lines instead of the live dashboard\n"
                 "  --no-history      disable local accepted history this run; existing data stays\n"
                 "  --no-market       suppress manual/offline terminal references this run\n"
+                "  --no-energy       disable optional session board-energy recording this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
                 "                    not duty cycle; runtime defaults can be edited in Settings\n"
                 "  --no-donation     turn the optional 1%% developer donation off (on by default;\n"
@@ -898,6 +899,9 @@ int main(int argc, char **argv) {
         so.manualMarketPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "manual-market-preferences.json").u8string();
         so.manualMarketFactory = makeManualMarketProjector;
         so.noMarket = cli.ov.noMarket;
+        so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();
+        so.energyFactory = makeSessionEnergyOwner;
+        so.noEnergy = cli.ov.noEnergy;
         so.resolvedWorkWait = opt.workWaitMs;
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;

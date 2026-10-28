@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -23,6 +24,8 @@
 using namespace om;
 
 namespace {
+volatile sig_atomic_t fixtureSignalStop=0;
+void fixtureStopSignal(int){fixtureSignalStop=1;}
 
 const char kFakeChild[] = "--fake-child";
 const char kFakeCrash[] = "--fake-crash";
@@ -217,6 +220,7 @@ void testAggregate() {
     views[1].seed = seed(1);  // not reporting yet: listed with zeros, power from NVML
     views[1].telValid = true;
     views[1].tel.powerMilliwatts = 300000;
+    views[1].tel.powerValid = true;
     views[1].tel.temperatureC = 70;
     StatsSnapshot agg = aggregateSnapshot(o, views, 12.5, "running");
     CHECK(agg.devices.size() == 2);
@@ -810,7 +814,7 @@ int main(int argc, char **argv) {
 #endif
     if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang || std::string(argv[1]) == kFakeLatched))
         return fakeChild(argv[1]);
-    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test")) {
+    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test")) {
         if (!platformInit()) return 83;
         StatsServer probe;
         std::string error;
@@ -818,6 +822,10 @@ int main(int argc, char **argv) {
         const int port = probe.port();
         probe.stop();
         SupervisorOptions options = baseOptions();
+        fixtureSignalStop=0;
+        std::signal(SIGINT,fixtureStopSignal);
+        std::signal(SIGTERM,fixtureStopSignal);
+        options.stop=&fixtureSignalStop;
         options.exe = selfExecutablePath();
         options.userArgs = {"--fake-history-child","--fixture-start-count",(std::filesystem::path(argv[2])/"fixture-worker-starts.txt").u8string()};
         options.seeds = {seed(0)};
@@ -827,6 +835,9 @@ int main(int argc, char **argv) {
         options.manualMarketPreferencesPath = (std::filesystem::path(argv[2]) / "manual-market-preferences.json").u8string();
         options.manualMarketFactory = makeManualMarketProjector;
         options.noMarket = std::string(argv[1]) == "--manual-no-market-session-test";
+        options.electricityPreferencesPath = (std::filesystem::path(argv[2]) / "electricity-preferences.json").u8string();
+        options.energyFactory = makeSessionEnergyOwner;
+        options.noEnergy = std::string(argv[1]) == "--no-energy-session-test";
         RuntimePreferences defaults;
         RuntimePreferencesStore defaultsStore(std::filesystem::u8path(options.runtimePreferencesPath));
         if (!defaultsStore.load(&defaults, &error)) return 85;

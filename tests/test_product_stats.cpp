@@ -234,6 +234,7 @@ int main() {
         GpuTelemetry g;
         g.valid = true;
         g.powerMilliwatts = 200500;
+        g.powerValid = true;
         g.temperatureC = 61;
         obs.onReport(ms, g);
         const StatsSnapshot s = pub.snapshot();

@@ -11,7 +11,7 @@ from unittest import mock
 
 class AuxiliaryImports(unittest.TestCase):
     def test_helpers_have_no_import_time_work(self):
-        for name in ("test_electricity_oracle", "test_credit_worker_boundary", "test_manual_market_terminal", "test_credit_journal_crash"):
+        for name in ("test_electricity_oracle", "test_credit_worker_boundary", "test_manual_market_terminal", "test_credit_journal_crash", "test_session_energy_terminal"):
             with self.subTest(module=name):
                 spec = importlib.util.spec_from_file_location("discovery_fixture", Path(__file__).with_name(name + ".py"))
                 module = importlib.util.module_from_spec(spec)

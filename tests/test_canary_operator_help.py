@@ -27,7 +27,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                 '-DCANARY_PEARL_ONLY_BUILD=' + profile,
                 '-include', 'tests/pearl_cli_stubs/cuda_stub.h', 'src/core/miner.cu',
                 'src/core/registry.cu', 'tests/test_pearl_cli_stubs.cpp', 'src/product/exact_decimal.cpp',
-                'src/product/manual_market.cpp', '-pthread', '-o', str(binary)]
+                'src/product/manual_market.cpp', 'src/product/energy_owner.cpp', '-pthread', '-o', str(binary)]
             compiled = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=90)
             if compiled.returncode:
                 raise RuntimeError(compiled.stderr.decode(errors='replace'))

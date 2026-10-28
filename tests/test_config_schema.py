@@ -162,6 +162,31 @@ class ManualMarketSchemaTests(unittest.TestCase):
         self.assertEqual(set(schema['required']), set(schema['properties']))
 
 
+class ElectricityPreferencesSchemaTests(unittest.TestCase):
+    def test_disabled_defaults_boundaries_and_native_keys(self):
+        schema = load('config/electricity-preferences.schema.json')
+        example = load('config/electricity-preferences.example.json')
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertFalse(example['collect_energy'])
+        self.assertFalse(example['tariff_enabled'])
+        self.assertFalse(example['exclusions_acknowledged'])
+        for key in ('country', 'region', 'supplier', 'product', 'version', 'currency', 'rate_per_kwh'):
+            self.assertEqual(example[key], '')
+        for key, value in (('schema_version', 2), ('rule_model', 'shared_progressive'), ('measurement_basis', 'whole_meter'),
+                           ('collect_energy', 1), ('show_energy', 0), ('rate_per_kwh', 0.5), ('rate_per_kwh', '1e2'),
+                           ('clock', 'named_iana'), ('record_interval_ms', 100), ('maximum_gap_ms', 60001),
+                           ('country', 'bad\x1b[2J'), ('tax_rule', 'synthetic'), ('currency', 'USDT')):
+            with self.subTest(key=key):
+                self.assertTrue(validate({**example, key: value}, schema, schema))
+        with open(os.path.join(ROOT, 'src', 'product', 'electricity_preferences.h'), encoding='utf8') as stream:
+            native = stream.read()
+        writer = native.split('inline std::string electricityPreferencesJson', 1)[1].split('inline bool parseElectricityPreferences', 1)[0]
+        parser = re.search(r'const char \*keys\[\]\s*=\s*\{([^}]+)\}', native).group(1)
+        self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
+        self.assertEqual(set(re.findall(r'"([a-z_]+)"', parser)), set(schema['properties']))
+        self.assertEqual(set(schema['required']), set(schema['properties']))
+
+
 class StatsSchemaTests(unittest.TestCase):
     def test_schema_covers_the_writer(self):
         schema = load('config/stats-v1.schema.json')

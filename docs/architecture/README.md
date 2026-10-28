@@ -26,6 +26,8 @@
 
 **Electricity/time core:** P-05a/P-08a adds [optional offline IANA civil time, exact sample-and-hold energy and supported declared tariffs](../electricity-core.md), including pure full-remainder whole-meter counterfactuals. No real plan certification, telemetry/settings activation, income/net forecast or optimizer is supplied.
 
+**Native energy defaults:** P-05b/P-08b adds [reviewed flat energy-only settings and optional session GPU-board estimates](../session-energy.md), an explicit power-read validity flag, bounded background accumulation and `--no-energy`. Settings freeze until the next explicit session. It is not a combined utility-bill adapter, persistent energy history, whole-PC/incremental measurement, income/net forecast or production hardware qualification.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order
@@ -64,7 +66,8 @@ The native dashboard also reports durable accepted-share history, market informa
 | Exact posted-credit storage/valuation core | Implemented and tested for synthetic contracts only; no real source or runtime activation |
 | Actual-credit adapters and financial income dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
-| Declared tariff/time/energy arithmetic | Offline-tested pure core; no certified supplier adapter, persistent state or native activation |
+| Declared combined bill/time arithmetic | Offline-tested pure core; no certified supplier adapter or persistent billing/reset state |
+| Native flat-energy defaults and session board energy | Default-off native review/save and bounded session-only model; typed power validity/coverage, not whole-PC/incremental energy or net income |
 | Automatic profitability selection | Not implemented |
 | Tested game pause/coexist policies | Not implemented in this fork |
 | Stratum TLS | Not implemented |

@@ -291,6 +291,13 @@ Saving during a supervised dashboard session changes reference display without r
 `--no-market` suppresses that session's references without changing saved values. Stale/missing inputs and the unavailable
 one-hour mean are explicit; actual income, forecasts, net estimates and automation remain disabled.
 
+Optional [session GPU-board energy](docs/session-energy.md) and declared **flat energy-only** defaults are available through
+**S → Electricity**. Collection defaults off; collection/display/cadence, declaration identity/currency/version/effective UTC
+and UTC/fixed-standard clock are reviewed separately. All saved changes wait for the next explicit parent session, never a
+worker retry. `--no-energy` disables optional collection for this session without stopping ordinary safety telemetry.
+Unknown power is not zero; known energy/cost carry model/basis/time/coverage. This excludes complex/shared utility billing,
+whole-PC/incremental measurement, persistent energy history and net income; no installed miner is replaced.
+
 The development CLI also accepts [`--work-wait-ms 0..1000`](docs/work-wait.md) between completed work batches, default 0.
 S → Automatic mining or Privacy now opens [runtime defaults](docs/runtime-settings.md) for host wait/history collection.
 These save separately from UI drafts to `runtime-preferences.json`, show configured/current/CLI-overridden values and apply

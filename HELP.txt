@@ -154,6 +154,14 @@ Contents
   The same controls are available without mining: canary-miner settings [--config FILE]
   See docs/manual-market.md for validity, clock, storage and qualification limits.
 
+  Optional session board energy: S -> Electricity. Collection defaults OFF; display is independent.
+  Declare flat ENERGY-ONLY cost only after explicitly acknowledging excluded tiers/TOU/dynamic/fees/taxes/shared bills.
+  Country/region/supplier/product/currency/version/clock and effective UTC are separate user declarations, not presets.
+  Review/save applies on the NEXT EXPLICIT parent session only. --no-energy overrides this session's optional collection;
+  ordinary safety/statistics telemetry remains active. Missing power is not zero. Energy/cost are covered GPU-board
+  sample-and-hold estimates, not whole-PC/incremental energy, a utility bill, persistent history, income or net profit.
+  See docs/session-energy.md for scope, source, clock, storage, activation and unqualified release gates.
+
 
 8. The developer donation
 -------------------------

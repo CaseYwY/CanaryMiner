@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "rule_model": "flat_energy_only",
+  "measurement_basis": "gpu_board_proxy",
+  "collect_energy": false,
+  "show_energy": true,
+  "tariff_enabled": false,
+  "exclusions_acknowledged": false,
+  "record_interval_ms": 1000,
+  "maximum_gap_ms": 5000,
+  "country": "",
+  "region": "",
+  "supplier": "",
+  "product": "",
+  "version": "",
+  "currency": "",
+  "rate_per_kwh": "",
+  "clock": "utc",
+  "fixed_offset_seconds": 0,
+  "effective_from_utc": 0,
+  "effective_through_utc": 0,
+  "confirmed_utc": 0
+}
