@@ -50,6 +50,7 @@ enum ExitCode : int {
     kExitSelftestFailed = 5,  // a selftest step failed
     kExitStatusDown = 6,      // `status` could not reach a running miner
     kExitShutdownForced = 7,  // the drain deadline passed; shares in flight were recorded as unknown
+    kExitFaultLatched = 8,    // supervisor retry budget exhausted; an outer launcher must not retry it
 };
 
 /** The stats port `--api-enable` uses when no `--api-port` is given. The config file default stays 8085. */

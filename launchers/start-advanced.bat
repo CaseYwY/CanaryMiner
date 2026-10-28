@@ -1,6 +1,6 @@
 @echo off
 rem CanaryMiner, editable launcher. Edit the settings below, then double-click this file.
-rem The miner restarts itself 5 seconds after it stops. To quit, press Ctrl+C and then Y.
+rem Only exit code 1 retries (at most MAX_RESTARTS). Q, clean/forced stop and latched faults never restart.
 rem GPU clocks, memory, power limit and fan: set them with MSI Afterburner (or a similar tool) before starting.
 rem CanaryMiner does not change GPU clocks on Windows; it mines with whatever your tuning tool has applied.
 title CanaryMiner
@@ -17,6 +17,9 @@ rem Developer donation: on (1%) or off.
 set "DONATION=on"
 rem Any extra options, for example --gpu-id 0 or --api-enable. Leave empty for none.
 set "EXTRA="
+rem 1 retries runtime errors; 0 runs once. The supervisor's own exhausted budget is never retried.
+set "RESTART=1"
+set "MAX_RESTARTS=3"
 rem ---- end of settings ----
 
 rem Turn on colours in this console window (the HKCU setting is per user and harmless if already set).
@@ -36,10 +39,20 @@ if "%WALLET%"=="PUT_YOUR_PRL_ADDRESS_HERE" (
 set "DONATION_FLAG="
 if /i "%DONATION%"=="off" set "DONATION_FLAG=--no-donation"
 echo CanaryMiner: pool %POOL%, worker %WORKER%, donation %DONATION%.
+set "RESTARTS=0"
+if not defined MAX_RESTARTS exit /b 2
+if not "%MAX_RESTARTS:~2,1%"=="" exit /b 2
+for /f "delims=0123456789" %%A in ("%MAX_RESTARTS%") do exit /b 2
 
 :run
 "%~dp0canary-miner.exe" --pool %POOL% --wallet %WALLET% --worker %WORKER% %DONATION_FLAG% %EXTRA%
+set "EXIT_CODE=%ERRORLEVEL%"
+if not "%RESTART%"=="1" exit /b %EXIT_CODE%
+if not "%EXIT_CODE%"=="1" exit /b %EXIT_CODE%
+set /a RESTARTS+=1
+if %RESTARTS% GTR %MAX_RESTARTS% exit /b %EXIT_CODE%
 echo.
-echo The miner stopped (exit code %ERRORLEVEL%). It restarts in 5 seconds. Press Ctrl+C and then Y to quit.
-timeout /t 5 >nul
+echo Retryable runtime error; restart %RESTARTS%/%MAX_RESTARTS% in 5 seconds. Press Ctrl+C and then Y to quit.
+timeout /t 5 /nobreak >nul
+if errorlevel 1 exit /b 130
 goto run

@@ -1,6 +1,6 @@
 #!/bin/sh
 # CanaryMiner, editable launcher. Edit the settings below, then run ./start-advanced.sh.
-# The miner restarts itself 5 seconds after it stops (Ctrl+C quits). Set RESTART=0 to run it once.
+# Only retryable runtime errors restart, at most MAX_RESTARTS times. Q/Ctrl+C/stop and latched faults never restart.
 
 # ---- settings: edit these ----
 # Your public PRL payout address. The launcher refuses to start until you change it.
@@ -14,8 +14,9 @@ POOL="kryptex"
 DONATION="on"
 # Extra options, for example "--gpu-id 0" or "--api-enable". Leave empty for none.
 EXTRA=""
-# 1 restarts the miner after it stops; 0 runs it once.
+# 1 retries exit code 1 only; 0 runs it once. Clean stops, signals and exhausted worker budgets never retry.
 RESTART=1
+MAX_RESTARTS=3
 # ---- end of settings ----
 
 cd "$(dirname "$0")" || exit 1
@@ -32,12 +33,35 @@ donation_flag=""
 if [ "$DONATION" = "off" ]; then donation_flag="--no-donation"; fi
 echo "CanaryMiner: pool $POOL, worker $WORKER, donation $DONATION."
 
+child_pid=""
+stop_launcher() {
+  trap '' INT TERM HUP
+  if [ -n "$child_pid" ]; then
+    kill -TERM "$child_pid" 2>/dev/null
+    wait "$child_pid" 2>/dev/null
+  fi
+  exit "$1"
+}
+trap 'stop_launcher 130' INT
+trap 'stop_launcher 143' TERM
+trap 'stop_launcher 129' HUP
+case "$MAX_RESTARTS" in [0-9]|[0-9][0-9]) ;; *) echo "MAX_RESTARTS must be an integer from 0 to 99." >&2; exit 2;; esac
+restarts=0
+
 while :; do
   # $EXTRA is deliberately unquoted so that several options split into words.
   # shellcheck disable=SC2086
-  ./canary-miner --pool "$POOL" --wallet "$WALLET" --worker "$WORKER" $donation_flag $EXTRA
+  ./canary-miner --pool "$POOL" --wallet "$WALLET" --worker "$WORKER" $donation_flag $EXTRA <&0 &
+  child_pid=$!
+  wait "$child_pid"
   status=$?
+  child_pid=""
   if [ "$RESTART" != "1" ]; then exit "$status"; fi
-  echo "The miner stopped (exit code $status). It restarts in 5 seconds. Press Ctrl+C to quit."
-  sleep 5
+  if [ "$status" != "1" ] || [ "$restarts" -ge "$MAX_RESTARTS" ]; then exit "$status"; fi
+  restarts=$((restarts + 1))
+  echo "Retryable runtime error; restart $restarts/$MAX_RESTARTS in 5 seconds. Press Ctrl+C to quit."
+  sleep 5 &
+  child_pid=$!
+  wait "$child_pid"
+  child_pid=""
 done

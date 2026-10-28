@@ -292,11 +292,13 @@ class FeeSession {
 inline int runOuterLoop(const RunOptions &userOpt, FeeSession *fee, FeeLoopDeps &deps, GuardRestartBudget *budget, int exitOk, int exitRuntime) {
     int rc = 0;
     for (;;) {
+        if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
         RunOptions o = userOpt;
         if (fee && fee->enabled()) o.loopHook = fee->userHook();
         deps.log("lane start: user");
         rc = deps.run(o);
         deps.log("lane end: user rc=" + std::to_string(rc));
+        if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
         if (fee && fee->enabled() && rc == kRunFeeWindow) {
             if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
             if (fee->runFeeWindow(userOpt) == 0) { rc = exitOk; break; }

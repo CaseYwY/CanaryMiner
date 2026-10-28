@@ -162,6 +162,20 @@ struct Rig {
 }  // namespace
 
 int main() {
+    // Stop wins both before the first lane and when a runtime error races the user's stop.
+    {
+        Sim sim;
+        sim.stop = true;
+        auto deps = sim.deps();
+        GuardRestartBudget budget;
+        CHECK(runOuterLoop(userOptions(), nullptr, deps, &budget, 0, 8) == 0);
+        CHECK(sim.runs.empty());
+        sim.stop = false;
+        unsigned runs = 0;
+        deps.run = [&](const RunOptions &) { ++runs; sim.stop = true; return 1; };
+        CHECK(runOuterLoop(userOptions(), nullptr, deps, &budget, 0, 8) == 0);
+        CHECK(runs == 1 && sim.sleptMs == 0);
+    }
     // Production schedule is the default; the accelerated schedule is opt-in at build time only.
 #ifndef CANARY_FEE_TEST_POLICY
     CHECK(std::string(feePolicyBuildLabel()) == "release");

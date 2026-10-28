@@ -109,7 +109,7 @@ the published checksum exactly.
 | `start.bat` | basic launcher (Kryptex); edit your PRL address and double-click |
 | `start-kryptex.bat`, `start-herominers.bat` | the same, pre-filled for each pool |
 | `start-f2pool.bat` | F2Pool; edit your F2Pool account name (not a PRL address) |
-| `start-advanced.bat` | settings at the top (wallet, worker, pool, donation, extra options) and an automatic restart after the miner stops |
+| `start-advanced.bat` | editable settings; bounded retry of runtime error 1 only, never Q/clean stop or latched faults |
 | `config.example.json` | example config file (see [Config file](#config-file)) |
 | `README.txt`, `HELP.txt` | quick start and everyday tasks |
 | `LICENSE.txt`, `THIRD_PARTY.txt`, `LICENSES\` | licences |
@@ -166,7 +166,7 @@ tmux new -s canary ./start.sh       # detach with Ctrl+B then D; reattach with: 
 | `start.sh` | basic launcher (Kryptex); edit your PRL address and run |
 | `start-kryptex.sh`, `start-herominers.sh` | pre-filled per pool; extra options pass through, for example `./start-kryptex.sh --gpu-id 0` |
 | `start-f2pool.sh` | F2Pool; edit your F2Pool account name (not a PRL address) |
-| `start-advanced.sh` | settings at the top (wallet, worker, pool, donation, extra options) and an automatic restart; `RESTART=0` runs it once |
+| `start-advanced.sh` | editable settings; bounded retry of runtime error 1 only; `RESTART=0` runs once; clean stops/signals/latched faults never restart |
 | `config.example.json` | example config file (see [Config file](#config-file)) |
 | `README.txt`, `HELP.txt` | quick start and everyday tasks |
 | `LICENSE`, `THIRD_PARTY.md`, `LICENSES/` | licences |

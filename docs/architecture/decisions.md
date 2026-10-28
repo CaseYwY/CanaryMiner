@@ -25,5 +25,6 @@ Settled product decisions are distinct from unresolved implementation choices. T
 | D-19 | Open technical ADR | Select timezone, exact-decimal and Unicode/grapheme/bidirectional support with licensing, versioning and deterministic tests. |
 | D-20 | Open capability | Verify actual credit attribution/interval support, game frame metrics and whole-system/incremental measurements. Missing capability stays unavailable, not simulated evidence. |
 | D-21 | Accepted conservative observation coverage | Polling cannot prove complete acknowledgement capture at worker exit. Persist uncertain shutdown tails and inter-session intervals, report latest recent gap, keep all-time uncertainty flags, and suppress rolling totals after a clock warning rather than repairing timestamps or clearing warnings implicitly. |
+| D-22 | Accepted lifecycle boundary | Intentional stop revokes the session token. Distinguish clean stop 0, forced stop 7 and exhausted/latched fault 8. Checked-in advanced launchers retry only runtime code 1 under their own finite budget; they must not undo Q/stop or inner fault budgets. Existing private installed controllers are not silently modified. See [P-03a](../session-intent.md). |
 
 Any later change must add its rationale and affected requirements/tests here. Do not erase the previous decision or change a display label to conceal different semantics.

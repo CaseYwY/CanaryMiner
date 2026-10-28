@@ -58,6 +58,8 @@ Use synthetic local CA fixtures for valid chain/name, wrong host/issuer, expirat
 
 Test priority of user stop, latched fault, thermal/telemetry limits, game constraints, economics and ordinary work. Q/Ctrl+C/close invalidate pending results/retries; no menu/save/refresh/login action starts mining. Test outer advanced-launcher/service restart boundaries as well as supervisor flags. Test bounded worker drains, crash budgets/cooldowns, helper ownership/restore without clobbering external changes, PID generation, no uncontrolled driver reset/reboot and no privilege escalation in network/UI code.
 
+Executed P-03a [intent/launcher evidence](../session-intent.md) covers explicit-start tokens, actual fake-worker supervisor exits and copied native launchers. Game/economic arbitration is still a pure contract, not runtime telemetry or game qualification.
+
 ## T-I18N
 
 Test all declared locales/key coverage, placeholders/plurals, review/fallback status, UTF-8/grapheme/combining/wide/RTL snapshots, numeric/date/currency formatting and invariant flags/JSON/protocol/event codes. Changing language must not change tariff, timezone, currency, device or prices.

@@ -26,10 +26,12 @@ namespace {
 const char kFakeChild[] = "--fake-child";
 const char kFakeCrash[] = "--fake-crash";
 const char kFakeHang[] = "--fake-hang";
+const char kFakeLatched[] = "--fake-latched";
 const char kHandleProbe[] = "--handle-probe";
 
 /** The fake worker: prints a line on each stream, then either waits for stdin to close and exits 3 (a graceful stop), or crashes. */
 int fakeChild(const std::string &mode) {
+    if (mode == kFakeLatched) return kExitFaultLatched;
     if (mode == kFakeCrash) {
         printf("crashing now\n");
         fflush(stdout);
@@ -762,7 +764,7 @@ struct TuningHookProbe final : SupervisorTuning {
 
 void testTuningHookOnForcedStop() {
     TuningHookProbe probe;
-    supervisedRun({kFakeHang}, 1, 500, &probe);
+    CHECK(supervisedRun({kFakeHang}, 1, 500, &probe) == kExitShutdownForced);
     CHECK(probe.calls.size() >= 3 && probe.calls.front() == "start" && probe.calls.back() == "stop");
     bool sawTick = false;
     for (const std::string &call : probe.calls) sawTick = sawTick || call == "tick";
@@ -771,7 +773,20 @@ void testTuningHookOnForcedStop() {
 
 void testSupervisedRestartBudget() {
     // a worker that crashes at once is restarted after 10 s, three times within the hour; the fourth crash ends the run with an error
-    CHECK(supervisedRun({kFakeCrash}, 1, 120000) == kExitRuntime);
+    CHECK(supervisedRun({kFakeCrash}, 1, 120000) == kExitFaultLatched);
+}
+
+void testStopAlreadyRequested() {
+    volatile sig_atomic_t stop = 1;
+    auto options = baseOptions();
+    options.exe = "must-not-be-executed";
+    options.seeds = {seed(0)};
+    options.stop = &stop;
+    TuningHookProbe probe;
+    options.tuning = &probe;
+    Supervisor supervisor(std::move(options));
+    CHECK(supervisor.run() == kExitOk);
+    CHECK(probe.calls.empty());
 }
 
 }  // namespace
@@ -785,7 +800,7 @@ int main(int argc, char **argv) {
         return finishTests("handle_isolation");
     }
 #endif
-    if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang))
+    if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang || std::string(argv[1]) == kFakeLatched))
         return fakeChild(argv[1]);
     if (argc == 3 && std::string(argv[1]) == "--dashboard-session-test") {
         if (!platformInit()) return 83;
@@ -808,6 +823,8 @@ int main(int argc, char **argv) {
         return result;
     }
     testFeedLines();
+    testStopAlreadyRequested();
+    CHECK(supervisedRun({kFakeLatched}, 1, 120000) == kExitFaultLatched);
     testWorkerArgs();
     testStatsRoundTrip();
     testAggregate();

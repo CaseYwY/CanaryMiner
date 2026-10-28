@@ -1088,7 +1088,7 @@ int main(int argc, char **argv) {
     } else if (plainRun) {
         fprintf(stderr, "developer donation: off\n");
     }
-    int rc = om::runOuterLoop(opt, feeSession.get(), feeDeps, &guardBudget, kExitOk, kExitRuntime);
+    int rc = om::runOuterLoop(opt, feeSession.get(), feeDeps, &guardBudget, kExitOk, kExitFaultLatched);
     bool forcedShutdown = false;
     if (shutdownDriver) {
         shutdownDriver->runLoopFinished();

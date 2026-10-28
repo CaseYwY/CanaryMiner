@@ -52,6 +52,7 @@
 #include "redact.h"
 #include "restart_budget.h"
 #include "settings.h"
+#include "session_intent.h"
 #include "accepted_history.h"
 #include "stats.h"
 #include "stats_server.h"
@@ -520,6 +521,9 @@ class Supervisor {
 
     /** Returns kExitOk when every worker stopped on request, kExitRuntime when a worker could not be kept running. */
     int run() {
+        if (opt_.stop && *opt_.stop) return kExitOk;
+        sessionToken_ = intent_.explicitStart();
+        if (!intent_.permits(sessionToken_)) return kExitFaultLatched;
         const uint64_t t0 = supervisorNowMs();
         if (!opt_.uiPreferencesPath.empty() && opt_.dashboard) {
             uiStore_.reset(new UiPreferencesStore(std::filesystem::u8path(opt_.uiPreferencesPath)));
@@ -672,7 +676,8 @@ class Supervisor {
                                     std::to_string((supervisorNowMs() - t0) / 1000) + " s";
         if (tty) printf("%s\n", summary.c_str());
         else printLine(summary);
-        return failed ? kExitRuntime : kExitOk;
+        if (failed) intent_.stop();
+        return forced ? kExitShutdownForced : failed && !quit && !(opt_.stop && *opt_.stop) ? kExitFaultLatched : kExitOk;
     }
 
    private:
@@ -713,6 +718,8 @@ class Supervisor {
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
     std::unique_ptr<AcceptedHistory> history_;
+    SessionIntent intent_;
+    SessionToken sessionToken_;
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
@@ -730,6 +737,9 @@ class Supervisor {
 
     /** Starts (or restarts) worker i. A spawn failure counts as an unexpected exit. */
     void startWorker(size_t i, uint64_t now) {
+        // Recheck signals here as well: one can arrive between loop polling and a due retry/first spawn.
+        if (opt_.stop && *opt_.stop) intent_.stop();
+        if (!intent_.permits(sessionToken_)) return;
         Worker &w = *workers_[i];
         w.restartPending = false;
         ++w.historyGeneration;
@@ -757,6 +767,7 @@ class Supervisor {
 
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
+        intent_.stop();  // every pending result/retry from this epoch loses permission before draining
         addEvent("stopping: draining every GPU");
         for (auto &w : workers_) {
             w->restartPending = false;
@@ -785,6 +796,12 @@ class Supervisor {
         w.seen = false;
         w.view.haveStats = false;
         w.view.detail = spawnError.empty() ? "exited with code " + std::to_string(code) : spawnError;
+        if (code == kExitFaultLatched) {
+            w.view.state = "Error";
+            w.view.detail += "; worker fault is latched; explicit new start required";
+            addEvent(workerLabel(w) + ": " + w.view.detail);
+            return;
+        }
         if (!w.budget.admit(now)) {
             w.view.state = "Error";
             w.view.detail += "; restart budget spent (3 per hour), this GPU is stopped";

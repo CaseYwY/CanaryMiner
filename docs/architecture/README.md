@@ -8,6 +8,8 @@
 
 **History batch:** P-04 adds local observed accepted counters with optional system SQLite, rolling windows, coverage/recovery and `--no-history`. See [history semantics](../accepted-history.md) and [validation](../history-validation.md). It is not a complete pool-acknowledgement or token-income ledger.
 
+**Safety slice:** P-03a adds [session intent and launcher lifecycle](../session-intent.md). Intentional stop and latched worker faults no longer authorize unconditional relaunch by the checked-in advanced scripts. Runtime activation controls, throttling and automatic policy integrations remain unfinished.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order
