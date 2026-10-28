@@ -606,6 +606,7 @@ class Supervisor {
                     if (!key) break;
                     view_.options = ui_;  // a saved page switch also governs the very next queued shortcut
                     if (settings_.visible) {
+                        settings_.updateCreditReview();
                         const auto result = settings_.key(key, [this](const UiPreferences &p, std::string *error) {
                             if (uiStore_ && !uiStore_->save(p, error)) return false;
                             ui_ = p;

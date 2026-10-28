@@ -298,6 +298,10 @@ worker retry. `--no-energy` disables optional collection for this session withou
 Unknown power is not zero; known energy/cost carry model/basis/time/coverage. This excludes complex/shared utility billing,
 whole-PC/incremental measurement, persistent energy history and net income; no installed miner is replaced.
 
+**S → Privacy → Credit recovery / collection status** provides the [native review seam](docs/credit-review.md).
+Without a qualified active collector it reports unavailable and opens no ledger. Synthetic tests cover private original-input
+review and one explicit revision-bound retry; there is no production ingestion, automatic replay, deletion/rebuild or income activation.
+
 The development CLI also accepts [`--work-wait-ms 0..1000`](docs/work-wait.md) between completed work batches, default 0.
 S → Automatic mining or Privacy now opens [runtime defaults](docs/runtime-settings.md) for host wait/history collection.
 These save separately from UI drafts to `runtime-preferences.json`, show configured/current/CLI-overridden values and apply

@@ -58,6 +58,8 @@ Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/neg
 
 [P-05b/P-08b](../session-energy.md) adds native settings/store tests, explicit NVML missing-versus-zero power, generation/origin-bound streaming accumulation, effective-version/clock guards and a queue-drop continuity oracle. POSIX actual-CLI/fake-supervisor PTY verifies independent saves, frozen current/next-start activation, CLI suppression, display/collection separation and Ctrl+C through an owned controlling terminal/stop flag. Synthetic data and host tests do not qualify native NVML accuracy/stalls, whole-PC/incremental baselines, persistent energy history, bill rules or net income.
 
+[P-07d](../credit-review.md) adds native private-default/status/original-input/acknowledgement tests and real helper tests for lost-reply retained input, no-auto-apply inspection, stale final-click refusal under an owner mutex and exact one-shot retry with unchanged observation times. POSIX PTY uses the actual settings plus injected fixture owner for reveal/cancel/dirty-draft preservation/duplicate Enter/confirmation/SIGINT. These do not qualify source/cursor/import/export/production binding or genuine parent-death/kernel/power-loss recovery.
+
 ## T-PROFILES
 
 Test zero-ms throttle semantics and safe complete-work-unit boundaries, warm-up/exclusion, repeated windows, bounded time/energy costs, cancellation and faults. Test profile fingerprints, import hints versus measured eligibility, drift/software/environment invalidation and no full-speed sweep during play. No arbitrary device whitelist or kernel-math expansion as a side effect.

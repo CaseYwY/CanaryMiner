@@ -28,6 +28,8 @@
 
 **Native energy defaults:** P-05b/P-08b adds [reviewed flat energy-only settings and optional session GPU-board estimates](../session-energy.md), an explicit power-read validity flag, bounded background accumulation and `--no-energy`. Settings freeze until the next explicit session. It is not a combined utility-bill adapter, persistent energy history, whole-PC/incremental measurement, income/net forecast or production hardware qualification.
 
+**Native credit review:** P-07d adds [private-original-input/status review and revision-bound exact retry](../credit-review.md) under Privacy. Ordinary settings opens no credit store/collector and clearly reports unavailable; the test-only fixture exercises the real helper. Tickets are not durable cursors, and changed review, lost reply or failed retry cannot erase uncertainty or enable income.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order

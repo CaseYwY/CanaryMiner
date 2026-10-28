@@ -69,6 +69,8 @@ The initial [P-05a/P-08a core](../electricity-core.md) is synchronous/pure and u
 
 [P-05b/P-08b](../session-energy.md) adds a separate default-off in-memory session owner. The supervisor only admits fixed-size generation-bound raw integer-milliwatt/absence observations from existing NVML reads; exact accumulation and prevalidated view formatting are background work. Its fixed GPU-board basis, explicit origin, UTC mapping guard and drop continuity cannot become whole-meter/baseline evidence. Reviewed flat-energy defaults are frozen per parent session; the full bill/time core, source-qualified forecasts and persistent billing state remain separate. Existing synchronous preference saves/native driver calls still need OS-stall qualification.
 
+[P-07d](../credit-review.md) connects a native recovery panel through optional fixed-owner in-memory callbacks, default empty in production. `uncertainBatch` aliases the immutable original retained job, including after lost replies. The new `retryReviewed` compares generation/revision/state and performs admission under the same mutex; UI-level last-frame checking alone is insufficient. Rendering never discovers/opens a credit store, refreshes source facts or performs helper I/O. Real collection/source cursor and production binding/helper packaging remain separate gates.
+
 ### M-PROFILES
 
 Owns bounded measurement plans, profile eligibility/fingerprints, drift detection and evidence. It requests safe session transitions but cannot override user stop, thermal limits or a game's test permission. Imported/model-based curves are hints until locally validated.

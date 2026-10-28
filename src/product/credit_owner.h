@@ -10,7 +10,7 @@ struct CreditOwnerPolicy {
     bool persistentRecovery = true; // default helper-side journal; false retains the explicit volatile compatibility contract
 };
 enum class CreditOwnerState { Stopped, Starting, Ready, Busy, NeedsReconciliation, Faulted };
-enum class CreditEnqueueStatus { Queued, NotReady, StaleGeneration, Full, Invalid, NeedsReconciliation };
+enum class CreditEnqueueStatus { Queued, NotReady, StaleGeneration, Full, Invalid, NeedsReconciliation, ReviewChanged };
 struct CreditEnqueueResult { CreditEnqueueStatus status = CreditEnqueueStatus::NotReady; uint64_t ticket = 0; };
 struct CreditOwnerSnapshot {
     CreditOwnerState state = CreditOwnerState::Stopped;
@@ -22,6 +22,10 @@ struct CreditOwnerSnapshot {
     uint64_t uncertainSequence = 0;
     std::string uncertainSnapshotId;
     CreditRecoveryState recoveryState = CreditRecoveryState::Disabled;
+    bool persistentRecovery = false;
+    // Aliased immutable original input retained by the uncertain job, also available after a lost/invalid reply.
+    // Private local review only: never log/export this or infer source progress from its existence.
+    std::shared_ptr<const CreditBatch> uncertainBatch;
     uint64_t durableSequence = 0;
     std::string durableSnapshotId;
     std::optional<CreditProcessReply> reply; // immutable point-in-time results, not fresh income solely because read recently
@@ -39,6 +43,8 @@ class CreditLedgerOwner {
     CreditEnqueueResult refresh(uint64_t generation, const std::vector<CreditQuerySpec> &queries = {});
     // Explicit reviewed recovery only: retry exact retained batch identity/content. Never run automatically after stop/fault.
     CreditEnqueueResult retryUncertain(uint64_t generation);
+    // Native review must bind to the exact observed revision; check and admission happen under the same owner mutex.
+    CreditEnqueueResult retryReviewed(uint64_t generation, uint64_t revision);
     void requestStop(); // short in-memory cancellation; discards queued unacknowledged jobs, no file/helper I/O here
     void stop();        // joins the background task after cancellation; invoke outside the mining/render/safety loop
     std::shared_ptr<const CreditOwnerSnapshot> snapshot() const;

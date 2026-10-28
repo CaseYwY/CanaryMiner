@@ -2,6 +2,8 @@
 
 **Fixture-qualified core only; no production financial activation.** This extends the [P-07b isolated owner](credit-owner.md), not source qualification. The production supervisor still constructs no credit owner, actual-income/forecast/net rows remain disabled, and no account, collector, import/export command, mining authorization or recovery UI is introduced.
 
+The later [P-07d native review seam](credit-review.md) adds in-memory status/private-original-input review and atomic revision-bound explicit retry, integrated with the terminal settings and tested with a synthetic owner. Ordinary settings still activates no credit owner/store; real-source collection, production recovery binding and import/export remain unavailable. The following P-07c evidence/limitations refer to its original core batch.
+
 Requirements: R-INC-001/003–007, R-SAFE-001/002, R-PRIV-002. Modules: M-LEDGER/M-SUPERVISOR/M-PRIVACY. Test families: T-LEDGER, T-INTENT, T-PRIVACY. All remain partial for their full product scope.
 
 ## State and ownership

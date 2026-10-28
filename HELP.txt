@@ -162,6 +162,11 @@ Contents
   sample-and-hold estimates, not whole-PC/incremental energy, a utility bill, persistent history, income or net profit.
   See docs/session-energy.md for scope, source, clock, storage, activation and unqualified release gates.
 
+  Credit recovery / collection status: S -> Privacy. Without a qualified active collector this page reports unavailable
+  and opens no credit store. Its fixture-tested review hides private original input until explicitly revealed;
+  one acknowledged exact retry is bound to the owner generation/revision. Queue tickets are not durable source cursors.
+  No import/export, delete/rebuild, automatic replay or production income activation. See docs/credit-review.md.
+
 
 8. The developer donation
 -------------------------

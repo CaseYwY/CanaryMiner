@@ -35,6 +35,7 @@ struct CreditLedgerOwner::Impl {
     void publish() { // mutex held; no disk, process wait, callbacks or provider work
         current.pendingJobs = jobs.size()+(inFlight?1:0);
         current.writeOutcomeUnknown = static_cast<bool>(uncertain);
+        current.uncertainBatch = uncertain ? std::shared_ptr<const CreditBatch>(uncertain,&*uncertain->request.batch) : nullptr;
         current.uncertainSequence = uncertain?uncertain->request.batch->sequence:0; current.uncertainSnapshotId = uncertain?uncertain->request.batch->snapshotId:"";
         ++current.revision; published = std::make_shared<const CreditOwnerSnapshot>(current);
     }
@@ -135,6 +136,7 @@ bool CreditLedgerOwner::start(uint64_t generation) {
     try {
         s.greatestGeneration = generation;
         s.current = {}; s.current.binding = s.binding; s.current.generation = generation; s.current.state = CreditOwnerState::Starting;
+        s.current.persistentRecovery=s.policy.persistentRecovery;
         s.cancel = false; s.opened = false; s.lastUtc = 0;
         if (s.enqueue(nullptr,{},false,true).status != CreditEnqueueStatus::Queued) { s.cancel = true; s.current.state = CreditOwnerState::Stopped; s.publish(); return false; }
         s.thread = std::thread([p=&s]{p->run();}); return true;
@@ -155,6 +157,14 @@ CreditEnqueueResult CreditLedgerOwner::retryUncertain(uint64_t generation) {
     if (generation != s.current.generation) return {CreditEnqueueStatus::StaleGeneration,0};
     if (!s.uncertain || !s.jobs.empty() || s.inFlight) return {CreditEnqueueStatus::NotReady,0};
     try { return s.enqueue(&*s.uncertain->request.batch,{},true); } catch (...) { return {CreditEnqueueStatus::Invalid,0}; }
+}
+CreditEnqueueResult CreditLedgerOwner::retryReviewed(uint64_t generation,uint64_t revision) {
+    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
+    if(generation!=s.current.generation)return {CreditEnqueueStatus::StaleGeneration,0};
+    if(!revision||revision!=s.current.revision)return {CreditEnqueueStatus::ReviewChanged,0};
+    if(!s.policy.persistentRecovery)return {CreditEnqueueStatus::Invalid,0};
+    if(!s.uncertain||s.current.state!=CreditOwnerState::NeedsReconciliation||!s.jobs.empty()||s.inFlight)return {CreditEnqueueStatus::NotReady,0};
+    try{return s.enqueue(&*s.uncertain->request.batch,{},true);}catch(...){return {CreditEnqueueStatus::Invalid,0};}
 }
 void CreditLedgerOwner::requestStop() {
     auto &s = *impl_; std::lock_guard<std::mutex> lock(s.mutex);

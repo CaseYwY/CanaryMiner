@@ -12,6 +12,7 @@
 #include "runtime_settings.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
+#include "credit_review.h"
 
 namespace om {
 
@@ -31,6 +32,8 @@ class SettingsPanel {
     RuntimeSettingsPanel runtime;
     ManualMarketSettingsPanel manual;
     ElectricitySettingsPanel electricity;
+    CreditReviewPanel credit;
+    CreditReviewAccess creditAccess; // default empty; this does not construct or activate a credit owner
 
     void open(const UiPreferences &value) {
         active = draft = value;
@@ -42,6 +45,7 @@ class SettingsPanel {
         runtime.visible = false;
         manual.visible = false;
         electricity.visible = false;
+        credit.visible = false;
     }
     bool dirty() const { return active != draft; }
 
@@ -50,9 +54,11 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 0 ? 3 : (group == 1 || group == 2 || group == 3) ? 1 : group == 8 ? 2 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 0 || group == 8 ? 3 : (group == 1 || group == 2 || group == 3) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
 
     SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}) {
+        if(credit.visible){updateCreditReview();return credit.key(key,creditAccess)==CreditReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if (electricity.visible) return electricity.key(key,electricitySave,nowUtc) == ElectricitySettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (manual.visible) return manual.key(key, manualSave, nowUtc) == ManualMarketSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (runtime.visible) return runtime.key(key, runtimeSave) == RuntimeSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
@@ -99,6 +105,7 @@ class SettingsPanel {
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3) return SettingsResult::OpenManualMarket;
             else if (group == 2) return SettingsResult::OpenElectricity;
+            else if (group == 8 && field == 2) credit.open(creditAccess.snapshot?creditAccess.snapshot():nullptr);
             else change();
         }
         return SettingsResult::None;
@@ -124,6 +131,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if(credit.visible)return credit.render(columns,rows,color);
         if (electricity.visible) return electricity.render(columns,rows,color);
         if (manual.visible) return manual.render(columns, rows, color);
         if (runtime.visible) return runtime.render(columns, rows, color);
@@ -226,6 +234,7 @@ class SettingsPanel {
         } else if (group == 8) {
             row(0, std::string("Hide worker label  [") + (draft.hideWorker ? "x" : " ") + "]");
             row(1, "History collection / runtime defaults [Enter]");
+            row(2, "Credit recovery / collection status [Enter]");
             result.push_back({"Presentation only, not a diagnostic scrubber.", Tone::Plain});
             result.push_back({"Logs, API and files are not anonymized by it.", Tone::Plain});
         } else if (group == 1) {
@@ -299,7 +308,7 @@ inline void openElectricityControls(SettingsPanel *panel,ElectricityPreferencesS
     panel->electricity.open(p,context);
 }
 
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false) {
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -319,6 +328,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     KeyReader keys;
     SettingsPanel panel;
     panel.open(preferences);
+    panel.creditAccess=std::move(creditAccess);
     printf("\x1b[2J\x1b[?25l");
     while (panel.visible && !(stop && *stop)) {
         for (int n = 0; n < 32; ++n) {
@@ -333,6 +343,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
             else if (result == SettingsResult::OpenElectricity) {ElectricitySettingsContext context;context.cliNoEnergy=noEnergy;openElectricityControls(&panel,&electricityStore,context);}
             else if (result != SettingsResult::None) { panel.visible = false; break; }
         }
+        panel.updateCreditReview();
         const auto color = panel.active.color ? detectColorLevel() : ColorLevel::None;
         printSettingsFrame(panel.render(terminalColumns(80), terminalRows(24), color));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
