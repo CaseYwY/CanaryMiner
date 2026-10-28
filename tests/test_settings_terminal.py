@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""POSIX PTY integration for the actual host CLI: no CUDA, mining or network.
+"""POSIX PTY integration for the actual host CLI: no CUDA, mining or external network.
 
 Usage: python3 tests/test_settings_terminal.py PATH_TO_HOST_CLI
 All runtime files are synthetic and stay in a private temporary directory.
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import select
 import signal
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -35,7 +36,7 @@ def main():
         assert not preferences.exists()
         checks = 3
 
-        def session(edit, expected, supervisor=None):
+        def session(edit, expected, supervisor=None, history_count=2):
             nonlocal checks
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
@@ -67,6 +68,7 @@ def main():
             try:
                 if supervisor:
                     until(b"[S]")  # label may wrap at the terminal boundary
+                    until(f"all local {history_count}".encode())
                     os.write(master, b"s")
                 until(b"CanaryMiner / Settings")
                 assert b"no CUDA" not in transcript
@@ -128,6 +130,15 @@ def main():
                 os.write(terminal, b"q")
 
             session(dashboard_edit, 100, str(Path(sys.argv[2]).resolve()))
+            def dashboard_restart(process, terminal, until):
+                del process, until
+                os.write(terminal, b"q")
+
+            session(dashboard_restart, 100, str(Path(sys.argv[2]).resolve()), history_count=4)
+            with sqlite3.connect(root / "state" / "accepted-history.sqlite3") as database:
+                assert database.execute("SELECT total FROM meta WHERE id=1").fetchone()[0] == 4
+                assert database.execute("SELECT COUNT(*) FROM sessions WHERE ended IS NULL").fetchone()[0] == 0
+                assert database.execute("SELECT gaps FROM meta WHERE id=1").fetchone()[0] == 1
         assert set(json.loads(preferences.read_text())) == {
             "schema_version", "refresh_ms", "show_events", "hide_worker", "color", "details_enabled", "log_enabled",
             "details_identity", "details_pool", "details_restarts", "details_errors", "log_severity", "log_unclassified",

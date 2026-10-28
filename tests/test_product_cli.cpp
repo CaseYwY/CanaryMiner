@@ -37,6 +37,7 @@ int main() {
     CHECK(parseArgs({"--pool", "f2pool", "-u", "prl1abc.rig1"}).command == Command::Run);
     CHECK(parseArgs({"run", "-o", "f2pool"}).command == Command::Run);
     CHECK(parseArgs({"settings"}).command == Command::Settings);
+    CHECK(parseArgs({"--no-history"}).ov.noHistory);
     CHECK(parseArgs({"settings", "--help"}).help);
     CHECK(contains(productHelpText(), "canary-miner settings"));
 

@@ -55,3 +55,4 @@ ui-preferences.json
 ui-preferences.json.lock/
 ui-preferences.json.tmp-*
 ui-preferences.json.v1.bak
+accepted-history.sqlite3*

@@ -2,6 +2,8 @@
 
 This is a host-side development batch. All financial inputs, devices, worker processes and local preference files used in tests are synthetic. No private mining/revenue/tariff dataset is included.
 
+This evidence describes the earlier display batch. The subsequent local accepted-history implementation has separate [history evidence](history-validation.md); it does not make these financial tests live-income qualification.
+
 | Executed check | Result |
 |---|---|
 | Windows MSVC CPU targets and CLI stub/preview build | Passed; existing optimization-flag override warnings remain |

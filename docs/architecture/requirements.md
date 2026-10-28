@@ -12,10 +12,10 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-UI-006 | Configure Details fields and Log level, rows, timestamps and follow behaviour; distinguish display filtering from storage retention. | M-UI | P-02 | T-UI | DONE |
 | R-UI-007 | Show configured/effective/CLI-overridden values and live/re-evaluate/reconnect/permission change classes; detect external config changes. | M-CONFIG | P-03 | T-CONFIG | PLANNED |
 | R-UI-008 | Preserve focus and readable content on resize, short terminals, no-color/plain output and text editing; never trigger global shortcuts inside text fields. | M-UI | P-02 | T-UI | PARTIAL |
-| R-HIST-001 | Show rolling 24h, 7d, 30d and all-local-history accepted counts; show collection start/coverage and missing intervals. | M-HISTORY | P-04 | T-HISTORY | PLANNED |
-| R-HIST-002 | Count acknowledged accepted user shares only; exclude developer-donation shares and never convert share count directly into income. | M-HISTORY | P-04 | T-HISTORY | PLANNED |
-| R-HIST-003 | Preserve history across restarts with counter-generation/deduplication rules, bounded storage, crash recovery and explicit corruption handling. | M-HISTORY | P-04 | T-HISTORY | PLANNED |
-| R-HIST-004 | Distinguish observed acknowledgement time from unavailable exact pool timestamps; handle clock jumps without wrapping or double counting. | M-HISTORY | P-04 | T-HISTORY | PLANNED |
+| R-HIST-001 | Show rolling 24h, 7d, 30d and all-local-history accepted counts; show collection start/coverage and missing intervals. | M-HISTORY | P-04 | T-HISTORY | DONE |
+| R-HIST-002 | Count acknowledged accepted user shares only; exclude developer-donation shares and never convert share count directly into income. | M-HISTORY | P-04 | T-HISTORY | DONE |
+| R-HIST-003 | Preserve history across restarts with counter-generation/deduplication rules, bounded storage, crash recovery and explicit corruption handling. | M-HISTORY | P-04 | T-HISTORY | DONE |
+| R-HIST-004 | Distinguish observed acknowledgement time from unavailable exact pool timestamps; handle clock jumps without wrapping or double counting. | M-HISTORY | P-04 | T-HISTORY | DONE |
 | R-MKT-001 | Display last-1h equal-time average and latest token price with quote currency, source, as-of, coverage and freshness. | M-MARKET | P-06 | T-MARKET | PLANNED |
 | R-MKT-002 | Replace price, FX and reward adapters without changing policy code; validate asset/network identity rather than ticker alone. | M-MARKET | P-06 | T-MARKET | PLANNED |
 | R-MKT-003 | Use bounded asynchronous HTTPS requests, provenance, cache expiry, rate limits, retry/backoff and manual/offline inputs; no trading or private keys. | M-MARKET | P-06 | T-MARKET | PLANNED |
@@ -62,3 +62,5 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-REL-002 | Keep small reversible contribution batches, issue-first upstream behaviour/protocol discussion, DCO and all required release gates. | M-RELEASE | P-14 | T-RELEASE | PARTIAL |
 
 `PARTIAL` means a baseline behaviour or process exists, not that the expanded requirement is complete. For example, current Q/signal tests do not establish the future economic/game resume state machine, and current ASCII resize tests do not establish multilingual terminal accessibility.
+
+P-04 `DONE` is the local **observed-counter** scope in [accepted history](../accepted-history.md), with [host/PTY evidence](../history-validation.md). It is not complete pool history: missed shutdown tails/session gaps are uncertain, exact pool timestamps are unavailable, and clock warnings suppress rolling totals. Financial-credit storage and persisted runtime settings are separate tasks.

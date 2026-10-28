@@ -24,6 +24,7 @@
 #include "terminal_keys.h"
 #include "ui_preferences.h"
 #include "financial_view.h"
+#include "accepted_history_view.h"
 
 #if defined(_WIN32)
 #include <conio.h>
@@ -82,6 +83,7 @@ struct DashModel {
     std::vector<std::string> log;   // redacted worker output, oldest first ([L])
     std::vector<DashLogEntry> logEntries;  // structured provenance when available; raw output is unclassified
     FinancialView finances;
+    AcceptedHistoryView history;
 };
 
 /** What the terminal shows: the page, the scroll position, and the terminal size and colour. */
@@ -97,6 +99,8 @@ struct DashView {
     bool logFrozen = false, logScrollHeld = false;
     std::vector<DashLogEntry> frozenLog;
 };
+
+inline std::string utcIsoClock(time_t t);
 
 namespace dash_detail {
 
@@ -336,7 +340,30 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
     }
     out.push_back(one(""));
 
-    // SESSION SHARES: per GPU, a TOTAL, then the donation (kept apart from the shares).
+    if (m.history.enabled) {
+        section(out, "ACCEPTED HISTORY (observed user shares)", w);
+        const auto &h = m.history;
+        if (!h.ready) {
+            for (const auto &part : wrapText("N/A: " + (h.error.empty() ? std::string("loading local history") : h.error), w))
+                out.push_back(one(part, Tone::Amber));
+        } else {
+            const std::string history = "24h " + (h.clockAdjusted ? std::string("N/A") : commas(h.day)) +
+                " | 7d " + (h.clockAdjusted ? std::string("N/A") : commas(h.week)) +
+                " | 30d " + (h.clockAdjusted ? std::string("N/A") : commas(h.month)) + " | all local " + commas(h.all);
+            for (const auto &part : wrapText(history, w)) out.push_back(one(part, Tone::Canary));
+            for (const auto &part : wrapText("Collected since " + utcIsoClock(static_cast<time_t>(h.startedUtc)) +
+                    "; 1s observation resolution; donor shares excluded.", w)) out.push_back(one(part, Tone::Plain));
+            out.push_back(one("As of " + utcIsoClock(static_cast<time_t>(h.asOfUtc)), Tone::Dark));
+            if (h.asOfUtc < h.startedUtc || h.asOfUtc - h.startedUtc < 30 * 86400 || h.gaps || h.clockAdjusted)
+                for (const auto &part : wrapText("Coverage: partial span/known observations" + std::string(h.gaps ? "; recovery/gap warning" : "") +
+                        (h.clockAdjusted ? "; clock adjusted, rolling totals unavailable" : ""), w)) out.push_back(one(part, Tone::Amber));
+            if (h.gapFromUtc)
+                for (const auto &part : wrapText("Latest uncertain interval: " + utcIsoClock(static_cast<time_t>(h.gapFromUtc)) + " to " +
+                        utcIsoClock(static_cast<time_t>(h.gapToUtc)), w)) out.push_back(one(part, Tone::Amber));
+        }
+        out.push_back(one(""));
+    }
+
     if (m.finances.enabled) {
         section(out, "PRODUCTION AND REFERENCE VALUATION", w);
         for (const auto &line : financialViewLines(m.finances))
@@ -344,6 +371,7 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
         out.push_back(one(""));
     }
 
+    // SESSION SHARES: per GPU, a TOTAL, then the donation (kept apart from the shares).
     section(out, "SESSION SHARES", w);
     auto shareHead = [&]() {
         Line head{cell("GPU", 14, false, Tone::Plain)};
@@ -459,9 +487,9 @@ inline std::string utcClock(time_t t) {
 inline std::string utcIsoClock(time_t t) {
     struct tm g {};
 #if defined(_WIN32)
-    gmtime_s(&g, &t);
+    if (gmtime_s(&g, &t) != 0) return "[invalid UTC]";
 #else
-    gmtime_r(&t, &g);
+    if (!gmtime_r(&t, &g)) return "[invalid UTC]";
 #endif
     char b[32];
     strftime(b, sizeof(b), "%Y-%m-%dT%H:%M:%SZ", &g);
@@ -578,9 +606,20 @@ inline std::string renderPlainSummary(const DashModel &m, time_t now) {
         rejected += g.outcomes.rejected;
         states += (states.empty() ? "" : ", ") + std::string("GPU") + std::to_string(g.index) + " " + g.state;
     }
+    std::string history;
+    if (m.history.enabled) {
+        const auto &h = m.history;
+        if (!h.ready) history = " | history N/A: " + (h.error.empty() ? std::string("loading") : h.error);
+        else history = " | observed user history 24h " + (h.clockAdjusted ? std::string("N/A") : commas(h.day)) +
+            ", 7d " + (h.clockAdjusted ? std::string("N/A") : commas(h.week)) +
+            ", 30d " + (h.clockAdjusted ? std::string("N/A") : commas(h.month)) + ", all local " + commas(h.all) +
+            ", since " + utcIsoClock(static_cast<time_t>(h.startedUtc)) + ", as of " + utcIsoClock(static_cast<time_t>(h.asOfUtc)) +
+            ", 1s resolution, donation excluded, observed coverage only" + (h.gaps ? ", gaps" : "") +
+            (h.clockAdjusted ? ", clock adjusted" : "");
+    }
     return "[" + utcClock(now) + "] Current " + fixed(rate, 1) + " TH/s | average " + fixed(avg, 1) + " TH/s | accepted " +
            std::to_string(accepted) + " rejected " + std::to_string(rejected) + " | " + states + " | donation " +
-           (m.donationOn ? std::string("on") : std::string("off"));
+           (m.donationOn ? std::string("on") : std::string("off")) + history;
 }
 
 // ---- terminal helpers

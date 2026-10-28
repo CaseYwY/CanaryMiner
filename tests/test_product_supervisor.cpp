@@ -52,6 +52,28 @@ int fakeChild(const std::string &mode) {
 
 bool has(const std::string &text, const char *needle) { return text.find(needle) != std::string::npos; }
 
+int fakeHistoryChild(int argc, char **argv) {
+    int port = 0;
+    for (int i = 2; i + 1 < argc; ++i) if (std::string(argv[i]) == "--api-port") port = std::atoi(argv[i + 1]);
+    if (!platformInit() || port <= 0) return 81;
+    StatsSnapshot stats;
+    stats.state = "running";
+    stats.poolState = "mining";
+    stats.devices.push_back(StatsDevice{});
+    stats.devices[0].outcomes.accepted = 2;
+    stats.devices[0].outcomes.rejected = 3;
+    stats.devices[0].outcomes.pending = 4;
+    stats.fee.outcomes.accepted = 999;
+    StatsServer server;
+    std::string error;
+    if (!server.start("127.0.0.1", port, [&] { return statsToJson(stats); }, "{}", &error)) return 82;
+    char input[64];
+    while (fread(input, 1, sizeof(input), stdin) > 0) {}
+    server.stop();
+    platformShutdown();
+    return 0;
+}
+
 WorkerSeed seed(int index) {
     WorkerSeed s;
     s.index = index;
@@ -755,6 +777,7 @@ void testSupervisedRestartBudget() {
 }  // namespace
 
 int main(int argc, char **argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--fake-history-child") return fakeHistoryChild(argc, argv);
 #if defined(_WIN32)
     if (argc >= 3 && std::string(argv[1]) == kHandleProbe) return handleProbeChild(argv[2]);
     if (argc == 2 && std::string(argv[1]) == "--handle-isolation-test") {
@@ -765,14 +788,24 @@ int main(int argc, char **argv) {
     if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang))
         return fakeChild(argv[1]);
     if (argc == 3 && std::string(argv[1]) == "--dashboard-session-test") {
+        if (!platformInit()) return 83;
+        StatsServer probe;
+        std::string error;
+        if (!probe.start("127.0.0.1", 0, [] { return "{}"; }, "{}", &error)) return 84;
+        const int port = probe.port();
+        probe.stop();
         SupervisorOptions options = baseOptions();
         options.exe = selfExecutablePath();
-        options.userArgs = {kFakeChild};
+        options.userArgs = {"--fake-history-child"};
         options.seeds = {seed(0)};
         options.dashboard = true;
         options.uiPreferencesPath = (std::filesystem::path(argv[2]) / "ui-preferences.json").string();
+        options.historyPath = (std::filesystem::path(argv[2]) / "accepted-history.sqlite3").u8string();
+        options.workerPortBase = port;
         Supervisor supervisor(std::move(options));
-        return supervisor.run();
+        const int result = supervisor.run();
+        platformShutdown();
+        return result;
     }
     testFeedLines();
     testWorkerArgs();

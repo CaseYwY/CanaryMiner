@@ -279,8 +279,10 @@ unavailable until their implementations land. See [the staged feature roadmap](d
 been submitted to or accepted by upstream; there is no new qualified production release for this branch.
 
 The [architecture book](docs/architecture/README.md) records requirements, modules, final income/valuation semantics, test
-families, implementation batches and open decisions. A financial renderer contract exists, but live market/credit providers,
-durable accepted history and electricity-profit calculations are not yet integrated; synthetic tests are not live income.
+families, implementation batches and open decisions. [Local accepted history](docs/accepted-history.md) now persists observed
+user counts for 24h/7d/30d/all-local windows with coverage warnings; `--no-history` disables it for a run. It requires the optional
+system SQLite runtime and is not complete pool history. A financial renderer contract exists, but live market/credit providers
+and electricity-profit calculations are not yet integrated; synthetic tests and accepted counts are not live income.
 
 On a terminal the miner shows a live dashboard: per GPU hashrate (TH/s, the same figure as T MAC/s in the stats endpoint),
 power, temperature, fan, clocks and shares, a donation row and recent events. Keys: **Q** quit, **D** details (PCI bus, pool

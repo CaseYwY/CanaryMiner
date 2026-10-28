@@ -52,6 +52,7 @@
 #include "redact.h"
 #include "restart_budget.h"
 #include "settings.h"
+#include "accepted_history.h"
 #include "stats.h"
 #include "stats_server.h"
 
@@ -370,6 +371,7 @@ struct SupervisorOptions {
     volatile sig_atomic_t *stop = nullptr; // set by the console handler or SIGTERM
     SupervisorTuning *tuning = nullptr;
     std::string uiPreferencesPath;         // optional presentation file; never the mining config
+    std::string historyPath;               // optional local installation history; no wallet/device names stored
 };
 
 /** What the supervisor knows about one worker at one moment. */
@@ -520,10 +522,11 @@ class Supervisor {
     int run() {
         const uint64_t t0 = supervisorNowMs();
         if (!opt_.uiPreferencesPath.empty() && opt_.dashboard) {
-            uiStore_.reset(new UiPreferencesStore(opt_.uiPreferencesPath));
+            uiStore_.reset(new UiPreferencesStore(std::filesystem::u8path(opt_.uiPreferencesPath)));
             std::string error;
             if (!uiStore_->load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
         }
+        if (!opt_.historyPath.empty()) history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
             std::unique_ptr<Worker> w(new Worker());
             w->view.seed = opt_.seeds[i];
@@ -647,12 +650,17 @@ class Supervisor {
             if (w->proc->started() && !w->proc->finished()) w->proc->waitFor(2000, &code);
             w->proc->joinReader();
         }
+        // A poll cannot prove that no acknowledgement arrived after the last snapshot.
+        // Persist an uncertain tail even for graceful exits instead of claiming complete history.
+        if (history_) for (size_t i = 0; i < workers_.size(); ++i)
+            history_->markGap(static_cast<unsigned>(i), workers_[i]->historyLastUtc);
         if (forced) addEvent("workers were stopped by force");
         if (opt_.tuning) {
             std::vector<std::string> events;
             opt_.tuning->stop(&events);
             for (const std::string &event : events) addEvent(event);
         }
+        if (history_) history_->stop();  // worker drains/safety stop complete before optional persistence shutdown
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -679,6 +687,10 @@ class Supervisor {
         bool stopping = false;
         uint64_t restartAt = 0;
         uint64_t nextSampleAt = 0;
+        uint64_t historyGeneration = 0;
+        uint64_t historyCounter = 0;
+        int64_t historyLastUtc = 0;
+        bool historySeen = false, historyOutage = false;
         unsigned restarts = 0;
         // last observed values, for the events
         bool seen = false;
@@ -700,6 +712,7 @@ class Supervisor {
     std::unique_ptr<UiPreferencesStore> uiStore_;
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
+    std::unique_ptr<AcceptedHistory> history_;
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
@@ -719,6 +732,9 @@ class Supervisor {
     void startWorker(size_t i, uint64_t now) {
         Worker &w = *workers_[i];
         w.restartPending = false;
+        ++w.historyGeneration;
+        w.historySeen = w.historyOutage = false;
+        w.historyLastUtc = static_cast<int64_t>(time(nullptr));
         w.proc.reset(new ChildProcess());
         const size_t slot = i;
         std::string err;
@@ -758,6 +774,7 @@ class Supervisor {
             addEvent(workerLabel(w) + ": stopped (exit " + std::to_string(code) + ")");
             return;
         }
+        if (history_) history_->markGap(static_cast<unsigned>(i), w.historyLastUtc);
         // Keep what this run earned: the next run's counters start at zero.
         StatsOutcomes done = w.lastOutcomes;
         done.pending = 0;
@@ -785,17 +802,33 @@ class Supervisor {
     /** Polls the worker's stats endpoint and NVML, and records the events its counters imply. */
     void sample(size_t i) {
         Worker &w = *workers_[i];
+        bool historySample = false;
         int status = 0;
         std::string body, err;
         if (httpGetLocal("127.0.0.1", w.port, "/api/v1/stats", &status, &body, &err, 1) && status == 200) {
             JsonValue root;
             StatsSnapshot snap;
             if (parseJsonStrict(body, &root, &err) && statsFromJson(root, &snap, &err)) {
+                uint64_t count = 0;
+                if (history_ && acceptedHistoryCounter(root, &count)) {
+                    historySample = true;
+                    const auto utc = static_cast<int64_t>(time(nullptr));
+                    if (!w.historySeen || w.historyOutage || count != w.historyCounter)
+                        history_->observe(static_cast<unsigned>(i), w.historyGeneration, count, utc);
+                    w.historyCounter = count;
+                    w.historySeen = true;
+                    w.historyOutage = false;
+                    w.historyLastUtc = utc;
+                }
                 observe(w, snap);
                 w.view.stats = snap;
                 w.view.haveStats = true;
                 w.view.lastSampleMs = supervisorNowMs();
             }
+        }
+        if (history_ && !historySample && w.historySeen && !w.historyOutage) {
+            history_->markGap(static_cast<unsigned>(i), w.historyLastUtc);
+            w.historyOutage = true;
         }
         if (w.nvmlOk) {
             w.view.tel = w.nvml.sample();
@@ -875,6 +908,8 @@ class Supervisor {
         const StatsSnapshot agg = aggregateSnapshot(opt_, views, up, "running");
         DashModel model = dashboardModel(opt_, views, agg, up, now, events_, log_);
         model.logEntries.assign(logEntries_.begin(), logEntries_.end());
+        if (history_) model.history = history_->snapshot();
+        if (history_) for (const auto &worker : workers_) if (!worker->historySeen || worker->historyOutage) model.history.gaps = true;
         return model;
     }
 

@@ -117,6 +117,6 @@ Possible states: `Stopped`, `Starting`, `MiningNormal`, `MiningCoexist`, `Calibr
 
 Use transactional/idempotent history and credit stores with versioned records, one-writer/concurrency policy, bounded retention/compaction and tested crash recovery. The engine must preserve all-time aggregates while pruning expired detail and show the retained-detail coverage.
 
-SQLite versus a bounded append journal/checkpoint implementation is not yet settled. Choose based on atomicity, Windows/Linux packaging, lock/crash behaviour, migration, exact decimal support and operational maintainability—not familiarity alone. Never silently delete corrupt user records, initialize them as a zero lifetime total, or publish them as test fixtures.
+Local accepted history now uses optional system SQLite behind a single background owner; see [D-17 implementation](../accepted-history.md). This commits counters, lifetime totals and window records atomically and preserves unknown/corrupt/newer stores without resetting them. Credit storage still needs a precise financial schema/scope decision. Never silently delete corrupt user records, initialize them as a zero lifetime total, or publish them as test fixtures.
 
 Presentation preferences already use a small independent atomic JSON store; this is not a justification to rewrite large financial/history files synchronously on each screen frame.

@@ -255,7 +255,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         fprintf(stderr, "settings requires an interactive terminal; no mining was started\n");
         return 2;
     }
-    UiPreferencesStore store(std::filesystem::path(stateDir) / "ui-preferences.json");
+    UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     UiPreferences preferences;
     std::string error;
     if (!store.load(&preferences, &error)) { fprintf(stderr, "%s\n", error.c_str()); return 3; }

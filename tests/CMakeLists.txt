@@ -325,7 +325,7 @@ add_test(NAME protocol_identity COMMAND ${Python3_EXECUTABLE} tests/check_protoc
 endif()
 
 # ---- product layer (Gate 1b-1): config, CLI, devices, shutdown, fee, stats, log sink, selftest logic ----------------
-foreach(name config cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning settings display)
+foreach(name config cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning settings display history)
   add_executable(test_product_${name} ${R}/tests/test_product_${name}.cpp)
   target_compile_features(test_product_${name} PRIVATE cxx_std_17)
   target_include_directories(test_product_${name} PRIVATE ${R}/src)
@@ -334,7 +334,7 @@ foreach(name config cli log devices shutdown fee fee_session stats selftest supe
   target_link_libraries(test_product_${name} PRIVATE $<$<PLATFORM_ID:Linux>:dl>)
 endforeach()
 add_test(NAME product_config COMMAND $<TARGET_FILE:test_product_config> ${R}/config/config.example.json WORKING_DIRECTORY ${R})
-foreach(name cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning settings display)
+foreach(name cli log devices shutdown fee fee_session stats selftest supervisor gpu_tuning settings display history)
   add_test(NAME product_${name} COMMAND $<TARGET_FILE:test_product_${name}> WORKING_DIRECTORY ${R})
 endforeach()
 

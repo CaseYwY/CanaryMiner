@@ -96,3 +96,11 @@ component.)
 | Pearl verifier build (`pearl_mining`, Cargo dependency set) | rc.1 collected a conservative Cargo notice set; regenerate at Gate 6 |
 | Nuitka compiler and runtime-library exception (if the controller stays Nuitka-compiled) | re-evaluate at Gate 6 |
 | NVML / CUDA driver libraries | system libraries, not redistributed |
+
+## 6. Optional system SQLite runtime (development history feature)
+
+Local accepted-share history loads the OS `winsqlite3.dll` on Windows or the distribution `libsqlite3.so.0` on Linux.
+This change includes no SQLite implementation, header, library binary or source archive. SQLite's upstream public-domain
+statement is at <https://www.sqlite.org/copyright.html>; Windows system components remain subject to their platform terms.
+The required ABI floor is 3.31.0, not a patch/security baseline. Keep the selected system runtime serviced. Any future bundled
+build requires its own exact artifact/provenance and licence inventory. See `docs/accepted-history.md` for limits and recovery.

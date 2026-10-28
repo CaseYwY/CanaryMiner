@@ -73,6 +73,7 @@ struct CliOverrides {
     std::string logDir;
     bool json = false;
     bool noDonation = false;  // --no-donation: switch the developer donation off for this run
+    bool noHistory = false;   // local accepted history only, never a reward/account setting
     GpuTuningConfig tuning;
 };
 
@@ -153,7 +154,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             }
             return true;
         };
-        if (a == "--config") {
+        if (a == "--no-history") {
+            r.ov.noHistory = true;
+        } else if (a == "--config") {
             if (!need(i, "--config", &v)) return false;
             if (!r.ov.configPath.empty()) {
                 if (error) *error = "--config given twice";
@@ -394,6 +397,7 @@ inline std::string productHelpText() {
         "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
         "       canary-miner version\n"
         "       canary-miner settings          edit presentation without starting mining\n"
+        "       --no-history                  disable local accepted-share history for this run\n"
         "\n"
         "Pool\n"
         "  -o, --pool SPEC       HOST:PORT, stratum+tcp://HOST:PORT, or a preset: f2pool, kryptex,\n"

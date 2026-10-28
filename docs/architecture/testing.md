@@ -14,6 +14,8 @@ Test strict keys/types/ranges, old-version defaults, unsupported-new-version rej
 
 Test generation resets and carried counters, duplicate/reordered samples, aggregation across GPUs, donation exclusion, accepted versus pending/rejected/unknown, rolling-window exact boundaries, clock jumps and incomplete coverage. Test restart/durable recovery, compaction preserving all-time totals, truncated/corrupt writes, concurrent writer refusal, counter overflow and missing-period reporting. Never infer rewards from shares.
 
+Executed local observation slice: [history validation](../history-validation.md). Includes process-crash/WAL recovery and PTY two-session persistence, not physical power-loss, full-disk or production-CUDA qualification.
+
 ## T-MARKET
 
 Test correct/wrong asset and network; latest quote versus equal-time 1h average; full/duplicate/missing/incomplete minute candles; sparse time weighting; pagination; valid zero-volume candles; stale/future timestamps; provider errors/rate limits; cache/cancellation/source switch. Test token/USDT times USDT/USD, missing/depegged conversion and explicit currency labels. HTTP responses are bounded; no redirects to unauthorized schemes/hosts and no disabled TLS verification.

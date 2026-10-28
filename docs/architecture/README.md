@@ -1,10 +1,12 @@
 # CanaryMiner desktop automation: architecture book
 
-**Architecture version:** 1.0. **State:** accepted product requirements plus a proposed, staged architecture. An architecture requirement is not an implemented feature.
+**Architecture version:** 1.1. **State:** accepted product requirements plus a proposed, staged architecture. An architecture requirement is not an implemented feature.
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial/history integrations are still absent.
+**Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
+
+**History batch:** P-04 adds local observed accepted counters with optional system SQLite, rolling windows, coverage/recovery and `--no-history`. See [history semantics](../accepted-history.md) and [validation](../history-validation.md). It is not a complete pool-acknowledgement or token-income ledger.
 
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
@@ -33,11 +35,11 @@ The native dashboard also reports durable accepted-share history, market informa
 
 ## Current implementation truth
 
-| Capability | Status: baseline plus display batch |
+| Capability | Status: baseline plus display/history batches |
 |---|---|
 | S-entry settings, navigation, review/save/discard and idle settings command | Implemented; host/PTY evidence linked above |
 | Display refresh, terminal color, recent events and hiding worker label | Implemented, local presentation preferences only |
-| Durable 24h/7d/30d/all accepted counters | Not implemented |
+| Durable 24h/7d/30d/all accepted counters | Implemented for observed user-share counters; partial coverage and clock/recovery warnings explicit |
 | Market/credit adapters and financial dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
 | International tariff calculation and automatic profitability selection | Not implemented |
@@ -47,7 +49,7 @@ The native dashboard also reports durable accepted-share history, market informa
 
 No personal prototype, local GPU curve, wallet observation or machine-specific deployment is evidence that a fork feature is implemented or universally safe. Disabled groups must stay explicitly unavailable until their backend and tests exist.
 
-The subsequent display batch adds a tested **read-only financial presentation contract**, not a live data provider or durable income ledger. Its default runtime state stays disabled until an integrated provider supplies validated data. Real-time market, actual income, durable accepted history, forecasts and tariff computation remain unimplemented integrations.
+The display batch adds a tested **read-only financial presentation contract**, not a live data provider or durable income ledger. Its default runtime state stays disabled until an integrated provider supplies validated data. Real-time market, actual income, forecasts and tariff computation remain unimplemented integrations. Accepted-counter history is now separate and must never supply fabricated token income.
 
 ## Document authority and maintenance
 

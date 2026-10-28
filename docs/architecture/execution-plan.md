@@ -9,7 +9,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 | P-01 | Native settings shell, four local presentation controls, idle command and host/PTY tests | Existing upstream renderer/config/supervisor | DONE at ab208e8 |
 | P-02 | Details/Log switches and content controls; metric presentation contract | P-01 | DONE at a2549c3; live financial/history integrations are separate tasks |
 | P-03 | Typed activation/override contracts, explicit intent arbiter and safe host-side throttle | P-01 | PLANNED; current stop/retry mechanisms are partial foundations |
-| P-04 | Durable accepted history with coverage/recovery and 24h/7d/30d/all display | Storage ADR, P-02 | PLANNED |
+| P-04 | Durable accepted history with coverage/recovery and 24h/7d/30d/all display | Storage ADR, P-02 | DONE local observed-counter slice; see history validation, not complete pool history |
 | P-05 | Portable tariff primitives, state, counterfactual costs and validated plan adapters | Time/decimal ADR, researched rule evidence | PLANNED |
 | P-06 | Replaceable bounded price/FX/reward providers, fresh 1h/latest quote snapshots | HTTPS/backend ADR, typed contracts | PLANNED |
 | P-07 | Attributable actual-credit ledger, current production valuation and optional historical references | Storage/decimal ADR, P-06 | PLANNED |
@@ -27,7 +27,8 @@ Task order below is a dependency plan, not a promise that every module lands in 
 - The working development branch is `feat/dashboard-metrics`. Architecture and tariff research were drafted after P-01 and are not evidence that P-02 onward is done.
 - The final user-approved money decision is **latest-price main-panel valuation**; earlier per-credit-default proposals are superseded. Optional per-credit historical references are secondary and never sale records.
 - P-02 at `a2549c3` adds tested D/L switches/content controls, v1-to-v2 preference migration and a synthetic-input financial renderer. Evidence: `docs/display-validation.md`. It does not supply live prices, credits, history or tariff computation.
-- Next executable batch: choose/test storage for P-04 and maintained HTTPS contracts for P-06 before claiming durable history or live financial data. P-12 TLS can be developed independently after its dependency/endpoint decisions.
+- P-04 adds optional system-SQLite accepted-counter history, background persistence, window/coverage display and `--no-history`. Evidence: [history validation](../history-validation.md); semantics/recovery: [accepted history](../accepted-history.md). Runtime settings and actual pool-credit data are not supplied by this slice.
+- Next executable batches: P-03 runtime/intent/throttle contracts, and maintained HTTPS/provider contracts for P-06. [Secure-transport research](../research/secure-transport-backends.md) compares backends and records the still-unverified F2Pool/donation TLS route; it is not implemented TLS. P-12 can proceed independently after its dependency/endpoint decisions.
 - No upstream issue/PR or new production binary has been published for these advanced features. Do not replace an existing user's installed miner as an implicit development step.
 
 ## Definition of done for each batch
@@ -43,7 +44,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 
 ## Questions that block implementation, not the whole roadmap
 
-- Transactional store/dependency choice for history and credits; exact retention/compaction/recovery guarantees.
+- Accepted-history storage is settled for the observed-counter slice; financial credit exact-number/scope schema remains open.
 - Maintained TLS/HTTPS backend/trust-store packaging, supported secure preset/donation endpoints and migration semantics.
 - Exact credit-provider attribution and interval granularity; never solve missing worker revenue by silently using wallet totals.
 - Timezone/decimal/Unicode implementation dependencies and supported platform versions.
