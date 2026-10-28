@@ -113,3 +113,19 @@ from development curl 8.23.0 `COPYING` and c-ares 1.34.9 `LICENSE.md` are retain
 and `LICENSES/c-ares-1.34.9.txt`; exact download hashes and source-authentication limitations are in `docs/public-https.md`.
 These do not substitute for the final package's exact dependency graph, OpenSSL/provider notices, CRT/OS terms,
 security review and clean-machine qualification. No production binary for this feature is published.
+
+## 8. Optional offline named-time development backend
+
+`CANARY_ENABLE_NAMED_TZDB` is default-off. When enabled, the electricity/civil-time host core links separately supplied
+HowardHinnant/date-tz with remote APIs/automatic downloads compiled out and explicitly loads a reviewed private IANA
+text database. No implementation archive, library binary or timezone dataset is included. Development source v3.0.5
+(whose CMake metadata still says 3.0.4), IANA 2026e and a pinned CLDR Windows mapping are identified with official
+source locations, hashes and authentication/packaging limits in `docs/electricity-core.md`.
+
+Per-file MIT author lists/terms for the selected date headers/source are retained in `LICENSES/date-3.0.5-notices.txt`;
+any different build must inventory its own used files. IANA's development licence text is retained in
+`LICENSES/IANA-tzdata-2026e.txt`. The selected CLDR root copyright/permission notice is retained in
+`LICENSES/CLDR-7afa5cdb.txt`: the Windows mapping is data under Unicode-3.0; the notice separately restricts the LDML
+publication, which is not copied here. Future packages must include all applicable exact dependency notices, OS/CRT
+terms and reviewed data/update provenance. These development inputs have not passed independent release-signature
+authentication or clean-machine production qualification. No production binary for this feature is published.

@@ -18,6 +18,8 @@
 
 **Credit core:** P-07a adds a [durable exact posted-credit ledger](../credit-ledger.md) for synthetic-source qualification, with revision/provenance/coverage recovery and pure latest-price references. No real provider, background collection, calendar forecast or financial dashboard activation is supplied.
 
+**Electricity/time core:** P-05a/P-08a adds [optional offline IANA civil time, exact sample-and-hold energy and supported declared tariffs](../electricity-core.md), including pure full-remainder whole-meter counterfactuals. No real plan certification, telemetry/settings activation, income/net forecast or optimizer is supplied.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order
@@ -55,7 +57,8 @@ The native dashboard also reports durable accepted-share history, market informa
 | Exact posted-credit storage/valuation core | Implemented and tested for synthetic contracts only; no real source or runtime activation |
 | Actual-credit adapters and financial income dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
-| International tariff calculation and automatic profitability selection | Not implemented |
+| Declared tariff/time/energy arithmetic | Offline-tested pure core; no certified supplier adapter, persistent state or native activation |
+| Automatic profitability selection | Not implemented |
 | Tested game pause/coexist policies | Not implemented in this fork |
 | Stratum TLS | Not implemented |
 | First internationalization language packs | Not implemented |

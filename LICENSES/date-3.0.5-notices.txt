@@ -1,0 +1,50 @@
+Notices from the selected external HowardHinnant/date v3.0.5 development sources.
+No implementation source is included. The author lists remain specific to each file.
+
+include/date/date.h:
+Copyright (c) 2015, 2016, 2017 Howard Hinnant
+Copyright (c) 2016 Adrian Colomitchi
+Copyright (c) 2017 Florian Dang
+Copyright (c) 2017 Paul Thompson
+Copyright (c) 2018, 2019 Tomasz Kamiński
+Copyright (c) 2019 Jiangang Zhuang
+
+include/date/tz.h:
+Copyright (c) 2015, 2016, 2017 Howard Hinnant
+Copyright (c) 2017 Jiangang Zhuang
+Copyright (c) 2017 Aaron Bishop
+Copyright (c) 2017 Tomasz Kamiński
+
+include/date/tz_private.h:
+Copyright (c) 2015, 2016 Howard Hinnant
+
+src/tz.cpp:
+Copyright (c) 2015, 2016, 2017 Howard Hinnant
+Copyright (c) 2015 Ville Voutilainen
+Copyright (c) 2016 Alexander Kormanovsky
+Copyright (c) 2016, 2017 Jiangang Zhuang
+Copyright (c) 2017 Nicolas Veloz Savino
+Copyright (c) 2017 Florian Dang
+Copyright (c) 2017 Aaron Bishop
+
+The following terms accompany each of the files listed above:
+
+The MIT License (MIT)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

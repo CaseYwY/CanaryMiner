@@ -42,9 +42,13 @@ Implement [research test specifications T01–T34](../research/international-ele
 
 Add plan-specific official worked-example comparisons before labelling an adapter source-verified. Verify pure counterfactual evaluation from identical opening state and no look-ahead to unpublished prices/events. Reject unsupported current contract/allocation rules; do not smooth real discontinuities or use country averages silently.
 
+[P-05a](../electricity-core.md) executes a declared supported-rule subset, exact rational arithmetic/oracle checks and explicit offline IANA day/fold/gap/TOU cases. It does not complete all 34 research specifications or qualify a supplier plan; unsupported families and dependency authentication/packaging remain listed there.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.
+
+[P-08a](../electricity-core.md) executes bounded exact sample-and-hold integration with explicit scope/basis and UTC/monotonic consistency/coverage, not a real telemetry adapter, matched hardware baseline, persistent measurement store or live net-income estimate.
 
 ## T-PROFILES
 

@@ -63,6 +63,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.
 
+The initial [P-05a/P-08a core](../electricity-core.md) is synchronous/pure and unused by the production supervisor. Explicit optional offline IANA data, rational W·ms/costs and declared full-remainder scenarios do not replace a bounded telemetry/economic owner, persisted billing-state adapter or qualified supplier plan. No core calculation belongs in the render/mining/safety loop.
+
 ### M-PROFILES
 
 Owns bounded measurement plans, profile eligibility/fingerprints, drift detection and evidence. It requests safe session transitions but cannot override user stop, thermal limits or a game's test permission. Imported/model-based curves are hints until locally validated.
