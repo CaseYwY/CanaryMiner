@@ -386,6 +386,27 @@ CreditLedgerStatus CreditLedger::apply(const CreditBatch &input, int64_t now) {
     } catch (...) { return s.storageFailure(); }
 }
 
+CreditLedgerStatus CreditLedger::verifyLatest(const CreditBatch &input, int64_t now) {
+    auto &s=*impl_;
+    if (!s.ready) return CreditLedgerStatus::Storage;
+    if (!sameCreditSourceContract(input.binding,s.contract)) return CreditLedgerStatus::Attribution;
+    if (!boundedCreditBatchInput(input,now)) return CreditLedgerStatus::Invalid;
+    try {
+        auto batch=input;
+        if (!normalizeCoverage(&batch.coverage,s.contract,batch.sourceAsOfMs)) return CreditLedgerStatus::Invalid;
+        std::sort(batch.records.begin(),batch.records.end(),[](const auto &a,const auto &b){return a.id<b.id;});
+        const auto canonical=canonicalBatch(batch);
+        if (!s.exec("BEGIN;")) return s.storageFailure();
+        struct ReadTransaction { Impl &s; bool ended=false; ~ReadTransaction() { if (!ended && !s.exec("ROLLBACK;")) s.ready=false; } } read{s};
+        if (!s.metadata()) return s.storageFailure();
+        if (now<s.observed) return CreditLedgerStatus::Clock;
+        const auto result=batch.sequence<s.sequence ? CreditLedgerStatus::StaleBatch :
+            batch.sequence==s.sequence && canonical==s.lastBatch ? CreditLedgerStatus::Replay : CreditLedgerStatus::Conflict;
+        if (!s.exec("ROLLBACK;")) return s.storageFailure();
+        read.ended=true; return result;
+    } catch (...) { return s.storageFailure(); }
+}
+
 CreditTotals CreditLedger::query(int64_t start, int64_t end, int64_t now) {
     auto &s = *impl_;
     CreditTotals result; result.fromExclusiveMs = start; result.throughInclusiveMs = end;

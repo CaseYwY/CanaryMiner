@@ -125,4 +125,6 @@ Local accepted history now uses optional system SQLite behind a single backgroun
 
 The initial [P-07a credit store](../credit-ledger.md) implements a separate fixture-only schema and shared storage-only lease. Its synchronous object is used by the new [P-07b isolated owner](../credit-owner.md) only inside one-operation helpers, never in the production render/mining/safety loop. Per-operation leases, full revalidation and explicit uncertain-write recovery do not complete real provider, pending-journal/UI or OS-stall/release qualification. No supervisor activates it; accepted counters never supply income.
 
+[P-07c](../credit-recovery.md) supplies the initial pending-journal part by default: a helper-owned private sidecar precedes ledger mutation and retains exact prepared/confirmed/rejected input. Queries do not auto-replay; missing/divergent current-ledger proof and failed retries preserve reconciliation requirements. Ledger schema v1 and the no-production-activation boundary remain unchanged; native recovery/source-cursor UI and OS failure qualification remain open.
+
 Presentation preferences already use a small independent atomic JSON store; this is not a justification to rewrite large financial/history files synchronously on each screen frame.

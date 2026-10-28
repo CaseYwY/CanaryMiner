@@ -36,6 +36,8 @@ Test actual credits versus balance/payout/pending/share count; worker versus wal
 
 [P-07b](../credit-owner.md) additionally executes native helper/IPC and bounded background ownership, backpressure, generation/stop isolation and explicit exact-batch recovery after a lost post-commit acknowledgement. It does not turn userspace stalls into genuine kernel/D-state qualification or supply real credit collection, persistent pending-journal/recovery UI or production activation.
 
+[P-07c](../credit-recovery.md) adds durable original intent/receipt, owner recreation, checksum/binding preservation, no-auto-replay inspection, read-only current-ledger proof and failed-retry non-erasure. Separate processes exit at prepared/applied/confirmed boundaries and recover without doubling or freshening. This does not prove live-parent death with an unreaped/stuck helper, genuine power loss, source-cursor/native recovery UI or production activation.
+
 ## T-FORECAST
 
 Test today's actual-so-far plus remaining eligible expected income, calendar 23/24/25-hour days, delayed/incomplete current-day credits, uncertain schedules, switching/donation/fees without double deduction, and the separate rolling-24h row. Test no-tariff row omission versus configured zero/negative rate, missing price/FX/reward/cost data, negative valid estimated net values and matching revenue/cost horizons. Labels must say estimated, not realized.

@@ -57,6 +57,7 @@ struct CreditLedgerOwner::Impl {
         // Validate borrowed input before copying any caller-controlled vectors/strings into the bounded queue.
         if (batch && (!boundedCreditBatchInput(*batch,now) || !sameCreditSourceContract(binding,batch->binding))) { result.status = CreditEnqueueStatus::Invalid; return result; }
         if (batch) r.batch = *batch;
+        if (policy.persistentRecovery) r.recovery=batch ? (recovery?CreditRecoveryMode::Retry:CreditRecoveryMode::Submit) : CreditRecoveryMode::Inspect;
         std::string wire;
         if (!encodeCreditRequest(r,&wire)) { result.status = CreditEnqueueStatus::Invalid; return result; }
         if (wire.size() > policy.maxWireBytes-current.reservedWireBytes) { result.status = CreditEnqueueStatus::Full; return result; }
@@ -86,12 +87,25 @@ struct CreditLedgerOwner::Impl {
                 if (cancel.load()) return; // requestStop already revoked publication; storage may nevertheless have committed
                 current.transport = result.transport; current.reply = std::move(result.reply);
                 bool ok = current.transport == LocalTaskStatus::Ok && current.reply && current.reply->opened == CreditLedgerStatus::Ok;
+                bool recoveredPrepared=false;
                 if (current.reply) {
                     current.lastCompletedTicket = job->request.ticket;
                     if (current.reply->applied && !accepted(*current.reply->applied)) ok = false;
                     for (const auto &t : current.reply->totals) if (t.status != CreditLedgerStatus::Ok) ok = false;
+                    if (current.reply->recovery) {
+                        const auto &recovered=*current.reply->recovery;
+                        current.recoveryState=recovered.state;
+                        current.durableSequence=recovered.batch?recovered.batch->sequence:0;
+                        current.durableSnapshotId=recovered.batch?recovered.batch->snapshotId:"";
+                        if (recovered.status!=CreditLedgerStatus::Ok) ok=false;
+                        if ((recovered.state==CreditRecoveryState::Prepared || recovered.state==CreditRecoveryState::Diverged) && recovered.batch) {
+                            auto retained=std::make_shared<Job>(); retained->request=job->request;
+                            retained->request.batch=recovered.batch; retained->request.recovery=CreditRecoveryMode::Retry;
+                            retained->recovery=true; uncertain=std::move(retained); recoveredPrepared=true;
+                        }
+                    }
                 }
-                if (result.writeOutcomeUnknown && job->request.batch) uncertain = job;
+                if (result.writeOutcomeUnknown && job->request.batch && !recoveredPrepared) uncertain = job;
                 if (job->recovery) {
                     if (ok && current.reply->applied && (*current.reply->applied == CreditLedgerStatus::Ok || *current.reply->applied == CreditLedgerStatus::Replay)) uncertain.reset();
                     else ok = false; // a stale stream cursor does not prove that this old uncertain content was committed

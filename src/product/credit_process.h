@@ -3,6 +3,9 @@
 #include "local_task_process.h"
 namespace om {
 struct CreditQuerySpec { bool cumulative = false; int64_t fromExclusiveMs = 0, throughInclusiveMs = 0; };
+enum class CreditRecoveryMode { Volatile, Inspect, Submit, Retry };
+enum class CreditRecoveryState { Disabled, Empty, Prepared, Confirmed, Rejected, Diverged, Unavailable };
+constexpr size_t creditRecoveryRequestLimit = 48*1024; // leaves space for retained input plus totals in the 64-KiB reply
 struct CreditProcessRequest {
     uint64_t generation = 0, ticket = 0;
     std::filesystem::path file;
@@ -11,12 +14,20 @@ struct CreditProcessRequest {
     int64_t nowUtcMs = 0;
     std::vector<CreditQuerySpec> queries;
     std::optional<CreditBatch> batch;
+    CreditRecoveryMode recovery = CreditRecoveryMode::Volatile;
+};
+struct CreditRecoverySnapshot {
+    CreditLedgerStatus status = CreditLedgerStatus::Storage;
+    CreditRecoveryState state = CreditRecoveryState::Unavailable;
+    std::optional<CreditBatch> batch; // original source/observation times; never refreshed by inspection or retry
+    std::optional<CreditLedgerStatus> applied;
 };
 struct CreditProcessReply {
     uint64_t generation = 0, ticket = 0;
     CreditLedgerStatus opened = CreditLedgerStatus::Storage;
     std::optional<CreditLedgerStatus> applied;
     std::vector<CreditTotals> totals;
+    std::optional<CreditRecoverySnapshot> recovery;
 };
 struct CreditProcessResult {
     LocalTaskStatus transport = LocalTaskStatus::Unavailable;

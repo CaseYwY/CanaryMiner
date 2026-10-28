@@ -1,4 +1,5 @@
 #include "credit_process.h"
+#include "credit_recovery.h"
 #include "json_dom.h"
 #include <algorithm>
 
@@ -28,6 +29,9 @@ bool contract(const JsonValue &v, CreditSourceContract &c) {
     return validCreditSourceContract(c);
 }
 bool validRequest(const CreditProcessRequest &r) {
+    if (static_cast<unsigned>(r.recovery)>static_cast<unsigned>(CreditRecoveryMode::Retry) ||
+        (r.recovery==CreditRecoveryMode::Inspect && r.batch) ||
+        ((r.recovery==CreditRecoveryMode::Submit || r.recovery==CreditRecoveryMode::Retry) && !r.batch)) return false;
     if (!r.generation || !r.ticket || !localTaskPath(r.file) || !validCreditSourceContract(r.binding) || r.nowUtcMs <= 0 || static_cast<uint64_t>(r.nowUtcMs) > lastMs || r.binding.historyStartMs > r.nowUtcMs ||
         r.queries.empty() || r.queries.size() > 4 || !r.limits.maxRecords || r.limits.maxRecords > 100000 || r.limits.maxVersions < r.limits.maxRecords || r.limits.maxVersions > 400000 ||
         !r.limits.maxSnapshots || r.limits.maxSnapshots > 400000 || r.limits.maxDatabaseBytes < 1024*1024 || r.limits.maxDatabaseBytes > 256*1024*1024) return false;
@@ -38,6 +42,53 @@ bool validRequest(const CreditProcessRequest &r) {
     return !r.batch || (boundedCreditBatchInput(*r.batch,r.nowUtcMs) && sameCreditSourceContract(r.binding,r.batch->binding));
 }
 bool status(const JsonValue &v, CreditLedgerStatus &s) { uint64_t n = 0; if (!u(v,n,static_cast<unsigned>(CreditLedgerStatus::Storage))) return false; s = static_cast<CreditLedgerStatus>(n); return true; }
+std::string batch(const CreditBatch &b) {
+    std::string text="["+std::to_string(b.sequence)+","+jsonQuote(b.snapshotId)+","+std::to_string(b.sourceAsOfMs)+","+std::to_string(b.observedAtMs)+",[";
+    for (size_t i=0;i<b.records.size();++i) {
+        if (i) text+=',';
+        const auto &v=b.records[i];
+        text+="["+jsonQuote(v.id)+","+std::to_string(v.revision)+","+std::to_string(static_cast<unsigned>(v.kind))+","+jsonQuote(v.reference)+","+std::to_string(v.postedAtMs)+","+jsonQuote(v.amount.text())+"]";
+    }
+    text+="],[";
+    for (size_t i=0;i<b.coverage.size();++i) { if (i) text+=','; text+="["+std::to_string(b.coverage[i].fromExclusiveMs)+","+std::to_string(b.coverage[i].throughInclusiveMs)+"]"; }
+    return text+"]]";
+}
+bool batch(const JsonValue &v, const CreditSourceContract &binding, CreditBatch &out) {
+    if (!array(v,6)) return false;
+    const auto &b=v.items; CreditBatch result; result.binding=binding;
+    if (!u(b[0],result.sequence,INT64_MAX) || !str(b[1],result.snapshotId) || !si(b[2],result.sourceAsOfMs) || !si(b[3],result.observedAtMs) ||
+        !b[4].isArray() || b[4].items.size()>512 || !b[5].isArray() || b[5].items.size()>128) return false;
+    for (const auto &v : b[4].items) {
+        CreditRevision c; uint64_t kind=0;
+        if (!array(v,6) || !str(v.items[0],c.id) || !u(v.items[1],c.revision,INT64_MAX) || !u(v.items[2],kind,1) || !str(v.items[3],c.reference) || !si(v.items[4],c.postedAtMs) || !dec(v.items[5],c.amount)) return false;
+        c.kind=static_cast<CreditKind>(kind); result.records.push_back(std::move(c));
+    }
+    for (const auto &v : b[5].items) { CreditCoverage c; if (!array(v,2) || !si(v.items[0],c.fromExclusiveMs) || !si(v.items[1],c.throughInclusiveMs)) return false; result.coverage.push_back(c); }
+    if (!boundedCreditBatchInput(result,result.observedAtMs)) return false;
+    out=std::move(result); return true;
+}
+bool recovery(const CreditProcessRequest &r, const JsonValue &v, CreditRecoverySnapshot &out) {
+    if (!array(v,4)) return false;
+    CreditRecoverySnapshot value; uint64_t state=0;
+    if (!status(v.items[0],value.status) || !u(v.items[1],state,static_cast<unsigned>(CreditRecoveryState::Unavailable))) return false;
+    value.state=static_cast<CreditRecoveryState>(state);
+    if (!null(v.items[2])) { CreditBatch b; if (!batch(v.items[2],r.binding,b)) return false; value.batch=std::move(b); }
+    if (!null(v.items[3])) { CreditLedgerStatus s; if (!status(v.items[3],s)) return false; value.applied=s; }
+    if (value.status!=CreditLedgerStatus::Ok) {
+        if (value.state!=CreditRecoveryState::Unavailable || value.batch || value.applied) return false;
+    } else if (value.state==CreditRecoveryState::Empty) {
+        if (value.batch || value.applied) return false;
+    } else {
+        if (!value.batch) return false;
+        if (value.state==CreditRecoveryState::Prepared) { if (value.applied) return false; }
+        else if (value.state==CreditRecoveryState::Confirmed || value.state==CreditRecoveryState::Diverged) {
+            if (!value.applied || (*value.applied!=CreditLedgerStatus::Ok && *value.applied!=CreditLedgerStatus::Replay)) return false;
+        } else if (value.state==CreditRecoveryState::Rejected) {
+            if (!value.applied || *value.applied==CreditLedgerStatus::Ok || *value.applied==CreditLedgerStatus::Replay || *value.applied==CreditLedgerStatus::StaleBatch || *value.applied==CreditLedgerStatus::Storage) return false;
+        } else return false;
+    }
+    out=std::move(value); return true;
+}
 std::string totals(const CreditTotals &t) {
     return "["+std::to_string(static_cast<unsigned>(t.status))+","+std::to_string(static_cast<unsigned>(t.completeness))+","+std::to_string(t.fromExclusiveMs)+","+
         std::to_string(t.throughInclusiveMs)+","+std::to_string(t.sourceAsOfMs)+","+std::to_string(t.observedAtMs)+","+std::to_string(t.coveredMs)+","+
@@ -66,75 +117,129 @@ bool totals(const JsonValue &v, const CreditProcessRequest &r, const CreditQuery
 bool encodeCreditRequest(const CreditProcessRequest &r, std::string *wire) {
     if (!wire || !validRequest(r)) return false;
     try {
-        std::string text = "[\"CMCR1\","+std::to_string(r.generation)+","+std::to_string(r.ticket)+","+jsonQuote(r.file.u8string())+","+contract(r.binding)+",["+
+        std::string text = std::string(r.recovery==CreditRecoveryMode::Volatile?"[\"CMCR1\",":"[\"CMCR2\",")+std::to_string(r.generation)+","+std::to_string(r.ticket)+","+jsonQuote(r.file.u8string())+","+contract(r.binding)+",["+
             std::to_string(r.limits.maxRecords)+","+std::to_string(r.limits.maxVersions)+","+std::to_string(r.limits.maxSnapshots)+","+std::to_string(r.limits.maxDatabaseBytes)+"],"+std::to_string(r.nowUtcMs)+",[";
         for (size_t i = 0; i < r.queries.size(); ++i) { if (i) text += ','; const auto &q = r.queries[i]; text += std::string("[")+(q.cumulative?"true":"false")+","+std::to_string(q.fromExclusiveMs)+","+std::to_string(q.throughInclusiveMs)+"]"; }
         text += "],";
-        if (r.batch) {
-            const auto &b = *r.batch; text += "["+std::to_string(b.sequence)+","+jsonQuote(b.snapshotId)+","+std::to_string(b.sourceAsOfMs)+","+std::to_string(b.observedAtMs)+",[";
-            for (size_t i = 0; i < b.records.size(); ++i) { if (i) text += ','; const auto &v = b.records[i]; text += "["+jsonQuote(v.id)+","+std::to_string(v.revision)+","+std::to_string(static_cast<unsigned>(v.kind))+","+jsonQuote(v.reference)+","+std::to_string(v.postedAtMs)+","+jsonQuote(v.amount.text())+"]"; }
-            text += "],[";
-            for (size_t i = 0; i < b.coverage.size(); ++i) { if (i) text += ','; text += "["+std::to_string(b.coverage[i].fromExclusiveMs)+","+std::to_string(b.coverage[i].throughInclusiveMs)+"]"; }
-            text += "]]";
-        } else text += "null";
+        text += r.batch?batch(*r.batch):"null";
+        if (r.recovery!=CreditRecoveryMode::Volatile) text+=","+std::to_string(static_cast<unsigned>(r.recovery));
         text += "]";
-        if (text.size() > localTaskRequestLimit || !boundedPublicJson(text)) return false;
+        if (text.size() > (r.recovery==CreditRecoveryMode::Volatile?localTaskRequestLimit:creditRecoveryRequestLimit) || !boundedPublicJson(text)) return false;
         *wire = std::move(text); return true;
     } catch (...) { return false; }
 }
 bool decodeCreditRequest(const std::string &wire, CreditProcessRequest *out) {
     if (!out || wire.size() > localTaskRequestLimit || !boundedPublicJson(wire)) return false;
     JsonValue root;
-    if (!parseJsonStrict(wire,&root,nullptr) || !array(root,9)) return false;
+    if (!parseJsonStrict(wire,&root,nullptr) || (!array(root,9) && !array(root,10))) return false;
     const auto &a = root.items; CreditProcessRequest r; std::string path; uint64_t n[4] = {};
-    if (!a[0].isString() || a[0].text != "CMCR1" || !u(a[1],r.generation,UINT64_MAX) || !u(a[2],r.ticket,UINT64_MAX) || !str(a[3],path) || !contract(a[4],r.binding) || !array(a[5],4) ||
+    if (!a[0].isString()) return false;
+    if (a[0].text=="CMCR1") { if (a.size()!=9) return false; }
+    else if (a[0].text=="CMCR2") {
+        uint64_t mode=0;
+        if (a.size()!=10 || !u(a[9],mode,3) || !mode || wire.size()>creditRecoveryRequestLimit) return false;
+        r.recovery=static_cast<CreditRecoveryMode>(mode);
+    } else return false;
+    if (!u(a[1],r.generation,UINT64_MAX) || !u(a[2],r.ticket,UINT64_MAX) || !str(a[3],path) || !contract(a[4],r.binding) || !array(a[5],4) ||
         !u(a[5].items[0],n[0],100000) || !u(a[5].items[1],n[1],400000) || !u(a[5].items[2],n[2],400000) || !u(a[5].items[3],n[3],256*1024*1024) || !si(a[6],r.nowUtcMs) || !a[7].isArray() || a[7].items.size() > 4) return false;
     try { r.file = std::filesystem::u8path(path); } catch (...) { return false; }
     r.limits = {static_cast<size_t>(n[0]),static_cast<size_t>(n[1]),static_cast<size_t>(n[2]),n[3]};
     for (const auto &v : a[7].items) { CreditQuerySpec q; if (!array(v,3) || !v.items[0].isBool() || !si(v.items[1],q.fromExclusiveMs) || !si(v.items[2],q.throughInclusiveMs)) return false; q.cumulative = v.items[0].boolean; r.queries.push_back(q); }
     if (!null(a[8])) {
-        const auto &v = a[8]; if (!array(v,6)) return false;
-        const auto &b = v.items; CreditBatch batch; batch.binding = r.binding;
-        if (!u(b[0],batch.sequence,INT64_MAX) || !str(b[1],batch.snapshotId) || !si(b[2],batch.sourceAsOfMs) || !si(b[3],batch.observedAtMs) || !b[4].isArray() || b[4].items.size() > 512 || !b[5].isArray() || b[5].items.size() > 128) return false;
-        for (const auto &v : b[4].items) {
-            CreditRevision c; uint64_t kind = 0;
-            if (!array(v,6) || !str(v.items[0],c.id) || !u(v.items[1],c.revision,INT64_MAX) || !u(v.items[2],kind,1) || !str(v.items[3],c.reference) || !si(v.items[4],c.postedAtMs) || !dec(v.items[5],c.amount)) return false;
-            c.kind = static_cast<CreditKind>(kind); batch.records.push_back(std::move(c));
-        }
-        for (const auto &v : b[5].items) { CreditCoverage c; if (!array(v,2) || !si(v.items[0],c.fromExclusiveMs) || !si(v.items[1],c.throughInclusiveMs)) return false; batch.coverage.push_back(c); }
-        r.batch = std::move(batch);
+        CreditBatch b; if (!batch(a[8],r.binding,b)) return false; r.batch=std::move(b);
     }
     if (!validRequest(r)) return false;
     *out = std::move(r); return true;
 }
 bool encodeCreditReply(const CreditProcessRequest &r, const CreditProcessReply &reply, std::string *wire) {
     if (!wire || !validRequest(r) || reply.totals.size() > 4) return false;
-    std::string text = "[\"CMCA1\","+std::to_string(reply.generation)+","+std::to_string(reply.ticket)+","+std::to_string(static_cast<unsigned>(reply.opened))+","+
+    if (reply.recovery.has_value()!=(r.recovery!=CreditRecoveryMode::Volatile)) return false;
+    std::string text = std::string(reply.recovery?"[\"CMCA2\",":"[\"CMCA1\",")+std::to_string(reply.generation)+","+std::to_string(reply.ticket)+","+std::to_string(static_cast<unsigned>(reply.opened))+","+
         (reply.applied?std::to_string(static_cast<unsigned>(*reply.applied)):"null")+",[";
     for (size_t i = 0; i < reply.totals.size(); ++i) { if (i) text += ','; text += totals(reply.totals[i]); }
-    text += "]]"; CreditProcessReply checked;
+    text += "]";
+    if (reply.recovery) {
+        const auto &s=*reply.recovery;
+        text+=",["+std::to_string(static_cast<unsigned>(s.status))+","+std::to_string(static_cast<unsigned>(s.state))+","+
+            (s.batch?batch(*s.batch):"null")+","+(s.applied?std::to_string(static_cast<unsigned>(*s.applied)):"null")+"]";
+    }
+    text += "]"; CreditProcessReply checked;
     if (!decodeCreditReply(r,text,&checked)) return false;
     *wire = std::move(text); return true;
 }
 bool decodeCreditReply(const CreditProcessRequest &r, const std::string &wire, CreditProcessReply *out) {
     if (!out || !validRequest(r) || wire.size() > localTaskResponseLimit || !boundedPublicJson(wire)) return false;
-    JsonValue root; if (!parseJsonStrict(wire,&root,nullptr) || !array(root,6)) return false;
+    const bool persistent=r.recovery!=CreditRecoveryMode::Volatile;
+    JsonValue root; if (!parseJsonStrict(wire,&root,nullptr) || !array(root,persistent?7:6)) return false;
     const auto &a = root.items; CreditProcessReply reply;
-    if (!a[0].isString() || a[0].text != "CMCA1" || !u(a[1],reply.generation,UINT64_MAX) || !u(a[2],reply.ticket,UINT64_MAX) || reply.generation != r.generation || reply.ticket != r.ticket || !status(a[3],reply.opened) || !a[5].isArray()) return false;
+    if (!a[0].isString() || a[0].text != (persistent?"CMCA2":"CMCA1") || !u(a[1],reply.generation,UINT64_MAX) || !u(a[2],reply.ticket,UINT64_MAX) || reply.generation != r.generation || reply.ticket != r.ticket || !status(a[3],reply.opened) || !a[5].isArray()) return false;
+    if (persistent) { CreditRecoverySnapshot value; if (!recovery(r,a[6],value)) return false; reply.recovery=std::move(value); }
     if (!null(a[4])) { CreditLedgerStatus s; if (!status(a[4],s)) return false; reply.applied = s; }
     if (reply.opened != CreditLedgerStatus::Ok) { if (reply.applied || !a[5].items.empty()) return false; }
     else {
         if (reply.applied.has_value() != r.batch.has_value() || a[5].items.size() != r.queries.size()) return false;
         for (size_t i = 0; i < r.queries.size(); ++i) { CreditTotals t; if (!totals(a[5].items[i],r,r.queries[i],t)) return false; reply.totals.push_back(std::move(t)); }
+        if (reply.recovery && reply.recovery->status==CreditLedgerStatus::Ok && reply.applied &&
+            (*reply.applied==CreditLedgerStatus::Ok || *reply.applied==CreditLedgerStatus::Replay)) {
+            if (reply.recovery->state!=CreditRecoveryState::Confirmed || !reply.recovery->batch ||
+                batch(*r.batch)!=batch(*reply.recovery->batch)) return false;
+        }
     }
     *out = std::move(reply); return true;
 }
 CreditProcessReply executeCreditRequest(const CreditProcessRequest &r) {
     CreditProcessReply reply; reply.generation = r.generation; reply.ticket = r.ticket;
     if (!validRequest(r)) { reply.opened = CreditLedgerStatus::Invalid; return reply; }
+    CreditRecoveryJournal journal;
+    const bool persistent=r.recovery!=CreditRecoveryMode::Volatile;
+    if (persistent) {
+        reply.opened=journal.open(r); reply.recovery=journal.snapshot();
+        if (reply.opened!=CreditLedgerStatus::Ok) return reply;
+        if (reply.recovery->batch) {
+            // A surviving receipt never authorizes recreating a lost/replaced ledger as an empty history.
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(r.file,ec)) || ec) {
+                if (reply.recovery->state==CreditRecoveryState::Confirmed) reply.recovery->state=CreditRecoveryState::Diverged;
+                reply.opened=CreditLedgerStatus::Storage; return reply;
+            }
+        }
+    }
     CreditLedger ledger; reply.opened = ledger.open(r.file,r.binding,r.nowUtcMs,r.limits);
-    if (reply.opened != CreditLedgerStatus::Ok) return reply;
-    if (r.batch) reply.applied = ledger.apply(*r.batch,r.nowUtcMs);
+    if (reply.opened != CreditLedgerStatus::Ok) {
+        if (persistent && reply.recovery->state==CreditRecoveryState::Confirmed) reply.recovery->state=CreditRecoveryState::Diverged;
+        return reply;
+    }
+    if (persistent && reply.recovery->state==CreditRecoveryState::Confirmed) {
+        const auto proof=ledger.verifyLatest(*reply.recovery->batch,r.nowUtcMs);
+        if (proof!=CreditLedgerStatus::Replay) {
+            reply.recovery->state=CreditRecoveryState::Diverged;
+            if (proof==CreditLedgerStatus::Storage || proof==CreditLedgerStatus::Clock) { reply.opened=proof; return reply; }
+        }
+    }
+    if (r.batch) {
+        bool apply=true;
+        const bool divergent=reply.recovery && reply.recovery->state==CreditRecoveryState::Diverged;
+        if (persistent) {
+            if (r.recovery==CreditRecoveryMode::Retry) {
+                if (!journal.matches(r)) { reply.applied=CreditLedgerStatus::Conflict; apply=false; }
+            } else if (divergent || journal.snapshot().state==CreditRecoveryState::Prepared) { reply.applied=CreditLedgerStatus::Conflict; apply=false; }
+            else {
+                const auto staged=journal.prepare(r);
+                if (staged!=CreditLedgerStatus::Ok) { reply.applied=staged; apply=false; }
+            }
+        }
+        if (apply) {
+            reply.applied=ledger.apply(*r.batch,r.nowUtcMs);
+            const bool accepted=*reply.applied==CreditLedgerStatus::Ok || *reply.applied==CreditLedgerStatus::Replay;
+            // A failed retry proves only that this retry did not commit, not that the old uncertain attempt never did.
+            if (persistent && (accepted || (r.recovery==CreditRecoveryMode::Submit && *reply.applied!=CreditLedgerStatus::Storage && *reply.applied!=CreditLedgerStatus::StaleBatch))) journal.settle(*reply.applied);
+        }
+        if (persistent) {
+            reply.recovery=journal.snapshot();
+            if (divergent && reply.recovery->state==CreditRecoveryState::Confirmed &&
+                (!reply.applied || (*reply.applied!=CreditLedgerStatus::Ok && *reply.applied!=CreditLedgerStatus::Replay))) reply.recovery->state=CreditRecoveryState::Diverged;
+        }
+    }
     for (const auto &q : r.queries) {
         auto t = q.cumulative ? ledger.cumulative(q.throughInclusiveMs,r.nowUtcMs) : ledger.query(q.fromExclusiveMs,q.throughInclusiveMs,r.nowUtcMs);
         if (t.status != CreditLedgerStatus::Ok) { const auto s = t.status; t = {}; t.status = s; t.qualification = r.binding.qualification; t.scope = r.binding.scope; t.fromExclusiveMs = q.cumulative ? r.binding.historyStartMs-1 : q.fromExclusiveMs; t.throughInclusiveMs = q.throughInclusiveMs; }
@@ -152,7 +257,9 @@ CreditProcessResult CreditProcessClient::transact(const CreditProcessRequest &re
         if (decodeCreditReply(request,task.response,&reply)) result.reply = std::move(reply);
         else result.transport = LocalTaskStatus::Unavailable;
     }
-    result.writeOutcomeUnknown = request.batch.has_value() && task.childStarted && (!result.reply || (result.reply->applied && *result.reply->applied == CreditLedgerStatus::Storage));
+    result.writeOutcomeUnknown = request.batch.has_value() && task.childStarted && (!result.reply ||
+        (result.reply->applied && *result.reply->applied == CreditLedgerStatus::Storage) ||
+        (result.reply->recovery && (result.reply->recovery->status!=CreditLedgerStatus::Ok || result.reply->recovery->state==CreditRecoveryState::Prepared || result.reply->recovery->state==CreditRecoveryState::Diverged)));
     return result;
 }
 }  // namespace om

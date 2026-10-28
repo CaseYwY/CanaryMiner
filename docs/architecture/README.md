@@ -22,6 +22,8 @@
 
 **Credit ownership:** P-07b adds [bounded isolated local ledger jobs](../credit-owner.md) and immutable generation-bound results with explicit lost-acknowledgement reconciliation. It does not qualify a real provider, persist pending jobs, supply recovery/collection UI or enable production financial rows.
 
+**Credit restart recovery:** P-07c adds [durable pending intent/receipt and exact restart reconciliation](../credit-recovery.md) to the isolated owner by default. Inspection never auto-applies; confirmed receipts require read-only latest-ledger proof and failed retries preserve old uncertainty. Real-source/collection cursor, native recovery/import/export UI, parent-death/OS-stall packaging and financial activation remain unfinished.
+
 **Electricity/time core:** P-05a/P-08a adds [optional offline IANA civil time, exact sample-and-hold energy and supported declared tariffs](../electricity-core.md), including pure full-remainder whole-meter counterfactuals. No real plan certification, telemetry/settings activation, income/net forecast or optimizer is supplied.
 
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.

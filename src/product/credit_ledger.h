@@ -80,6 +80,8 @@ class CreditLedger {
     CreditLedger &operator=(const CreditLedger &) = delete;
     CreditLedgerStatus open(const std::filesystem::path &absoluteLocalFile, const CreditSourceContract &contract, int64_t nowUtcMs, CreditLedgerLimits limits = {});
     CreditLedgerStatus apply(const CreditBatch &batch, int64_t nowUtcMs);
+    // Read-only proof for the current latest snapshot only. Never inserts/replays a missing batch.
+    CreditLedgerStatus verifyLatest(const CreditBatch &batch, int64_t nowUtcMs);
     CreditTotals query(int64_t fromExclusiveMs, int64_t throughInclusiveMs, int64_t nowUtcMs);
     CreditTotals cumulative(int64_t throughInclusiveMs, int64_t nowUtcMs);
    private:

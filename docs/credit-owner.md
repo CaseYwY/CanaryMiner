@@ -2,6 +2,8 @@
 
 **Offline/synthetic host integration only.** This batch adds a real native ledger helper, serialized bounded background jobs and immutable results; no production supervisor starts them. `FinancialView.enabled` remains false, no real source is qualified, and there is no new mining authorization, account/credential connector, manual income importer or today's forecast. [P-07a](credit-ledger.md) remains the durable-fact/schema contract; accepted-share history and its owner are unchanged.
 
+This document records the initial P-07b volatile contract. The later [P-07c durable intent/receipt layer](credit-recovery.md) is now the owner's default; explicit `persistentRecovery=false` retains this compatibility behavior. Its smaller persistent IPC bound, restart inspection, read-only receipt verification and failed-retry rules have their own evidence and do not qualify a real source or production activation.
+
 Requirements: R-INC-001/003–007, R-SAFE-001/002 and R-PRIV-002, all still partial for their full product scope. Modules: M-LEDGER/M-SUPERVISOR/M-PRIVACY; tests: T-LEDGER/T-INTENT/T-PRIVACY.
 
 ## Why a process, and why one transaction job per helper
@@ -50,7 +52,7 @@ Cancellation can arrive **after COMMIT**. Killing a helper cannot undo already d
 3. Only an explicit reviewed `retryUncertain()` action replays that retained original source ID/sequence/content, with a new request ticket/current query instant. It is **not** an automatic stop/fault retry. The original source/observation times remain unchanged.
 4. `Ok` or exact `Replay` resolves this recovery. `StaleBatch` alone does not prove that the old uncertain content committed, so it cannot clear the latch; conflict/storage failure still needs explicit ledger/source reconciliation. There is no destructive repair shortcut or fabricated corrected coverage.
 
-The retained recovery batch is memory-only. If the whole application exits before reconciliation, the source adapter/UI must recover the stable source snapshot/ID and reconcile explicitly; durable pending-job/recovery-journal UX is **not implemented**. Real ingestion activation requires that design and qualified source capabilities, not merely this queue.
+The original P-07b retained recovery batch is memory-only. [P-07c](credit-recovery.md) adds helper-side durable pending/receipt state and exact restart reconciliation by default; native recovery/import/export UX and qualified collection/source integration are still not implemented. Real ingestion activation requires those capabilities, not merely this queue.
 
 ## Build, tests and rollout
 
@@ -73,4 +75,4 @@ Executed evidence (2026-10-28):
 
 Cases include exact large values/canonical wire limits, unknown/partial versus zero, immutable snapshots, source/scope binding, replay without freshening, concurrent-writer refusal, bad response/reply-generation rejection, explicit inheritance/environment filtering, Unicode helper/data paths, backpressure with no consumed tickets, stopped queue discard/no late publication, automatic-fault latching, lost-after-commit acknowledgement, and exact explicit recovery. Tests also guard CLI-like Python helper scripts against import-time work: the previous electricity oracle now has a main guard/local Decimal context, so unittest discovery cannot execute its probe or alter other tests' precision merely by importing it.
 
-API reference lookup used Context7's first-party Win32 material for file mappings/inherited handles; native tests verify the child cannot remap its request writable. This is not independent dependency/OS/security certification. Qualified real-credit providers, manual import/export/recovery UI, persistent pending journal, supervisor/financial activation, today's forecast, OS-failure/packaging and production release gates remain open. No real pool/account was contacted and no miner was started.
+API reference lookup used Context7's first-party Win32 material for file mappings/inherited handles; native tests verify the child cannot remap its request writable. This is not independent dependency/OS/security certification. Qualified real-credit providers, manual import/export/recovery UI, supervisor/financial activation, today's forecast, OS-failure/packaging and production release gates remain open; P-07c's later persistent journal is linked separately above. No real pool/account was contacted and no miner was started.

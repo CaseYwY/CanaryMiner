@@ -58,3 +58,4 @@ ui-preferences.json.v1.bak
 accepted-history.sqlite3*
 runtime-preferences.json*
 manual-market-preferences.json*
+*.credit-recovery.json*

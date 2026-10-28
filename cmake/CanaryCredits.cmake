@@ -3,6 +3,7 @@ add_library(canary_credits STATIC
   "${CMAKE_SOURCE_DIR}/src/product/credit_ledger.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/local_task_process.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/credit_process.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/credit_recovery.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/credit_owner.cpp")
 target_compile_features(canary_credits PUBLIC cxx_std_17)
 target_include_directories(canary_credits PUBLIC "${CMAKE_SOURCE_DIR}/src")

@@ -1,4 +1,7 @@
 #include "credit_process.h"
+#ifdef CANARY_CREDIT_WORKER_TESTING
+#include "credit_recovery.h"
+#endif
 #include <chrono>
 #include <thread>
 #include <cstdlib>
@@ -34,6 +37,18 @@ int main(int argc, char **argv) {
         }
         const bool stallBefore = request.batch && !request.batch->records.empty() && request.batch->records[0].id == "fixture.stall-before-apply";
         if (stallBefore) { std::ofstream(marker).put('1'); std::this_thread::sleep_for(std::chrono::seconds(60)); }
+        if (request.recovery==CreditRecoveryMode::Submit && request.batch && !request.batch->records.empty()) {
+            const auto &id=request.batch->records[0].id;
+            if (id=="fixture.stall-prepared" || id=="fixture.stall-unsettled") {
+                CreditRecoveryJournal journal;
+                if (journal.open(request)!=CreditLedgerStatus::Ok || journal.prepare(request)!=CreditLedgerStatus::Ok) return 6;
+                if (id=="fixture.stall-unsettled") {
+                    auto direct=request; direct.recovery=CreditRecoveryMode::Volatile;
+                    if (executeCreditRequest(direct).applied!=CreditLedgerStatus::Ok) return 7;
+                }
+                std::ofstream(marker).put('1'); std::this_thread::sleep_for(std::chrono::seconds(60));
+            }
+        }
 #endif
         const auto response = executeCreditRequest(request);
 #ifdef CANARY_CREDIT_WORKER_TESTING

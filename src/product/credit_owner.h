@@ -3,7 +3,12 @@
 #include "credit_process.h"
 #include <functional>
 namespace om {
-struct CreditOwnerPolicy { size_t maxJobs = 8, maxWireBytes = 1024*1024; unsigned operationTimeoutMs = 10000; CreditLedgerLimits ledger; };
+struct CreditOwnerPolicy {
+    size_t maxJobs = 8, maxWireBytes = 1024*1024;
+    unsigned operationTimeoutMs = 10000;
+    CreditLedgerLimits ledger;
+    bool persistentRecovery = true; // default helper-side journal; false retains the explicit volatile compatibility contract
+};
 enum class CreditOwnerState { Stopped, Starting, Ready, Busy, NeedsReconciliation, Faulted };
 enum class CreditEnqueueStatus { Queued, NotReady, StaleGeneration, Full, Invalid, NeedsReconciliation };
 struct CreditEnqueueResult { CreditEnqueueStatus status = CreditEnqueueStatus::NotReady; uint64_t ticket = 0; };
@@ -16,6 +21,9 @@ struct CreditOwnerSnapshot {
     bool writeOutcomeUnknown = false;
     uint64_t uncertainSequence = 0;
     std::string uncertainSnapshotId;
+    CreditRecoveryState recoveryState = CreditRecoveryState::Disabled;
+    uint64_t durableSequence = 0;
+    std::string durableSnapshotId;
     std::optional<CreditProcessReply> reply; // immutable point-in-time results, not fresh income solely because read recently
 };
 using CreditOwnerClock = std::function<int64_t()>; // pure UTC millisecond clock; not a callback for disk/provider work
