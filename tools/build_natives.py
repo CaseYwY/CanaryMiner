@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Compile-only five-translation-unit build of the Pearl natives (no GPU is used).
+"""Compile-only Pearl native build, with separate host-only display objects (no GPU is used).
 
-This is the recipe the qualified v18 (SM120) native was built with, parameterised by toolkit path.
+Kernel flags retain the qualified v18 (SM120) recipe, parameterised by toolkit path.
+The added host display objects do not constitute a newly qualified production binary.
 usage:  python3 tools/build_natives.py 120 --toolkit DIR --out DIR [--src DIR] [--only]
 
   --toolkit DIR   a CUDA 13.1 toolkit root containing bin/nvcc (the qualified builds used nvcc 13.1.115)
@@ -27,12 +28,18 @@ if a.compat_include: inc=['-I'+a.compat_include]+inc
 TUS=[('miner','src/core/miner.cu'),('registry','src/core/registry.cu'),('pearl_algo','src/algos/pearl-pow/algo.cu'),('run','src/core/run.cpp')]
 idx={n:i for i,(n,_) in enumerate(TUS)}
 if a.only: TUS=[t for t in TUS if t[0]=='pearl_algo']
+else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market','src/product/manual_market.cpp')]
 out.mkdir(parents=True,exist_ok=True)
 env=dict(os.environ,PATH=str(T/'bin')+os.pathsep+os.environ['PATH'])
 def comp(t):
     name,rel=t; o=out/(name+'.o')
-    argv=[NVCC,'-c','-x','cu',*flags,'--std=c++17','-lineinfo','-ccbin=/usr/bin/g++',*inc,*extra,
-          *['-D'+d for d in defs],'--frandom-seed='+seeds[idx[name]],str(src/rel),'-o',str(o)]
+    if name in idx:
+        argv=[NVCC,'-c','-x','cu',*flags,'--std=c++17','-lineinfo','-ccbin=/usr/bin/g++',*inc,*extra,
+              *['-D'+d for d in defs],'--frandom-seed='+seeds[idx[name]],str(src/rel),'-o',str(o)]
+    else:
+        # Pure host arithmetic/projector; no CUDA preprocessing or optional HTTPS backend is needed.
+        argv=['/usr/bin/g++','-c','-O3','-std=c++17','-Wall','-Wformat','-Werror=format','-pthread',*inc,
+              str(src/rel),'-o',str(o)]
     r=subprocess.run(argv,cwd=src,capture_output=True,text=True,env=env)
     (out/(name+'.log')).write_text(' '.join(argv)+'\n'+r.stdout+r.stderr)
     return name,r.returncode,(hashlib.sha256(o.read_bytes()).hexdigest() if r.returncode==0 else r.stderr[-1500:])
@@ -40,7 +47,7 @@ with cf.ThreadPoolExecutor(a.jobs) as ex: res=list(ex.map(comp,TUS))
 for n,rc,h in res: print(n,rc,h if rc else h[:16])
 if any(r[1] for r in res): sys.exit(1)
 if not a.only:
-    link=[NVCC,'-arch=sm_120a','-ccbin=/usr/bin/g++','-L'+str(T/'lib64/stubs'),*[str(out/(n+'.o')) for n,_ in TUS],'-ldl','-o',str(out/'canary-miner')]
+    link=[NVCC,'-arch=sm_120a','-ccbin=/usr/bin/g++','-Xcompiler=-pthread','-L'+str(T/'lib64/stubs'),*[str(out/(n+'.o')) for n,_ in TUS],'-ldl','-o',str(out/'canary-miner')]
     r=subprocess.run(link,cwd=src,capture_output=True,text=True,env=env); (out/'link.log').write_text(' '.join(link)+r.stdout+r.stderr)
     if r.returncode: sys.exit(r.stderr[-800:])
     d=(out/'canary-miner'); print('native sha256',hashlib.sha256(d.read_bytes()).hexdigest(),d.stat().st_size)

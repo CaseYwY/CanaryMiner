@@ -14,7 +14,9 @@
 
 **Public data transport:** P-06a adds a [default-off HTTPS/helper-process foundation](../public-https.md), with bounded local TLS/IPC tests on both host platforms. No market polling, financial provider or Stratum TLS is enabled; cache/adapters, native-trust egress and release packaging remain unfinished.
 
-**Market core:** P-06b adds [exact price/FX adapters, immutable cache ownership and a native projection](../market-data.md), verified with synthetic/offline data. No production supervisor activates it; unqualified provider candles, income, manual-user import and native-trust/release gates remain unfinished.
+**Market core:** P-06b adds [exact price/FX adapters, immutable cache ownership and a native projection](../market-data.md), verified with synthetic/offline data. No production supervisor activates the public-feed owner; provider candles, income and native-trust/release gates remain unfinished.
+
+**Offline references:** P-06c adds [native manual price/FX input](../manual-market.md), independent review/save, freshness/skew labels and a one-session `--no-market` override. Running terminal display can update without restarting workers. User declarations are not live quotes, complete 1h series, attributable income or qualified policy inputs; public feeds/financial rows remain disabled.
 
 **Credit core:** P-07a adds a [durable exact posted-credit ledger](../credit-ledger.md) for synthetic-source qualification, with revision/provenance/coverage recovery and pure latest-price references. No real provider, background collection, calendar forecast or financial dashboard activation is supplied.
 
@@ -56,6 +58,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Display refresh, terminal color, recent events and hiding worker label | Implemented, local presentation preferences only |
 | Durable 24h/7d/30d/all accepted counters | Implemented for observed user-share counters; partial coverage and clock/recovery warnings explicit |
 | Market adapters and native market projection | Offline-tested exact market core/owner/projection; not production-activated or live-qualified |
+| Manual/offline reference input and terminal display | Implemented default-off native subpage and separate preferences; user-declared PRL/USDT and FX only, not income/automation |
 | Exact posted-credit storage/valuation core | Implemented and tested for synthetic contracts only; no real source or runtime activation |
 | Actual-credit adapters and financial income dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |

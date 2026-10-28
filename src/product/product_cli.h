@@ -75,6 +75,7 @@ struct CliOverrides {
     bool json = false;
     bool noDonation = false;  // --no-donation: switch the developer donation off for this run
     bool noHistory = false;   // local accepted history only, never a reward/account setting
+    bool noMarket = false;    // terminal manual-price display override; never modifies saved values
     GpuTuningConfig tuning;
 };
 
@@ -155,7 +156,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             }
             return true;
         };
-        if (a == "--no-history") {
+        if (a == "--no-market") {
+            r.ov.noMarket = true;
+        } else if (a == "--no-history") {
             r.ov.noHistory = true;
         } else if (a == "--config") {
             if (!need(i, "--config", &v)) return false;
@@ -399,6 +402,7 @@ inline std::string productHelpText() {
         "       canary-miner version\n"
         "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       --no-history                  disable local accepted-share history for this run\n"
+        "       --no-market                   suppress offline manual references this run; saved values stay\n"
         "\n"
         "Pool\n"
         "  -o, --pool SPEC       HOST:PORT, stratum+tcp://HOST:PORT, or a preset: f2pool, kryptex,\n"

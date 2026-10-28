@@ -26,7 +26,8 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                 '-Werror', '-Wno-unused-variable', '-Itests/pearl_cli_stubs',
                 '-DCANARY_PEARL_ONLY_BUILD=' + profile,
                 '-include', 'tests/pearl_cli_stubs/cuda_stub.h', 'src/core/miner.cu',
-                'src/core/registry.cu', 'tests/test_pearl_cli_stubs.cpp', '-o', str(binary)]
+                'src/core/registry.cu', 'tests/test_pearl_cli_stubs.cpp', 'src/product/exact_decimal.cpp',
+                'src/product/manual_market.cpp', '-pthread', '-o', str(binary)]
             compiled = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=90)
             if compiled.returncode:
                 raise RuntimeError(compiled.stderr.decode(errors='replace'))

@@ -284,6 +284,13 @@ user counts for 24h/7d/30d/all-local windows with coverage warnings; `--no-histo
 system SQLite runtime and is not complete pool history. A financial renderer contract exists, but live market/credit providers
 and electricity-profit calculations are not yet integrated; synthetic tests and accepted counts are not live income.
 
+Optional [manual/offline price references](docs/manual-market.md) are now available through **S → Market and timing** or the
+idle settings command. They default off and stay labelled user declarations, not live exchange quotes. Enter PRL/USDT and,
+separately, USD per USDT with their own reference UTC times; review/save writes only `manual-market-preferences.json`.
+Saving during a supervised dashboard session changes reference display without restarting workers or fetching a provider.
+`--no-market` suppresses that session's references without changing saved values. Stale/missing inputs and the unavailable
+one-hour mean are explicit; actual income, forecasts, net estimates and automation remain disabled.
+
 The development CLI also accepts [`--work-wait-ms 0..1000`](docs/work-wait.md) between completed work batches, default 0.
 S → Automatic mining or Privacy now opens [runtime defaults](docs/runtime-settings.md) for host wait/history collection.
 These save separately from UI drafts to `runtime-preferences.json`, show configured/current/CLI-overridden values and apply

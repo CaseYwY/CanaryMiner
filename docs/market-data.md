@@ -1,6 +1,6 @@
 # Exact market adapters, cache owner and native projection (P-06b)
 
-**Implemented offline-capable core; runtime public feeds remain unconfigured/default off.** This batch extends R-MKT-001–003, T-MARKET/T-INTENT and the native read-only projection. It is not a production market-data, income, optimizer or release qualification. P-06 is still `PARTIAL`.
+**Implemented offline-capable core; runtime public feeds remain unconfigured/default off.** This batch extends R-MKT-001–003, T-MARKET/T-INTENT and the native read-only projection. It is not a production market-data, income, optimizer or release qualification. P-06 is still `PARTIAL`. The later [P-06c manual/offline subpage](manual-market.md) supplies independent user declarations, not qualified provider observations.
 
 ## Exact data and identities
 
@@ -53,7 +53,7 @@ The cache retains a last good observation with its original times through failur
 
 `PublicMarketView` is independent of `FinancialView`: latest PRL/USDT, USDT/USD, USD reference, source health, observation time/age, absent trade-event time, 1h means and actual coverage/end/lag are projected from validated snapshots. A default/unstarted owner does not enable a section. Stopped/stale/missing-FX/clock-fault values have textual unavailable reasons, not color-only status. No credited-income or net-profit rows are enabled as a side effect.
 
-The existing dashboard has a `PUBLIC MARKET REFERENCES` section only when supplied that projection. **The supervisor does not supply it yet.** CPU-only `canary_market_preview` supplies conspicuously labelled synthetic fixtures to exercise this seam without a GPU, mining, credentials or network:
+The existing dashboard has a `PUBLIC MARKET REFERENCES` section only when supplied that projection. **The supervisor does not supply provider projections yet.** P-06c instead uses a separately headed manual-declaration section. CPU-only `canary_market_preview` supplies conspicuously labelled synthetic fixtures to exercise the provider seam without a GPU, mining, credentials or network:
 
 ```sh
 cmake --preset tests -B build/market-check
@@ -64,7 +64,7 @@ build/market-check/tests/canary_market_preview fresh 80
 
 Use the executable suffix on Windows. Preview modes are `fresh`, `stale`, `missing-fx`, `clock-fault`; every value is invented. Tests cover 60/80/128 columns. The existing renderer clamps a 40-column request to 60: this batch does **not** claim full sub-60-column support. No independent GUI/browser runtime is added.
 
-No new settings/CLI flags, saved config/schema, cache file, history migration, provider authentication or automatic startup behaviour is introduced. Rollback removes the new market core/optional projection; do not delete accepted history, mining credentials or runtime preferences.
+The original P-06b slice introduced no settings/CLI flags, saved config/schema, cache file, history migration, provider authentication or automatic startup behaviour. P-06c's separate preferences/CLI and rollback are documented in [manual/offline inputs](manual-market.md); neither slice enables public polling. Do not delete accepted history, mining credentials or runtime preferences.
 
 ## Evidence and remaining work
 
@@ -77,4 +77,4 @@ Executed evidence, using synthetic/offline inputs only:
 
 Checks include boundary/rounding/property cases, source/currency/candle/coverage checks, deterministic clock/backoff/rate/stop behaviour and actual background-owner immutable-cache/cancellation scenarios, including all four fixture feeds. No hardware miner was started by these tests.
 
-Not run or supplied by this slice: live ticker/candle/metadata qualification, source terms/regional access approval, native trust auxiliary egress/packaging/signing, custom manual-user input/import UI, persistent candle archive, production supervisor/settings activation, actual credit provider/ledger, UTC timezone/calendar billing, native GPU/game or release qualification. Full project scope remains in [execution plan](architecture/execution-plan.md). The existing financial presentation contract remains disabled; no shares, balances or payouts are relabelled as income.
+Not run or supplied by this original slice: live ticker/candle/metadata qualification, source terms/regional access approval, native trust auxiliary egress/packaging/signing, persistent candle archive, provider supervisor/settings activation, actual-credit source/runtime integration, native GPU/game or release qualification. Later [manual input](manual-market.md), [credit core](credit-ledger.md), [credit owner](credit-owner.md) and [civil/energy/tariff core](electricity-core.md) have their own bounded evidence, not live financial qualification. Full project scope remains in [execution plan](architecture/execution-plan.md). The existing financial presentation contract remains disabled; no shares, balances or payouts are relabelled as income.

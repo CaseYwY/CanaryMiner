@@ -140,9 +140,19 @@ Contents
       Q   quit (stops the miner cleanly)
       D   details: PCI bus, pool state, restarts and the last error for each GPU
       L   log: recent miner output
+      S   native settings (this development branch); review/save or cancel explicitly
 
   Add --no-dashboard for plain timestamped lines (also used automatically when the output goes to a file).
   Rates are shown in TH/s.
+
+  Optional offline references: S -> Market and timing -> Manual/offline price references.
+  Default off. Enter PRL/USDT and independent USD per USDT with their own reference UTC times.
+  N on a timestamp field explicitly stamps now; saving alone never refreshes a reference time.
+  V/F2 reviews; Enter/F2 saves only the offline-reference target. This does not restart mining or fetch quotes.
+  --no-market suppresses this session's display without changing saved values. Inputs are user declarations,
+  not live quotes or a one-hour mean. No actual-income, forecast or net-profit rows are enabled.
+  The same controls are available without mining: canary-miner settings [--config FILE]
+  See docs/manual-market.md for validity, clock, storage and qualification limits.
 
 
 8. The developer donation

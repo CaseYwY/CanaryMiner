@@ -51,7 +51,7 @@ set(CANARY_SOURCES
 set_source_files_properties(src/core/run.cpp PROPERTIES LANGUAGE CUDA)
 
 add_executable(canaryminer ${CANARY_SOURCES})
-target_link_libraries(canaryminer PRIVATE canary_public_https)
+target_link_libraries(canaryminer PRIVATE canary_market)
 set_target_properties(canaryminer PROPERTIES OUTPUT_NAME canary-miner CUDA_SEPARABLE_COMPILATION OFF)
 
 # Stable, distinct per-unit seeds for nvcc-generated identifiers (reproducible builds).

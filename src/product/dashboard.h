@@ -367,7 +367,7 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
     }
 
     if (m.publicMarket.enabled) {
-        section(out, "PUBLIC MARKET REFERENCES", w);
+        section(out, m.publicMarket.heading, w);
         for (const auto &line : m.publicMarket.lines)
             for (const auto &part : wrapText(line, w)) out.push_back(one(part));
         out.push_back(one(""));

@@ -33,6 +33,7 @@
 #include "../product/restart_budget.h"
 #include "../product/fee_session.h"
 #include "../product/supervisor.h"
+#include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
 #include <chrono>
 #include <thread>
@@ -131,7 +132,7 @@ int main(int argc, char **argv) {
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
-        return runSettingsCommand(cfg.stateDir, &g_stop);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket);
     }
 
     std::string algoName = defaultAlgorithmName;
@@ -328,6 +329,7 @@ int main(int argc, char **argv) {
                 "  --log-dir DIR     rotating redacted log files\n"
                 "  --no-dashboard    plain timestamped lines instead of the live dashboard\n"
                 "  --no-history      disable local accepted history this run; existing data stays\n"
+                "  --no-market       suppress manual/offline terminal references this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
                 "                    not duty cycle; runtime defaults can be edited in Settings\n"
                 "  --no-donation     turn the optional 1%% developer donation off (on by default;\n"
@@ -893,6 +895,9 @@ int main(int argc, char **argv) {
             so.historyPath = (std::filesystem::u8path(cfg.stateDir) / "accepted-history.sqlite3").u8string();
         so.runtimePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json").u8string();
         so.runtimeContext = runtimeContext;
+        so.manualMarketPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "manual-market-preferences.json").u8string();
+        so.manualMarketFactory = makeManualMarketProjector;
+        so.noMarket = cli.ov.noMarket;
         so.resolvedWorkWait = opt.workWaitMs;
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;

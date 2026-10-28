@@ -10,11 +10,12 @@
 #include "dashboard.h"
 #include "ui_preferences.h"
 #include "runtime_settings.h"
+#include "manual_market_settings.h"
 
 namespace om {
 
 enum class SettingsPage { Browse, Review, Leave };
-enum class SettingsResult { None, Close, Quit, OpenRuntime };
+enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket };
 
 class SettingsPanel {
    public:
@@ -27,6 +28,7 @@ class SettingsPanel {
     UiPreferences active, draft;
     std::string message;
     RuntimeSettingsPanel runtime;
+    ManualMarketSettingsPanel manual;
 
     void open(const UiPreferences &value) {
         active = draft = value;
@@ -36,6 +38,7 @@ class SettingsPanel {
         reviewOffset = 0;
         message.clear();
         runtime.visible = false;
+        manual.visible = false;
     }
     bool dirty() const { return active != draft; }
 
@@ -44,9 +47,10 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 0 ? 3 : group == 1 ? 1 : group == 8 ? 2 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 0 ? 3 : (group == 1 || group == 3) ? 1 : group == 8 ? 2 : group == 9 ? 5 : group == 10 ? 7 : 0; }
 
-    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}) {
+    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0) {
+        if (manual.visible) return manual.key(key, manualSave, nowUtc) == ManualMarketSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (runtime.visible) return runtime.key(key, runtimeSave) == RuntimeSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (key == 3 || key == 'q' || key == 'Q') return SettingsResult::Quit;
         if (page == SettingsPage::Leave) {
@@ -89,6 +93,7 @@ class SettingsPanel {
         } else if (key == '\r' || key == '\n' || key == ' ') {
             if (groupsFocused) groupsFocused = false;
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
+            else if (group == 3) return SettingsResult::OpenManualMarket;
             else change();
         }
         return SettingsResult::None;
@@ -114,6 +119,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if (manual.visible) return manual.render(columns, rows, color);
         if (runtime.visible) return runtime.render(columns, rows, color);
         using namespace dash_detail;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
@@ -126,7 +132,7 @@ class SettingsPanel {
         std::vector<Line> body;
         body.push_back(one("(o> CanaryMiner / Settings" + std::string(dirty() ? " * unsaved" : ""), Tone::Canary));
         if (!compact) {
-            body.push_back(one("UI preferences; runtime controls save separately. Current run stays unchanged.", Tone::Plain));
+            body.push_back(one("UI, runtime and offline references save separately; no automatic miner restart.", Tone::Plain));
             body.push_back(one(""));
         }
         if (page == SettingsPage::Review) {
@@ -220,6 +226,10 @@ class SettingsPanel {
             row(0, "Host wait / runtime defaults [Enter]");
             result.push_back({"Manual controls; automatic selection is not enabled.", Tone::Plain});
             result.push_back({"Saved defaults apply on the next explicit start only.", Tone::Plain});
+        } else if (group == 3) {
+            row(0, "Manual/offline price references [Enter]");
+            result.push_back({"Default off; user-declared PRL/USDT and independent FX.", Tone::Plain});
+            result.push_back({"No provider polling, 1h series, actual income or optimizer.", Tone::Plain});
         } else if (group == 9) {
             toggle(0, "Details page", draft.detailsEnabled);
             toggle(1, "Device identity", draft.detailsIdentity);
@@ -266,7 +276,14 @@ inline void openRuntimeControls(SettingsPanel *panel, RuntimePreferencesStore *s
     if (panel->group == 8) panel->runtime.field = 1;
 }
 
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop) {
+inline void openManualMarketControls(SettingsPanel *panel, ManualMarketStore *store, const ManualMarketContext &context) {
+    if (!store) { panel->message = "Offline-market settings unavailable: no local target configured."; return; }
+    ManualMarketPreferences configured; std::string error;
+    if (!store->load(&configured,&error)) { panel->message = "Offline-market settings unavailable: "+error; return; }
+    panel->manual.open(configured,context);
+}
+
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -277,6 +294,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     }
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
+    ManualMarketStore manualStore(std::filesystem::u8path(stateDir) / "manual-market-preferences.json");
     UiPreferences preferences;
     std::string error;
     if (!store.load(&preferences, &error)) { fprintf(stderr, "%s\n", error.c_str()); return 3; }
@@ -290,8 +308,10 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
             const int key = keys.poll();
             if (!key) break;
             const auto result = panel.key(key, [&](const UiPreferences &p, std::string *e) { return store.save(p, e); },
-                [&](const RuntimePreferences &p, std::string *e) { return runtimeStore.save(p, e); });
+                [&](const RuntimePreferences &p, std::string *e) { return runtimeStore.save(p, e); },
+                [&](ManualMarketPreferences &p, std::string *e) { return confirmManualMarket(&p,static_cast<uint64_t>(time(nullptr)),e) && manualStore.save(p,e); }, static_cast<uint64_t>(time(nullptr)));
             if (result == SettingsResult::OpenRuntime) openRuntimeControls(&panel, &runtimeStore, {});
+            else if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.cliDisabled=noMarket; openManualMarketControls(&panel,&manualStore,context); }
             else if (result != SettingsResult::None) { panel.visible = false; break; }
         }
         const auto color = panel.active.color ? detectColorLevel() : ColorLevel::None;

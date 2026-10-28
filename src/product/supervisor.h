@@ -379,6 +379,9 @@ struct SupervisorOptions {
     std::string historyPath;               // optional local installation history; no wallet/device names stored
     std::string runtimePreferencesPath;
     RuntimeContext runtimeContext;
+    std::string manualMarketPreferencesPath;
+    ManualMarketFactory manualMarketFactory;
+    bool noMarket = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
 
@@ -538,6 +541,14 @@ class Supervisor {
             if (!uiStore_->load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
         }
         if (!opt_.runtimePreferencesPath.empty()) runtimeStore_.reset(new RuntimePreferencesStore(std::filesystem::u8path(opt_.runtimePreferencesPath)));
+        if (opt_.dashboard && !opt_.manualMarketPreferencesPath.empty()) {
+            manualStore_.reset(new ManualMarketStore(std::filesystem::u8path(opt_.manualMarketPreferencesPath)));
+            if (!opt_.noMarket) {
+                std::string error;
+                if (!manualStore_->load(&manualEffective_,&error)) addEvent("Offline-market display unavailable: "+error);
+                else if (opt_.manualMarketFactory) manualProjection_=opt_.manualMarketFactory(manualEffective_,static_cast<uint64_t>(time(nullptr)),t0);
+            }
+        }
         if (!opt_.historyPath.empty()) history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
             std::unique_ptr<Worker> w(new Worker());
@@ -583,8 +594,17 @@ class Supervisor {
                             return true;
                         }, [this](const RuntimePreferences &p, std::string *error) {
                             return runtimeStore_ && runtimeStore_->save(p, error);
-                        });
+                        }, [this,now](ManualMarketPreferences &p, std::string *error) {
+                            if (!manualStore_) { if(error)*error="Offline-market target unavailable."; return false; }
+                            if (p.enabled && !opt_.manualMarketFactory) { if(error)*error="Manual reference projection unavailable in this build."; return false; }
+                            const auto utc=static_cast<uint64_t>(time(nullptr));
+                            if (!confirmManualMarket(&p,utc,error)) return false;
+                            auto projection=opt_.manualMarketFactory?opt_.manualMarketFactory(p,utc,now):ManualMarketProjector{};
+                            if (!manualStore_->save(p,error)) return false;
+                            manualEffective_=p; manualProjection_=std::move(projection); return true;
+                        },static_cast<uint64_t>(time(nullptr)));
                         if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
+                        if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.running=true; context.cliDisabled=opt_.noMarket; context.effective=manualEffective_; openManualMarketControls(&settings_,manualStore_.get(),context); }
                         if (result == SettingsResult::Quit) {
                             settings_.visible = false;
                             nextFrame_ = 0;
@@ -727,6 +747,9 @@ class Supervisor {
     UiPreferences ui_;
     std::unique_ptr<UiPreferencesStore> uiStore_;
     std::unique_ptr<RuntimePreferencesStore> runtimeStore_;
+    std::unique_ptr<ManualMarketStore> manualStore_;
+    ManualMarketPreferences manualEffective_;
+    ManualMarketProjector manualProjection_;
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
     std::unique_ptr<AcceptedHistory> history_;
@@ -939,6 +962,7 @@ class Supervisor {
         model.logEntries.assign(logEntries_.begin(), logEntries_.end());
         if (history_) model.history = history_->snapshot();
         if (history_) for (const auto &worker : workers_) if (!worker->historySeen || worker->historyOutage) model.history.gaps = true;
+        if (opt_.dashboard && !opt_.noMarket && manualProjection_ && intent_.permits(sessionToken_)) model.publicMarket=manualProjection_(static_cast<uint64_t>(time(nullptr)),now);
         return model;
     }
 

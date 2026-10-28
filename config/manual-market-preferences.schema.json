@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CanaryMiner offline manual reference preferences v1 (not a provider or income source)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "asset", "token_quote", "fx_base", "fx_quote", "enabled", "fx_enabled", "prl_usdt", "prl_as_of_utc", "usdt_usd", "fx_as_of_utc", "confirmed_utc", "validity_seconds", "max_fx_skew_seconds"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "asset": {"const": "pearl-mainnet-native-prl"},
+    "token_quote": {"const": "USDT"},
+    "fx_base": {"const": "USDT"},
+    "fx_quote": {"const": "USD"},
+    "enabled": {"type": "boolean"},
+    "fx_enabled": {"type": "boolean"},
+    "prl_usdt": {"type": "string", "maxLength": 64, "pattern": "^(|[0-9]+(\\.[0-9]+)?)$"},
+    "usdt_usd": {"type": "string", "maxLength": 64, "pattern": "^(|[0-9]+(\\.[0-9]+)?)$"},
+    "prl_as_of_utc": {"type": "integer", "minimum": 0, "maximum": 253402300799},
+    "fx_as_of_utc": {"type": "integer", "minimum": 0, "maximum": 253402300799},
+    "confirmed_utc": {"type": "integer", "minimum": 0, "maximum": 253402300799},
+    "validity_seconds": {"type": "integer", "minimum": 60, "maximum": 86400},
+    "max_fx_skew_seconds": {"type": "integer", "minimum": 0, "maximum": 3600}
+  },
+  "$comment": "The native validator additionally requires positive values, <=38 digits / <=18 decimal places, complete value/time pairs and an explicit non-future confirmation for enabled inputs. A settings confirmation never replaces a reference timestamp. Schema shape alone does not qualify a price source."
+}

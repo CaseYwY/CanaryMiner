@@ -135,6 +135,33 @@ class RuntimePreferencesSchemaTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
 
 
+class ManualMarketSchemaTests(unittest.TestCase):
+    def test_disabled_example_shape_and_native_keys(self):
+        schema = load('config/manual-market-preferences.schema.json')
+        example = load('config/manual-market-preferences.example.json')
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertFalse(example['enabled'])
+        self.assertFalse(example['fx_enabled'])
+        self.assertEqual(example['prl_usdt'], '')
+        self.assertEqual(example['usdt_usd'], '')
+        self.assertEqual(example['prl_as_of_utc'], 0)
+        self.assertEqual(example['fx_as_of_utc'], 0)
+        self.assertEqual(example['confirmed_utc'], 0)
+        for key, value in (('schema_version', 2), ('asset', 'synthetic-other-asset'), ('token_quote', 'USD'),
+                           ('fx_base', 'USD'), ('fx_quote', 'USDT'), ('prl_usdt', 2.5), ('usdt_usd', '1e3'),
+                           ('enabled', 1), ('validity_seconds', 0), ('max_fx_skew_seconds', 3601),
+                           ('prl_as_of_utc', -1), ('wallet', 'synthetic')):
+            with self.subTest(key=key):
+                self.assertTrue(validate({**example, key: value}, schema, schema))
+        with open(os.path.join(ROOT, 'src', 'product', 'manual_market_preferences.h'), encoding='utf8') as stream:
+            native = stream.read()
+        writer = native.split('inline std::string manualMarketJson', 1)[1].split('inline bool parseManualMarket', 1)[0]
+        parser = re.search(r'const char \*keys\[\] = \{([^}]+)\}', native).group(1)
+        self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
+        self.assertEqual(set(re.findall(r'"([a-z_]+)"', parser)), set(schema['properties']))
+        self.assertEqual(set(schema['required']), set(schema['properties']))
+
+
 class StatsSchemaTests(unittest.TestCase):
     def test_schema_covers_the_writer(self):
         schema = load('config/stats-v1.schema.json')

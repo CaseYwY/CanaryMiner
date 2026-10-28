@@ -47,6 +47,8 @@ Owns durable accepted-count observations and rolling queries. Inputs are generat
 
 Owns asset-aware price/reward/FX adapters, bounded asynchronous fetches, source health, coverage and cache expiry. Interfaces return typed facts plus provenance. A URL or response cannot supply a shell command, GPU command, wallet key request or executable plugin. Offline/manual providers use the same validation contract.
 
+The initial [P-06c manual references](../manual-market.md) stop short of that provider contract: separate user declarations project terminal text only, never a qualified observation, reward, credit or policy input. Public-feed ownership remains unactivated. Explicit small-preference saves follow the existing synchronous settings path and retain an OS/disk-stall release gate; no frame performs file/network access.
+
 ### M-LEDGER
 
 Owns attributable credit facts and source revision/deduplication. The main panel derives latest-price production valuations without mutating these facts; optional historical price observations support a separate Details reference. Actual credits, payouts, wallet balances and sales are distinct record types. It does not derive token income from accepted counts, infer sales or assign wallet-wide income to a worker without evidence.

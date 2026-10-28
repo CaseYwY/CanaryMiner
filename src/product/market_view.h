@@ -6,5 +6,6 @@ namespace om {
 struct PublicMarketView {
     bool enabled = false;
     std::vector<std::string> lines;
+    std::string heading = "PUBLIC MARKET REFERENCES";
 };
 }  // namespace om

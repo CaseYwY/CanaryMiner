@@ -26,6 +26,8 @@ Executed transport-only slice: [P-06a](../public-https.md), including separate d
 
 [P-06b](../market-data.md) separately tests exact-decimal/rational arithmetic against a Python Decimal oracle, explicit Gate/Kraken fixture adapters, aligned historical FX products, full minute coverage, stale/skew/event-time rules, deterministic rate/backoff/clock/generation state, real background cache cancellation and native projection. These are synthetic/offline results, not live source/supervisor activation or actual-credit qualification.
 
+[P-06c](../manual-market.md) adds manual decimal/identity/schema/clock/expiry/skew, storage and native editor/render tests. Actual POSIX CLI/synthetic-supervisor PTY tests cover independent saves, timestamp preservation, terminal-only live replacement/off, CLI suppression and unchanged child-start counts. Manual declarations cannot qualify a provider or create income; a small synchronous save is not hard disk-stall/stop-deadline evidence.
+
 ## T-LEDGER
 
 Test actual credits versus balance/payout/pending/share count; worker versus wallet attribution; inclusive/exclusive time boundaries; pagination/retries/revisions/reversals and late discoveries. Test that market updates preserve token facts while changing **latest-price production valuation**. Two differently priced credit events at the same latest price must value as their total tokens times that latest price, not the historical weighted sum. Optional historical estimates remain separate. Sale status stays unknown, even after a transfer/deposit; missing/partial data never becomes zero or complete lifetime revenue.
