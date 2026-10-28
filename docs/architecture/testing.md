@@ -24,6 +24,8 @@ Test correct/wrong asset and network; latest quote versus equal-time 1h average;
 
 Executed transport-only slice: [P-06a](../public-https.md), including separate direct/process-isolated TLS fixtures, JSON/IPC limits and stalled-helper cancellation on Windows and Linux/WSL. Native-trust revocation policies differ explicitly. These tests do not qualify provider data, actual DNS stalls, live quotes, a market scheduler or production packaging/auxiliary egress.
 
+[P-06b](../market-data.md) separately tests exact-decimal/rational arithmetic against a Python Decimal oracle, explicit Gate/Kraken fixture adapters, aligned historical FX products, full minute coverage, stale/skew/event-time rules, deterministic rate/backoff/clock/generation state, real background cache cancellation and native projection. These are synthetic/offline results, not live source/supervisor activation or actual-credit qualification.
+
 ## T-LEDGER
 
 Test actual credits versus balance/payout/pending/share count; worker versus wallet attribution; inclusive/exclusive time boundaries; pagination/retries/revisions/reversals and late discoveries. Test that market updates preserve token facts while changing **latest-price production valuation**. Two differently priced credit events at the same latest price must value as their total tokens times that latest price, not the historical weighted sum. Optional historical estimates remain separate. Sale status stays unknown, even after a transfer/deposit; missing/partial data never becomes zero or complete lifetime revenue.

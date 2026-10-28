@@ -24,6 +24,7 @@
 #include "terminal_keys.h"
 #include "ui_preferences.h"
 #include "financial_view.h"
+#include "market_view.h"
 #include "accepted_history_view.h"
 
 #if defined(_WIN32)
@@ -83,6 +84,7 @@ struct DashModel {
     std::vector<std::string> log;   // redacted worker output, oldest first ([L])
     std::vector<DashLogEntry> logEntries;  // structured provenance when available; raw output is unclassified
     FinancialView finances;
+    PublicMarketView publicMarket;
     AcceptedHistoryView history;
 };
 
@@ -361,6 +363,13 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
                 for (const auto &part : wrapText("Latest uncertain interval: " + utcIsoClock(static_cast<time_t>(h.gapFromUtc)) + " to " +
                         utcIsoClock(static_cast<time_t>(h.gapToUtc)), w)) out.push_back(one(part, Tone::Amber));
         }
+        out.push_back(one(""));
+    }
+
+    if (m.publicMarket.enabled) {
+        section(out, "PUBLIC MARKET REFERENCES", w);
+        for (const auto &line : m.publicMarket.lines)
+            for (const auto &part : wrapText(line, w)) out.push_back(one(part));
         out.push_back(one(""));
     }
 

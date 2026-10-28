@@ -19,6 +19,7 @@ if(CANARY_PROFILE STREQUAL "tests")
   # Host-side tests only: CPU, no nvcc, no GPU, no network. Built with warnings; format warnings are errors.
   project(canaryminer-tests LANGUAGES CXX)
   include(cmake/CanaryPublicHttps.cmake)
+  include(cmake/CanaryMarket.cmake)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   enable_testing()
   add_subdirectory(tests)
@@ -27,6 +28,7 @@ endif()
 
 project(canaryminer LANGUAGES CXX CUDA)
 include(cmake/CanaryPublicHttps.cmake)
+include(cmake/CanaryMarket.cmake)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

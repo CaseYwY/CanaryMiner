@@ -2,6 +2,8 @@
 
 **Implemented, default off, not a live market integration.** Requirements: R-MKT-003 (partial), R-PRIV-002 and R-REL-001; families T-MARKET, T-INTENT and T-PRIVACY. No provider polling is started by the miner, no price/FX/credit facts are produced, and `FinancialView.enabled` remains false. Stratum and donation connections are unchanged. This helper is native host C++, not a GUI/browser runtime.
 
+Follow-on [P-06b](market-data.md) now supplies the offline-tested adapters, exact calculation/cache owner and native projection. It does not change the default-off/no-supervisor-activation boundary or satisfy this document's trust/packaging release gates.
+
 ## Backend and ownership decision
 
 Optional libcurl uses **c-ares**, Schannel on Windows and OpenSSL on Linux. The runtime refuses missing TLS/asynchronous-DNS/c-ares capabilities or an unexpected TLS backend. The curl ABI floor is 8.12, **not** a security approval for old unpatched releases. Development qualification used curl 8.23.0, c-ares 1.34.9 and the host's serviced native TLS facilities. Do not load another application's DLLs or install dependencies while mining.

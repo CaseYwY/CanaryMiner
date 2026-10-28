@@ -14,6 +14,8 @@
 
 **Public data transport:** P-06a adds a [default-off HTTPS/helper-process foundation](../public-https.md), with bounded local TLS/IPC tests on both host platforms. No market polling, financial provider or Stratum TLS is enabled; cache/adapters, native-trust egress and release packaging remain unfinished.
 
+**Market core:** P-06b adds [exact price/FX adapters, immutable cache ownership and a native projection](../market-data.md), verified with synthetic/offline data. No production supervisor activates it; unqualified provider candles, income, manual-user import and native-trust/release gates remain unfinished.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order
@@ -47,7 +49,8 @@ The native dashboard also reports durable accepted-share history, market informa
 | S-entry settings, navigation, review/save/discard and idle settings command | Implemented; host/PTY evidence linked above |
 | Display refresh, terminal color, recent events and hiding worker label | Implemented, local presentation preferences only |
 | Durable 24h/7d/30d/all accepted counters | Implemented for observed user-share counters; partial coverage and clock/recovery warnings explicit |
-| Market/credit adapters and financial dashboard | Not implemented |
+| Market adapters and native market projection | Offline-tested exact market core/owner/projection; not production-activated or live-qualified |
+| Actual-credit adapters and financial income dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
 | International tariff calculation and automatic profitability selection | Not implemented |
 | Tested game pause/coexist policies | Not implemented in this fork |
