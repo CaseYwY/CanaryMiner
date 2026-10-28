@@ -104,3 +104,12 @@ This change includes no SQLite implementation, header, library binary or source 
 statement is at <https://www.sqlite.org/copyright.html>; Windows system components remain subject to their platform terms.
 The required ABI floor is 3.31.0, not a patch/security baseline. Keep the selected system runtime serviced. Any future bundled
 build requires its own exact artifact/provenance and licence inventory. See `docs/accepted-history.md` for limits and recovery.
+
+## 7. Optional public JSON HTTPS development backend
+
+The default-off `CANARY_ENABLE_PUBLIC_HTTPS` build uses external libcurl/c-ares and Schannel (Windows) or distribution
+OpenSSL (Linux). No library binary, implementation source archive or CA bundle is included in this change. The notices
+from development curl 8.23.0 `COPYING` and c-ares 1.34.9 `LICENSE.md` are retained verbatim in `LICENSES/curl-8.23.0.txt`
+and `LICENSES/c-ares-1.34.9.txt`; exact download hashes and source-authentication limitations are in `docs/public-https.md`.
+These do not substitute for the final package's exact dependency graph, OpenSSL/provider notices, CRT/OS terms,
+security review and clean-machine qualification. No production binary for this feature is published.

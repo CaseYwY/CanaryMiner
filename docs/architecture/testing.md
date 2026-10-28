@@ -22,6 +22,8 @@ Executed local observation slice: [history validation](../history-validation.md)
 
 Test correct/wrong asset and network; latest quote versus equal-time 1h average; full/duplicate/missing/incomplete minute candles; sparse time weighting; pagination; valid zero-volume candles; stale/future timestamps; provider errors/rate limits; cache/cancellation/source switch. Test token/USDT times USDT/USD, missing/depegged conversion and explicit currency labels. HTTP responses are bounded; no redirects to unauthorized schemes/hosts and no disabled TLS verification.
 
+Executed transport-only slice: [P-06a](../public-https.md), including separate direct/process-isolated TLS fixtures, JSON/IPC limits and stalled-helper cancellation on Windows and Linux/WSL. Native-trust revocation policies differ explicitly. These tests do not qualify provider data, actual DNS stalls, live quotes, a market scheduler or production packaging/auxiliary egress.
+
 ## T-LEDGER
 
 Test actual credits versus balance/payout/pending/share count; worker versus wallet attribution; inclusive/exclusive time boundaries; pagination/retries/revisions/reversals and late discoveries. Test that market updates preserve token facts while changing **latest-price production valuation**. Two differently priced credit events at the same latest price must value as their total tokens times that latest price, not the historical weighted sum. Optional historical estimates remain separate. Sale status stays unknown, even after a transfer/deposit; missing/partial data never becomes zero or complete lifetime revenue.

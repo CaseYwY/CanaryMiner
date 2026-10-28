@@ -12,6 +12,8 @@
 
 **Runtime settings:** P-03c adds [native persisted host-wait/history defaults](../runtime-settings.md) with review/cancel, configured/effective/CLI distinctions and separate save targets. Both activate only at the next explicit session. Live activation and wider mining-config review remain unfinished.
 
+**Public data transport:** P-06a adds a [default-off HTTPS/helper-process foundation](../public-https.md), with bounded local TLS/IPC tests on both host platforms. No market polling, financial provider or Stratum TLS is enabled; cache/adapters, native-trust egress and release packaging remain unfinished.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order

@@ -18,6 +18,7 @@ option(CANARY_FEE_TEST_POLICY "Build the explicitly test-only accelerated donati
 if(CANARY_PROFILE STREQUAL "tests")
   # Host-side tests only: CPU, no nvcc, no GPU, no network. Built with warnings; format warnings are errors.
   project(canaryminer-tests LANGUAGES CXX)
+  include(cmake/CanaryPublicHttps.cmake)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   enable_testing()
   add_subdirectory(tests)
@@ -25,6 +26,7 @@ if(CANARY_PROFILE STREQUAL "tests")
 endif()
 
 project(canaryminer LANGUAGES CXX CUDA)
+include(cmake/CanaryPublicHttps.cmake)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,6 +45,7 @@ set(CANARY_SOURCES
 set_source_files_properties(src/core/run.cpp PROPERTIES LANGUAGE CUDA)
 
 add_executable(canaryminer ${CANARY_SOURCES})
+target_link_libraries(canaryminer PRIVATE canary_public_https)
 set_target_properties(canaryminer PROPERTIES OUTPUT_NAME canary-miner CUDA_SEPARABLE_COMPILATION OFF)
 
 # Stable, distinct per-unit seeds for nvcc-generated identifiers (reproducible builds).
@@ -78,3 +81,6 @@ if(WIN32)
 endif()
 
 install(TARGETS canaryminer RUNTIME DESTINATION bin)
+if(CANARY_ENABLE_PUBLIC_HTTPS)
+  install(TARGETS canary_public_json_worker RUNTIME DESTINATION bin)
+endif()

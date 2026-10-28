@@ -13,3 +13,6 @@ docs/sustained-public-wrapper-cpu-tests-20260905.txt text eol=lf
 
 # Preserve exact upstream notice bytes in source archives.
 LICENSES/NVIDIA-CUDA-13.1.1/*.txt -text
+# Exact optional dependency notices, including upstream Markdown trailing spaces.
+LICENSES/curl-8.23.0.txt -text
+LICENSES/c-ares-1.34.9.txt -text whitespace=-blank-at-eol

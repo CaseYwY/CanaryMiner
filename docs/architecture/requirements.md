@@ -18,7 +18,7 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-HIST-004 | Distinguish observed acknowledgement time from unavailable exact pool timestamps; handle clock jumps without wrapping or double counting. | M-HISTORY | P-04 | T-HISTORY | DONE |
 | R-MKT-001 | Display last-1h equal-time average and latest token price with quote currency, source, as-of, coverage and freshness. | M-MARKET | P-06 | T-MARKET | PLANNED |
 | R-MKT-002 | Replace price, FX and reward adapters without changing policy code; validate asset/network identity rather than ticker alone. | M-MARKET | P-06 | T-MARKET | PLANNED |
-| R-MKT-003 | Use bounded asynchronous HTTPS requests, provenance, cache expiry, rate limits, retry/backoff and manual/offline inputs; no trading or private keys. | M-MARKET | P-06 | T-MARKET | PLANNED |
+| R-MKT-003 | Use bounded asynchronous HTTPS requests, provenance, cache expiry, rate limits, retry/backoff and manual/offline inputs; no trading or private keys. | M-MARKET | P-06 | T-MARKET | PARTIAL |
 | R-INC-001 | Show today's full-day forecast, actual credited income in the last 24h and actual cumulative credited income in token and dollar units. | M-LEDGER | P-07 | T-LEDGER, T-FORECAST | PLANNED |
 | R-INC-002 | Define today by the selected billing/reporting timezone; forecast actual credited so far plus remaining-time expected income with assumptions and coverage. | M-FORECAST | P-08 | T-FORECAST | PLANNED |
 | R-INC-003 | Credit facts require provider IDs/revisions and attributable scope; missing/incomplete/ambiguous data is unavailable or partial, never invented zero. | M-LEDGER | P-07 | T-LEDGER | PLANNED |
@@ -66,3 +66,5 @@ Each row is a testable requirement, not a checklist of already implemented featu
 P-04 `DONE` is the local **observed-counter** scope in [accepted history](../accepted-history.md), with [host/PTY evidence](../history-validation.md). It is not complete pool history: missed shutdown tails/session gaps are uncertain, exact pool timestamps are unavailable, and clock warnings suppress rolling totals. Financial-credit storage and persisted runtime settings are separate tasks.
 
 R-UI-007 remains `PARTIAL` in implementation scope: [P-03c](../runtime-settings.md) now supplies native runtime defaults, configured/effective/CLI review, explicit next-start activation and external-writer detection for runtime/UI files. Live policy activation and external mining-config review are not implemented. Income-provider research is [capability evidence](../research/market-and-credit-providers.md), not passing actual-income implementation.
+
+R-MKT-003 is `PARTIAL`: [P-06a](../public-https.md) implements optional strict HTTPS, bounded JSON/IPC and helper-process cancellation with local-only TLS tests. No market-owner thread, cache, polling/backoff, manual input, live adapter, quote freshness or financial display is integrated; native trust auxiliary egress/packaging remain release gates.

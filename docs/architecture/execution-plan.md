@@ -11,7 +11,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 | P-03 | Typed activation/override contracts, explicit intent arbiter and safe host-side throttle | P-01 | PARTIAL: P-03a stop safety, P-03b host wait and P-03c native persisted defaults/CLI review; live activation, broader config review and native GPU qualification remain |
 | P-04 | Durable accepted history with coverage/recovery and 24h/7d/30d/all display | Storage ADR, P-02 | DONE local observed-counter slice; see history validation, not complete pool history |
 | P-05 | Portable tariff primitives, state, counterfactual costs and validated plan adapters | Time/decimal ADR, researched rule evidence | PLANNED |
-| P-06 | Replaceable bounded price/FX/reward providers, fresh 1h/latest quote snapshots | HTTPS/backend ADR, typed contracts | PLANNED |
+| P-06 | Replaceable bounded price/FX/reward providers, fresh 1h/latest quote snapshots | HTTPS/backend ADR, typed contracts | PARTIAL: P-06a default-off HTTPS and process isolation with local TLS/IPC tests; adapters/cache/polling/display remain |
 | P-07 | Attributable actual-credit ledger, current production valuation and optional historical references | Storage/decimal ADR, P-06 | PLANNED |
 | P-08 | Energy integration, today's forecast and optional estimated net-USD view | P-05, P-06, P-07 | PLANNED |
 | P-09 | Bounded local curve measurement and invalidation | P-03, P-08 | PLANNED |
@@ -31,7 +31,8 @@ Task order below is a dependency plan, not a promise that every module lands in 
 - P-03a at `4c4a3e8` adds [session/launcher safety](../session-intent.md): stop tokens, no initial spawn after stop, latched exit 8, forced exit 7 and bounded runtime-only launcher retries. The policy arbiter's game/economic inputs are contracts, not live automation.
 - P-03b adds a [complete-work-batch host wait](../work-wait.md), default 0 ms, bounded cancellable CLI control with research/evidence conflicts rejected. P-03c supplies its initial native default controls; production GPU wait/energy qualification remains pending.
 - P-03c adds [native runtime defaults](../runtime-settings.md) for host wait/history collection, independent save/review, contextual numeric input, external-writer refusal and visible configured/effective/CLI values. Activation is next explicit session only, frozen across child retries; no automatic restart or deletion.
-- Next executable batch: maintained HTTPS/provider implementation for P-06, with the [Gate/Kraken identity/schema review](../research/market-and-credit-providers.md). P-03 live activation and broader mining-config review remain follow-up work. [Secure-transport research](../research/secure-transport-backends.md) records the still-unverified F2Pool/donation TLS route; it is not implemented TLS. P-12 can proceed independently after its dependency/endpoint decisions.
+- P-06a adds a [default-off public HTTPS foundation](../public-https.md): curl/c-ares, strict TLS, fixed public request identifiers, bounded JSON/IPC and an owned native helper process so synchronous trust checks cannot block the miner's stop. Native trust auxiliary egress and production packaging remain release gates. No polling or live financial provider is enabled.
+- Next executable batch: P-06 provider adapters, minute/quote qualification, immutable snapshots/cache and bounded asynchronous scheduling, using the [Gate/Kraken identity/schema review](../research/market-and-credit-providers.md) and the new process client. P-03 live activation and broader mining-config review remain follow-up work. [Secure-transport research](../research/secure-transport-backends.md) records the still-unverified F2Pool/donation TLS route; it is not implemented Stratum TLS. P-12 can proceed independently after its dependency/endpoint decisions.
 - No upstream issue/PR or new production binary has been published for these advanced features. Do not replace an existing user's installed miner as an implicit development step.
 
 ## Definition of done for each batch
@@ -48,7 +49,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 ## Questions that block implementation, not the whole roadmap
 
 - Accepted-history storage is settled for the observed-counter slice; financial credit exact-number/scope schema remains open.
-- Maintained TLS/HTTPS backend/trust-store packaging, supported secure preset/donation endpoints and migration semantics.
+- P-06a settles the initial HTTPS backend/process boundary, not native-trust egress, release packaging, Stratum backends or supported secure preset/donation endpoints and migration semantics.
 - Exact credit-provider attribution and interval granularity: the reviewed Kryptex schema does not establish stable/revisioned attributable credits or exact rolling24h; actual-income rows remain unavailable. Never solve this by silently using wallet totals.
 - Timezone/decimal/Unicode implementation dependencies and supported platform versions.
 - Permitted game metrics, default user-selected experience limits and available wall/incremental measurement adapters.
