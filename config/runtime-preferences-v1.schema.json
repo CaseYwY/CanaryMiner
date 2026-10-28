@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-runtime-preferences-v1",
+  "title": "Local runtime defaults; next explicit run only",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "work_wait_ms": { "type": "integer", "minimum": 0, "maximum": 1000, "default": 0 },
+    "history_enabled": { "type": "boolean", "default": true }
+  }
+}

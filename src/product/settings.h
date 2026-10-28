@@ -9,11 +9,12 @@
 #include "../core/telemetry.h"
 #include "dashboard.h"
 #include "ui_preferences.h"
+#include "runtime_settings.h"
 
 namespace om {
 
 enum class SettingsPage { Browse, Review, Leave };
-enum class SettingsResult { None, Close, Quit };
+enum class SettingsResult { None, Close, Quit, OpenRuntime };
 
 class SettingsPanel {
    public:
@@ -25,6 +26,7 @@ class SettingsPanel {
     SettingsPage page = SettingsPage::Browse;
     UiPreferences active, draft;
     std::string message;
+    RuntimeSettingsPanel runtime;
 
     void open(const UiPreferences &value) {
         active = draft = value;
@@ -33,6 +35,7 @@ class SettingsPanel {
         page = SettingsPage::Browse;
         reviewOffset = 0;
         message.clear();
+        runtime.visible = false;
     }
     bool dirty() const { return active != draft; }
 
@@ -41,9 +44,10 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 0 ? 3 : group == 8 ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 0 ? 3 : group == 1 ? 1 : group == 8 ? 2 : group == 9 ? 5 : group == 10 ? 7 : 0; }
 
-    SettingsResult key(int key, const Save &save) {
+    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}) {
+        if (runtime.visible) return runtime.key(key, runtimeSave) == RuntimeSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (key == 3 || key == 'q' || key == 'Q') return SettingsResult::Quit;
         if (page == SettingsPage::Leave) {
             if (key == 'd' || key == 'D') { draft = active; visible = false; return SettingsResult::Close; }
@@ -84,6 +88,7 @@ class SettingsPanel {
             if (groupsFocused) field = 0;
         } else if (key == '\r' || key == '\n' || key == ' ') {
             if (groupsFocused) groupsFocused = false;
+            else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else change();
         }
         return SettingsResult::None;
@@ -109,6 +114,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if (runtime.visible) return runtime.render(columns, rows, color);
         using namespace dash_detail;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
         const bool compact = rows > 0 && rows < 20;
@@ -120,7 +126,7 @@ class SettingsPanel {
         std::vector<Line> body;
         body.push_back(one("(o> CanaryMiner / Settings" + std::string(dirty() ? " * unsaved" : ""), Tone::Canary));
         if (!compact) {
-            body.push_back(one("Presentation only. Mining continues under its existing policy.", Tone::Plain));
+            body.push_back(one("UI preferences; runtime controls save separately. Current run stays unchanged.", Tone::Plain));
             body.push_back(one(""));
         }
         if (page == SettingsPage::Review) {
@@ -207,8 +213,13 @@ class SettingsPanel {
             result.push_back({"or mining intensity. NO_COLOR still wins.", Tone::Plain});
         } else if (group == 8) {
             row(0, std::string("Hide worker label  [") + (draft.hideWorker ? "x" : " ") + "]");
+            row(1, "History collection / runtime defaults [Enter]");
             result.push_back({"Presentation only, not a diagnostic scrubber.", Tone::Plain});
             result.push_back({"Logs, API and files are not anonymized by it.", Tone::Plain});
+        } else if (group == 1) {
+            row(0, "Host wait / runtime defaults [Enter]");
+            result.push_back({"Manual controls; automatic selection is not enabled.", Tone::Plain});
+            result.push_back({"Saved defaults apply on the next explicit start only.", Tone::Plain});
         } else if (group == 9) {
             toggle(0, "Details page", draft.detailsEnabled);
             toggle(1, "Device identity", draft.detailsIdentity);
@@ -246,6 +257,15 @@ inline void printSettingsFrame(const std::string &text) {
     fflush(stdout);
 }
 
+inline void openRuntimeControls(SettingsPanel *panel, RuntimePreferencesStore *store, const RuntimeContext &context) {
+    if (!store) { panel->message = "Runtime controls unavailable: no local defaults target configured."; return; }
+    RuntimePreferences configured;
+    std::string error;
+    if (!store->load(&configured, &error)) { panel->message = "Runtime controls unavailable: " + error; return; }
+    panel->runtime.open(configured, context);
+    if (panel->group == 8) panel->runtime.field = 1;
+}
+
 inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
@@ -256,6 +276,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         return 2;
     }
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
+    RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
     UiPreferences preferences;
     std::string error;
     if (!store.load(&preferences, &error)) { fprintf(stderr, "%s\n", error.c_str()); return 3; }
@@ -268,8 +289,10 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         for (int n = 0; n < 32; ++n) {
             const int key = keys.poll();
             if (!key) break;
-            const auto result = panel.key(key, [&](const UiPreferences &p, std::string *e) { return store.save(p, e); });
-            if (result != SettingsResult::None) { panel.visible = false; break; }
+            const auto result = panel.key(key, [&](const UiPreferences &p, std::string *e) { return store.save(p, e); },
+                [&](const RuntimePreferences &p, std::string *e) { return runtimeStore.save(p, e); });
+            if (result == SettingsResult::OpenRuntime) openRuntimeControls(&panel, &runtimeStore, {});
+            else if (result != SettingsResult::None) { panel.visible = false; break; }
         }
         const auto color = panel.active.color ? detectColorLevel() : ColorLevel::None;
         printSettingsFrame(panel.render(terminalColumns(80), terminalRows(24), color));

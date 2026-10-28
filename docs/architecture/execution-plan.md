@@ -8,7 +8,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 |---|---|---|---|
 | P-01 | Native settings shell, four local presentation controls, idle command and host/PTY tests | Existing upstream renderer/config/supervisor | DONE at ab208e8 |
 | P-02 | Details/Log switches and content controls; metric presentation contract | P-01 | DONE at a2549c3; live financial/history integrations are separate tasks |
-| P-03 | Typed activation/override contracts, explicit intent arbiter and safe host-side throttle | P-01 | PARTIAL: P-03a stop/launcher safety and P-03b validated CLI host wait; runtime controls/activation and native GPU qualification remain |
+| P-03 | Typed activation/override contracts, explicit intent arbiter and safe host-side throttle | P-01 | PARTIAL: P-03a stop safety, P-03b host wait and P-03c native persisted defaults/CLI review; live activation, broader config review and native GPU qualification remain |
 | P-04 | Durable accepted history with coverage/recovery and 24h/7d/30d/all display | Storage ADR, P-02 | DONE local observed-counter slice; see history validation, not complete pool history |
 | P-05 | Portable tariff primitives, state, counterfactual costs and validated plan adapters | Time/decimal ADR, researched rule evidence | PLANNED |
 | P-06 | Replaceable bounded price/FX/reward providers, fresh 1h/latest quote snapshots | HTTPS/backend ADR, typed contracts | PLANNED |
@@ -29,8 +29,9 @@ Task order below is a dependency plan, not a promise that every module lands in 
 - P-02 at `a2549c3` adds tested D/L switches/content controls, v1-to-v2 preference migration and a synthetic-input financial renderer. Evidence: `docs/display-validation.md`. It does not supply live prices, credits, history or tariff computation.
 - P-04 at `b67c4c0` adds optional system-SQLite accepted-counter history, background persistence, window/coverage display and `--no-history`. Evidence: [history validation](../history-validation.md); semantics/recovery: [accepted history](../accepted-history.md). Runtime settings and actual pool-credit data are not supplied by this slice.
 - P-03a at `4c4a3e8` adds [session/launcher safety](../session-intent.md): stop tokens, no initial spawn after stop, latched exit 8, forced exit 7 and bounded runtime-only launcher retries. The policy arbiter's game/economic inputs are contracts, not live automation.
-- P-03b adds a [complete-work-batch host wait](../work-wait.md), default 0 ms, bounded cancellable CLI control with research/evidence conflicts rejected. Native runtime settings and production GPU wait/energy qualification remain pending.
-- Next executable batches: finish P-03 runtime activation/override controls, and maintained HTTPS/provider contracts for P-06. [Secure-transport research](../research/secure-transport-backends.md) compares backends and records the still-unverified F2Pool/donation TLS route; it is not implemented TLS. P-12 can proceed independently after its dependency/endpoint decisions.
+- P-03b adds a [complete-work-batch host wait](../work-wait.md), default 0 ms, bounded cancellable CLI control with research/evidence conflicts rejected. P-03c supplies its initial native default controls; production GPU wait/energy qualification remains pending.
+- P-03c adds [native runtime defaults](../runtime-settings.md) for host wait/history collection, independent save/review, contextual numeric input, external-writer refusal and visible configured/effective/CLI values. Activation is next explicit session only, frozen across child retries; no automatic restart or deletion.
+- Next executable batch: maintained HTTPS/provider implementation for P-06, with the [Gate/Kraken identity/schema review](../research/market-and-credit-providers.md). P-03 live activation and broader mining-config review remain follow-up work. [Secure-transport research](../research/secure-transport-backends.md) records the still-unverified F2Pool/donation TLS route; it is not implemented TLS. P-12 can proceed independently after its dependency/endpoint decisions.
 - No upstream issue/PR or new production binary has been published for these advanced features. Do not replace an existing user's installed miner as an implicit development step.
 
 ## Definition of done for each batch
@@ -48,7 +49,7 @@ Task order below is a dependency plan, not a promise that every module lands in 
 
 - Accepted-history storage is settled for the observed-counter slice; financial credit exact-number/scope schema remains open.
 - Maintained TLS/HTTPS backend/trust-store packaging, supported secure preset/donation endpoints and migration semantics.
-- Exact credit-provider attribution and interval granularity; never solve missing worker revenue by silently using wallet totals.
+- Exact credit-provider attribution and interval granularity: the reviewed Kryptex schema does not establish stable/revisioned attributable credits or exact rolling24h; actual-income rows remain unavailable. Never solve this by silently using wallet totals.
 - Timezone/decimal/Unicode implementation dependencies and supported platform versions.
 - Permitted game metrics, default user-selected experience limits and available wall/incremental measurement adapters.
 - Current, fully verified local utility plan details for any preset; indexed/historical research does not certify a current account's bill.

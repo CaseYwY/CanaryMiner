@@ -269,11 +269,11 @@ sudo journalctl -k --since "10 min ago" | grep -i xid
 
 On this development branch, **S** opens native settings in the supervised terminal dashboard. Use arrows/Tab to navigate,
 Space/Enter to change a supported value, V/F2 to review, and Enter/F2 to save. Esc returns; Q/Ctrl+C stops without implicitly
-saving. Controls are presentation-only: display refresh, color, recent events, hiding the worker label, Details/Log page
+saving. Presentation controls include display refresh, color, recent events, hiding the worker label, Details/Log page
 switches, Details fields and Log severity/records/observed timestamps/follow. Unknown raw log lines remain explicitly
 unclassified; display filtering does not stop collecting worker output.
 
-`canary-miner settings [--config FILE]` opens the same preferences without starting mining. Preferences are stored separately
+`canary-miner settings [--config FILE]` opens the same preferences without starting mining. Presentation preferences are stored
 as `ui-preferences.json` in the configured state directory; this does not rewrite mining config. Advanced groups are explicitly
 unavailable until their implementations land. See [the staged feature roadmap](docs/feature-roadmap.md). These changes have not
 been submitted to or accepted by upstream; there is no new qualified production release for this branch.
@@ -285,8 +285,11 @@ system SQLite runtime and is not complete pool history. A financial renderer con
 and electricity-profit calculations are not yet integrated; synthetic tests and accepted counts are not live income.
 
 The development CLI also accepts [`--work-wait-ms 0..1000`](docs/work-wait.md) between completed work batches, default 0.
-This is a cancellable host wait, not duty cycle or a GPU clock change; runtime menu controls and real GPU/energy qualification
-remain pending. No waiting value is promised profitable or game-qualified.
+S → Automatic mining or Privacy now opens [runtime defaults](docs/runtime-settings.md) for host wait/history collection.
+These save separately from UI drafts to `runtime-preferences.json`, show configured/current/CLI-overridden values and apply
+only at the next explicit session, never by automatic restart or history deletion. This is not duty cycle, hardware tuning or
+automatic optimization. Live policy activation and real GPU/energy qualification remain pending; no wait is promised profitable
+or game-qualified.
 
 On a terminal the miner shows a live dashboard: per GPU hashrate (TH/s, the same figure as T MAC/s in the stats endpoint),
 power, temperature, fan, clocks and shares, a donation row and recent events. Keys: **Q** quit, **D** details (PCI bus, pool

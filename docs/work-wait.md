@@ -14,7 +14,7 @@ Positive waits are rejected in benchmark, formal, quota, sustained, private/publ
 
 ## Configuration scope
 
-This slice exposes a validated CLI option, forwarded unchanged to supervised children. Runtime menu editing, persistence, CLI-override review and live activation remain unfinished P-03 work. Do not add the field to an older strict product JSON schema or mistake UI refresh for workload throttling. Rollback is to omit the flag or select `0`; an older binary will reject an unknown flag rather than implementing it.
+The initial slice exposes a validated CLI option. Subsequent [P-03c native defaults](runtime-settings.md) adds menu editing, persistence and configured/effective/CLI review, with resolved child options frozen for the current session. Live activation remains unfinished P-03 work. Do not add the field to an older strict mining-config JSON schema or mistake UI refresh for workload throttling. Rollback is to use a zero saved default and omit the flag, or explicitly select `0`; an older binary rejects an unknown flag and ignores the new defaults file.
 
 ## Validation scope
 

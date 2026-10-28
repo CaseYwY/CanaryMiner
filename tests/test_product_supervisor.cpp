@@ -173,6 +173,10 @@ void testWorkerArgs() {
     CHECK(sawChild);
     const auto wait = std::find(args.begin(), args.end(), "--work-wait-ms");
     CHECK(wait != args.end() && wait + 1 != args.end() && *(wait + 1) == "200");
+    const auto frozen = workerArgs(user, seed(1), 8087, 0);
+    CHECK(std::count(frozen.begin(), frozen.end(), "--work-wait-ms") == 1);
+    const auto frozenWait = std::find(frozen.begin(), frozen.end(), "--work-wait-ms");
+    CHECK(frozenWait != frozen.end() && frozenWait + 1 != frozen.end() && *(frozenWait + 1) == "0");
     CHECK(args[args.size() - 2] == "--worker-id" && args[args.size() - 1] == "1");
 }
 
@@ -817,7 +821,16 @@ int main(int argc, char **argv) {
         options.seeds = {seed(0)};
         options.dashboard = true;
         options.uiPreferencesPath = (std::filesystem::path(argv[2]) / "ui-preferences.json").string();
-        options.historyPath = (std::filesystem::path(argv[2]) / "accepted-history.sqlite3").u8string();
+        options.runtimePreferencesPath = (std::filesystem::path(argv[2]) / "runtime-preferences.json").u8string();
+        RuntimePreferences defaults;
+        RuntimePreferencesStore defaultsStore(std::filesystem::u8path(options.runtimePreferencesPath));
+        if (!defaultsStore.load(&defaults, &error)) return 85;
+        options.runtimeContext.running = true;
+        options.runtimeContext.cliWorkWait = 0;
+        options.runtimeContext.effective = effectiveRuntimePreferences(defaults, options.runtimeContext);
+        options.resolvedWorkWait = options.runtimeContext.effective.workWaitMs;
+        if (options.runtimeContext.effective.historyEnabled)
+            options.historyPath = (std::filesystem::path(argv[2]) / "accepted-history.sqlite3").u8string();
         options.workerPortBase = port;
         Supervisor supervisor(std::move(options));
         const int result = supervisor.run();

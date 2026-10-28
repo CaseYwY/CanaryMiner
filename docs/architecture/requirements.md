@@ -10,7 +10,7 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-UI-004 | Persist four existing presentation controls atomically, detect stale writers and leave active values unchanged on failure. | M-CONFIG | P-01 | T-CONFIG | DONE |
 | R-UI-005 | Independently enable/disable Details and Log pages; hide their entry and reject their shortcut when disabled. | M-UI | P-02 | T-UI | DONE |
 | R-UI-006 | Configure Details fields and Log level, rows, timestamps and follow behaviour; distinguish display filtering from storage retention. | M-UI | P-02 | T-UI | DONE |
-| R-UI-007 | Show configured/effective/CLI-overridden values and live/re-evaluate/reconnect/permission change classes; detect external config changes. | M-CONFIG | P-03 | T-CONFIG | PLANNED |
+| R-UI-007 | Show configured/effective/CLI-overridden values and live/re-evaluate/reconnect/permission change classes; detect external config changes. | M-CONFIG | P-03 | T-CONFIG | PARTIAL |
 | R-UI-008 | Preserve focus and readable content on resize, short terminals, no-color/plain output and text editing; never trigger global shortcuts inside text fields. | M-UI | P-02 | T-UI | PARTIAL |
 | R-HIST-001 | Show rolling 24h, 7d, 30d and all-local-history accepted counts; show collection start/coverage and missing intervals. | M-HISTORY | P-04 | T-HISTORY | DONE |
 | R-HIST-002 | Count acknowledged accepted user shares only; exclude developer-donation shares and never convert share count directly into income. | M-HISTORY | P-04 | T-HISTORY | DONE |
@@ -64,3 +64,5 @@ Each row is a testable requirement, not a checklist of already implemented featu
 `PARTIAL` means a baseline behaviour or process exists, not that the expanded requirement is complete. For example, current Q/signal tests do not establish the future economic/game resume state machine, and current ASCII resize tests do not establish multilingual terminal accessibility.
 
 P-04 `DONE` is the local **observed-counter** scope in [accepted history](../accepted-history.md), with [host/PTY evidence](../history-validation.md). It is not complete pool history: missed shutdown tails/session gaps are uncertain, exact pool timestamps are unavailable, and clock warnings suppress rolling totals. Financial-credit storage and persisted runtime settings are separate tasks.
+
+R-UI-007 remains `PARTIAL` in implementation scope: [P-03c](../runtime-settings.md) now supplies native runtime defaults, configured/effective/CLI review, explicit next-start activation and external-writer detection for runtime/UI files. Live policy activation and external mining-config review are not implemented. Income-provider research is [capability evidence](../research/market-and-credit-providers.md), not passing actual-income implementation.

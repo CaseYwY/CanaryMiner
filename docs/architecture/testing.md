@@ -10,6 +10,8 @@ Test S entry, all keyboard contexts, focus, supported edit/toggle/select, review
 
 Test strict keys/types/ranges, old-version defaults, unsupported-new-version rejection, atomic replace, read-only/invalid/external edits, stale writers, lock/crash handling, CLI precedence and independent credential/runtime stores. A failed save cannot change effective state. Navigation cannot grant benchmark, plaintext or hardware permission.
 
+P-03c [runtime-default evidence](../runtime-settings.md) covers native numeric editor contexts, separate UI/runtime saves, zero CLI overrides, external writers and frozen current-session values. Real PTY tests verify collection off/on only at explicit future sessions; this is not live policy or credential-store qualification.
+
 ## T-HISTORY
 
 Test generation resets and carried counters, duplicate/reordered samples, aggregation across GPUs, donation exclusion, accepted versus pending/rejected/unknown, rolling-window exact boundaries, clock jumps and incomplete coverage. Test restart/durable recovery, compaction preserving all-time totals, truncated/corrupt writes, concurrent writer refusal, counter overflow and missing-period reporting. Never infer rewards from shares.

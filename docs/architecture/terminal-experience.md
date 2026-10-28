@@ -55,6 +55,8 @@ Classify each setting as live presentation, safe-boundary policy re-evaluation, 
 
 Display preferences now write schema v2, accepting old v1 files with documented defaults. Loading never rewrites an old file; the first explicit v2 save preserves a validated `ui-preferences.json.v1.bak` rollback copy without overwriting it. Unknown/newer schemas and invalid rollback files fail safely. Financial records and provider credentials are not added to this presentation file.
 
+P-03c [runtime controls](../runtime-settings.md) are available through Automatic mining and Privacy as a separate native subpage/save target. Numeric input has contextual shortcut handling; host wait/history defaults use runtime schema v1, visible CLI precedence and next-explicit-start activation. A current session and its child retries keep their original resolved values. Saving runtime defaults does not commit an outstanding UI draft, restart mining or delete history. This does not enable the unfinished automatic-mining group.
+
 Implemented Log controls add renderer-owned **observed** UTC timestamps; they do not remove or reinterpret timestamps embedded in raw worker text. Default follow tracks the latest output; Up/PageUp holds scroll and F resumes. Turning follow off freezes that page's current snapshot while background collection continues. Re-entering the page takes a new frozen snapshot. Unclassified raw lines have an independent inclusion option; they are not guessed to be warnings because their text contains a keyword.
 
 ## Accessibility and internationalization

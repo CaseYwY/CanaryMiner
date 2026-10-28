@@ -120,6 +120,21 @@ class ConfigSchemaTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r'"([a-z_]+)"', m.group(1))), set(pool_obj['properties']))
 
 
+class RuntimePreferencesSchemaTests(unittest.TestCase):
+    def test_defaults_boundaries_and_writer_keys(self):
+        schema = load('config/runtime-preferences-v1.schema.json')
+        self.assertEqual(validate({'schema_version': 1}, schema, schema), [])
+        for number in (0, 1, 345, 1000):
+            self.assertEqual(validate({'schema_version': 1, 'work_wait_ms': number, 'history_enabled': False}, schema, schema), [])
+        for bad in ({}, {'schema_version': 2}, {'schema_version': 1, 'work_wait_ms': -1},
+                    {'schema_version': 1, 'work_wait_ms': 1001}, {'schema_version': 1, 'work_wait_ms': True},
+                    {'schema_version': 1, 'history_enabled': 1}, {'schema_version': 1, 'wallet': 'synthetic'}):
+            self.assertTrue(validate(bad, schema, schema))
+        with open(os.path.join(ROOT, 'src', 'product', 'runtime_preferences.h'), encoding='utf8') as stream:
+            writer = stream.read().split('inline std::string runtimePreferencesJson', 1)[1].split('inline bool parseRuntimePreferences', 1)[0]
+        self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
+
+
 class StatsSchemaTests(unittest.TestCase):
     def test_schema_covers_the_writer(self):
         schema = load('config/stats-v1.schema.json')

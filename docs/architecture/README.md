@@ -8,7 +8,9 @@
 
 **History batch:** P-04 adds local observed accepted counters with optional system SQLite, rolling windows, coverage/recovery and `--no-history`. See [history semantics](../accepted-history.md) and [validation](../history-validation.md). It is not a complete pool-acknowledgement or token-income ledger.
 
-**Safety slices:** P-03a adds [session intent and launcher lifecycle](../session-intent.md). Intentional stop and latched worker faults no longer authorize unconditional relaunch by the checked-in advanced scripts. P-03b adds a [manual complete-work-batch host wait](../work-wait.md), default 0 ms. Runtime activation controls, measured profiles and automatic policy integrations remain unfinished; native GPU qualification is still required.
+**Safety slices:** P-03a adds [session intent and launcher lifecycle](../session-intent.md). Intentional stop and latched worker faults no longer authorize unconditional relaunch by the checked-in advanced scripts. P-03b adds a [manual complete-work-batch host wait](../work-wait.md), default 0 ms. Live runtime activation, measured profiles and automatic policy integrations remain unfinished; native GPU qualification is still required.
+
+**Runtime settings:** P-03c adds [native persisted host-wait/history defaults](../runtime-settings.md) with review/cancel, configured/effective/CLI distinctions and separate save targets. Both activate only at the next explicit session. Live activation and wider mining-config review remain unfinished.
 
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
@@ -26,6 +28,7 @@
 Related evidence:
 
 - [International electricity-billing research](../research/international-electricity-billing.md): ten jurisdictions, primary-source citations, capability limits and 34 synthetic tariff test specifications. These are researched structures, not shipped tariff presets.
+- [Market/credit provider research](../research/market-and-credit-providers.md): explicit Gate Pearl/Kraken FX identity and schema limits; the reviewed Kryptex contract is insufficient for attributable actual-credit rows.
 - [Initial feature roadmap](../feature-roadmap.md) and [first-slice host validation](../settings-validation.md).
 - Upstream [CONTRIBUTING.md](../../CONTRIBUTING.md) and [SECURITY.md](../../SECURITY.md) remain authoritative for contributions and vulnerability reporting.
 

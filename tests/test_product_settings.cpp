@@ -66,9 +66,8 @@ static void panelTests() {
     p.open(UiPreferences{});
     p.key(kKeyRight, ok);
     p.key('\t', ok);
-    p.key(' ', ok);
+    CHECK(p.key(' ', ok) == SettingsResult::OpenRuntime);
     CHECK(!p.dirty());
-    CHECK(p.message.find("Not implemented") != std::string::npos);
     CHECK(p.key('q', ok) == SettingsResult::Quit);
     CHECK(p.key(3, ok) == SettingsResult::Quit);
     p.open(UiPreferences{});

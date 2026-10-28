@@ -397,7 +397,7 @@ inline std::string productHelpText() {
         "       canary-miner selftest           offline kernel + proof self-test per device\n"
         "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
         "       canary-miner version\n"
-        "       canary-miner settings          edit presentation without starting mining\n"
+        "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "\n"
         "Pool\n"

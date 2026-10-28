@@ -61,7 +61,8 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                 'logical work-unit budget (default 4194304)', 'fixed synthetic fixture height 1851444',
                 'canary-miner list-devices', 'base-before-penalty|final-adjusted-bound',
                 'does not establish accepted shares or earnings', 'canary-miner selftest',
-                'canary-miner status', '--config FILE', '--api-port N', "Supported devices are listed by 'list-devices'"):
+                'canary-miner status', 'canary-miner settings', '--work-wait-ms N', '--no-history',
+                '--config FILE', '--api-port N', "Supported devices are listed by 'list-devices'"):
             with self.subTest(text=text):
                 self.assertIn(text, help_text)
         self.assertNotIn('development', help_text.lower())

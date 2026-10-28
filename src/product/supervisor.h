@@ -27,6 +27,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -332,10 +333,12 @@ struct SupervisorTuning {
 };
 
 /** Arguments for one worker: the user's command line without the options the supervisor sets per worker, plus the internal ones. */
-inline std::vector<std::string> workerArgs(const std::vector<std::string> &user, const WorkerSeed &w, int port) {
+inline std::vector<std::string> workerArgs(const std::vector<std::string> &user, const WorkerSeed &w, int port,
+                                         std::optional<unsigned> resolvedWait = std::nullopt) {
     std::vector<std::string> out;
     for (size_t i = 0; i < user.size(); ++i) {
         const std::string &a = user[i];
+        if (resolvedWait && a == "--work-wait-ms") { ++i; continue; }
         if (a == "--devices" || a == "--device" || a == "--api-port" || a == "--api-bind" || a == "--worker-id") {
             ++i;  // drop the option and its value
             continue;
@@ -352,6 +355,7 @@ inline std::vector<std::string> workerArgs(const std::vector<std::string> &user,
     out.push_back("--worker-child");
     out.push_back("--worker-id");
     out.push_back(std::to_string(w.index));
+    if (resolvedWait) { out.push_back("--work-wait-ms"); out.push_back(std::to_string(*resolvedWait)); }
     return out;
 }
 
@@ -373,6 +377,9 @@ struct SupervisorOptions {
     SupervisorTuning *tuning = nullptr;
     std::string uiPreferencesPath;         // optional presentation file; never the mining config
     std::string historyPath;               // optional local installation history; no wallet/device names stored
+    std::string runtimePreferencesPath;
+    RuntimeContext runtimeContext;
+    std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
 
 /** What the supervisor knows about one worker at one moment. */
@@ -530,6 +537,7 @@ class Supervisor {
             std::string error;
             if (!uiStore_->load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
         }
+        if (!opt_.runtimePreferencesPath.empty()) runtimeStore_.reset(new RuntimePreferencesStore(std::filesystem::u8path(opt_.runtimePreferencesPath)));
         if (!opt_.historyPath.empty()) history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
             std::unique_ptr<Worker> w(new Worker());
@@ -573,7 +581,10 @@ class Supervisor {
                             if (uiStore_ && !uiStore_->save(p, error)) return false;
                             ui_ = p;
                             return true;
+                        }, [this](const RuntimePreferences &p, std::string *error) {
+                            return runtimeStore_ && runtimeStore_->save(p, error);
                         });
+                        if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
                         if (result == SettingsResult::Quit) {
                             settings_.visible = false;
                             nextFrame_ = 0;
@@ -715,6 +726,7 @@ class Supervisor {
     DashView view_;  // page, scroll and terminal size of the dashboard
     UiPreferences ui_;
     std::unique_ptr<UiPreferencesStore> uiStore_;
+    std::unique_ptr<RuntimePreferencesStore> runtimeStore_;
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
     std::unique_ptr<AcceptedHistory> history_;
@@ -749,7 +761,7 @@ class Supervisor {
         const size_t slot = i;
         std::string err;
         const bool ok = w.proc->start(
-            opt_.exe, workerArgs(opt_.userArgs, w.view.seed, w.port),
+            opt_.exe, workerArgs(opt_.userArgs, w.view.seed, w.port, opt_.resolvedWorkWait),
             [this, slot](const std::string &line) {
                 std::lock_guard<std::mutex> g(mu_);
                 inbox_.push_back({slot, line});

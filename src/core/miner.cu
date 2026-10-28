@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
     GpuTuningPlatform tuningPlatform = currentGpuTuningPlatform();
     if (cli.command == Command::Status) return commandStatus(cfg, cli.ov.json);
     if (cli.command == Command::Settings) {
-        if (cli.help) { printf("canary-miner settings [--config FILE]\nEdit presentation preferences without starting mining.\n"); return kExitOk; }
+        if (cli.help) { printf("canary-miner settings [--config FILE]\nEdit display/runtime defaults without starting mining.\n"); return kExitOk; }
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
@@ -313,7 +313,8 @@ int main(int argc, char **argv) {
                 "       canary-miner list-devices       GPU identity and whether it is supported\n"
                 "       canary-miner selftest           offline kernel + proof self-test per device\n"
                 "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
-                "       canary-miner version\n\n"
+                "       canary-miner version\n"
+                "       canary-miner settings          edit local display/runtime defaults\n\n"
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"
@@ -326,6 +327,9 @@ int main(int argc, char **argv) {
                 "  --api-port N      stats endpoint port (default 8085; 0 disables)\n"
                 "  --log-dir DIR     rotating redacted log files\n"
                 "  --no-dashboard    plain timestamped lines instead of the live dashboard\n"
+                "  --no-history      disable local accepted history this run; existing data stays\n"
+                "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
+                "                    not duty cycle; runtime defaults can be edited in Settings\n"
                 "  --no-donation     turn the optional 1%% developer donation off (on by default;\n"
                 "                    config key: donation)\n"
                 "  --pearl-network mainnet\n"
@@ -386,6 +390,28 @@ int main(int argc, char **argv) {
         }
     }
 
+    RuntimePreferences runtimeDefaults;
+    RuntimeContext runtimeContext;
+    const bool ordinaryRuntime = cli.command == Command::Run && !workerChild && !opt.bench && !opt.formalBenchmark.enabled &&
+        !opt.pearlProduction && !opt.pearlAcceptedQuota && !opt.pearlSustainedSeconds &&
+        !pearlPrivateEnabled(opt.pearlPrivateExecution) && !pearlPublicEnabled(opt.pearlPublicExecution)
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+        && guardControlText.empty()
+#endif
+        ;
+    if (ordinaryRuntime && !cli.help) {
+        RuntimePreferencesStore runtimeStore(std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json");
+        std::string error;
+        if (!runtimeStore.load(&runtimeDefaults, &error)) {
+            fprintf(stderr, "runtime preferences unavailable: %s; no mining was started\n", error.c_str());
+            return kExitConfig;
+        }
+        runtimeContext.running = true;
+        if (workWaitSeen) runtimeContext.cliWorkWait = opt.workWaitMs;
+        runtimeContext.cliNoHistory = cli.ov.noHistory;
+        runtimeContext.effective = effectiveRuntimePreferences(runtimeDefaults, runtimeContext);
+        opt.workWaitMs = runtimeContext.effective.workWaitMs;
+    }
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
         fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
         return kExitUsage;
@@ -863,7 +889,11 @@ int main(int argc, char **argv) {
         so.secrets = {cfg.wallet, std::string(CANARY_FEE_POOL_ACCOUNT), feeDestination()};
         so.dashboard = stdoutIsTty() && !noDashboard;
         so.uiPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "ui-preferences.json").u8string();
-        if (!cli.ov.noHistory) so.historyPath = (std::filesystem::u8path(cfg.stateDir) / "accepted-history.sqlite3").u8string();
+        if (runtimeContext.effective.historyEnabled && !cli.ov.noHistory)
+            so.historyPath = (std::filesystem::u8path(cfg.stateDir) / "accepted-history.sqlite3").u8string();
+        so.runtimePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json").u8string();
+        so.runtimeContext = runtimeContext;
+        so.resolvedWorkWait = opt.workWaitMs;
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;
         for (const DeviceIdentity &d : chosenAll) tuningDevices.push_back({d.index, d.uuid});

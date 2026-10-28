@@ -1,8 +1,10 @@
 """CPU CLI-stub admission only; never starts real GPU work or a pool connection."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 EXECUTABLE = None
@@ -40,6 +42,31 @@ class ThrottleCli(unittest.TestCase):
             result = self.run_cli("--work-wait-ms", "1", environment=environment)
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(b"research/pipeline/evidence", result.stderr)
+
+    def test_runtime_defaults_before_device_setup_and_cli_zero_precedence(self):
+        with tempfile.TemporaryDirectory(prefix="canary-runtime-cli-") as temporary:
+            root = Path(temporary)
+            config = root / "config.json"
+            config.write_text(json.dumps({"schema_version": 1, "state_dir": str(root)}), encoding="utf8")
+            preferences = root / "runtime-preferences.json"
+            preferences.write_text(json.dumps({"schema_version": 1, "work_wait_ms": 345, "history_enabled": False}), encoding="utf8")
+            environment = os.environ.copy()
+            environment["CANARY_PEARL_ASYNC_SUBMIT"] = "1"
+            result = self.run_cli("--config", str(config), environment=environment)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(b"research/pipeline/evidence", result.stderr)  # stored positive wait was resolved
+            result = self.run_cli("--config", str(config), "--work-wait-ms", "0", environment=environment)
+            self.assertNotIn(b"--work-wait-ms cannot be combined", result.stderr)  # explicit zero wins
+            self.assertNotEqual(result.returncode, 0)  # no valid pool setup; nothing mines
+            preferences.write_text('{"schema_version":99}', encoding="utf8")
+            result = self.run_cli("--config", str(config))
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertIn(b"runtime preferences unavailable", result.stderr)
+            result = self.run_cli("settings", "--config", str(config), "--help")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(preferences.read_text(), '{"schema_version":99}')
+            result = self.run_cli("--config", str(config), "--work-wait-ms", "1", "--bench")
+            self.assertIn(b"ordinary Pearl pool mining", result.stderr)  # benchmark does not read runtime defaults
 
 
 if __name__ == "__main__":

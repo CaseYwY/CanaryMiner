@@ -27,7 +27,7 @@ The first explicit save of a v1 file preserves a validated, immutable sibling `u
 - Partial/missing/stale values retain their status, not invented zeroes. Dollar values are production references, not sales, realized profit or current holdings.
 - No configured electricity means **no net row**. A configured zero/negative rate is different from no plan. An estimated-net row requires a complete forecast, finite USD cost and a matched horizon, with explicit energy basis/exclusions.
 
-The runtime `FinancialView.enabled` default remains false: **live prices, credit attribution, durable accepted history, today's forecast inputs and tariff/energy calculation are not integrated yet**. The renderer does not supply those facts. Its floating-point fields are display projections, not an exact persistent accounting representation.
+The runtime `FinancialView.enabled` default remains false: **live prices, credit attribution, today's forecast inputs and tariff/energy calculation are not integrated yet**. Local [accepted-counter history](accepted-history.md) is now separately implemented; it never supplies financial facts. The renderer's floating-point fields are display projections, not an exact persistent accounting representation.
 
 ## Validation boundary
 

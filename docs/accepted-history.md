@@ -5,7 +5,7 @@ This fork records **observed, acknowledged user-share counters**, not earnings, 
 ## Collection and controls
 
 - An explicitly started supervised run collects locally in `state_dir/accepted-history.sqlite3`. Idle settings, status and self-tests do not create history. Each state directory is one local installation scope, potentially spanning different pools, workers and payout accounts. It is **not** a per-wallet or per-device ledger.
-- `--no-history` disables history collection/display for that run without deleting existing history. Native persisted runtime collection controls are part of the later configuration batch; this option is not a presentation preference.
+- `--no-history` disables history collection/display for that run without deleting existing history. [Native runtime defaults](runtime-settings.md) now also persist the collection switch for the next explicit session; it is not a presentation preference or a live delete operation.
 - The supervisor reads each child's raw user counter, never its already-carried session total. A local session, worker slot and spawn generation identify its high-water mark. Repeated values do not add shares; a new generation starts at zero. Older generations and decreasing counters produce a coverage warning rather than unsigned subtraction or an inferred reset.
 - Missing/malformed accepted fields are not interpreted as zero. Only an exact non-negative integer in a valid single-device stats document is admitted. Local worker stats disclose no new external information.
 
