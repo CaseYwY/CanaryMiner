@@ -83,6 +83,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05q](../billing-review.md) connects the borrowed immutable owner view to the existing terminal settings, with bounded private document caching and viewport-only rendering. Default-empty access performs no store activation; optional callbacks admit background actions and revoke on session stop. Source notification/compute and production runtime remain unconnected.
 
+[P-05r](../billing-compute.md) supplies one default-off readonly notification/query/compute owner. Its immutable candidate freezes the monetary review, full source receipt and hypothetical next prefix; notification hints are not evidence. It has no financial write authority. Native candidate review and runtime source/configuration wiring remain subsequent integration steps.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

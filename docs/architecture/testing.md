@@ -76,6 +76,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05q](../billing-review.md) checks complete-original native rendering and revision-bound controls, private byte escaping, maximum binding/trace/receipt review, bound refusal, actual end-of-document navigation, independent draft cancellation, duplicate keys, owned helper action flows and PTY resize/SIGINT. Borrowed owner revocation is also checked through supervisor pre-start/ordinary stop. Source/runtime and production rendering/trust gates remain separate.
 
+[P-05r](../billing-compute.md) checks readonly source-notified candidates, exact receipts/amounts and independently gated submission, immutable context/observation revisions, hint-only identities, partial/capacity/unavailable reads, source/monetary rollback and same-sequence forks, stop/invalidate/clock/deadline revocation, isolated Unreaped precedence and owned parent/helper death. Fixture-only assertions preserve source/monetary originals and absence of automatic staging.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.
