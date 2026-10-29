@@ -15,6 +15,7 @@
 #include "tariff_settings.h"
 #include "credit_review.h"
 #include "energy_review.h"
+#include "energy_authorization_settings.h"
 
 namespace om {
 
@@ -39,6 +40,8 @@ class SettingsPanel {
     CreditReviewAccess creditAccess; // default empty; this does not construct or activate a credit owner
     EnergyReviewPanel energyReview;
     EnergyReviewAccess energyAccess; // independent, default empty; opening the page is not persistence authorization
+    EnergyAuthorizationPanel energyAuthorization;
+    EnergyAuthorizationAccess energyAuthorizationAccess; // injected memory-only helper admission; no automatic plan issuance
 
     void open(const UiPreferences &value) {
         active = draft = value;
@@ -53,6 +56,7 @@ class SettingsPanel {
         tariff.visible = false;
         credit.visible = false;
         energyReview.visible = false;
+        energyAuthorization.visible = false;
     }
     bool dirty() const { return active != draft; }
 
@@ -61,11 +65,13 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 8 ? 4 : group == 0 || group == 2 ? 3 : (group == 1 || group == 3) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 8 ? 5 : group == 2 ? 4 : group == 0 ? 3 : (group == 1 || group == 3) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
+    void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
 
     SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}) {
+        if(energyAuthorization.visible){updateEnergyAuthorization();return energyAuthorization.key(key,energyAuthorizationAccess)==EnergyAuthorizationPanelResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if(energyReview.visible){updateEnergyReview();return energyReview.key(key,energyAccess)==EnergyReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if(tariff.visible)return tariff.key(key,tariffSave,nowUtc)==TariffSettingsResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(credit.visible){updateCreditReview();return credit.key(key,creditAccess)==CreditReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;}
@@ -114,6 +120,7 @@ class SettingsPanel {
             if (groupsFocused) groupsFocused = false;
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3) return SettingsResult::OpenManualMarket;
+            else if ((group==2&&field==3)||(group==8&&field==4)) energyAuthorization.open(energyAuthorizationAccess.snapshot?energyAuthorizationAccess.snapshot():nullptr);
             else if ((group==2&&field==2)||(group==8&&field==3)) energyReview.open(energyAccess.snapshot?energyAccess.snapshot():nullptr);
             else if (group == 2) return field==0?SettingsResult::OpenElectricity:SettingsResult::OpenTariff;
             else if (group == 8 && field == 2) credit.open(creditAccess.snapshot?creditAccess.snapshot():nullptr);
@@ -142,6 +149,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if(energyAuthorization.visible)return energyAuthorization.render(columns,rows,color,energyAuthorizationAccess);
         if(energyReview.visible)return energyReview.render(columns,rows,color);
         if(tariff.visible)return tariff.render(columns,rows,color);
         if(credit.visible)return credit.render(columns,rows,color);
@@ -249,6 +257,7 @@ class SettingsPanel {
             row(1, "History collection / runtime defaults [Enter]");
             row(2, "Credit recovery / collection status [Enter]");
             row(3, "Energy history / recovery status [Enter]");
+            row(4, "Energy persistence / authorization [Enter]");
             result.push_back({"Presentation only, not a diagnostic scrubber.", Tone::Plain});
             result.push_back({"Logs, API and files are not anonymized by it.", Tone::Plain});
         } else if (group == 1) {
@@ -263,6 +272,7 @@ class SettingsPanel {
             row(0,"Session board energy / declared flat energy-only rate [Enter]");
             row(1,"Combined tariff / declared whole-meter opening [Enter]");
             row(2,"Energy history / durable capture recovery [Enter]");
+            row(3,"Energy persistence / authorization [Enter]");
             result.push_back({"Default off; next explicit session only, no miner restart.",Tone::Plain});
             result.push_back({"Not whole-PC/incremental energy, shared utility bill or net income.",Tone::Plain});
         } else if (group == 9) {
@@ -330,7 +340,7 @@ inline void openTariffControls(SettingsPanel *panel,TariffDeclarationStore *stor
     panel->tariff.open(std::move(value));
 }
 
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}) {
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -353,6 +363,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     panel.open(preferences);
     panel.creditAccess=std::move(creditAccess);
     panel.energyAccess=std::move(energyAccess);
+    panel.energyAuthorizationAccess=std::move(authorizationAccess);
     printf("\x1b[2J\x1b[?25l");
     while (panel.visible && !(stop && *stop)) {
         for (int n = 0; n < 32; ++n) {
@@ -371,6 +382,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         }
         panel.updateCreditReview();
         panel.updateEnergyReview();
+        panel.updateEnergyAuthorization();
         const auto color = panel.active.color ? detectColorLevel() : ColorLevel::None;
         printSettingsFrame(panel.render(terminalColumns(80), terminalRows(24), color));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));

@@ -2,7 +2,7 @@
 
 **Development library/helper, not production persistence activation.** This adds an audited, bounded SQLite history of raw power observations and independently named reset windows. It supports exact window projections and explicit cross-session recovery. The ordinary supervisor still uses the [in-memory session collector](session-energy.md); its collection preference is not consent to retain raw observations on disk. [P-05f/P-08e](energy-compaction.md) adds separately opted-in v2 exact compaction. Native persistence consent, stable device binding, retention-duration qualification, recovery UI and production helper packaging remain integration work.
 
-[P-08f](energy-capture.md) supplies the optional producer/supervisor seam, private namespace-based selected-device mapping and native recovery page. The ordinary factory is still empty pending saved persistence consent/retention, secure identity provisioning and selected-set/store enrollment; mapping/review alone does not activate storage.
+[P-08f](energy-capture.md) supplies the optional producer/supervisor seam, private namespace-based selected-device mapping and native recovery page. [P-08g](energy-authorization.md) adds isolated saved consent/retention, private identity enrollment and injected native controls. The ordinary factory is still empty pending whole-collector admission, runtime binding and helper/workload qualification; mapping/review alone does not activate storage.
 
 Requirements: R-ENG-001, R-TAR-003, R-SAFE-001/002, R-PRIV-002 and R-REL-001 remain partial. Modules: M-ENERGY/M-TARIFF. Tests: T-ENERGY/T-TARIFF/T-INTENT/T-PRIVACY/T-RELEASE. D-37 defines this slice. It supplies neither attributable income nor a bill, forecast, tariff activation or hardware-control permission.
 

@@ -178,9 +178,9 @@ int main(int argc,char **argv){
     auto changed=std::make_shared<EnergyCaptureSnapshot>(*reviewed);auto owner=std::make_shared<EnergyHistoryOwnerSnapshot>(*reviewed->owner);++owner->revision;changed->owner=owner;
     panel.update(changed);CHECK(!panel.reviewing&&!panel.acknowledged);panel.key(27,access);CHECK(!panel.visible&&!panel.reveal);
     for(int key:{3,int('q'),int('Q')}){panel.open(reviewed);CHECK(panel.key(key,access)==EnergyReviewResult::Quit);}
-    SettingsPanel settings;settings.open({});settings.groupsFocused=false;settings.group=8;settings.field=3;CHECK(settings.fields()==4);
+    SettingsPanel settings;settings.open({});settings.groupsFocused=false;settings.group=8;settings.field=3;CHECK(settings.fields()==5);
     settings.key('\r',{});CHECK(settings.energyReview.visible&&settings.render(80,24,ColorLevel::None).find("UNAVAILABLE")!=std::string::npos);
-    settings.key(27,{});settings.group=2;settings.field=2;CHECK(settings.fields()==3);settings.key('\r',{});CHECK(settings.energyReview.visible);
+    settings.key(27,{});settings.group=2;settings.field=2;CHECK(settings.fields()==4);settings.key('\r',{});CHECK(settings.energyReview.visible);
     // Lost response at a compaction commit is preserved, queued later samples are discarded, and stop cannot publish a late Ready.
     const auto lost=root/"fixture.compact-committed.db";c=makeEnergyCapture(fixture,lost,p,1000,clock);CHECK(c->start(1,devices)&&ready(*c));
     for(unsigned n=0;n<2;++n)CHECK(c->submit(1,reading(n,0,100000))==A::Buffered);

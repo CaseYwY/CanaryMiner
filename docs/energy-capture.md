@@ -2,7 +2,7 @@
 
 This connects the [persistent energy owner](energy-recovery.md) to a bounded, generation-bound producer and an optional supervisor seam. A native recovery page is available under **Settings → Electricity → Energy history** and **Settings → Privacy → Energy history**.
 
-**Development integration, not production activation.** The ordinary miner still supplies no `energyCaptureFactory`. Its existing in-memory energy toggle is not disk-retention consent. Opening either new page with no injected owner shows unavailable and opens no store. Separately saved authorization/retention, secure private namespace/session-ID provisioning, helper packaging and physical telemetry qualification remain necessary before ordinary-runtime activation.
+**Development integration, not production activation.** The ordinary miner still supplies no `energyCaptureFactory`. Its existing in-memory energy toggle is not disk-retention consent. Opening either new page with no injected owner shows unavailable and opens no store. The later [P-08g authorization/enrollment helper](energy-authorization.md) supplies saved consent and system-random identities; whole-collector admission, ordinary-runtime binding, helper packaging and physical telemetry qualification remain necessary before ordinary-runtime activation.
 
 R-ENG-001, R-PRIV-001/002, R-SAFE-001/002 and R-REL-001 remain partial; M-ENERGY/M-PRIVACY/M-SUPERVISOR; T-ENERGY/T-INTENT/T-PRIVACY/T-RELEASE; D-40. Monetary billing, today's income/net forecast and optimization remain separate roadmap work.
 
@@ -69,4 +69,4 @@ cmake --build --preset tests --target test_energy_capture energy_review_fixture 
 ctest --preset tests -R "^(energy_capture|energy_review_terminal)$" --output-on-failure
 ```
 
-Next: independently saved native persistence/retention controls with next-explicit-parent semantics, secure namespace/fresh-session generation and retention, explicit selected-set/store enrollment, bounded configuration I/O and helper lifecycle/packaging qualification. Finite segment/session/window/database budgets still need real-cadence planning; this supplies no 30-day retention guarantee, raw archive, monetary bill state, actual-income source or production release authorization.
+The later [P-08g](energy-authorization.md) provides helper-isolated consent/retention controls, private identity enrollment and fresh one-use plans through an injected native page. Next: lifetime-exclusive collection, ordinary-runtime binding and helper lifecycle/packaging qualification. Finite segment/session/window/database budgets still need real-cadence planning; this supplies no 30-day retention guarantee, raw archive, monetary bill state, actual-income source or production release authorization.

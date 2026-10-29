@@ -2,7 +2,7 @@
 
 This extends [observed-power history](energy-history.md) with a bounded private write-ahead input/receipt. A new parent can recover the original **Prepared** batch from disk, inspect its relation to committed facts and explicitly reconcile it. The public `EnergyHistoryOwner` uses this mode by default. The ordinary supervisor still has only its separately enabled in-memory session-energy collector.
 
-Requirements R-ENG-001, R-TAR-003, R-SAFE-001/002, R-PRIV-002 and R-REL-001 remain partial. Modules M-ENERGY/M-TARIFF; test families T-ENERGY/T-TARIFF/T-INTENT/T-PRIVACY/T-RELEASE; decision D-38. Later [compaction](energy-compaction.md) and [bounded producer/private mapping/native recovery](energy-capture.md) extend this protocol. Saved native authorization/retention, secure identity provisioning/store enrollment, monetary billing and ordinary-runtime activation remain unfinished.
+Requirements R-ENG-001, R-TAR-003, R-SAFE-001/002, R-PRIV-002 and R-REL-001 remain partial. Modules M-ENERGY/M-TARIFF; test families T-ENERGY/T-TARIFF/T-INTENT/T-PRIVACY/T-RELEASE; decision D-38. Later [compaction](energy-compaction.md), [bounded producer/private mapping/native recovery](energy-capture.md) and [isolated authorization/identity enrollment](energy-authorization.md) extend this protocol. Lifetime-exclusive collector admission, ordinary-runtime binding/lifecycle, monetary billing and production activation remain unfinished.
 
 ## Durable boundary
 
