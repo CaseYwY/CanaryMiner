@@ -47,3 +47,5 @@ Executed evidence:
 Initial fixture failures were corrected at the fixture: source replacement must remove its own READONLY-created WAL/SHM companions, while production creation still refuses orphans; a maximal timestamp was moved one day inside the supported calendar range so its next civil midnight exists. Field widths/counter/power/envelope maxima remain exercised. Production arithmetic and preservation rules were not weakened. No new named-timezone, UI/PTY, physical meter or deployment qualification is claimed by this batch.
 
 Remaining: durable pending/recovery/compute ownership, explicit settings/notification/cycle/archive handling, real source/rule/cadence eligibility and production deployment qualification. No actual-income source, automatic mining control or native billing display is activated.
+
+[P-05k](billing-pending.md) subsequently persists complete monetary originals and source receipts before apply, with journal-aware readonly inspection and explicit exact-original/revision-bound retry. It supplies no live source fetch or isolated monetary transport/owner.

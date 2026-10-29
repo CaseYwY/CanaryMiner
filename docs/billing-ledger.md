@@ -59,3 +59,5 @@ Remaining work: exact observed-energy/source-checkpoint adapter; immutable sourc
 [P-05h](energy-trace.md) supplies the first source-read foundation: coherent exact power/coverage/checkpoint snapshots through an existing-only READONLY energy store. It does not yet persist source receipts in this monetary ledger or admit real power as a billing source.
 
 [P-05j](billing-source.md) subsequently adds an explicit new source-bound schema v2: anchored exact-query receipts and the last committed source checkpoint share the monetary transaction and restart audit. V1 bytes/admission remain compatible. Only synthetic origins are admitted; durable pending monetary recovery, isolated compute ownership and runtime activation remain unfinished.
+
+[P-05k](billing-pending.md) subsequently composes the compatible v1/v2 ledger with durable pending originals, QueryOnly inspection and explicit revision-bound retry under ordered leases. The shared canonical monetary model keeps existing binding/chunk/state bytes compatible.

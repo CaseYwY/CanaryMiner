@@ -62,6 +62,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05j](../billing-source.md) checks source-anchored exact receipts across raw/compacted histories, same-head slices, restart/replay, changed clocks/bindings, uncertain/missing sources and greater-sequence forks. Retained/expired ancestry and combined maximum envelopes exercise the actual query helper. Independent SQLite mutation rehashes invalid source anchors/receipts and requires preserved rejection; pre-monetary-COMMIT death keeps the old source-progress/money transaction atomic. These remain synthetic, without pending monetary recovery or native activation.
 
+[P-05k](../billing-pending.md) checks durable monetary originals at flushed-temp, Prepared, pre/post-COMMIT and settlement boundaries, including failed-settlement restart. Independent processes retry exact receipts after their synthetic source is removed; stale/changed original, failed retry and divergent/absent/corrupt pairs preserve bytes. Maximum source envelopes and a >1-MiB framed binding/chunk round-trip without widening shared parsers. Readonly methods refuse writes and ordinary artifacts exclude crash seams. Physical storage and bounded native transport remain separate qualification.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

@@ -69,6 +69,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05j](../billing-source.md) adds new source-bound schema v2 and an exact-query receipt adapter. The next monetary prefix must prove the last energy checkpoint's ancestry under the source lease; an increasing sequence alone is insufficient. Source query/original reply, exact watts, money and last source checkpoint share one monetary transaction and replay audit. Previously committed receipts do not depend on the live source; new imports do. This remains synthetic and synchronous pending durable monetary recovery and isolated ownership.
 
+[P-05k](../billing-pending.md) adds a synchronous ordered recovery-store facade: complete canonical binding/chunk frames are durable before monetary apply, and exact source receipts survive process loss. QueryOnly returns committed prefix and pending input separately. Explicit retry checks the inspected revision and full original, never re-fetches and never clears failed uncertainty. This precedes bounded monetary transport/background ownership.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

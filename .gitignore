@@ -63,3 +63,4 @@ electricity-preferences.json*
 tariff-declaration.json*
 energy-history.sqlite3*
 *.energy-recovery.json*
+*.billing-recovery*

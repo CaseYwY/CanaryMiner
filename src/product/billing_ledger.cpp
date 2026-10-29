@@ -1,4 +1,5 @@
 #include "billing_ledger.h"
+#include "billing_model.h"
 #include "hash.h"
 #include "json_dom.h"
 #include "local_store_lease.h"
@@ -7,9 +8,8 @@
 #include <algorithm>
 #include <cstdlib>
 namespace om {
-namespace {
-constexpr int64_t lastUtc=253402300799999LL,application=0x434d424c;
-constexpr size_t bindingLimit=1024*1024,chunkLimit=128*1024,maxChunkIntervals=512;
+namespace billing_detail {
+constexpr int64_t application=0x434d424c;
 const std::string metaSql="CREATE TABLE meta(id INTEGER PRIMARY KEY CHECK(id=1),binding TEXT NOT NULL,sequence INTEGER NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL)";
 const std::string eventsSql="CREATE TABLE events(sequence INTEGER PRIMARY KEY,id TEXT NOT NULL UNIQUE,body TEXT NOT NULL,digest TEXT NOT NULL,state TEXT NOT NULL)";
 bool instant(int64_t t){return t>0&&t<=lastUtc;}
@@ -92,6 +92,15 @@ std::string stateText(const BillingSnapshot &s){return "["+n(static_cast<int64_t
     jsonQuote(s.opening.timeDatabaseVersion)+","+decimal(s.opening.importedKwh.numerator)+","+decimal(s.opening.accruedSubtotal.numerator)+","+
     (s.provisionalTotal?decimal(s.provisionalTotal->numerator):"null")+","+(s.settledTotal?decimal(s.settledTotal->numerator):"null")+","+n(s.settlementDependent)+
     (s.source?",["+n(static_cast<int64_t>(s.source->checkpoint.sequence))+","+jsonQuote(s.source->checkpoint.digest)+","+n(s.source->queriedUtcMs)+"]":"")+"]";}
+BillingStatus validateBinding(const BillingBinding &b,const BillingLimits &limits,int64_t now){
+    using S=BillingStatus;
+    if(b.evidence.origin!=PowerOrigin::SyntheticFixture||b.plan.origin!=TariffOrigin::SyntheticFixture)return S::Unsupported;
+    if(!key(b.cycleKey)||b.cycleKey.rfind("fixture.",0)!=0||!key(b.evidence.scope)||!key(b.evidence.adapter)||!boundedPlan(b.plan)||!validLimits(limits)||
+        !instant(now)||!instant(b.cycleBeginUtcMs)||b.cycleBeginUtcMs>now)return S::Invalid;
+    if(validateTariffOpening(b.plan,initial(b))!=ElectricityStatus::Ok)return S::Calculation;
+    if(b.source&&(sourceText(*b.source).empty()||!sameEvidence(b.evidence,b.source->binding.evidence)||b.source->binding.historyBeginUtcMs>b.cycleBeginUtcMs))return S::Attribution;
+    return bindingText(b,limits).size()>bindingLimit?S::Capacity:S::Ok;
+}
 BillingSnapshot initialSnapshot(const BillingBinding &b,const std::string &bound){
     BillingSnapshot s;s.status=BillingStatus::Ok;s.opening=initial(b);s.digest=sha256Hex(bound);
     if(b.source)s.source=BillingSnapshot::SourceProgress{{0,seed(*b.source)},0};
@@ -119,6 +128,7 @@ BillingStatus advance(const BillingBinding &binding,const BillingLimits &limits,
 }
 struct Param {bool isText=false;int64_t number=0;std::string value;Param(int64_t n):number(n){}Param(const std::string &s):isText(true),value(s){}};
 } // namespace
+using namespace billing_detail;
 struct BillingLedger::Impl {
     SqliteRuntime api;SqliteDb *db=nullptr;LocalStoreLease lease;
     bool attempted=false,ready=false,readOnly=false;
@@ -193,11 +203,8 @@ BillingLedger::BillingLedger():impl_(new Impl){}
 BillingLedger::~BillingLedger()=default;
 BillingStatus BillingLedger::open(const std::filesystem::path &path,const BillingBinding &binding,int64_t now,BillingOpen mode,BillingLimits limits){
     using S=BillingStatus;auto &s=*impl_;if(s.attempted)return S::Invalid;s.attempted=true;
-    if(binding.evidence.origin!=PowerOrigin::SyntheticFixture||binding.plan.origin!=TariffOrigin::SyntheticFixture)return S::Unsupported;
-    if(!key(binding.cycleKey)||binding.cycleKey.rfind("fixture.",0)!=0||!key(binding.evidence.scope)||!key(binding.evidence.adapter)||!boundedPlan(binding.plan)||!validLimits(limits)||
-        !instant(now)||!instant(binding.cycleBeginUtcMs)||binding.cycleBeginUtcMs>now||!path.is_absolute()||(mode!=BillingOpen::Existing&&mode!=BillingOpen::CreateNew&&mode!=BillingOpen::Inspect))return S::Invalid;
-    if(validateTariffOpening(binding.plan,initial(binding))!=ElectricityStatus::Ok)return S::Calculation;
-    if(binding.source&&(sourceText(*binding.source).empty()||!sameEvidence(binding.evidence,binding.source->binding.evidence)||binding.source->binding.historyBeginUtcMs>binding.cycleBeginUtcMs))return S::Attribution;
+    const auto valid=validateBinding(binding,limits,now);if(valid!=S::Ok)return valid;
+    if(!path.is_absolute()||(mode!=BillingOpen::Existing&&mode!=BillingOpen::CreateNew&&mode!=BillingOpen::Inspect))return S::Invalid;
     s.binding=binding;s.limits=limits;s.readOnly=mode==BillingOpen::Inspect;s.bound=bindingText(binding,limits);if(s.bound.size()>bindingLimit)return S::Capacity;
     try{
         if(!s.api.load())return S::Storage;

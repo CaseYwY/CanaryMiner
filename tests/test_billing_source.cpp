@@ -1,5 +1,7 @@
 #include "billing_source_fixture.h"
 #include "product/energy_recovery.h"
+#include "product/billing_recovery.h"
+#include "product/billing_model.h"
 #include "product_test_util.h"
 #include <fstream>
 using namespace billing_source_fixture;
@@ -36,6 +38,11 @@ void maximumReceipt(const std::filesystem::path &root,EnergyTraceProcessClient &
         CHECK(original.trace.intervals.size()==512&&original.receipt->reply.source.recovery->batch->readings.size()==128&&original.receipt->reply.source.recovery->batch->windows.size()==32);
         CHECK(ledger.apply(original,r.nowUtcMs)==S::Ok&&ledger.snapshot(r.nowUtcMs).settledTotal.has_value());}
     BillingLedger inspect;CHECK(inspect.open(file,b,r.nowUtcMs,BillingOpen::Inspect)==S::Ok&&inspect.verifyCommitted(original,r.nowUtcMs)==S::Replay&&inspect.snapshot(r.nowUtcMs).source->checkpoint.sequence==257);
+    const auto recovered=root/"maximum-recovery.db";auto saved=recovered;saved+=".billing-recovery";
+    {BillingRecoveryStore store;CHECK(store.open(recovered,b,r.nowUtcMs,BillingRecoveryOpen::CreateNew)==S::Ok&&store.submit(original,r.nowUtcMs)==S::Ok);}
+    const auto frozen=bytes(saved);CHECK(frozen.size()>64*1024&&frozen.size()<256*1024);
+    {BillingRecoveryStore store;CHECK(store.open(recovered,b,r.nowUtcMs,BillingRecoveryOpen::QueryOnly)==S::Ok);const auto s=store.inspect(r.nowUtcMs);
+        CHECK(s.state==BillingRecoveryState::Confirmed&&s.committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*s.original)==billing_detail::chunkText(original)&&bytes(saved)==frozen);}
 }
 }
 int main(int argc,char **argv){
