@@ -687,7 +687,7 @@ void testChildPipes() {
 }
 
 /** Runs the supervisor over `workers` fake workers and stops it after `stopAfterMs` unless it ends first. */
-int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr) {
+int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false) {
     volatile sig_atomic_t stop = 0;
     SupervisorOptions o = baseOptions();
     o.exe = selfExecutablePath();
@@ -698,6 +698,7 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     o.stop = &stop;
     o.dashboard = false;
     o.tuning = tuning;
+    o.energyCaptureFactory=std::move(capture);o.noEnergy=noEnergy;
     std::atomic<bool> finished{false};
     std::thread timer([&] {
         for (uint64_t t = 0; t < stopAfterMs / 20 && !finished.load(); ++t) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -796,9 +797,37 @@ void testStopAlreadyRequested() {
     options.stop = &stop;
     TuningHookProbe probe;
     options.tuning = &probe;
+    unsigned factories=0;options.energyCaptureFactory=[&]()->std::unique_ptr<EnergyCaptureSink>{++factories;return {};};
     Supervisor supervisor(std::move(options));
     CHECK(supervisor.run() == kExitOk);
     CHECK(probe.calls.empty());
+    CHECK(factories==0);
+}
+
+struct CaptureProbeState {unsigned factories=0,starts=0,samples=0,ticks=0,stops=0;bool revoked=false,late=false;std::vector<std::string> devices;};
+class CaptureProbe final:public EnergyCaptureSink {
+    CaptureProbeState &state_;
+   public:
+    explicit CaptureProbe(CaptureProbeState &s):state_(s){}
+    bool start(uint64_t g,const std::vector<std::string> &ids)override{CHECK(g>0);++state_.starts;state_.devices=ids;return true;}
+    EnergyCaptureAdmission submit(uint64_t,const SessionPowerInput &in)override{
+        ++state_.samples;state_.late=state_.late||state_.revoked;CHECK(in.channel<state_.devices.size()&&in.utcMs>0);return EnergyCaptureAdmission::Buffered;
+    }
+    void tick(int64_t,uint64_t)override{++state_.ticks;state_.late=state_.late||state_.revoked;}
+    void markGap(uint64_t)override{}
+    EnergyHistoryAdmission inspect(uint64_t,uint64_t)override{return EnergyHistoryAdmission::NotReady;}
+    EnergyHistoryAdmission retryReviewed(uint64_t,uint64_t)override{return EnergyHistoryAdmission::NotReady;}
+    void requestStop()override{state_.revoked=true;}
+    void stop()override{CHECK(state_.revoked);++state_.stops;}
+    std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{return std::make_shared<const EnergyCaptureSnapshot>();}
+};
+void testCaptureBridge(){
+    CaptureProbeState s;auto factory=[&]()->std::unique_ptr<EnergyCaptureSink>{++s.factories;return std::make_unique<CaptureProbe>(s);};
+    CHECK(supervisedRun({kFakeChild},2,1200,nullptr,factory)==kExitOk);
+    CHECK(s.factories==1&&s.starts==1&&s.samples>=2&&s.ticks>=1&&s.stops==1&&s.revoked&&!s.late);
+    CHECK(s.devices==std::vector<std::string>({seed(0).uuid,seed(1).uuid}));
+    CaptureProbeState disabled;auto no=[&]()->std::unique_ptr<EnergyCaptureSink>{++disabled.factories;return std::make_unique<CaptureProbe>(disabled);};
+    CHECK(supervisedRun({kFakeChild},1,500,nullptr,no,true)==kExitOk);CHECK(disabled.factories==0);
 }
 
 }  // namespace
@@ -855,6 +884,7 @@ int main(int argc, char **argv) {
     }
     testFeedLines();
     testStopAlreadyRequested();
+    testCaptureBridge();
     CHECK(supervisedRun({kFakeLatched}, 1, 120000) == kExitFaultLatched);
     testWorkerArgs();
     testStatsRoundTrip();

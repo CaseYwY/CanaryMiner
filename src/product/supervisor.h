@@ -54,6 +54,7 @@
 #include "restart_budget.h"
 #include "settings.h"
 #include "energy_owner.h"
+#include "energy_capture.h"
 #include "session_intent.h"
 #include "accepted_history.h"
 #include "stats.h"
@@ -385,6 +386,7 @@ struct SupervisorOptions {
     bool noMarket = false;
     std::string electricityPreferencesPath;
     SessionEnergyFactory energyFactory;
+    EnergyCaptureFactory energyCaptureFactory; // only an independently authorized, privately bound plan may supply this
     bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
@@ -575,6 +577,19 @@ class Supervisor {
                 }
             }
         }
+        if(opt_.stop&&*opt_.stop)intent_.stop();
+        if(!opt_.noEnergy&&opt_.energyCaptureFactory&&intent_.permits(sessionToken_)){
+            std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
+            energyCapture_=opt_.energyCaptureFactory();
+            if(opt_.stop&&*opt_.stop)intent_.stop();
+            if(!energyCapture_||!intent_.permits(sessionToken_)||!energyCapture_->start(sessionToken_.epoch,ids)){
+                energyCapture_.reset();addEvent("Durable board-energy capture unavailable; preserve local history.");
+            }else{
+                settings_.energyAccess.snapshot=[this]{return energyCapture_->snapshot();};
+                settings_.energyAccess.inspect=[this](uint64_t g,uint64_t r){return energyCapture_->inspect(g,r);};
+                settings_.energyAccess.retry=[this](uint64_t g,uint64_t r){return energyCapture_->retryReviewed(g,r);};
+            }
+        }
         if (opt_.tuning) {
             std::vector<std::string> events;
             opt_.tuning->start(t0, &events);
@@ -607,6 +622,7 @@ class Supervisor {
                     view_.options = ui_;  // a saved page switch also governs the very next queued shortcut
                     if (settings_.visible) {
                         settings_.updateCreditReview();
+                        settings_.updateEnergyReview();
                         const auto result = settings_.key(key, [this](const UiPreferences &p, std::string *error) {
                             if (uiStore_ && !uiStore_->save(p, error)) return false;
                             ui_ = p;
@@ -684,6 +700,11 @@ class Supervisor {
                 }
                 pending = pending || w.restartPending;
             }
+            if(energyCapture_&&intent_.permits(sessionToken_)){
+                const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                energyCapture_->tick(utc,supervisorNowMs());
+                settings_.updateEnergyReview();
+            }
             if (stopping) {
                 if (!alive) break;
                 if (now >= stopDeadline) {
@@ -706,6 +727,7 @@ class Supervisor {
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(tty ? 50 : 250));
         }
+        if(energyCapture_)energyCapture_->requestStop();
         for (auto &w : workers_) {
             if (!w->proc) continue;
             int code = 0;
@@ -724,6 +746,7 @@ class Supervisor {
         }
         if (history_) history_->stop();  // worker drains/safety stop complete before optional persistence shutdown
         if (energy_) energy_->stop();
+        if (energyCapture_) energyCapture_->stop();
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -783,6 +806,7 @@ class Supervisor {
     std::unique_ptr<TariffDeclarationStore> tariffStore_;
     ElectricityPreferences electricityEffective_;
     std::unique_ptr<SessionEnergySink> energy_;
+    std::unique_ptr<EnergyCaptureSink> energyCapture_;
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
     std::unique_ptr<AcceptedHistory> history_;
@@ -837,6 +861,7 @@ class Supervisor {
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
         if(energy_)energy_->requestStop();
+        if(energyCapture_)energyCapture_->requestStop();
         addEvent("stopping: draining every GPU");
         for (auto &w : workers_) {
             w->restartPending = false;
@@ -848,6 +873,7 @@ class Supervisor {
     /** A worker ended: a stop is recorded; anything else is restarted after 10 s while the 3-per-hour budget allows it. */
     void onExit(size_t i, int code, uint64_t now, bool stopping, const std::string &spawnError = std::string()) {
         Worker &w = *workers_[i];
+        if(energyCapture_)energyCapture_->markGap(sessionToken_.epoch);
         if (stopping || w.stopping) {
             w.view.state = "Stopped";
             w.view.detail = "stopped (exit " + std::to_string(code) + ")";
@@ -920,13 +946,14 @@ class Supervisor {
             w.view.tel = w.nvml.sample();
             w.view.telValid = w.view.tel.valid;
         }
-        if(energy_ && intent_.permits(sessionToken_)) {
+        if((energy_||energyCapture_) && intent_.permits(sessionToken_)) {
             const auto mono=supervisorNowMs();
-            if(mono>=w.nextEnergyAt) {
+            const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            SessionPowerInput input;input.channel=static_cast<unsigned>(i);input.monotonicMs=mono;input.utcMs=utc>0?static_cast<uint64_t>(utc):0;
+            if(w.nvmlOk&&w.view.telValid&&w.view.tel.powerValid)input.milliwatts=w.view.tel.powerMilliwatts;
+            if(energyCapture_)energyCapture_->submit(sessionToken_.epoch,input);
+            if(energy_&&mono>=w.nextEnergyAt) {
                 w.nextEnergyAt=mono+electricityEffective_.recordIntervalMs;
-                const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                SessionPowerInput input;input.channel=static_cast<unsigned>(i);input.monotonicMs=mono;input.utcMs=utc>0?static_cast<uint64_t>(utc):0;
-                if(w.nvmlOk&&w.view.telValid&&w.view.tel.powerValid)input.milliwatts=w.view.tel.powerMilliwatts;
                 energy_->submit(sessionToken_.epoch,input);
             }
         }

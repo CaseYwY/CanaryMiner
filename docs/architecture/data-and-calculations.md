@@ -110,6 +110,8 @@ The initial [observed-energy ledger](../energy-history.md) integrates raw intege
 
 [Opt-in exact compaction](../energy-compaction.md) preserves summed milliwatts and covered-channel counts as exact piecewise intervals, with active per-channel continuity retained separately. Arbitrary millisecond queries and independent reset projections clip those intervals without rounding or average-power interpolation. Raw per-channel originals before the exposed compaction boundary expire; DetailExpired is neither exact replay proof nor missing aggregate energy. Segment growth remains bounded and capacity rejects instead of weakening precision or coverage.
 
+The [bounded producer](../energy-capture.md) tags each selected reading with continuity before buffering. Overflow advances future epochs while preserving earlier queued epochs; later samples cannot hold power across lost observations. Intentional cadence skips are distinct, but a failed sensor read between selected samples still breaks continuity. A new parent begins with a fresh explicit session anchor after inspection/recovery; no old shutdown tail is filled. Volatile queue sizes and helper tickets never contribute committed energy or monetary state.
+
 ## 7. Curves, calibration and optimization
 
 Profile identity includes local device identity, software/driver/kernel version, work shape, throttle mechanism, thermal environment, measurement basis, warm-up/repetition/window and evidence freshness. Never copy one machine's frequencies, identifiers, power or profit numbers into shipped defaults.
