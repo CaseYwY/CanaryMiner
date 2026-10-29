@@ -2,7 +2,7 @@
 add_library(canary_billing STATIC "${CMAKE_SOURCE_DIR}/src/product/billing_ledger.cpp")
 target_compile_features(canary_billing PUBLIC cxx_std_17)
 target_include_directories(canary_billing PUBLIC "${CMAKE_SOURCE_DIR}/src")
-target_link_libraries(canary_billing PUBLIC canary_economics PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(canary_billing PUBLIC canary_economics canary_energy_history PRIVATE ${CMAKE_DL_LIBS})
 if(MSVC)
   target_compile_definitions(canary_billing PRIVATE NOMINMAX)
   target_compile_options(canary_billing PRIVATE /W3 /utf-8)

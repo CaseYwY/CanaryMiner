@@ -60,6 +60,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05g](../billing-ledger.md) checks exact prefix/full-cycle equivalence, provisional all-units repricing, end-only floors, signed rates, no duplicated fees and named-clock 23h/25h restart settlement. An independent Fraction oracle compares exact numerator/delta/energy and half-even display. Separate SQLite/process tests cover empty-versus-zero, immutable binding, replay/conflict/gap refusal, read-only preservation, orphan companions, page-cap rollback and pre-COMMIT death; rehashed fabricated state must fail arithmetic replay. The page-cap fixture does not establish physical disk failure or source/helper/runtime qualification.
 
+[P-05j](../billing-source.md) checks source-anchored exact receipts across raw/compacted histories, same-head slices, restart/replay, changed clocks/bindings, uncertain/missing sources and greater-sequence forks. Retained/expired ancestry and combined maximum envelopes exercise the actual query helper. Independent SQLite mutation rehashes invalid source anchors/receipts and requires preserved rejection; pre-monetary-COMMIT death keeps the old source-progress/money transaction atomic. These remain synthetic, without pending monetary recovery or native activation.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

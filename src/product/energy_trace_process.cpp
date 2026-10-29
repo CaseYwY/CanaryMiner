@@ -1,5 +1,7 @@
 #include "energy_trace_process.h"
 #include "energy_recovery.h"
+#include "energy_history_model.h"
+#include "hash.h"
 #include "json_dom.h"
 #include "public_https.h"
 #include <utility>
@@ -31,37 +33,60 @@ std::string traceText(const std::optional<PowerTrace> &trace){
 bool validEnergyTraceRequest(const EnergyTraceRequest &r){
     const auto &s=r.source;
     if(!r.maxIntervals||r.maxIntervals>512||s.mode!=EnergyHistoryOpen::Existing||s.recovery!=EnergyRecoveryMode::Inspect||s.batch||s.queries.size()!=1||!s.queries[0].registerId.empty()||!s.queries[0].periodId.empty())return false;
-    std::string inner;return encodeEnergyHistoryRequest(s,&inner)&&inner.size()+32<=energyTraceRequestLimit;
+    if(r.anchor&&(r.anchor->sequence>(s.limits.compaction?energy_history_detail::lifetimeBatchLimit:s.limits.maxBatches)||r.anchor->digest.size()!=64||r.anchor->digest.find_first_not_of("0123456789abcdef")!=std::string::npos))return false;
+    std::string inner;return encodeEnergyHistoryRequest(s,&inner)&&inner.size()+(r.anchor?128:32)<=energyTraceRequestLimit;
 }
 bool encodeEnergyTraceRequest(const EnergyTraceRequest &r,uint64_t parent,std::string *wire){
     if(!wire||!parent||parent>UINT32_MAX||!validEnergyTraceRequest(r))return false;
     std::string inner;if(!encodeEnergyHistoryRequest(r.source,&inner))return false;
-    *wire="CMETQ1\n"+std::to_string(parent)+"\n"+std::to_string(r.maxIntervals)+"\n"+inner;return wire->size()<=energyTraceRequestLimit;
+    *wire=std::string(r.anchor?"CMETQ2\n":"CMETQ1\n")+std::to_string(parent)+"\n"+std::to_string(r.maxIntervals)+"\n"+
+        (r.anchor?std::to_string(r.anchor->sequence)+"\n"+r.anchor->digest+"\n":"")+inner;return wire->size()<=energyTraceRequestLimit;
 }
 bool decodeEnergyTraceRequest(const std::string &wire,EnergyTraceRequest *out,uint64_t *parent){
-    if(!out||!parent||wire.size()>energyTraceRequestLimit||wire.rfind("CMETQ1\n",0)!=0)return false;
+    const bool anchored=wire.rfind("CMETQ2\n",0)==0;
+    if(!out||!parent||wire.size()>energyTraceRequestLimit||(!anchored&&wire.rfind("CMETQ1\n",0)!=0))return false;
     size_t offset=7;uint64_t pid=0,maximum=0;EnergyTraceRequest r;
-    if(!numberLine(wire,offset,UINT32_MAX,pid)||!pid||!numberLine(wire,offset,512,maximum)||!maximum||!decodeEnergyHistoryRequest(wire.substr(offset),&r.source))return false;
+    if(!numberLine(wire,offset,UINT32_MAX,pid)||!pid||!numberLine(wire,offset,512,maximum)||!maximum)return false;
+    if(anchored){EnergyHistoryAnchor a;if(!numberLine(wire,offset,energy_history_detail::lifetimeBatchLimit,a.sequence)||offset+65>wire.size()||wire[offset+64]!='\n')return false;
+        a.digest=wire.substr(offset,64);offset+=65;r.anchor=std::move(a);}
+    if(!decodeEnergyHistoryRequest(wire.substr(offset),&r.source))return false;
     r.maxIntervals=static_cast<size_t>(maximum);if(!validEnergyTraceRequest(r))return false;*parent=pid;*out=std::move(r);return true;
 }
 bool encodeEnergyTraceReply(const EnergyTraceRequest &r,const EnergyTraceReply &reply,std::string *wire){
-    if(!wire||!validEnergyTraceRequest(r)||(reply.completeTrace&&reply.completeTrace->intervals.size()>r.maxIntervals))return false;
+    if(!wire||!validEnergyTraceRequest(r)||r.anchor.has_value()!=reply.anchorStatus.has_value()||(reply.completeTrace&&reply.completeTrace->intervals.size()>r.maxIntervals))return false;
     if(reply.completeTrace){const auto &a=reply.completeTrace->evidence,&b=r.source.binding.evidence;
         if(a.basis!=b.basis||a.origin!=b.origin||a.scope!=b.scope||a.adapter!=b.adapter)return false;}
     std::string inner;if(!encodeEnergyHistoryReply(r.source,reply.source,&inner))return false;
-    const auto text="CMETA1\n"+std::to_string(inner.size())+"\n"+inner+"\n"+std::to_string(static_cast<unsigned>(reply.status))+"\n"+traceText(reply.completeTrace);
+    const auto text=std::string(r.anchor?"CMETA2\n":"CMETA1\n")+std::to_string(inner.size())+"\n"+inner+"\n"+
+        (reply.anchorStatus?std::to_string(static_cast<unsigned>(*reply.anchorStatus))+"\n":"")+std::to_string(static_cast<unsigned>(reply.status))+"\n"+traceText(reply.completeTrace);
     EnergyTraceReply checked;if(!decodeEnergyTraceReply(r,text,&checked))return false;*wire=text;return true;
 }
 bool decodeEnergyTraceReply(const EnergyTraceRequest &r,const std::string &wire,EnergyTraceReply *out){
-    if(!out||!validEnergyTraceRequest(r)||wire.size()>localTaskResponseLimit||wire.rfind("CMETA1\n",0)!=0)return false;
+    if(!out||!validEnergyTraceRequest(r)||wire.size()>localTaskResponseLimit||wire.rfind(r.anchor?"CMETA2\n":"CMETA1\n",0)!=0)return false;
     EnergyTraceReply reply;size_t offset=7;uint64_t bytes=0,status=0;
     if(!numberLine(wire,offset,localTaskResponseLimit,bytes)||!bytes||bytes>=wire.size()-offset||wire[offset+static_cast<size_t>(bytes)]!='\n'||
         !decodeEnergyHistoryReply(r.source,wire.substr(offset,static_cast<size_t>(bytes)),&reply.source))return false;
     offset+=static_cast<size_t>(bytes)+1;
-    if(!numberLine(wire,offset,static_cast<unsigned>(S::Storage),status))return false;
+    if(r.anchor){if(!numberLine(wire,offset,static_cast<unsigned>(S::DetailExpired),status))return false;reply.anchorStatus=static_cast<S>(status);}
+    if(!numberLine(wire,offset,static_cast<unsigned>(r.anchor?S::DetailExpired:S::Storage),status))return false;
     reply.status=static_cast<S>(status);
     const auto text=wire.substr(offset);JsonValue trace;if(!boundedPublicJson(text)||!parseJsonStrict(text,&trace,nullptr))return false;
-    const auto base=sourceStatus(reply.source);
+    auto base=sourceStatus(reply.source);
+    if(r.anchor){const auto proof=*reply.anchorStatus;
+        if(base!=S::Ok){if(proof!=base)return false;}
+        else{
+            if(proof!=S::Ok&&proof!=S::Conflict&&proof!=S::DetailExpired&&proof!=S::Storage)return false;
+            const auto &a=*r.anchor;const auto &c=reply.source.checkpoint;
+            if(proof!=S::Storage){
+                if(!a.sequence){if(proof!=(a.digest==sha256Hex(energy_history_detail::bindingText(r.source.binding))?S::Ok:S::Conflict))return false;}
+                else if(a.sequence>c.sequence){if(proof!=S::Conflict)return false;}
+                else if(a.sequence==c.sequence){if(proof!=(a.digest==c.digest?S::Ok:S::Conflict))return false;}
+                else if(a.sequence+1<c.compactedSequence){if(proof!=S::DetailExpired)return false;}
+                else if(proof==S::DetailExpired)return false;
+            }
+            base=proof;
+        }
+    }
     if(base!=S::Ok){if(reply.status!=base||trace.type!=JsonValue::Type::Null)return false;}
     else if(reply.status!=S::Ok){if((reply.status!=S::Capacity&&reply.status!=S::Storage)||trace.type!=JsonValue::Type::Null)return false;}
     else{
@@ -87,13 +112,15 @@ bool decodeEnergyTraceReply(const EnergyTraceRequest &r,const std::string &wire,
 }
 EnergyTraceReply executeEnergyTraceRequest(const EnergyTraceRequest &r){
     EnergyTraceReply reply;auto &source=reply.source;source.generation=r.source.generation;source.ticket=r.source.ticket;source.recovery=EnergyRecoverySnapshot{};
-    if(!validEnergyTraceRequest(r)){reply.status=source.opened=source.recovery->status=S::Invalid;return reply;}
+    const auto failed=[&](S status){reply.status=source.recovery->status=status;if(r.anchor)reply.anchorStatus=status;};
+    if(!validEnergyTraceRequest(r)){source.opened=S::Invalid;failed(source.opened);return reply;}
     EnergyRecoveryJournal journal;source.opened=journal.open(r.source,EnergyRecoveryOpen::QueryOnly);
-    if(source.opened!=S::Ok){reply.status=source.recovery->status=source.opened;return reply;}
+    if(source.opened!=S::Ok){failed(source.opened);return reply;}
     EnergyHistoryLedger ledger;source.opened=ledger.open(r.source.file,r.source.binding,r.source.nowUtcMs,EnergyHistoryOpen::ExistingQuery,r.source.limits);
-    if(source.opened!=S::Ok){reply.status=source.recovery->status=source.opened;return reply;}
+    if(source.opened!=S::Ok){failed(source.opened);return reply;}
     source.checkpoint=ledger.checkpoint(r.source.nowUtcMs);source.recovery=journal.inspect(ledger,r.source.nowUtcMs);
     const auto &q=r.source.queries[0];source.totals.push_back(ledger.query(q.beginUtcMs,q.endUtcMs,r.source.nowUtcMs));reply.status=sourceStatus(source);
+    if(r.anchor){reply.anchorStatus=reply.status==S::Ok?ledger.verifyAnchor(*r.anchor,r.source.nowUtcMs):reply.status;if(reply.status==S::Ok)reply.status=*reply.anchorStatus;}
     if(reply.status!=S::Ok)return reply;
     const auto trace=ledger.queryTrace(q.beginUtcMs,q.endUtcMs,r.source.nowUtcMs,r.maxIntervals);reply.status=trace.status;reply.completeTrace=trace.completeTrace;return reply;
 }

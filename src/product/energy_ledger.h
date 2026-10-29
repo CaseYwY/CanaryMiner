@@ -60,6 +60,10 @@ struct EnergyHistoryCheckpoint {
     std::string batchId, sessionId, digest; // audited chain head; local corruption/recovery binding, not authentication
     int64_t observedAtMs = 0, throughUtcMs = 0;
 };
+struct EnergyHistoryAnchor {
+    uint64_t sequence=0;
+    std::string digest; // earlier committed head in this immutable source; not a queue ticket
+};
 struct EnergyHistoryTotals {
     EnergyHistoryStatus status = EnergyHistoryStatus::Storage;
     EnergyHistoryCoverage coverage = EnergyHistoryCoverage::Unavailable;
@@ -86,6 +90,7 @@ class EnergyHistoryLedger {
                              EnergyHistoryOpen mode = EnergyHistoryOpen::Existing, EnergyHistoryLimits limits = {});
     EnergyHistoryStatus apply(const EnergyHistoryBatch &batch, int64_t nowUtcMs);
     EnergyHistoryStatus verifyCommitted(const EnergyHistoryBatch &batch, int64_t nowUtcMs); // read-only exact retained input proof
+    EnergyHistoryStatus verifyAnchor(const EnergyHistoryAnchor &anchor,int64_t nowUtcMs); // expired ancestry is unavailable, never inferred from a larger sequence
     EnergyHistoryCheckpoint checkpoint(int64_t nowUtcMs) const;
     EnergyHistoryTotals query(int64_t beginUtcMs, int64_t endUtcMs, int64_t nowUtcMs) const;
     // Exact summed held watts, never average power. Capacity refuses rather than smoothing/partial trace publication.

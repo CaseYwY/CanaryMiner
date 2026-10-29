@@ -67,6 +67,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05g](../billing-ledger.md) supplies exact prefix accrual and an independent synchronous fixture-only monetary store. Complete original chunks, recomputed state and a chained head share one transaction; immutable source/plan/cycle/budgets begin at the explicit zero origin. READONLY inspection and exact replay preserve uncertainty. One committed prefix can seed complete-remainder scenarios without recording them as observations. No renderer/supervisor calls the new library; observed source/checkpoint adaptation, pending recovery and bounded isolated ownership precede runtime activation.
 
+[P-05j](../billing-source.md) adds new source-bound schema v2 and an exact-query receipt adapter. The next monetary prefix must prove the last energy checkpoint's ancestry under the source lease; an increasing sequence alone is insufficient. Source query/original reply, exact watts, money and last source checkpoint share one monetary transaction and replay audit. Previously committed receipts do not depend on the live source; new imports do. This remains synthetic and synchronous pending durable monetary recovery and isolated ownership.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

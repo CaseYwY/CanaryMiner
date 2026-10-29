@@ -3,6 +3,7 @@
 #include "json_dom.h"
 #include "local_store_lease.h"
 #include "sqlite_runtime.h"
+#include "energy_history_model.h"
 #include <algorithm>
 #include <cstdlib>
 namespace om {
@@ -18,6 +19,21 @@ std::string decimal(const ExactDecimal &v){return jsonQuote(v.text());}
 std::string optional(const std::optional<ExactDecimal> &v){return v?decimal(*v):"null";}
 std::string evidence(const PowerEvidence &e){return "["+n(static_cast<int>(e.basis))+","+n(static_cast<int>(e.origin))+","+jsonQuote(e.scope)+","+jsonQuote(e.adapter)+"]";}
 bool sameEvidence(const PowerEvidence &a,const PowerEvidence &b){return a.basis==b.basis&&a.origin==b.origin&&a.scope==b.scope&&a.adapter==b.adapter;}
+std::string sourceText(const BillingEnergySource &s){
+    EnergyHistoryRequest r;r.generation=r.ticket=1;r.file=s.file;r.binding=s.binding;r.limits=s.limits;r.nowUtcMs=s.binding.historyBeginUtcMs;r.recovery=EnergyRecoveryMode::Inspect;
+    std::string wire;return encodeEnergyHistoryRequest(r,&wire)?wire:std::string{};
+}
+std::string seed(const BillingEnergySource &s){return sha256Hex(energy_history_detail::bindingText(s.binding));}
+bool sameTrace(const PowerTrace &a,const PowerTrace &b){
+    if(!sameEvidence(a.evidence,b.evidence)||a.intervals.size()!=b.intervals.size())return false;
+    for(size_t i=0;i<a.intervals.size();++i)if(a.intervals[i].beginUtcMs!=b.intervals[i].beginUtcMs||a.intervals[i].endUtcMs!=b.intervals[i].endUtcMs||a.intervals[i].watts.compare(b.intervals[i].watts)!=0)return false;
+    return true;
+}
+bool receiptText(const BillingChunk::Receipt &receipt,std::string &request,std::string &reply){
+    return receipt.request.anchor&&receipt.request.source.generation==1&&receipt.request.source.ticket==1&&
+        encodeEnergyTraceRequest(receipt.request,1,&request)&&encodeEnergyTraceReply(receipt.request,receipt.reply,&reply)&&
+        receipt.reply.status==EnergyHistoryStatus::Ok&&receipt.reply.anchorStatus==EnergyHistoryStatus::Ok&&receipt.reply.completeTrace.has_value();
+}
 bool boundedPlan(const TariffPlan &p){
     if(!key(p.key)||!key(p.territory)||!key(p.supplier)||!key(p.product)||p.currency.size()!=3||p.clock.zone.size()>128||p.revisions.size()>128)return false;
     size_t rows=0;
@@ -46,40 +62,59 @@ std::string planText(const TariffPlan &p){
     }
     return s+"]]";
 }
-std::string bindingText(const BillingBinding &b,const BillingLimits &l){return "[\"CMBL1\","+jsonQuote(b.cycleKey)+","+n(b.cycleBeginUtcMs)+","+n(b.cycleEndUtcMs)+","+evidence(b.evidence)+","+planText(b.plan)+
-    ",["+n(static_cast<int64_t>(l.maxBatches))+","+n(static_cast<int64_t>(l.maxIntervals))+","+n(static_cast<int64_t>(l.maxDatabaseBytes))+"]]";}
+std::string bindingText(const BillingBinding &b,const BillingLimits &l){return std::string(b.source?"[\"CMBL2\",":"[\"CMBL1\",")+jsonQuote(b.cycleKey)+","+n(b.cycleBeginUtcMs)+","+n(b.cycleEndUtcMs)+","+evidence(b.evidence)+","+planText(b.plan)+
+    ",["+n(static_cast<int64_t>(l.maxBatches))+","+n(static_cast<int64_t>(l.maxIntervals))+","+n(static_cast<int64_t>(l.maxDatabaseBytes))+"]"+(b.source?","+jsonQuote(sourceText(*b.source)):"")+"]";}
 bool boundedChunk(const BillingChunk &b){return b.sequence&&b.sequence<=4096&&key(b.id)&&instant(b.observedUtcMs)&&!b.trace.intervals.empty()&&b.trace.intervals.size()<=maxChunkIntervals&&key(b.trace.evidence.scope)&&key(b.trace.evidence.adapter);}
 std::string chunkText(const BillingChunk &b){
-    std::string s="[\"CMBC1\","+n(static_cast<int64_t>(b.sequence))+","+jsonQuote(b.id)+","+n(b.observedUtcMs)+","+evidence(b.trace.evidence)+",[";
+    std::string request,reply;if(b.receipt&&!receiptText(*b.receipt,request,reply))return {};
+    std::string s=std::string(b.receipt?"[\"CMBC2\",":"[\"CMBC1\",")+n(static_cast<int64_t>(b.sequence))+","+jsonQuote(b.id)+","+n(b.observedUtcMs)+","+evidence(b.trace.evidence)+",[";
     for(size_t i=0;i<b.trace.intervals.size();++i){if(i)s+=',';const auto &p=b.trace.intervals[i];s+="["+n(p.beginUtcMs)+","+n(p.endUtcMs)+","+decimal(p.watts)+"]";}
-    return s+"]]";
+    return s+"]"+(b.receipt?",["+jsonQuote(request)+","+jsonQuote(reply)+"]":"")+"]";
 }
 bool array(const JsonValue &v,size_t count){return v.isArray()&&v.items.size()==count;}
 bool integer(const JsonValue &v,int64_t &out){uint64_t value=0;if(!v.asUint64(&value)||value>static_cast<uint64_t>(lastUtc))return false;out=static_cast<int64_t>(value);return true;}
 bool parseChunk(const std::string &s,const PowerEvidence &e,BillingChunk &out){
     if(s.size()>chunkLimit)return false;
-    JsonValue root;if(!parseJsonStrict(s,&root,nullptr)||!array(root,6))return false;
+    JsonValue root;if(!parseJsonStrict(s,&root,nullptr)||!root.isArray()||(root.items.size()!=6&&root.items.size()!=7))return false;
     const auto &a=root.items;BillingChunk b;b.trace.evidence=e;
-    if(!a[0].isString()||a[0].text!="CMBC1"||!a[1].asUint64(&b.sequence)||!a[2].isString()||!integer(a[3],b.observedUtcMs)||!array(a[4],4)||!a[5].isArray()||a[5].items.size()>maxChunkIntervals)return false;
+    if(!a[0].isString()||a[0].text!=(a.size()==7?"CMBC2":"CMBC1")||!a[1].asUint64(&b.sequence)||!a[2].isString()||!integer(a[3],b.observedUtcMs)||!array(a[4],4)||!a[5].isArray()||a[5].items.size()>maxChunkIntervals)return false;
     b.id=a[2].text;
     for(const auto &row:a[5].items){PowerInterval i;if(!array(row,3)||!integer(row.items[0],i.beginUtcMs)||!integer(row.items[1],i.endUtcMs)||!row.items[2].isString()||!ExactDecimal::parse(row.items[2].text,&i.watts))return false;b.trace.intervals.push_back(std::move(i));}
+    if(a.size()==7){BillingChunk::Receipt receipt;uint64_t parent=0;
+        if(!array(a[6],2)||!a[6].items[0].isString()||!a[6].items[1].isString()||!decodeEnergyTraceRequest(a[6].items[0].text,&receipt.request,&parent)||parent!=1||
+            !decodeEnergyTraceReply(receipt.request,a[6].items[1].text,&receipt.reply))return false;
+        b.receipt=std::move(receipt);}
     // Canonical comparison also verifies every evidence field and excludes alternative/unknown JSON representations.
     if(!boundedChunk(b)||chunkText(b)!=s)return false;
     out=std::move(b);return true;
 }
 std::string stateText(const BillingSnapshot &s){return "["+n(static_cast<int64_t>(s.sequence))+","+n(static_cast<int64_t>(s.intervals))+","+jsonQuote(s.batchId)+","+n(s.observedUtcMs)+","+n(s.opening.throughUtcMs)+","+
     jsonQuote(s.opening.timeDatabaseVersion)+","+decimal(s.opening.importedKwh.numerator)+","+decimal(s.opening.accruedSubtotal.numerator)+","+
-    (s.provisionalTotal?decimal(s.provisionalTotal->numerator):"null")+","+(s.settledTotal?decimal(s.settledTotal->numerator):"null")+","+n(s.settlementDependent)+"]";}
+    (s.provisionalTotal?decimal(s.provisionalTotal->numerator):"null")+","+(s.settledTotal?decimal(s.settledTotal->numerator):"null")+","+n(s.settlementDependent)+
+    (s.source?",["+n(static_cast<int64_t>(s.source->checkpoint.sequence))+","+jsonQuote(s.source->checkpoint.digest)+","+n(s.source->queriedUtcMs)+"]":"")+"]";}
+BillingSnapshot initialSnapshot(const BillingBinding &b,const std::string &bound){
+    BillingSnapshot s;s.status=BillingStatus::Ok;s.opening=initial(b);s.digest=sha256Hex(bound);
+    if(b.source)s.source=BillingSnapshot::SourceProgress{{0,seed(*b.source)},0};
+    return s;
+}
 BillingStatus advance(const BillingBinding &binding,const BillingLimits &limits,const BillingChunk &chunk,BillingSnapshot &state){
     if(!boundedChunk(chunk))return BillingStatus::Invalid;
     if(!sameEvidence(binding.evidence,chunk.trace.evidence))return BillingStatus::Attribution;
     if(chunk.sequence!=state.sequence+1)return chunk.sequence>state.sequence?BillingStatus::SequenceGap:BillingStatus::Conflict;
     if(chunk.sequence>limits.maxBatches||state.intervals+chunk.trace.intervals.size()>limits.maxIntervals)return BillingStatus::Capacity;
     if(chunk.observedUtcMs<state.observedUtcMs||chunk.trace.intervals.back().endUtcMs>chunk.observedUtcMs)return BillingStatus::Clock;
+    if(binding.source.has_value()!=chunk.receipt.has_value()||binding.source.has_value()!=state.source.has_value())return BillingStatus::Attribution;
+    if(chunk.receipt){const auto &r=chunk.receipt->request;const auto &reply=chunk.receipt->reply;std::string request,wire;
+        if(!receiptText(*chunk.receipt,request,wire))return BillingStatus::Invalid;
+        if(sourceText(*binding.source)!=sourceText({r.source.file,r.source.binding,r.source.limits})||!sameTrace(chunk.trace,*reply.completeTrace))return BillingStatus::Attribution;
+        if(r.anchor->sequence!=state.source->checkpoint.sequence||r.anchor->digest!=state.source->checkpoint.digest)return BillingStatus::Conflict;
+        if(chunk.observedUtcMs!=reply.source.checkpoint.observedAtMs||r.source.nowUtcMs<state.source->queriedUtcMs)return BillingStatus::Clock;
+    }
     const auto step=accrueBill(binding.plan,state.opening,chunk.trace,chunk.trace.intervals.back().endUtcMs,chunk.observedUtcMs);
     if(step.status!=ElectricityStatus::Ok)return step.status==ElectricityStatus::Capacity?BillingStatus::Capacity:BillingStatus::Calculation;
     auto next=state;next.sequence=chunk.sequence;next.intervals+=chunk.trace.intervals.size();next.observedUtcMs=chunk.observedUtcMs;next.batchId=chunk.id;
     next.opening=*step.ending;next.provisionalTotal=step.provisionalTotal;next.settledTotal=step.settledTotal;next.settlementDependent=step.settlementDependent;
+    if(chunk.receipt){const auto &c=chunk.receipt->reply.source.checkpoint;next.source=BillingSnapshot::SourceProgress{{c.sequence,c.digest},chunk.receipt->request.source.nowUtcMs};}
     state=std::move(next);return BillingStatus::Ok;
 }
 struct Param {bool isText=false;int64_t number=0;std::string value;Param(int64_t n):number(n){}Param(const std::string &s):isText(true),value(s){}};
@@ -122,7 +157,7 @@ struct BillingLedger::Impl {
         {Statement q(this,"SELECT binding,sequence,digest,state FROM meta WHERE id=1");
             if(q.step()!=100||!text(q.value,0,bindingText)||bindingText!=bound||!number(q.value,1,sequence)||sequence<0||static_cast<uint64_t>(sequence)>limits.maxBatches||
                 !text(q.value,2,head,64)||!text(q.value,3,ending,2048)||q.step()!=101)return false;}
-        BillingSnapshot checked;checked.status=BillingStatus::Ok;checked.opening=initial(binding);checked.digest=sha256Hex(bound);
+        BillingSnapshot checked=initialSnapshot(binding,bound);
         Statement q(this,"SELECT sequence,id,body,digest,state FROM events ORDER BY sequence");int code=0;
         while((code=q.step())==100){int64_t seq=0;std::string id,body,digest,saved;BillingChunk chunk;
             if(!number(q.value,0,seq)||seq<=0||seq>sequence||!text(q.value,1,id,512)||!text(q.value,2,body,chunkLimit)||!text(q.value,3,digest,64)||!text(q.value,4,saved,2048)||
@@ -137,7 +172,8 @@ struct BillingLedger::Impl {
     BillingStatus verify(const BillingChunk &chunk){
         if(!boundedChunk(chunk))return BillingStatus::Invalid;
         if(!sameEvidence(binding.evidence,chunk.trace.evidence))return BillingStatus::Attribution;
-        const auto body=chunkText(chunk);if(body.size()>chunkLimit)return BillingStatus::Capacity;
+        if(binding.source.has_value()!=chunk.receipt.has_value())return BillingStatus::Attribution;
+        const auto body=chunkText(chunk);if(body.empty())return BillingStatus::Invalid;if(body.size()>chunkLimit)return BillingStatus::Capacity;
         Statement q(this,"SELECT body FROM events WHERE sequence=? OR id=?",{static_cast<int64_t>(chunk.sequence),chunk.id});std::string original;
         const auto code=q.step();if(code==101)return BillingStatus::SequenceGap;
         if(code!=100||!text(q.value,0,original,chunkLimit))return fail();
@@ -161,6 +197,7 @@ BillingStatus BillingLedger::open(const std::filesystem::path &path,const Billin
     if(!key(binding.cycleKey)||binding.cycleKey.rfind("fixture.",0)!=0||!key(binding.evidence.scope)||!key(binding.evidence.adapter)||!boundedPlan(binding.plan)||!validLimits(limits)||
         !instant(now)||!instant(binding.cycleBeginUtcMs)||binding.cycleBeginUtcMs>now||!path.is_absolute()||(mode!=BillingOpen::Existing&&mode!=BillingOpen::CreateNew&&mode!=BillingOpen::Inspect))return S::Invalid;
     if(validateTariffOpening(binding.plan,initial(binding))!=ElectricityStatus::Ok)return S::Calculation;
+    if(binding.source&&(sourceText(*binding.source).empty()||!sameEvidence(binding.evidence,binding.source->binding.evidence)||binding.source->binding.historyBeginUtcMs>binding.cycleBeginUtcMs))return S::Attribution;
     s.binding=binding;s.limits=limits;s.readOnly=mode==BillingOpen::Inspect;s.bound=bindingText(binding,limits);if(s.bound.size()>bindingLimit)return S::Capacity;
     try{
         if(!s.api.load())return S::Storage;
@@ -183,34 +220,35 @@ BillingStatus BillingLedger::open(const std::filesystem::path &path,const Billin
         }else if(absent||ec||!std::filesystem::is_regular_file(status)||std::filesystem::file_size(path)>limits.maxDatabaseBytes)return S::Storage;
         if(s.api.openV2(path.u8string().c_str(),&s.db,(s.readOnly?1:2)|0x10000|0x1000000,nullptr)!=0)return S::Storage;
         s.api.busyTimeout(s.db,0);s.api.limit(s.db,0,static_cast<int>(bindingLimit+4096));s.api.limit(s.db,1,65536);s.api.limit(s.db,2,32);s.api.limit(s.db,3,32);s.api.limit(s.db,7,0);
-        int64_t app=0,version=0;if(!s.scalar("PRAGMA application_id",app)||!s.scalar("PRAGMA user_version",version)||(!absent&&(app!=application||version!=1)))return S::Storage;
+        const auto schema=binding.source?2:1;
+        int64_t app=0,version=0;if(!s.scalar("PRAGMA application_id",app)||!s.scalar("PRAGMA user_version",version)||(!absent&&(app!=application||version!=schema)))return S::Storage;
         if(!s.exec("PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-2048;"))return S::Storage;
         if(!absent){int64_t extra=0;
             if(!s.isText("PRAGMA quick_check(1)","ok")||!s.scalar("SELECT count(*) FROM sqlite_master WHERE type IN ('trigger','view') OR (type='table' AND name NOT IN ('meta','events'))",extra)||extra||
                 !s.isText("SELECT sql FROM sqlite_master WHERE type='table' AND name='meta'",metaSql)||!s.isText("SELECT sql FROM sqlite_master WHERE type='table' AND name='events'",eventsSql))return S::Storage;
             if(!s.isText("SELECT binding FROM meta WHERE id=1",s.bound))return S::Attribution;
             if(!s.audit())return S::Storage;
-            if(now<s.current.observedUtcMs)return S::Clock;
+            if(now<s.current.observedUtcMs||(s.current.source&&now<s.current.source->queriedUtcMs))return S::Clock;
         }
         if(s.readOnly){if(!s.isText("PRAGMA journal_mode","wal"))return S::Storage;}
         else if(!s.isText("PRAGMA journal_mode=WAL","wal")||!s.exec("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=256; PRAGMA journal_size_limit=1048576;"))return S::Storage;
         int64_t page=0,pages=0;if(!s.scalar("PRAGMA page_size",page)||page<512||page>65536)return S::Storage;
         if(!s.scalar("PRAGMA page_count",pages)||pages<0||(!absent&&pages<1)||static_cast<uint64_t>(pages)>limits.maxDatabaseBytes/static_cast<uint64_t>(page))return S::Storage;
         if(!s.readOnly&&!s.exec("PRAGMA max_page_count="+n(static_cast<int64_t>(limits.maxDatabaseBytes/static_cast<uint64_t>(page)))))return S::Storage;
-        if(absent){s.current.status=S::Ok;s.current.opening=initial(binding);s.current.digest=sha256Hex(s.bound);
+        if(absent){s.current=initialSnapshot(binding,s.bound);
             if(!s.exec("BEGIN IMMEDIATE; "+metaSql+"; "+eventsSql+";")||!s.write("INSERT INTO meta VALUES(1,?,0,?,?)",{s.bound,s.current.digest,stateText(s.current)})||
-                !s.exec("PRAGMA application_id="+n(application)+"; PRAGMA user_version=1; COMMIT;")){s.exec("ROLLBACK;");return S::Storage;}}
+                !s.exec("PRAGMA application_id="+n(application)+"; PRAGMA user_version="+n(schema)+"; COMMIT;")){s.exec("ROLLBACK;");return S::Storage;}}
         s.ready=true;return S::Ok;
     }catch(...){return s.fail();}
 }
 BillingStatus BillingLedger::apply(const BillingChunk &chunk,int64_t now){
     using S=BillingStatus;auto &s=*impl_;if(!s.ready)return S::Storage;if(s.readOnly)return S::Unsupported;
-    if(!instant(now)||now<s.current.observedUtcMs||chunk.observedUtcMs>now)return S::Clock;
+    if(!instant(now)||now<s.current.observedUtcMs||chunk.observedUtcMs>now||(s.current.source&&now<s.current.source->queriedUtcMs)||(chunk.receipt&&chunk.receipt->request.source.nowUtcMs>now))return S::Clock;
     if(!boundedChunk(chunk))return S::Invalid;
     try{
         const auto replay=s.verify(chunk);if(replay!=S::SequenceGap)return replay;
         auto next=s.current;const auto status=advance(s.binding,s.limits,chunk,next);if(status!=S::Ok)return status;
-        const auto body=chunkText(chunk),state=stateText(next);if(body.size()>chunkLimit)return S::Capacity;
+        const auto body=chunkText(chunk),state=stateText(next);if(body.empty())return S::Invalid;if(body.size()>chunkLimit)return S::Capacity;
         next.digest=sha256Hex(s.current.digest+"|"+body+"|"+state);
         if(!s.exec("BEGIN IMMEDIATE;"))return s.fail(s.lastCode);
         if(!s.write("INSERT INTO events VALUES(?,?,?,?,?)",{static_cast<int64_t>(chunk.sequence),chunk.id,body,next.digest,state})||
@@ -224,18 +262,33 @@ BillingStatus BillingLedger::apply(const BillingChunk &chunk,int64_t now){
 }
 BillingStatus BillingLedger::verifyCommitted(const BillingChunk &chunk,int64_t now)const{
     auto &s=*impl_;if(!s.ready)return BillingStatus::Storage;
-    if(!instant(now)||now<s.current.observedUtcMs||chunk.observedUtcMs>now)return BillingStatus::Clock;
+    if(!instant(now)||now<s.current.observedUtcMs||chunk.observedUtcMs>now||(s.current.source&&now<s.current.source->queriedUtcMs)||(chunk.receipt&&chunk.receipt->request.source.nowUtcMs>now))return BillingStatus::Clock;
     try{return s.verify(chunk);}catch(...){return s.fail();}
 }
 BillingSnapshot BillingLedger::snapshot(int64_t now)const{
     const auto &s=*impl_;if(!s.ready)return {};
-    if(!instant(now)||now<s.current.observedUtcMs||now<s.binding.cycleBeginUtcMs){BillingSnapshot result;result.status=BillingStatus::Clock;return result;}
+    if(!instant(now)||now<s.current.observedUtcMs||now<s.binding.cycleBeginUtcMs||(s.current.source&&now<s.current.source->queriedUtcMs)){BillingSnapshot result;result.status=BillingStatus::Clock;return result;}
     return s.current;
+}
+std::optional<EnergyTraceRequest> BillingLedger::sourceQuery(int64_t through,int64_t now,size_t maximum)const{
+    const auto &s=*impl_;if(snapshot(now).status!=BillingStatus::Ok||!s.binding.source||s.current.settledTotal||through<=s.current.opening.throughUtcMs||through>s.binding.cycleEndUtcMs)return {};
+    EnergyTraceRequest r;const auto &source=*s.binding.source;r.source.generation=r.source.ticket=1;r.source.file=source.file;r.source.binding=source.binding;r.source.limits=source.limits;
+    r.source.recovery=EnergyRecoveryMode::Inspect;r.source.nowUtcMs=now;r.source.queries={{s.current.opening.throughUtcMs,through,"",""}};r.maxIntervals=maximum;r.anchor=s.current.source->checkpoint;
+    return validEnergyTraceRequest(r)?std::optional<EnergyTraceRequest>{std::move(r)}:std::nullopt;
+}
+BillingStatus makeBillingSourceChunk(uint64_t sequence,const EnergyTraceRequest &request,const EnergyTraceReply &reply,BillingChunk *out){
+    if(!out||!sequence||sequence>4096||!request.anchor)return BillingStatus::Invalid;
+    std::string wire;if(!encodeEnergyTraceReply(request,reply,&wire)||reply.status!=EnergyHistoryStatus::Ok||reply.anchorStatus!=EnergyHistoryStatus::Ok||!reply.completeTrace)return BillingStatus::Invalid;
+    if(request.source.binding.evidence.origin!=PowerOrigin::SyntheticFixture)return BillingStatus::Unsupported;
+    BillingChunk c;c.sequence=sequence;c.id="fixture.energy."+std::to_string(sequence);c.observedUtcMs=reply.source.checkpoint.observedAtMs;c.trace=*reply.completeTrace;c.receipt=BillingChunk::Receipt{request,reply};
+    c.receipt->request.source.generation=c.receipt->request.source.ticket=c.receipt->reply.source.generation=c.receipt->reply.source.ticket=1;
+    const auto text=chunkText(c);if(text.empty())return BillingStatus::Invalid;if(text.size()>chunkLimit)return BillingStatus::Capacity;
+    *out=std::move(c);return BillingStatus::Ok;
 }
 CounterfactualBill BillingLedger::projectRemainder(const PowerTrace &base,const PowerTrace &with,int64_t decision)const{
     const auto &s=*impl_;CounterfactualBill result;
     if(!s.ready||!s.current.sequence)return result;
-    if(!instant(decision)||decision<s.current.observedUtcMs){result.status=ElectricityStatus::ClockFault;return result;}
+    if(!instant(decision)||decision<s.current.observedUtcMs||(s.current.source&&decision<s.current.source->queriedUtcMs)){result.status=ElectricityStatus::ClockFault;return result;}
     if(s.current.settledTotal){result.status=ElectricityStatus::Unsupported;return result;}
     return counterfactualBill(s.binding.plan,s.current.opening,base,with,s.binding.cycleEndUtcMs,decision);
 }

@@ -36,3 +36,5 @@ Executed evidence:
 - Linux own-code/helper/probe **ASan+UBSan** passes the same selection and counts. The initial Windows build found a missing test-only `<iostream>` include; it was added before the successful focused runs. No production parser or warning policy was weakened.
 
 These are CPU/fixture/WSL tests, not real sensor/cadence/storage-failure/production deployment evidence. Source-to-monetary durable receipts, pending monetary originals, bounded compute ownership, runtime configuration and real source eligibility remain integration work.
+
+[P-05j](billing-source.md) subsequently adds optional anchored CMETQ2/CMETA2 queries for source-to-monetary continuity. An unprovable expired or mismatched earlier source head blocks a complete trace; no-anchor v1 calls keep the contract above.

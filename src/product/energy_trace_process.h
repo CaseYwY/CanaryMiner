@@ -6,11 +6,13 @@ constexpr size_t energyTraceRequestLimit=48*1024;
 struct EnergyTraceRequest {
     EnergyHistoryRequest source; // Existing + Inspect, exactly one plain half-open query, no batch
     size_t maxIntervals=512;
+    std::optional<EnergyHistoryAnchor> anchor; // v2: require proof that the current source extends this committed prefix
 };
 struct EnergyTraceReply {
     EnergyHistoryReply source;
     EnergyHistoryStatus status=EnergyHistoryStatus::Storage;
     std::optional<PowerTrace> completeTrace;
+    std::optional<EnergyHistoryStatus> anchorStatus;
 };
 struct EnergyTraceProcessResult {
     LocalTaskStatus transport=LocalTaskStatus::Unavailable;

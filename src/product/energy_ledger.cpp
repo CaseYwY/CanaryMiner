@@ -30,7 +30,7 @@ struct EnergyHistoryLedger::Impl {
     Model model;
     std::string digest;
     uint64_t rawBatches=0,rawReadings=0;
-    std::string compactedOriginal;
+    std::string compactedOriginal,compactedDigest,compactedPriorDigest;
 #ifdef CANARY_ENERGY_HISTORY_TESTING
     bool crash=false;
 #endif
@@ -73,7 +73,7 @@ struct EnergyHistoryLedger::Impl {
             if(body.empty()){if(!seal.empty())return false;}
             else{EnergyCompactedSnapshot saved;
                 if(seal!=sha256Hex(bound+"|"+retentionText(limits)+"|"+body)||!decodeEnergySnapshot(binding,limits,body,&saved)||saved.model.head.sequence>static_cast<uint64_t>(seq))return false;
-                checked=std::move(saved.model);previous=saved.digest;compactedOriginal=batchText(saved.original);
+                checked=std::move(saved.model);previous=saved.digest;compactedOriginal=batchText(saved.original);compactedDigest=saved.digest;compactedPriorDigest=saved.priorDigest;
             }
         }
         int code=0;Statement q(this,"SELECT sequence,id,body,digest FROM events ORDER BY sequence");
@@ -180,8 +180,9 @@ EnergyHistoryStatus EnergyHistoryLedger::apply(const EnergyHistoryBatch &b,int64
         if(s.crash)std::_Exit(86);
 #endif
         if(!s.exec("COMMIT;")){s.exec("ROLLBACK;");return s.fail();}
+        if(compact)s.compactedPriorDigest=s.digest;
         s.model=std::move(next);s.digest=digest;
-        if(compact){s.compactedOriginal=body;s.rawBatches=s.rawReadings=0;}else{++s.rawBatches;s.rawReadings+=b.readings.size();}
+        if(compact){s.compactedOriginal=body;s.compactedDigest=digest;s.rawBatches=s.rawReadings=0;}else{++s.rawBatches;s.rawReadings+=b.readings.size();}
         return S::Ok;
     }catch(...){s.exec("ROLLBACK;");return s.fail();}
 }
@@ -196,6 +197,21 @@ EnergyHistoryStatus EnergyHistoryLedger::verifyCommitted(const EnergyHistoryBatc
     try{Impl::Statement q(&s,"SELECT id,body FROM events WHERE sequence=?",{static_cast<int64_t>(b.sequence)});std::string id,stored;
         if(q.step()!=100||!s.text(q.value,0,&id)||!s.text(q.value,1,&stored)||q.step()!=101)return s.fail();
         return id==b.id&&stored==batchText(b)?S::Replay:S::Conflict;
+    }catch(...){return s.fail();}
+}
+EnergyHistoryStatus EnergyHistoryLedger::verifyAnchor(const EnergyHistoryAnchor &anchor,int64_t now){
+    using S=EnergyHistoryStatus;auto &s=*impl_;if(!s.ready)return S::Storage;
+    if(!instant(now)||anchor.sequence>(s.limits.compaction?lifetimeBatchLimit:s.limits.maxBatches)||anchor.digest.size()!=64||anchor.digest.find_first_not_of("0123456789abcdef")!=std::string::npos)return S::Invalid;
+    if(now<s.model.head.observedAtMs)return S::Clock;
+    if(anchor.sequence>s.model.head.sequence)return S::Conflict;
+    if(!anchor.sequence)return anchor.digest==sha256Hex(bindingText(s.binding))?S::Ok:S::Conflict;
+    if(anchor.sequence==s.model.head.sequence)return anchor.digest==s.digest?S::Ok:S::Conflict;
+    if(anchor.sequence+1==s.model.head.compactedSequence)return anchor.digest==s.compactedPriorDigest?S::Ok:S::Conflict;
+    if(anchor.sequence<s.model.head.compactedSequence)return S::DetailExpired;
+    if(anchor.sequence==s.model.head.compactedSequence)return anchor.digest==s.compactedDigest?S::Ok:S::Conflict;
+    try{Impl::Statement q(&s,"SELECT digest FROM events WHERE sequence=?",{static_cast<int64_t>(anchor.sequence)});std::string stored;
+        if(q.step()!=100||!s.text(q.value,0,&stored,64)||q.step()!=101)return s.fail();
+        return stored==anchor.digest?S::Ok:S::Conflict;
     }catch(...){return s.fail();}
 }
 EnergyHistoryCheckpoint EnergyHistoryLedger::checkpoint(int64_t now) const {
