@@ -17,6 +17,7 @@
 #include "energy_review.h"
 #include "energy_authorization_settings.h"
 #include "energy_runtime_access.h"
+#include "billing_review.h"
 
 namespace om {
 
@@ -43,6 +44,8 @@ class SettingsPanel {
     EnergyReviewAccess energyAccess; // independent, default empty; opening the page is not persistence authorization
     EnergyAuthorizationPanel energyAuthorization;
     EnergyAuthorizationAccess energyAuthorizationAccess; // injected memory-only helper admission; no automatic plan issuance
+    BillingReviewPanel billingReview;
+    BillingReviewAccess billingAccess; // default empty; caller retains ownership, stop/join is not a renderer operation
 
     void open(const UiPreferences &value) {
         active = draft = value;
@@ -58,6 +61,7 @@ class SettingsPanel {
         credit.visible = false;
         energyReview.visible = false;
         energyAuthorization.visible = false;
+        billingReview=BillingReviewPanel{};
     }
     bool dirty() const { return active != draft; }
 
@@ -66,12 +70,20 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 8 ? 5 : group == 2 ? 4 : group == 0 ? 3 : (group == 1 || group == 3) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
     void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
+    void updateBillingReview(){if(billingReview.visible&&billingAccess.snapshot)billingReview.update(billingAccess.snapshot());}
+    void stopBillingReview(){billingReview.key(3,billingAccess);}
 
     SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}) {
+        const auto result=routeKey(key,save,runtimeSave,manualSave,nowUtc,electricitySave,tariffSave);
+        if(result==SettingsResult::Quit)stopBillingReview();
+        return result;
+    }
+    SettingsResult routeKey(int key,const Save &save,const RuntimeSettingsPanel::Save &runtimeSave,const ManualMarketSettingsPanel::Save &manualSave,uint64_t nowUtc,const ElectricitySettingsPanel::Save &electricitySave,const TariffSettingsPanel::Save &tariffSave){
+        if(billingReview.visible)return billingReview.key(key,billingAccess)==BillingReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(energyAuthorization.visible){updateEnergyAuthorization();return energyAuthorization.key(key,energyAuthorizationAccess)==EnergyAuthorizationPanelResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if(energyReview.visible){updateEnergyReview();return energyReview.key(key,energyAccess)==EnergyReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if(tariff.visible)return tariff.key(key,tariffSave,nowUtc)==TariffSettingsResult::Quit?SettingsResult::Quit:SettingsResult::None;
@@ -121,6 +133,7 @@ class SettingsPanel {
             if (groupsFocused) groupsFocused = false;
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3) return SettingsResult::OpenManualMarket;
+            else if ((group==2&&field==4)||(group==8&&field==5)) billingReview.open(billingAccess.snapshot?billingAccess.snapshot():nullptr);
             else if ((group==2&&field==3)||(group==8&&field==4)) energyAuthorization.open(energyAuthorizationAccess.snapshot?energyAuthorizationAccess.snapshot():nullptr);
             else if ((group==2&&field==2)||(group==8&&field==3)) energyReview.open(energyAccess.snapshot?energyAccess.snapshot():nullptr);
             else if (group == 2) return field==0?SettingsResult::OpenElectricity:SettingsResult::OpenTariff;
@@ -150,6 +163,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if(billingReview.visible)return billingReview.render(columns,rows,color);
         if(energyAuthorization.visible)return energyAuthorization.render(columns,rows,color,energyAuthorizationAccess);
         if(energyReview.visible)return energyReview.render(columns,rows,color);
         if(tariff.visible)return tariff.render(columns,rows,color);
@@ -259,6 +273,7 @@ class SettingsPanel {
             row(2, "Credit recovery / collection status [Enter]");
             row(3, "Energy history / recovery status [Enter]");
             row(4, "Energy persistence / authorization [Enter]");
+            row(5, "Billing originals / recovery review [Enter]");
             result.push_back({"Presentation only, not a diagnostic scrubber.", Tone::Plain});
             result.push_back({"Logs, API and files are not anonymized by it.", Tone::Plain});
         } else if (group == 1) {
@@ -274,6 +289,7 @@ class SettingsPanel {
             row(1,"Combined tariff / declared whole-meter opening [Enter]");
             row(2,"Energy history / durable capture recovery [Enter]");
             row(3,"Energy persistence / authorization [Enter]");
+            row(4,"Billing originals / recovery review [Enter]");
             result.push_back({"Default off; next explicit session only, no miner restart.",Tone::Plain});
             result.push_back({"Not whole-PC/incremental energy, shared utility bill or net income.",Tone::Plain});
         } else if (group == 9) {
@@ -341,7 +357,7 @@ inline void openTariffControls(SettingsPanel *panel,TariffDeclarationStore *stor
     panel->tariff.open(std::move(value));
 }
 
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}, EnergyRuntimeFactory runtimeFactory = {}, const std::vector<std::string> &selectedDevices = {}) {
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}, EnergyRuntimeFactory runtimeFactory = {}, const std::vector<std::string> &selectedDevices = {}, BillingReviewAccess billingAccess = {}) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -350,7 +366,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         fprintf(stderr, "settings requires an interactive terminal; no mining was started\n");
         return 2;
     }
-    if(stop&&*stop)return 0;
+    if(stop&&*stop){if(billingAccess.requestStop)billingAccess.requestStop();return 0;}
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
     ManualMarketStore manualStore(std::filesystem::u8path(stateDir) / "manual-market-preferences.json");
@@ -366,6 +382,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     panel.creditAccess=std::move(creditAccess);
     panel.energyAccess=std::move(energyAccess);
     panel.energyAuthorizationAccess=std::move(authorizationAccess);
+    panel.billingAccess=std::move(billingAccess);
     std::unique_ptr<EnergyRuntime> runtime;
     if(runtimeFactory&&!(stop&&*stop)){
         runtime=runtimeFactory(false,noEnergy);
@@ -396,10 +413,12 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         panel.updateCreditReview();
         panel.updateEnergyReview();
         panel.updateEnergyAuthorization();
+        panel.updateBillingReview();
         const auto color = panel.active.color ? detectColorLevel() : ColorLevel::None;
         printSettingsFrame(panel.render(terminalColumns(80), terminalRows(24), color));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+    panel.stopBillingReview();
     if(runtime){runtime->requestStop();runtime->stop();}
     printf("\x1b[2J\x1b[H\x1b[?25hSettings closed. No mining was started.\n");
     return 0;

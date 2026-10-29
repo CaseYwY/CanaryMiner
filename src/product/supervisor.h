@@ -390,6 +390,7 @@ struct SupervisorOptions {
     EnergyCaptureFactory energyCaptureFactory; // only an independently authorized, privately bound plan may supply this
     EnergyRuntimeFactory energyRuntimeFactory; // explicit development capability; owns both controls and fenced capture
     ForecastSinkFactory forecastFactory; // empty until a source-qualified caller supplies read/scenario ownership
+    BillingReviewAccess billingReviewAccess; // default empty; borrowed owner must outlive this supervisor
     bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
@@ -533,6 +534,7 @@ inline DashModel dashboardModel(const SupervisorOptions &opt, const std::vector<
 class Supervisor {
    public:
     explicit Supervisor(SupervisorOptions opt) : opt_(std::move(opt)) {
+        settings_.billingAccess=opt_.billingReviewAccess;
         for (const std::string &s : opt_.secrets) redactor_.addSecret(s);
     }
     Supervisor(const Supervisor &) = delete;
@@ -540,7 +542,7 @@ class Supervisor {
 
     /** Returns kExitOk when every worker stopped on request, kExitRuntime when a worker could not be kept running. */
     int run() {
-        if (opt_.stop && *opt_.stop) return kExitOk;
+        if (opt_.stop && *opt_.stop) {settings_.stopBillingReview();return kExitOk;}
         sessionToken_ = intent_.explicitStart();
         if (!intent_.permits(sessionToken_)) return kExitFaultLatched;
         const uint64_t t0 = supervisorNowMs();
@@ -649,6 +651,7 @@ class Supervisor {
                         settings_.updateCreditReview();
                         settings_.updateEnergyReview();
                         settings_.updateEnergyAuthorization();
+                        settings_.updateBillingReview();
                         const auto result = settings_.key(key, [this](const UiPreferences &p, std::string *error) {
                             if (uiStore_ && !uiStore_->save(p, error)) return false;
                             ui_ = p;
@@ -731,6 +734,7 @@ class Supervisor {
                 energyCapture_->tick(utc,supervisorNowMs());
                 settings_.updateEnergyReview();
                 settings_.updateEnergyAuthorization();
+                settings_.updateBillingReview();
             }
             if (stopping) {
                 if (!alive) break;
@@ -754,6 +758,7 @@ class Supervisor {
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(tty ? 50 : 250));
         }
+        settings_.stopBillingReview();
         if(energyCapture_)energyCapture_->requestStop();
         if(forecast_)forecast_->requestStop();
         for (auto &w : workers_) {
@@ -890,6 +895,7 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        settings_.stopBillingReview();
         if(forecast_)forecast_->requestStop();
         if(energy_)energy_->requestStop();
         if(energyCapture_)energyCapture_->requestStop();

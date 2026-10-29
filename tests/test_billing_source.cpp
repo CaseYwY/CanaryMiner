@@ -6,6 +6,7 @@
 #include "product/billing_retry_process.h"
 #include "product/billing_input_process.h"
 #include "product/billing_input_query.h"
+#include "product/billing_review_document.h"
 #include "product_test_util.h"
 #include <fstream>
 using namespace billing_source_fixture;
@@ -54,7 +55,16 @@ void maximumReceipt(const std::filesystem::path &root,EnergyTraceProcessClient &
         const auto created=staging->transact(p,"",cancel,10000);CHECK(created.confirmed&&created.confirmed->state==BillingRecoveryState::Empty);
         if(created.confirmed){p.prior=created.confirmed;p.chunk=original;const auto applied=staging->transact(p,created.reply->revision,cancel,10000);
             CHECK(applied.confirmed&&applied.confirmed->committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*applied.confirmed->original)==billing_detail::chunkText(original));
-            if(stagedReader){const auto read=stagedReader->transact(p.context,cancel,10000);CHECK(read.reply&&read.reply->outcome&&read.reply->original&&read.reply->outcome->committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*read.reply->original)==billing_detail::chunkText(original));}}}
+            if(stagedReader){const auto read=stagedReader->transact(p.context,cancel,10000);CHECK(read.reply&&read.reply->outcome&&read.reply->original&&read.reply->outcome->committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*read.reply->original)==billing_detail::chunkText(original));
+                if(read.reply&&applied.confirmed){BillingOwnerSnapshot snapshot;snapshot.reviewable=true;
+                    snapshot.context=std::make_shared<const BillingOwnerBinding>(BillingOwnerBinding{p.context.file,b,{}});
+                    auto view=std::make_shared<BillingOwnerView>();view->stable=true;view->observedUtcMs=r.nowUtcMs;
+                    view->stage=std::make_shared<const BillingInputSnapshot>(*read.reply);view->monetary=std::make_shared<const BillingRecoverySnapshot>(*applied.confirmed);snapshot.view=view;
+                    const auto document=billing_review_detail::document(snapshot);CHECK(document.complete);
+                    auto has=[&](const std::string &needle){for(const auto &line:document.lines)if(line.find(needle)!=std::string::npos)return true;return false;};
+                    CHECK(has("source.binding.channel[63]")&&has("stage.original.trace[511]")&&has("receipt.reply.recovery.original.reading[127]")&&has("receipt.reply.recovery.original.window[31].offsetSeconds = -64800"));
+                    CHECK(has("monetary.original.receipt.reply.completeTrace[511]")&&has("HISTORICAL stage outcome")&&has("END OF COMPLETE PRIVATE REVIEW DOCUMENT"));
+                }}}}
 }
 }
 int main(int argc,char **argv){

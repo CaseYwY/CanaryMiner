@@ -61,7 +61,7 @@ int main(int argc,char **argv){
     for(int width:{60,80,120})for(int height:{12,24}){panel.open(s);panel.key('r',mock);panel.key('i',mock);
         for(unsigned scroll=0;scroll<20;++scroll){const auto screen=panel.render(width,height,ColorLevel::None);CHECK(screen.find('\x1b')==std::string::npos&&std::count(screen.begin(),screen.end(),'\n')<=height);panel.key(kKeyPageDown,mock);}}
     SettingsPanel settings;settings.open({});settings.draft.color=false;settings.group=8;settings.field=2;settings.groupsFocused=false;
-    CHECK(settings.fields()==5&&settings.key(13,{})==SettingsResult::None&&settings.credit.visible&&settings.dirty());
+    CHECK(settings.fields()==6&&settings.key(13,{})==SettingsResult::None&&settings.credit.visible&&settings.dirty());
     CHECK(settings.render(80,24,ColorLevel::None).find("no qualified local credit collector")!=std::string::npos);settings.key(27,{});CHECK(!settings.credit.visible&&settings.dirty());
     const auto root=std::filesystem::path(makeScratchDir("credit-review"));
     {

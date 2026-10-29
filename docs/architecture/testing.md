@@ -74,6 +74,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05p](../billing-owner.md) checks default-off single-flight ownership, current/staged snapshot changes, preflight/live CAS, exact bounded receipt admission, loss/restart/retry/reconcile, retained older uncertainty, stop/invalidate/clock/rollback revocation and deadline behavior. Separate parents exercise owned helper death and readonly reconstruction; an isolated Unreaped seam checks terminal admission, including invalidated results. Native/physical/kernel/deployment qualification remains separate.
 
+[P-05q](../billing-review.md) checks complete-original native rendering and revision-bound controls, private byte escaping, maximum binding/trace/receipt review, bound refusal, actual end-of-document navigation, independent draft cancellation, duplicate keys, owned helper action flows and PTY resize/SIGINT. Borrowed owner revocation is also checked through supervisor pre-start/ordinary stop. Source/runtime and production rendering/trust gates remain separate.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

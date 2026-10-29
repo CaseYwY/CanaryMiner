@@ -687,7 +687,7 @@ void testChildPipes() {
 }
 
 /** Runs the supervisor over `workers` fake workers and stops it after `stopAfterMs` unless it ends first. */
-int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}, ForecastSinkFactory forecast = {}) {
+int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}, ForecastSinkFactory forecast = {}, BillingReviewAccess billing = {}) {
     volatile sig_atomic_t stop = 0;
     SupervisorOptions o = baseOptions();
     o.exe = selfExecutablePath();
@@ -701,6 +701,7 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     o.energyCaptureFactory=std::move(capture);o.noEnergy=noEnergy;
     o.energyRuntimeFactory=std::move(runtime);
     o.forecastFactory=std::move(forecast);
+    o.billingReviewAccess=std::move(billing);
     std::atomic<bool> finished{false};
     std::thread timer([&] {
         for (uint64_t t = 0; t < stopAfterMs / 20 && !finished.load(); ++t) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -761,7 +762,10 @@ void testHandleListInheritance() {
 
 void testSupervisedStop() {
     // two workers mine; a stop request closes both stdins; both drain (exit 3) and the run ends cleanly
-    CHECK(supervisedRun({kFakeChild}, 2, 1500) == kExitOk);
+    unsigned stops=0,reads=0;BillingReviewAccess billing;
+    billing.requestStop=[&]{++stops;};billing.snapshot=[&](){++reads;return std::shared_ptr<const BillingOwnerSnapshot>{};};
+    CHECK(supervisedRun({kFakeChild}, 2, 1500,nullptr,{},false,{},{},billing) == kExitOk);
+    CHECK(stops==1&&reads==0);
 }
 
 struct TuningHookProbe final : SupervisorTuning {
@@ -802,10 +806,12 @@ void testStopAlreadyRequested() {
     unsigned factories=0;options.energyCaptureFactory=[&]()->std::unique_ptr<EnergyCaptureSink>{++factories;return {};};
     options.energyRuntimeFactory=[&](bool,bool)->std::unique_ptr<EnergyRuntime>{++factories;return {};};
     options.forecastFactory=[&](bool,bool)->std::unique_ptr<ForecastSink>{++factories;return {};};
+    unsigned billingStops=0;options.billingReviewAccess.requestStop=[&]{++billingStops;};
     Supervisor supervisor(std::move(options));
     CHECK(supervisor.run() == kExitOk);
     CHECK(probe.calls.empty());
     CHECK(factories==0);
+    CHECK(billingStops==1);
 }
 
 struct CaptureProbeState {unsigned factories=0,starts=0,samples=0,ticks=0,stops=0;bool revoked=false,late=false;std::vector<std::string> devices;};

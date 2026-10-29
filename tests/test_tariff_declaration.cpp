@@ -99,7 +99,7 @@ int main(){
     for(int columns:{60,80,120})for(int rows:{12,24})for(size_t i=0;i<9;++i){panel.field=i;frame(panel,columns,rows);CHECK(panel.render(columns,rows,ColorLevel::None).find("> ")!=std::string::npos);}
     panel.field=8;panel.key('\r',{},T/1000);for(int columns:{60,80,120})for(int rows:{12,24})frame(panel,columns,rows);
     panel.key(27,{},T/1000);panel.key('v',{},T/1000);panel.reviewOffset=100000;for(int columns:{60,80,120})for(int rows:{12,24})frame(panel,columns,rows);
-    SettingsPanel settings;settings.open({});settings.group=2;settings.groupsFocused=false;settings.field=1;CHECK(settings.fields()==4&&settings.key('\r',{})==SettingsResult::OpenTariff);
+    SettingsPanel settings;settings.open({});settings.group=2;settings.groupsFocused=false;settings.field=1;CHECK(settings.fields()==5&&settings.key('\r',{})==SettingsResult::OpenTariff);
     openTariffControls(&settings,&store);CHECK(settings.tariff.visible);CHECK(settings.key(3,{})==SettingsResult::Quit);
     std::filesystem::remove_all(root);
     return finishTests("tariff declaration");
