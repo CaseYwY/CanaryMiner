@@ -21,9 +21,31 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
 #endif
 
 namespace om {
+uint64_t localTaskProcessId(){
+#if defined(_WIN32)
+    return GetCurrentProcessId();
+#else
+    return static_cast<uint64_t>(getpid());
+#endif
+}
+bool bindLocalTaskParent(uint64_t expected){
+    if(!expected||expected>UINT32_MAX)return false;
+#if defined(_WIN32)
+    // LocalTaskProcess assigns the suspended child to its non-inherited KILL_ON_JOB_CLOSE job before resuming it.
+    BOOL owned=FALSE;return IsProcessInJob(GetCurrentProcess(),nullptr,&owned)&&owned;
+#elif defined(__linux__)
+    if(static_cast<uint64_t>(getppid())!=expected||prctl(PR_SET_PDEATHSIG,SIGKILL)!=0)return false;
+    return static_cast<uint64_t>(getppid())==expected; // close the death-before-prctl race
+#else
+    return false;
+#endif
+}
 bool localTaskPath(const std::filesystem::path &path) {
     if (!path.is_absolute() || path.native().empty() || path.native().size() > 4096 || path.native().find(static_cast<std::filesystem::path::value_type>(0)) != std::filesystem::path::string_type::npos) return false;
 #if defined(_WIN32)
@@ -223,6 +245,33 @@ LocalTaskResult LocalTaskProcess::run(const std::string &request, const std::ato
     } catch (...) { result.status = LocalTaskStatus::Unavailable; }
     if (!impl_->stop()) result.status = LocalTaskStatus::Unreaped;
     if (result.status != LocalTaskStatus::Ok) result.response.clear();
+    return result;
+}
+LocalTaskResult LocalTaskProcess::hold(const std::string &request,const std::atomic<bool> &cancel,unsigned ms,const std::function<bool(const std::string &)> &ready){
+    LocalTaskResult result;
+    if(cancel.load()){result.status=LocalTaskStatus::Cancelled;return result;}
+    if(impl_->busy.test_and_set()){result.status=LocalTaskStatus::Busy;return result;}
+    struct Busy {Impl &p;~Busy(){p.busy.clear();}} busy{*impl_};
+    if(!ready||request.empty()||request.size()>localTaskRequestLimit||ms<50||ms>60000||!localTaskPath(impl_->helper)){result.status=LocalTaskStatus::Invalid;return result;}
+    if(!impl_->stop()){result.status=LocalTaskStatus::Unreaped;return result;}
+    try{
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(ms);
+        if(!impl_->start(request))return result;
+        result.childStarted=true;std::string wire;bool accepted=false;size_t frameBytes=0;
+        for(;;){
+            if(cancel.load()){result.status=LocalTaskStatus::Cancelled;break;}
+            if(!accepted&&std::chrono::steady_clock::now()>=deadline){result.status=LocalTaskStatus::Timeout;break;}
+            if(!impl_->send(request)||!impl_->read(wire))break;
+            bool ok=false;if(impl_->exited(ok))break; // readiness is not ownership after child exit
+            if(cancel.load()){result.status=LocalTaskStatus::Cancelled;break;}
+            if(accepted){if(wire.size()!=frameBytes)break;}
+            else{const auto end=wire.find('\n');if(end!=std::string::npos){
+                    if(!end||end+1!=wire.size()||std::chrono::steady_clock::now()>=deadline||!ready(wire.substr(0,end)))break;
+                    accepted=true;frameBytes=wire.size();}}
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }catch(...){result.status=LocalTaskStatus::Unavailable;}
+    if(!impl_->stop())result.status=LocalTaskStatus::Unreaped;
     return result;
 }
 bool readLocalTaskInput(int argc, char **argv, std::string *out) {

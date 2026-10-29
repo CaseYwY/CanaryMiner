@@ -4,18 +4,15 @@
 #include "json_dom.h"
 #include "local_store_lease.h"
 #include "public_https.h"
+#include "private_entropy.h"
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
 #if defined(_WIN32)
-#include <bcrypt.h>
 #include <fcntl.h>
 #include <io.h>
 #include <share.h>
 #include <sys/stat.h>
-#else
-#include <cerrno>
-#include <sys/random.h>
 #endif
 #ifdef CANARY_ENERGY_AUTHORIZATION_TESTING
 #include <cstdlib>
@@ -77,14 +74,7 @@ bool valid(const EnergyAuthorizationRequest &r){
 }
 bool mutating(A a){return a==A::Save||a==A::Enroll||a==A::Confirm||a==A::Provision;}
 bool randomKey(std::string &out){
-    unsigned char bytes[16]={};
-#if defined(_WIN32)
-    if(BCryptGenRandom(nullptr,bytes,sizeof(bytes),BCRYPT_USE_SYSTEM_PREFERRED_RNG)!=0)return false;
-#else
-    size_t done=0;while(done<sizeof(bytes)){const auto n=getrandom(bytes+done,sizeof(bytes)-done,0);if(n<0&&errno==EINTR)continue;if(n<=0)return false;done+=static_cast<size_t>(n);}
-#endif
-    const char *digits="0123456789abcdef";std::string result;result.reserve(32);
-    for(const auto byte:bytes){result+=digits[byte>>4];result+=digits[byte&15];}out=std::move(result);return true;
+    return privateEnergyKey(&out);
 }
 S readDocument(const std::filesystem::path &file,EnergyAuthorizationReply &reply){
     std::error_code ec;const auto st=std::filesystem::symlink_status(file,ec);

@@ -31,8 +31,8 @@ struct EnergyHistoryOwner::Impl {
     uint64_t greatestGeneration=0;
     int64_t lastUtc=0;
     std::string ownedSession;
-    Impl(std::filesystem::path helper,std::filesystem::path path,EnergyHistoryBinding b,EnergyHistoryLimits l,unsigned ms,EnergyHistoryClock c,bool persistent)
-        :client(std::move(helper)),file(std::move(path)),binding(std::move(b)),limits(l),timeout(ms),clock(c?std::move(c):EnergyHistoryClock(utcNow)),persistentRecovery(persistent){}
+    Impl(std::filesystem::path helper,std::filesystem::path path,EnergyHistoryBinding b,EnergyHistoryLimits l,unsigned ms,EnergyHistoryClock c,bool persistent,std::optional<EnergyCollectorFence> fence)
+        :client(std::move(helper),std::move(fence)),file(std::move(path)),binding(std::move(b)),limits(l),timeout(ms),clock(c?std::move(c):EnergyHistoryClock(utcNow)),persistentRecovery(persistent){}
     void publish(){current.pending=static_cast<bool>(queued||inFlight);current.uncertainBatch=uncertain;++current.revision;published=std::make_shared<const EnergyHistoryOwnerSnapshot>(current);}
     void retain(const std::shared_ptr<const Job> &job){
         if(!job)return;
@@ -95,8 +95,8 @@ struct EnergyHistoryOwner::Impl {
         }catch(...){try{std::lock_guard<std::mutex> lock(mutex);if(cancel)return;retain(inFlight);queued.reset();inFlight.reset();cancel=true;current.state=EnergyHistoryOwnerState::Faulted;publish();}catch(...){cancel=true;}}
     }
 };
-EnergyHistoryOwner::EnergyHistoryOwner(std::filesystem::path helper,std::filesystem::path file,EnergyHistoryBinding binding,EnergyHistoryLimits limits,unsigned timeout,EnergyHistoryClock clock,bool persistentRecovery)
-    :impl_(new Impl(std::move(helper),std::move(file),std::move(binding),limits,timeout,std::move(clock),persistentRecovery)){}
+EnergyHistoryOwner::EnergyHistoryOwner(std::filesystem::path helper,std::filesystem::path file,EnergyHistoryBinding binding,EnergyHistoryLimits limits,unsigned timeout,EnergyHistoryClock clock,bool persistentRecovery,std::optional<EnergyCollectorFence> fence)
+    :impl_(new Impl(std::move(helper),std::move(file),std::move(binding),limits,timeout,std::move(clock),persistentRecovery,std::move(fence))){}
 EnergyHistoryOwner::~EnergyHistoryOwner(){stop();}
 bool EnergyHistoryOwner::start(uint64_t generation,EnergyHistoryOpen mode){
     auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);std::lock_guard<std::mutex> lock(s.mutex);

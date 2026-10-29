@@ -85,7 +85,7 @@ class Capture final:public EnergyCaptureSink {
     }
    public:
     Capture(std::filesystem::path helper,std::filesystem::path file,EnergyCapturePlan plan,unsigned timeout,EnergyHistoryClock clock)
-        :plan_(std::move(plan)),owner_(std::move(helper),std::move(file),plan_.binding,plan_.limits,timeout,std::move(clock),true){}
+        :plan_(std::move(plan)),owner_(std::move(helper),std::move(file),plan_.binding,plan_.limits,timeout,std::move(clock),true,plan_.fence){}
     ~Capture()override{stop();}
     bool start(uint64_t generation,const std::vector<std::string> &ids)override{
         std::lock_guard<std::mutex> life(lifecycle_);std::lock_guard<std::mutex> lock(mutex_);

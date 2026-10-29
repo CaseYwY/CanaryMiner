@@ -19,7 +19,7 @@ using EnergyHistoryClock=std::function<int64_t()>; // pure UTC clock only
 class EnergyHistoryOwner {
    public:
     EnergyHistoryOwner(std::filesystem::path helper,std::filesystem::path file,EnergyHistoryBinding binding,
-                       EnergyHistoryLimits limits={},unsigned timeoutMs=10000,EnergyHistoryClock clock={},bool persistentRecovery=true);
+                       EnergyHistoryLimits limits={},unsigned timeoutMs=10000,EnergyHistoryClock clock={},bool persistentRecovery=true,std::optional<EnergyCollectorFence> fence={});
     ~EnergyHistoryOwner();
     EnergyHistoryOwner(const EnergyHistoryOwner &)=delete;
     EnergyHistoryOwner &operator=(const EnergyHistoryOwner &)=delete;

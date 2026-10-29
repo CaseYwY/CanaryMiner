@@ -17,18 +17,24 @@ def main():
     import pty
     import termios
     fixture, helper, cli = [str(Path(p).resolve()) for p in sys.argv[1:4]]
+    leased = len(sys.argv) > 4 and sys.argv[4] == '--leased'
+    authorization = str(Path(sys.argv[5]).resolve()) if leased else None
     checks = 0
     with tempfile.TemporaryDirectory(prefix='canary-energy-review-') as directory:
         root = Path(directory)
-        subprocess.run([fixture, '--prepare', str(root)], check=True, capture_output=True, timeout=5)
-        journal = root / 'fixture-energy-review.db.energy-recovery.json'
+        prepare = [fixture, '--leased-prepare', authorization, str(root)] if leased else [fixture, '--prepare', str(root)]
+        settings = [fixture, '--leased-settings', authorization, helper, str(root)] if leased else [fixture, '--settings', helper, str(root)]
+        subprocess.run(prepare, check=True, capture_output=True, timeout=5)
+        document = json.loads((root / 'fixture-authorization.json').read_bytes()) if leased else None
+        journal = root / ('energy-history.' + document[6] + '.db.energy-recovery.json' if leased else 'fixture-energy-review.db.energy-recovery.json')
+        original_id = document[8].encode() if leased else b'fixture.private-original'
         before = journal.read_bytes()
 
         def facts():
-            return subprocess.check_output([fixture, '--facts', str(root)], timeout=5).decode().strip()
+            return subprocess.check_output([fixture, '--leased-facts' if leased else '--facts', str(root)], timeout=5).decode().strip()
 
         assert facts() == 'Prepared 0 0 0 0'
-        rejected = subprocess.run([fixture, '--settings', helper, str(root)], capture_output=True, timeout=5)
+        rejected = subprocess.run(settings, capture_output=True, timeout=5)
         assert rejected.returncode == 2 and journal.read_bytes() == before
         checks += 2
 
@@ -41,7 +47,7 @@ def main():
                 os.setsid()
                 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
-            child = subprocess.Popen(command or [fixture, '--settings', helper, str(root)], stdin=slave, stdout=slave, stderr=slave, preexec_fn=own_terminal)
+            child = subprocess.Popen(command or settings, stdin=slave, stdout=slave, stderr=slave, preexec_fn=own_terminal)
             os.close(slave)
             transcript = b''
 
@@ -104,13 +110,16 @@ def main():
             nonlocal checks
             until(b'NeedsReview')
             screen = until(b'PRIVATE identity')
-            assert b'fixture.private-original' not in screen and b'123456' not in screen
+            assert original_id not in screen and b'123456' not in screen
+            if leased:
+                until(b'Lifetime lease: Held')
+                checks += 1
             assert journal.read_bytes() == before
             send(b'r\r')
             until(b'Reveal with I', True)
             assert journal.read_bytes() == before
             send(b'i')
-            until(b'fixture.private-original', True)
+            until(original_id, True)
             until(b'MISSING')
             send(b' ')
             until(b'[x] Replay EXACT original', True)
@@ -141,7 +150,7 @@ def main():
         session(retry)
         assert not list(root.glob('*preferences.json')) and not list(root.glob('*worker-starts*'))
         checks += 1
-    print(f'energy review PTY: {checks} checks; ordinary unavailable/private default/cancel/one exact retry/SIGINT passed')
+    print(f'energy {"collector" if leased else "review"} PTY: {checks} checks; ordinary unavailable/private default/cancel/one exact retry/SIGINT passed')
 
 
 if __name__ == '__main__':

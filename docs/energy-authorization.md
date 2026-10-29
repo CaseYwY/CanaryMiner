@@ -78,4 +78,4 @@ cmake --build --preset tests --target test_energy_authorization canary_energy_au
 ctest --preset tests -R "^energy_authorization" --output-on-failure
 ```
 
-Next work: whole-collector admission/lifecycle and bounded ordinary-runtime loading/provisioning, package/trust qualification and explicit selection-change recovery; real-cadence retention planning; monetary bill continuation, qualified credits/prices and today's forecast. Saving finite exact budgets supplies neither a guaranteed retention duration nor a raw archival strategy.
+Follow-up [P-08h](energy-collector.md) adds cooperative lifetime admission, transaction fences and scoped collector parent-death checks. The evidence above remains the P-08g slice. Next work: bounded ordinary-runtime loading/provisioning, package/trust qualification and explicit selection-change recovery; real-cadence retention planning; monetary bill continuation, qualified credits/prices and today's forecast. Saving finite exact budgets supplies neither a guaranteed retention duration nor a raw archival strategy.

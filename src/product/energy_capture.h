@@ -15,6 +15,7 @@ struct EnergyCapturePlan {
     EnergyHistoryLimits limits;
     std::string privateNamespace,sessionId; // caller-provisioned; never ordinal, generation, account or worker name
     EnergyHistoryOpen mode=EnergyHistoryOpen::Existing;
+    std::optional<EnergyCollectorFence> fence; // only a live lifetime-lease owner may supply this
 };
 // Pure mapping: namespace-salted opaque keys, sorted by key, stable when selection order changes.
 // The caller must privately retain the namespace and history lower bound, and explicitly bind each selected set.
@@ -22,12 +23,18 @@ bool makeEnergyCaptureBinding(const std::string &privateNamespace,int64_t histor
                               const std::vector<std::string> &deviceIds,PowerOrigin origin,EnergyHistoryBinding *out);
 enum class EnergyCaptureState { Stopped, Starting, Collecting, NeedsReview, Faulted, ClockFault };
 enum class EnergyCaptureAdmission { Buffered, Skipped, Full, NotReady, StaleGeneration, Invalid, Stopped };
+enum class EnergyLeaseState { Unmanaged, Starting, Held, Disabled, Lost, Stopped };
+struct EnergyAuthorizationRequest;
 struct EnergyCaptureSnapshot {
     EnergyCaptureState state=EnergyCaptureState::Stopped;
     uint64_t generation=0,revision=0,buffered=0,dropped=0,selectedOut=0,continuity=0;
     EnergyHistoryBinding binding; // private; UI hides by default, never forwarded to public stats/logs
     std::shared_ptr<const EnergyHistoryOwnerSnapshot> owner;
     std::shared_ptr<const EnergyHistoryOwnerSnapshot> reconciled; // one confirmed reviewed receipt, retained across later capture jobs
+    EnergyLeaseState leaseState=EnergyLeaseState::Unmanaged;
+    LocalTaskStatus leaseTransport=LocalTaskStatus::Unavailable;
+    bool provisioningOutcomeUnknown=false;
+    std::shared_ptr<const EnergyAuthorizationRequest> provisionRequest; // retained private original on unknown issuance, never replay authority
 };
 class EnergyCaptureSink {
    public:

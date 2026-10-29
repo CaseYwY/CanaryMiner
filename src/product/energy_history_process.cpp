@@ -1,6 +1,7 @@
 #include "energy_history_process.h"
 #include "energy_history_model.h"
 #include "energy_recovery.h"
+#include "energy_collector_process.h"
 #include "hash.h"
 #include "json_dom.h"
 #include "public_https.h" // shared bounded JSON lexical guard only
@@ -235,6 +236,7 @@ EnergyHistoryProcessResult EnergyHistoryProcessClient::transact(const EnergyHist
     EnergyHistoryProcessResult result;std::string wire;
     if(cancel){result.transport=LocalTaskStatus::Cancelled;return result;}
     if(!encodeEnergyHistoryRequest(r,&wire)){result.transport=LocalTaskStatus::Invalid;return result;}
+    if(fence_&&!encodeEnergyCollectorGuardRequest({localTaskProcessId(),*fence_,r},&wire)){result.transport=LocalTaskStatus::Invalid;return result;}
     const auto task=process_.run(wire,cancel,timeout);result.transport=task.status;
     if(task.status==LocalTaskStatus::Ok){EnergyHistoryReply reply;if(decodeEnergyHistoryReply(r,task.response,&reply))result.reply=std::move(reply);else result.transport=LocalTaskStatus::Unavailable;}
     result.writeOutcomeUnknown=(r.batch.has_value()||r.mode==EnergyHistoryOpen::CreateNew)&&task.childStarted&&(!result.reply||result.reply->opened==EnergyHistoryStatus::Storage||

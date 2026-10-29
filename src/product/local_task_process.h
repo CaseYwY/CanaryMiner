@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -15,6 +16,8 @@ struct LocalTaskResult {
     std::string response;
 };
 bool localTaskPath(const std::filesystem::path &path);  // lexical only; protected local installation/parent required
+uint64_t localTaskProcessId(); // ephemeral IPC only; never a durable device/session identity
+bool bindLocalTaskParent(uint64_t expectedParent); // helper-side: Windows owned job / Linux parent-death signal
 class LocalTaskProcess {
    public:
     explicit LocalTaskProcess(std::filesystem::path installedHelper);
@@ -22,6 +25,10 @@ class LocalTaskProcess {
     LocalTaskProcess(const LocalTaskProcess &) = delete;
     LocalTaskProcess &operator=(const LocalTaskProcess &) = delete;
     LocalTaskResult run(const std::string &request, const std::atomic<bool> &cancel, unsigned timeoutMs);
+    // One bounded newline-terminated readiness frame; child must then remain alive and silent until cancellation.
+    // Called only by an owned background thread. Unexpected exit (even code 0) is loss of the held lease, never success.
+    LocalTaskResult hold(const std::string &request,const std::atomic<bool> &cancel,unsigned startupTimeoutMs,
+                         const std::function<bool(const std::string &)> &ready);
    private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

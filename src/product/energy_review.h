@@ -1,6 +1,7 @@
 // Native private review of a capture snapshot. All callbacks are memory-only admission; no synchronous files/helpers.
 #pragma once
 #include "energy_capture.h"
+#include "energy_authorization.h"
 #include "dashboard.h"
 
 namespace om {
@@ -65,6 +66,16 @@ class EnergyReviewPanel {
         if(!s){out.push_back("UNAVAILABLE: no authorized durable capture owner is active.");out.push_back("Session energy collection alone does not authorize disk retention.");return out;}
         out.push_back(s->binding.evidence.origin==PowerOrigin::SyntheticFixture?"SYNTHETIC FIXTURE ONLY - not physical energy.":"GPU BOARD telemetry proxy; not whole-PC or incremental energy.");
         out.push_back("Capture: "+std::string(state(s->state))+" | generation "+std::to_string(s->generation));
+        if(s->leaseState!=EnergyLeaseState::Unmanaged){out.push_back("Lifetime lease: "+std::string(lease(s->leaseState))+"; writes require the current fence.");
+            if(s->provisioningOutcomeUnknown)out.push_back("Session reservation outcome UNKNOWN; no old identity is adopted or automatically retried.");}
+        if(s->provisioningOutcomeUnknown&&s->provisionRequest){
+            if(!reveal)out.push_back("PRIVATE original reservation request hidden. I reveals locally.");
+            else{const auto &r=*s->provisionRequest;
+                out.push_back("ORIGINAL reservation: Provision | generation "+std::to_string(r.generation)+" | ticket "+std::to_string(r.ticket));
+                out.push_back("Original UTC ms "+std::to_string(r.nowUtcMs)+" | expected snapshot "+safe(r.expected));
+                const auto path=r.file.u8string();out.push_back("Authorization path fragments (non-ASCII shown as ?):");
+                for(size_t n=0;n<path.size();n+=96)out.push_back(safe(path.substr(n,96)));
+                for(const auto &id:r.devices)out.push_back("Selected UUID "+safe(id));}}
         out.push_back("Volatile buffered readings "+std::to_string(s->buffered)+" | dropped/discarded "+std::to_string(s->dropped)+" | cadence skips "+std::to_string(s->selectedOut));
         out.push_back("Continuity "+std::to_string(s->continuity)+"; buffered input is not durable. No final power hold.");
         if(!s->owner){out.push_back("Owner unavailable; no committed quantity inferred.");return out;}
@@ -113,6 +124,7 @@ class EnergyReviewPanel {
     static bool eligible(const std::shared_ptr<const EnergyCaptureSnapshot> &s){return s&&s->state==EnergyCaptureState::NeedsReview&&s->owner&&s->owner->state==EnergyHistoryOwnerState::NeedsReview&&s->owner->uncertainBatch&&!s->owner->pending;}
     static std::string safe(const std::string &s){std::string out;for(unsigned char c:s){if(out.size()==128)break;out+=c>=32&&c<=126?static_cast<char>(c):'?';}return out;}
     static const char *state(EnergyCaptureState s){switch(s){case EnergyCaptureState::Stopped:return "Stopped";case EnergyCaptureState::Starting:return "Starting";case EnergyCaptureState::Collecting:return "Collecting";case EnergyCaptureState::NeedsReview:return "NeedsReview";case EnergyCaptureState::Faulted:return "Faulted";case EnergyCaptureState::ClockFault:return "ClockFault";}return "Unknown";}
+    static const char *lease(EnergyLeaseState s){switch(s){case EnergyLeaseState::Unmanaged:return "Unmanaged";case EnergyLeaseState::Starting:return "Starting";case EnergyLeaseState::Held:return "Held";case EnergyLeaseState::Disabled:return "Disabled";case EnergyLeaseState::Lost:return "Lost";case EnergyLeaseState::Stopped:return "Stopped";}return "Unknown";}
     static const char *recovery(EnergyRecoveryState s){switch(s){case EnergyRecoveryState::Disabled:return "Disabled";case EnergyRecoveryState::Empty:return "Empty";case EnergyRecoveryState::Prepared:return "Prepared";case EnergyRecoveryState::Confirmed:return "Confirmed";case EnergyRecoveryState::Rejected:return "Rejected";case EnergyRecoveryState::Diverged:return "Diverged";case EnergyRecoveryState::Unavailable:return "Unavailable";}return "Unknown";}
     static const char *status(EnergyHistoryStatus s){switch(s){case EnergyHistoryStatus::Ok:return "Ok";case EnergyHistoryStatus::Replay:return "Replay";case EnergyHistoryStatus::Invalid:return "Invalid";case EnergyHistoryStatus::Attribution:return "Attribution";case EnergyHistoryStatus::Conflict:return "Conflict";case EnergyHistoryStatus::SequenceGap:return "SequenceGap";case EnergyHistoryStatus::Clock:return "Clock";case EnergyHistoryStatus::Capacity:return "Capacity";case EnergyHistoryStatus::Storage:return "Storage";case EnergyHistoryStatus::DetailExpired:return "DetailExpired";}return "Unknown";}
     static const char *admission(EnergyHistoryAdmission s){switch(s){case EnergyHistoryAdmission::Queued:return "QUEUED once; not a durable acknowledgement.";case EnergyHistoryAdmission::NotReady:return "Owner not ready or observations buffered; nothing queued.";case EnergyHistoryAdmission::StaleGeneration:return "Generation changed; reopen review.";case EnergyHistoryAdmission::ReviewChanged:return "Owner revision changed; review current original again.";case EnergyHistoryAdmission::Invalid:return "Invalid request; original preserved.";}return "Nothing queued.";}

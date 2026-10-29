@@ -1,5 +1,6 @@
 # Optional observed-power/reset-window module and producer seam. Ordinary miner supplies no authorized capture factory.
 add_library(canary_energy_history STATIC
+  "${CMAKE_SOURCE_DIR}/src/product/private_entropy.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_model.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_compaction.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_ledger.cpp"
@@ -8,6 +9,8 @@ add_library(canary_energy_history STATIC
   "${CMAKE_SOURCE_DIR}/src/product/energy_capture.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_authorization.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_authorization_owner.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/energy_collector_process.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/energy_leased_capture.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_owner.cpp")
 target_compile_features(canary_energy_history PUBLIC cxx_std_17)
 target_include_directories(canary_energy_history PUBLIC "${CMAKE_SOURCE_DIR}/src")
@@ -17,6 +20,8 @@ if(WIN32)
 endif()
 add_executable(canary_energy_authorization_worker "${CMAKE_SOURCE_DIR}/src/product/energy_authorization_worker.cpp")
 target_link_libraries(canary_energy_authorization_worker PRIVATE canary_energy_history)
+add_executable(canary_energy_collector_worker "${CMAKE_SOURCE_DIR}/src/product/energy_collector_worker.cpp")
+target_link_libraries(canary_energy_collector_worker PRIVATE canary_energy_history)
 add_executable(canary_energy_history_worker "${CMAKE_SOURCE_DIR}/src/product/energy_history_worker.cpp")
 target_link_libraries(canary_energy_history_worker PRIVATE canary_energy_history)
 if(MSVC)
