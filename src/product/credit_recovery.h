@@ -8,7 +8,7 @@ class CreditRecoveryJournal {
     ~CreditRecoveryJournal();
     CreditRecoveryJournal(const CreditRecoveryJournal &) = delete;
     CreditRecoveryJournal &operator=(const CreditRecoveryJournal &) = delete;
-    CreditLedgerStatus open(const CreditProcessRequest &request);
+    CreditLedgerStatus open(const CreditProcessRequest &request,bool existingOnly=false);
     CreditLedgerStatus prepare(const CreditProcessRequest &request);
     CreditLedgerStatus settle(CreditLedgerStatus applied);
     bool matches(const CreditProcessRequest &request) const;

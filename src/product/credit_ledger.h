@@ -66,6 +66,7 @@ struct CreditLedgerLimits {
     uint64_t maxDatabaseBytes = 128 * 1024 * 1024;
 };
 enum class CreditLedgerStatus { Ok, Replay, StaleBatch, Invalid, Unsupported, Attribution, Conflict, SequenceGap, Clock, Capacity, Storage };
+enum class CreditLedgerOpen { CreateIfMissing, ExistingQuery }; // ExistingQuery opens SQLite read-only; apply is prohibited
 const char *creditLedgerStatusName(CreditLedgerStatus status);
 enum class CreditCompleteness { Unavailable, Partial, Complete };
 struct CreditCursorCheckpoint {
@@ -91,7 +92,7 @@ class CreditLedger {
     ~CreditLedger();
     CreditLedger(const CreditLedger &) = delete;
     CreditLedger &operator=(const CreditLedger &) = delete;
-    CreditLedgerStatus open(const std::filesystem::path &absoluteLocalFile, const CreditSourceContract &contract, int64_t nowUtcMs, CreditLedgerLimits limits = {});
+    CreditLedgerStatus open(const std::filesystem::path &absoluteLocalFile, const CreditSourceContract &contract, int64_t nowUtcMs, CreditLedgerLimits limits = {}, CreditLedgerOpen mode = CreditLedgerOpen::CreateIfMissing);
     CreditLedgerStatus apply(const CreditBatch &batch, int64_t nowUtcMs);
     // Read-only proof for the current latest snapshot only. Never inserts/replays a missing batch.
     CreditLedgerStatus verifyLatest(const CreditBatch &batch, int64_t nowUtcMs);

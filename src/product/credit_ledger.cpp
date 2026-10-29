@@ -116,6 +116,7 @@ const char *creditLedgerStatusName(CreditLedgerStatus status) {
 }
 
 struct CreditLedger::Impl {
+    bool queryOnly=false;
     SqliteRuntime api;
     SqliteDb *db = nullptr;
     LocalStoreLease lease;
@@ -297,10 +298,12 @@ struct CreditLedger::Impl {
 
 CreditLedger::CreditLedger() : impl_(new Impl()) {}
 CreditLedger::~CreditLedger() = default;
-CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const CreditSourceContract &contract, int64_t now, CreditLedgerLimits limits) {
+CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const CreditSourceContract &contract, int64_t now, CreditLedgerLimits limits, CreditLedgerOpen mode) {
     auto &s = *impl_;
     if (s.attempted) return CreditLedgerStatus::Invalid;
     s.attempted = true;
+    if(mode!=CreditLedgerOpen::CreateIfMissing&&mode!=CreditLedgerOpen::ExistingQuery)return CreditLedgerStatus::Invalid;
+    s.queryOnly=mode==CreditLedgerOpen::ExistingQuery;
     if (contract.qualification != CreditQualification::SyntheticFixture || contract.asset != CreditAsset::PearlMainnetNative) return CreditLedgerStatus::Unsupported;
     if (!validContract(contract) || !instant(now) || contract.historyStartMs > now || !path.is_absolute() || !limits.maxRecords || limits.maxRecords > 100000 ||
         !limits.maxVersions || limits.maxVersions > 400000 || limits.maxVersions < limits.maxRecords || !limits.maxSnapshots || limits.maxSnapshots > 400000 || limits.maxDatabaseBytes < 1024 * 1024 ||
@@ -309,12 +312,14 @@ CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const C
     try {
         if (!s.api.load()) return CreditLedgerStatus::Storage;
         std::error_code ec;
-        if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
+        if(s.queryOnly){if(!std::filesystem::is_regular_file(std::filesystem::symlink_status(path,ec))||ec)return CreditLedgerStatus::Storage;}
+        else if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
         if (ec) return CreditLedgerStatus::Storage;
         auto lock = path; lock += ".lock";
         if (!s.lease.acquire(lock)) return CreditLedgerStatus::Storage;
         const auto status = std::filesystem::symlink_status(path, ec);
         const bool absent = ec == std::errc::no_such_file_or_directory || (!ec && status.type() == std::filesystem::file_type::not_found);
+        if(absent&&s.queryOnly)return CreditLedgerStatus::Storage;
         if (!absent && (ec || !std::filesystem::is_regular_file(status) || std::filesystem::file_size(path) > limits.maxDatabaseBytes)) return CreditLedgerStatus::Storage;
         if (absent) {
 #if defined(_WIN32)
@@ -327,7 +332,7 @@ CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const C
             ::close(fd);
 #endif
         }
-        if (s.api.openV2(path.u8string().c_str(), &s.db, 2 | 0x10000 | 0x1000000, nullptr) != 0) return CreditLedgerStatus::Storage;
+        if (s.api.openV2(path.u8string().c_str(), &s.db, (s.queryOnly?1:2) | 0x10000 | 0x1000000, nullptr) != 0) return CreditLedgerStatus::Storage;
         s.api.busyTimeout(s.db, 0);
         s.api.limit(s.db, 0, 1024 * 1024 + 4096); s.api.limit(s.db, 1, 65536); s.api.limit(s.db, 2, 128); s.api.limit(s.db, 3, 32); s.api.limit(s.db, 7, 0);
         int64_t app = 0, version = 0;
@@ -342,9 +347,12 @@ CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const C
             std::map<std::string,CreditRevision> rows; std::vector<CreditCoverage> ranges;
             if (!s.records(&rows) || !s.audit(rows) || !s.coverage(&ranges)) return CreditLedgerStatus::Storage;
         }
-        if (!s.isText("PRAGMA journal_mode=WAL", "wal") || !s.exec("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=256; PRAGMA journal_size_limit=1048576;")) return CreditLedgerStatus::Storage;
+        if(s.queryOnly){if(!s.isText("PRAGMA journal_mode","wal"))return CreditLedgerStatus::Storage;}
+        else if (!s.isText("PRAGMA journal_mode=WAL", "wal") || !s.exec("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=256; PRAGMA journal_size_limit=1048576;")) return CreditLedgerStatus::Storage;
         int64_t page = 0;
-        if (!s.scalar("PRAGMA page_size", &page) || page < 512 || page > 65536 || !s.exec("PRAGMA max_page_count=" + std::to_string(limits.maxDatabaseBytes / static_cast<uint64_t>(page)))) return CreditLedgerStatus::Storage;
+        if (!s.scalar("PRAGMA page_size", &page) || page < 512 || page > 65536) return CreditLedgerStatus::Storage;
+        if(s.queryOnly){int64_t pages=0;if(!s.scalar("PRAGMA page_count",&pages)||pages<1||static_cast<uint64_t>(pages)>limits.maxDatabaseBytes/static_cast<uint64_t>(page))return CreditLedgerStatus::Storage;}
+        else if(!s.exec("PRAGMA max_page_count="+std::to_string(limits.maxDatabaseBytes/static_cast<uint64_t>(page))))return CreditLedgerStatus::Storage;
         if (absent) {
             if (!s.exec("BEGIN IMMEDIATE; CREATE TABLE meta(id INTEGER PRIMARY KEY CHECK(id=1),binding TEXT NOT NULL,sequence INTEGER NOT NULL,source_asof INTEGER NOT NULL,observed INTEGER NOT NULL,last_batch TEXT NOT NULL);"
                 "CREATE TABLE records(id TEXT PRIMARY KEY NOT NULL,revision INTEGER NOT NULL,kind INTEGER NOT NULL,reference TEXT NOT NULL,posted_ms INTEGER NOT NULL,amount TEXT NOT NULL);"
@@ -361,6 +369,7 @@ CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const C
 }
 
 CreditLedgerStatus CreditLedger::apply(const CreditBatch &input, int64_t now) {
+    if(impl_->queryOnly)return CreditLedgerStatus::Unsupported;
     auto &s = *impl_;
     if (!s.ready) return CreditLedgerStatus::Storage;
     if (!validContract(input.binding) || bindingText(input.binding) != bindingText(s.contract)) return CreditLedgerStatus::Attribution;

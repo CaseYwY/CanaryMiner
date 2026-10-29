@@ -26,6 +26,7 @@ std::string recordText(CreditRecoveryState state, std::optional<CreditLedgerStat
 bool definite(CreditLedgerStatus s) { return s != CreditLedgerStatus::Storage && s != CreditLedgerStatus::StaleBatch; }
 }
 struct CreditRecoveryJournal::Impl {
+    bool queryOnly=false;
     RuntimePreferencesLease lease;
     std::filesystem::path path;
     CreditProcessRequest saved;
@@ -92,19 +93,23 @@ struct CreditRecoveryJournal::Impl {
 };
 CreditRecoveryJournal::CreditRecoveryJournal() : impl_(new Impl) {}
 CreditRecoveryJournal::~CreditRecoveryJournal() = default;
-CreditLedgerStatus CreditRecoveryJournal::open(const CreditProcessRequest &request) {
+CreditLedgerStatus CreditRecoveryJournal::open(const CreditProcessRequest &request,bool existingOnly) {
     auto &s=*impl_;
     std::string checked;
     if (s.attempted || !encodeCreditRequest(request,&checked) || checked.size()>creditRecoveryRequestLimit) return s.fail(CreditLedgerStatus::Invalid);
     s.attempted=true;
+    s.queryOnly=existingOnly;
     s.bound=request; s.bound.batch.reset();
     s.path=request.file; s.path += ".credit-recovery.json";
-    std::error_code ec; std::filesystem::create_directories(s.path.parent_path(),ec);
+    std::error_code ec;
+    if(existingOnly){if(!std::filesystem::is_regular_file(std::filesystem::symlink_status(s.path,ec))||ec)return s.fail(CreditLedgerStatus::Storage);}
+    else std::filesystem::create_directories(s.path.parent_path(),ec);
     if (ec) return s.fail(CreditLedgerStatus::Storage);
     auto lock=s.path; lock += ".lock";
     if (!s.lease.acquire(lock)) return s.fail(CreditLedgerStatus::Storage);
     const auto status=std::filesystem::symlink_status(s.path,ec);
     if (ec==std::errc::no_such_file_or_directory || (!ec && status.type()==std::filesystem::file_type::not_found)) {
+        if(existingOnly)return s.fail(CreditLedgerStatus::Storage);
         s.opened=true; s.state=CreditRecoveryState::Empty; s.health=CreditLedgerStatus::Ok; return s.health;
     }
     if (ec || !std::filesystem::is_regular_file(status)) return s.fail(CreditLedgerStatus::Storage);
@@ -144,6 +149,7 @@ bool CreditRecoveryJournal::matches(const CreditProcessRequest &request) const {
     return !identity.empty() && identity==batchIdentity(s.saved);
 }
 CreditLedgerStatus CreditRecoveryJournal::prepare(const CreditProcessRequest &request) {
+    if(impl_->queryOnly)return CreditLedgerStatus::Unsupported;
     auto &s=*impl_;
     if (!s.opened || !request.batch || s.state==CreditRecoveryState::Prepared || !sameStore(s.bound,request)) return s.fail(CreditLedgerStatus::Conflict);
     std::string checked;
@@ -158,6 +164,7 @@ CreditLedgerStatus CreditRecoveryJournal::prepare(const CreditProcessRequest &re
     return result;
 }
 CreditLedgerStatus CreditRecoveryJournal::settle(CreditLedgerStatus applied) {
+    if(impl_->queryOnly)return CreditLedgerStatus::Unsupported;
     auto &s=*impl_;
     if (!s.opened || !s.saved.batch || !definite(applied)) return s.fail(CreditLedgerStatus::Invalid);
     return s.write(applied==CreditLedgerStatus::Ok || applied==CreditLedgerStatus::Replay ? CreditRecoveryState::Confirmed : CreditRecoveryState::Rejected,applied,s.wire);

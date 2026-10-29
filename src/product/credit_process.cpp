@@ -219,14 +219,20 @@ bool decodeCreditReply(const CreditProcessRequest &r, const std::string &wire, C
     }
     *out = std::move(reply); return true;
 }
-CreditProcessReply executeCreditRequest(const CreditProcessRequest &r) {
+static CreditProcessReply executeCreditRequestImpl(const CreditProcessRequest &r,bool existingOnly) {
     CreditProcessReply reply; reply.generation = r.generation; reply.ticket = r.ticket;
     if(r.binding.cursor)reply.cursor=CreditCursorCheckpoint{};
+    if(r.recovery!=CreditRecoveryMode::Volatile)reply.recovery=CreditRecoverySnapshot{};
     if (!validRequest(r)) { reply.opened = CreditLedgerStatus::Invalid; return reply; }
+    if(existingOnly){
+        if(!r.binding.cursor||r.batch||r.recovery!=CreditRecoveryMode::Inspect){reply.opened=CreditLedgerStatus::Invalid;return reply;}
+        auto sidecar=r.file;sidecar+=".credit-recovery.json";std::error_code ec;
+        for(const auto &p:{r.file,sidecar})if(!std::filesystem::is_regular_file(std::filesystem::symlink_status(p,ec))||ec){reply.opened=CreditLedgerStatus::Storage;return reply;}
+    }
     CreditRecoveryJournal journal;
     const bool persistent=r.recovery!=CreditRecoveryMode::Volatile;
     if (persistent) {
-        reply.opened=journal.open(r); reply.recovery=journal.snapshot();
+        reply.opened=journal.open(r,existingOnly); reply.recovery=journal.snapshot();
         if (reply.opened!=CreditLedgerStatus::Ok) return reply;
         if (reply.recovery->batch) {
             // A surviving receipt never authorizes recreating a lost/replaced ledger as an empty history.
@@ -237,7 +243,7 @@ CreditProcessReply executeCreditRequest(const CreditProcessRequest &r) {
             }
         }
     }
-    CreditLedger ledger; reply.opened = ledger.open(r.file,r.binding,r.nowUtcMs,r.limits);
+    CreditLedger ledger; reply.opened = ledger.open(r.file,r.binding,r.nowUtcMs,r.limits,existingOnly?CreditLedgerOpen::ExistingQuery:CreditLedgerOpen::CreateIfMissing);
     if (reply.opened != CreditLedgerStatus::Ok) {
         if (persistent && reply.recovery->state==CreditRecoveryState::Confirmed) reply.recovery->state=CreditRecoveryState::Diverged;
         return reply;
@@ -288,6 +294,8 @@ CreditProcessReply executeCreditRequest(const CreditProcessRequest &r) {
     if(r.binding.cursor)reply.cursor=ledger.cursor(r.nowUtcMs);
     return reply;
 }
+CreditProcessReply executeCreditRequest(const CreditProcessRequest &r){return executeCreditRequestImpl(r,false);}
+CreditProcessReply executeExistingCreditQuery(const CreditProcessRequest &r){return executeCreditRequestImpl(r,true);}
 CreditProcessResult CreditProcessClient::transact(const CreditProcessRequest &request, const std::atomic<bool> &cancel, unsigned timeoutMs) {
     CreditProcessResult result; std::string wire;
     if (cancel.load()) { result.transport = LocalTaskStatus::Cancelled; return result; }

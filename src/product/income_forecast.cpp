@@ -10,12 +10,13 @@ bool fixtureKey(const std::string &s){return s.size()>8&&s.size()<=128&&s.rfind(
 ExactDecimal number(uint64_t n){ExactDecimal d;ExactDecimal::parse(std::to_string(n),&d);return d;}
 bool sameClock(const CivilClock &a,const CivilClock &b){return a.kind==b.kind&&a.zone==b.zone&&a.fixedOffsetSeconds==b.fixedOffsetSeconds;}
 bool supported(const CreditSourceContract &c){return c.qualification==CreditQualification::SyntheticFixture&&validCreditSourceContract(c);}
+bool snapshotKey(const std::string &s){return !s.empty()&&s.size()<=128&&std::all_of(s.begin(),s.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='-'||c=='_'||c=='.'||c==':';});}
 bool sameSnapshot(const ForecastCredits &a,const ForecastCredits &b){return a.sequence==b.sequence&&a.snapshotId==b.snapshotId&&a.totals.sourceAsOfMs==b.totals.sourceAsOfMs&&a.totals.observedAtMs==b.totals.observedAtMs;}
 ForecastStatus creditsStatus(const ForecastCredits &value,const CreditSourceContract &binding,int64_t from,int64_t through,int64_t now){
     const auto &t=value.totals;
     if(!supported(value.binding)||!sameCreditSourceContract(value.binding,binding)||t.scope!=binding.scope||t.qualification!=binding.qualification)return ForecastStatus::Attribution;
     if(t.status!=CreditLedgerStatus::Ok)return t.status==CreditLedgerStatus::Clock?ForecastStatus::Clock:ForecastStatus::Unavailable;
-    if((!value.sequence||value.sequence>static_cast<uint64_t>(INT64_MAX)||!fixtureKey(value.snapshotId))&&t.completeness!=CreditCompleteness::Unavailable)return ForecastStatus::Invalid;
+    if((!value.sequence||value.sequence>static_cast<uint64_t>(INT64_MAX)||!snapshotKey(value.snapshotId))&&t.completeness!=CreditCompleteness::Unavailable)return ForecastStatus::Invalid;
     if(t.knownPostedNet.scale()>binding.amountScale)return ForecastStatus::Invalid;
     if(from==binding.historyStartMs-1&&t.knownPostedNet.negative())return ForecastStatus::Invalid;
     if(from<0||through<=from||through>now||t.fromExclusiveMs!=from||t.throughInclusiveMs!=through||t.requestedMs!=static_cast<uint64_t>(through-from)||t.coveredMs>t.requestedMs)return ForecastStatus::Invalid;

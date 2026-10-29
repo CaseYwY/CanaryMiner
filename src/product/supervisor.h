@@ -53,6 +53,7 @@
 #include "redact.h"
 #include "restart_budget.h"
 #include "settings.h"
+#include "forecast_owner.h"
 #include "energy_owner.h"
 #include "energy_capture.h"
 #include "session_intent.h"
@@ -388,6 +389,7 @@ struct SupervisorOptions {
     SessionEnergyFactory energyFactory;
     EnergyCaptureFactory energyCaptureFactory; // only an independently authorized, privately bound plan may supply this
     EnergyRuntimeFactory energyRuntimeFactory; // explicit development capability; owns both controls and fenced capture
+    ForecastSinkFactory forecastFactory; // empty until a source-qualified caller supplies read/scenario ownership
     bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
@@ -603,6 +605,15 @@ class Supervisor {
                 settings_.energyAccess.retry=[this](uint64_t g,uint64_t r){return energyCapture_->retryReviewed(g,r);};
             }
         }
+        if(opt_.stop&&*opt_.stop)intent_.stop();
+        if(opt_.forecastFactory&&intent_.permits(sessionToken_)){
+            forecast_=opt_.forecastFactory(opt_.noMarket,opt_.noEnergy);
+            if(opt_.stop&&*opt_.stop)intent_.stop();
+            if(!forecast_||!intent_.permits(sessionToken_)||!forecast_->start(sessionToken_.epoch)){
+                if(forecast_)forecast_->requestStop();
+                forecast_.reset();addEvent("Income forecast unavailable; preserve source records.");
+            }
+        }
         if (opt_.tuning) {
             std::vector<std::string> events;
             opt_.tuning->start(t0, &events);
@@ -744,6 +755,7 @@ class Supervisor {
             std::this_thread::sleep_for(std::chrono::milliseconds(tty ? 50 : 250));
         }
         if(energyCapture_)energyCapture_->requestStop();
+        if(forecast_)forecast_->requestStop();
         for (auto &w : workers_) {
             if (!w->proc) continue;
             int code = 0;
@@ -763,6 +775,7 @@ class Supervisor {
         if (history_) history_->stop();  // worker drains/safety stop complete before optional persistence shutdown
         if (energy_) energy_->stop();
         if (energyCapture_) energyCapture_->stop();
+        if (forecast_) forecast_->stop();
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -823,6 +836,7 @@ class Supervisor {
     ElectricityPreferences electricityEffective_;
     std::unique_ptr<SessionEnergySink> energy_;
     std::unique_ptr<EnergyCaptureSink> energyCapture_;
+    std::unique_ptr<ForecastSink> forecast_;
     SettingsPanel settings_;
     uint64_t nextFrame_ = 0;
     std::unique_ptr<AcceptedHistory> history_;
@@ -876,6 +890,7 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        if(forecast_)forecast_->requestStop();
         if(energy_)energy_->requestStop();
         if(energyCapture_)energyCapture_->requestStop();
         addEvent("stopping: draining every GPU");
@@ -1048,6 +1063,7 @@ class Supervisor {
         DashModel model = dashboardModel(opt_, views, agg, up, now, events_, log_);
         model.logEntries.assign(logEntries_.begin(), logEntries_.end());
         if (history_) model.history = history_->snapshot();
+        if(forecast_&&intent_.permits(sessionToken_))model.finances=forecast_->snapshot()->view;
         if (history_) for (const auto &worker : workers_) if (!worker->historySeen || worker->historyOutage) model.history.gaps = true;
         if (opt_.dashboard && !opt_.noMarket && manualProjection_ && intent_.permits(sessionToken_)) model.publicMarket=manualProjection_(static_cast<uint64_t>(time(nullptr)),now);
         if(energy_&&intent_.permits(sessionToken_)) {

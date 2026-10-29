@@ -59,6 +59,8 @@ Owns today's scenario forecast and estimated USD net-profit views. It combines a
 
 [P-08j](../income-forecast.md) supplies pure fixture-qualified composition: exact civil-day/posted-ms windows, coherent committed-read identities, complete matched user-work calibration and explicit future donation/pause/switch slots. Immutable reward ratios remain exact through current-price and same-horizon scenario-cost arithmetic; display alone rounds. The ordinary native `FinancialView` accepts prevalidated exact lines, exercised only by the synthetic preview. Real source/work qualification, a coherent helper adapter and bounded monotonic lifecycle owner, actual accrued bill continuation and production activation remain separate.
 
+[P-08k](../forecast-owner.md) supplies strict existing v2 query helpers and a default-off background owner. SQLite READONLY and query-only journal access cannot create/apply/settle source facts. Up to 17 four-query flights must share the same committed source head; read tickets never become evidence. One bounded job, a total read deadline, dual-clock latch, explicit source/profile invalidation, expiry-aware in-memory revaluation and pre-drain revocation protect the optional supervisor seam. Ordinary startup still has no source-qualified forecast factory; real data/work qualification, notifications/settings, accrued bills and deployment remain open.
+
 ### M-TARIFF
 
 Owns immutable plan revisions, local billing state and pure counterfactual evaluation. Components include supported energy rules, calendars, taxes, minimum bills and optional stateful settlement extensions. Plan adapters declare capabilities; an unsupported tax/demand/prepaid/export rule must not be replaced by an unlabeled national average.

@@ -40,6 +40,8 @@ bool decodeCreditRequest(const std::string &wire, CreditProcessRequest *request)
 bool encodeCreditReply(const CreditProcessRequest &request, const CreditProcessReply &reply, std::string *wire);
 bool decodeCreditReply(const CreditProcessRequest &request, const std::string &wire, CreditProcessReply *reply);
 CreditProcessReply executeCreditRequest(const CreditProcessRequest &request); // helper-side synchronous store only
+// Strict v2 Inspect without a batch: both stores must already exist; no prepare/apply/settle or missing-store creation.
+CreditProcessReply executeExistingCreditQuery(const CreditProcessRequest &request);
 class CreditProcessClient {
    public:
     explicit CreditProcessClient(std::filesystem::path installedHelper) : process_(std::move(installedHelper)) {}

@@ -687,7 +687,7 @@ void testChildPipes() {
 }
 
 /** Runs the supervisor over `workers` fake workers and stops it after `stopAfterMs` unless it ends first. */
-int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}) {
+int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}, ForecastSinkFactory forecast = {}) {
     volatile sig_atomic_t stop = 0;
     SupervisorOptions o = baseOptions();
     o.exe = selfExecutablePath();
@@ -700,6 +700,7 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     o.tuning = tuning;
     o.energyCaptureFactory=std::move(capture);o.noEnergy=noEnergy;
     o.energyRuntimeFactory=std::move(runtime);
+    o.forecastFactory=std::move(forecast);
     std::atomic<bool> finished{false};
     std::thread timer([&] {
         for (uint64_t t = 0; t < stopAfterMs / 20 && !finished.load(); ++t) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -800,6 +801,7 @@ void testStopAlreadyRequested() {
     options.tuning = &probe;
     unsigned factories=0;options.energyCaptureFactory=[&]()->std::unique_ptr<EnergyCaptureSink>{++factories;return {};};
     options.energyRuntimeFactory=[&](bool,bool)->std::unique_ptr<EnergyRuntime>{++factories;return {};};
+    options.forecastFactory=[&](bool,bool)->std::unique_ptr<ForecastSink>{++factories;return {};};
     Supervisor supervisor(std::move(options));
     CHECK(supervisor.run() == kExitOk);
     CHECK(probe.calls.empty());
@@ -844,6 +846,24 @@ void testCaptureBridge(){
     Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&late.factories==1&&late.starts==0&&late.revoked);
 }
 
+class ForecastProbe final:public ForecastSink {
+    CaptureProbeState &state_;
+   public:
+    explicit ForecastProbe(CaptureProbeState &s):state_(s){}
+    bool start(uint64_t g)override{CHECK(g>0);++state_.starts;return true;}
+    void requestStop()override{state_.revoked=true;}
+    void stop()override{CHECK(state_.revoked);++state_.stops;}
+    std::shared_ptr<const ForecastOwnerSnapshot> snapshot()const override{++state_.samples;return std::make_shared<const ForecastOwnerSnapshot>();}
+};
+void testForecastBridge(){
+    for(bool noEnergy:{false,true}){CaptureProbeState state;
+        auto factory=[&](bool market,bool energy)->std::unique_ptr<ForecastSink>{CHECK(!market&&energy==noEnergy);++state.factories;return std::make_unique<ForecastProbe>(state);};
+        CHECK(supervisedRun({kFakeChild},1,500,nullptr,{},noEnergy,{},factory)==kExitOk);
+        CHECK(state.factories==1&&state.starts==1&&state.samples>0&&state.stops==1&&state.revoked);}
+    volatile sig_atomic_t stop=0;CaptureProbeState state;auto options=baseOptions();options.exe="must-not-be-executed";options.stop=&stop;
+    options.forecastFactory=[&](bool,bool)->std::unique_ptr<ForecastSink>{++state.factories;stop=1;return std::make_unique<ForecastProbe>(state);};
+    Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&state.factories==1&&state.starts==0&&state.revoked);
+}
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -909,6 +929,7 @@ int main(int argc, char **argv) {
     testFeedLines();
     testStopAlreadyRequested();
     testCaptureBridge();
+    testForecastBridge();
     CHECK(supervisedRun({kFakeLatched}, 1, 120000) == kExitFaultLatched);
     testWorkerArgs();
     testStatsRoundTrip();
