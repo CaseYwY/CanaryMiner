@@ -54,6 +54,10 @@ set_source_files_properties(src/core/run.cpp PROPERTIES LANGUAGE CUDA)
 
 add_executable(canaryminer ${CANARY_SOURCES})
 target_link_libraries(canaryminer PRIVATE canary_economics)
+if(CANARY_ENABLE_ENERGY_RUNTIME)
+  message(STATUS "Development energy runtime enabled; deployment and telemetry qualification still required")
+  canary_enable_energy_runtime(canaryminer)
+endif()
 set_target_properties(canaryminer PROPERTIES OUTPUT_NAME canary-miner CUDA_SEPARABLE_COMPILATION OFF)
 
 # Stable, distinct per-unit seeds for nvcc-generated identifiers (reproducible builds).
@@ -89,6 +93,9 @@ if(WIN32)
 endif()
 
 install(TARGETS canaryminer RUNTIME DESTINATION bin)
+if(CANARY_ENABLE_ENERGY_RUNTIME)
+  install(TARGETS canary_energy_authorization_worker canary_energy_collector_worker RUNTIME DESTINATION bin)
+endif()
 if(CANARY_ENABLE_PUBLIC_HTTPS)
   install(TARGETS canary_public_json_worker RUNTIME DESTINATION bin)
 endif()

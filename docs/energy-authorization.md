@@ -2,7 +2,7 @@
 
 This adds a bounded private authorization store, system-random namespace/session provisioning, explicit selected-set enrollment and an injected native settings page to [P-08f capture](energy-capture.md). R-ENG-001, R-PRIV-001/002, R-SAFE-001/002 and R-REL-001 remain partial; M-ENERGY/M-PRIVACY/M-SUPERVISOR; T-CONFIG/T-UI/T-ENERGY/T-INTENT/T-PRIVACY/T-RELEASE; D-41.
 
-**Development integration.** The ordinary miner still leaves the capture factory and authorization access empty. Settings shows unavailable until a caller supplies the authorization owner and explicit selected UUIDs. The fixture exercises the actual native page/helper and hands a separately issued plan to the existing capture bridge. It does not discover GPUs, activate production persistence or install/replace a miner. Production helper discovery/packaging, whole-collector exclusivity, parent-death quarantine and real-cadence capacity qualification remain required.
+**Development integration.** At this batch boundary the ordinary miner left the capture factory and authorization access empty. Settings shows unavailable until a caller supplies the authorization owner and explicit selected UUIDs. The fixture exercises the actual native page/helper and hands a separately issued plan to the existing capture bridge. Later [P-08h](energy-collector.md) supplies cooperative lifetime fencing and [P-08i](energy-runtime.md) adds default-off development runtime/sibling-helper binding. Production deployment, global helper quarantine and real-cadence capacity qualification remain required.
 
 ## Separate saved consent
 

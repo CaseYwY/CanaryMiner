@@ -2,7 +2,7 @@
 
 This development slice joins [isolated consent/enrollment](energy-authorization.md) to the [bounded producer](energy-capture.md) with an owned lifetime helper and transaction-time validation. R-ENG-001, R-PRIV-001/002, R-SAFE-001/002 and R-REL-001 remain partial; M-ENERGY/M-PRIVACY/M-SUPERVISOR; T-ENERGY/T-CONFIG/T-INTENT/T-UI/T-PRIVACY/T-RELEASE; D-42.
 
-The ordinary miner still supplies no persistence factory or authorization owner. The new factory is exercised by CPU process tests and the native settings fixture. It does not activate sensors, mining, public providers, actual income or optimization.
+At this batch boundary the ordinary miner supplied no persistence factory or authorization owner. The factory is exercised by CPU process tests and the native settings fixture. [P-08i](energy-runtime.md) later adds explicit default-off development runtime binding; production qualification remains separate.
 
 ## Lifetime and lock ordering
 

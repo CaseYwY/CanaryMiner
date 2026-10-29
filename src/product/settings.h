@@ -16,6 +16,7 @@
 #include "credit_review.h"
 #include "energy_review.h"
 #include "energy_authorization_settings.h"
+#include "energy_runtime_access.h"
 
 namespace om {
 
@@ -340,7 +341,7 @@ inline void openTariffControls(SettingsPanel *panel,TariffDeclarationStore *stor
     panel->tariff.open(std::move(value));
 }
 
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}) {
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}, EnergyRuntimeFactory runtimeFactory = {}, const std::vector<std::string> &selectedDevices = {}) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -349,6 +350,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         fprintf(stderr, "settings requires an interactive terminal; no mining was started\n");
         return 2;
     }
+    if(stop&&*stop)return 0;
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
     ManualMarketStore manualStore(std::filesystem::u8path(stateDir) / "manual-market-preferences.json");
@@ -364,9 +366,20 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     panel.creditAccess=std::move(creditAccess);
     panel.energyAccess=std::move(energyAccess);
     panel.energyAuthorizationAccess=std::move(authorizationAccess);
+    std::unique_ptr<EnergyRuntime> runtime;
+    if(runtimeFactory&&!(stop&&*stop)){
+        runtime=runtimeFactory(false,noEnergy);
+        if(stop&&*stop){if(runtime)runtime->requestStop();}
+        else if(runtime&&runtime->start(1,selectedDevices)){
+            panel.energyAccess=energyRuntimeReview(*runtime);
+            panel.energyAuthorizationAccess=energyRuntimeAuthorization(*runtime);
+        }else{runtime.reset();panel.message="Energy persistence unavailable; check the development helper installation.";}
+    }
     printf("\x1b[2J\x1b[?25l");
     while (panel.visible && !(stop && *stop)) {
+        if(runtime){const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();runtime->tick(utc,0);}
         for (int n = 0; n < 32; ++n) {
+            if(stop&&*stop)break;
             const int key = keys.poll();
             if (!key) break;
             const auto result = panel.key(key, [&](const UiPreferences &p, std::string *e) { return store.save(p, e); },
@@ -378,7 +391,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
             else if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.cliDisabled=noMarket; openManualMarketControls(&panel,&manualStore,context); }
             else if (result == SettingsResult::OpenElectricity) {ElectricitySettingsContext context;context.cliNoEnergy=noEnergy;openElectricityControls(&panel,&electricityStore,context);}
             else if (result == SettingsResult::OpenTariff) openTariffControls(&panel,&tariffStore);
-            else if (result != SettingsResult::None) { panel.visible = false; break; }
+            else if (result != SettingsResult::None) { panel.visible = false;if(runtime)runtime->requestStop();break; }
         }
         panel.updateCreditReview();
         panel.updateEnergyReview();
@@ -387,6 +400,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         printSettingsFrame(panel.render(terminalColumns(80), terminalRows(24), color));
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+    if(runtime){runtime->requestStop();runtime->stop();}
     printf("\x1b[2J\x1b[H\x1b[?25hSettings closed. No mining was started.\n");
     return 0;
 }

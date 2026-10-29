@@ -387,6 +387,7 @@ struct SupervisorOptions {
     std::string electricityPreferencesPath;
     SessionEnergyFactory energyFactory;
     EnergyCaptureFactory energyCaptureFactory; // only an independently authorized, privately bound plan may supply this
+    EnergyRuntimeFactory energyRuntimeFactory; // explicit development capability; owns both controls and fenced capture
     bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
 };
@@ -578,7 +579,19 @@ class Supervisor {
             }
         }
         if(opt_.stop&&*opt_.stop)intent_.stop();
-        if(!opt_.noEnergy&&opt_.energyCaptureFactory&&intent_.permits(sessionToken_)){
+        if(opt_.energyRuntimeFactory&&intent_.permits(sessionToken_)){
+            std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
+            auto runtime=opt_.energyRuntimeFactory(true,opt_.noEnergy);
+            if(opt_.stop&&*opt_.stop)intent_.stop();
+            if(!runtime||!intent_.permits(sessionToken_)||!runtime->start(sessionToken_.epoch,ids)){
+                if(runtime)runtime->requestStop();
+                addEvent("Durable board-energy runtime unavailable; preserve local history.");
+            }else{
+                settings_.energyAccess=energyRuntimeReview(*runtime);
+                settings_.energyAuthorizationAccess=energyRuntimeAuthorization(*runtime);
+                energyCapture_=std::move(runtime);
+            }
+        }else if(!opt_.noEnergy&&opt_.energyCaptureFactory&&intent_.permits(sessionToken_)){
             std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
             energyCapture_=opt_.energyCaptureFactory();
             if(opt_.stop&&*opt_.stop)intent_.stop();
@@ -617,6 +630,7 @@ class Supervisor {
             const uint64_t now = supervisorNowMs();
             if (tty) {
                 for (int n = 0; n < 32; ++n) {
+                    if(stopping||(opt_.stop&&*opt_.stop))break;
                     const int key = keys.poll();
                     if (!key) break;
                     view_.options = ui_;  // a saved page switch also governs the very next queued shortcut
@@ -705,6 +719,7 @@ class Supervisor {
                 const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                 energyCapture_->tick(utc,supervisorNowMs());
                 settings_.updateEnergyReview();
+                settings_.updateEnergyAuthorization();
             }
             if (stopping) {
                 if (!alive) break;

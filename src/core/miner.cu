@@ -132,7 +132,12 @@ int main(int argc, char **argv) {
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
+#if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
+        const auto factory=[state=cfg.stateDir](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices);
+#else
         return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy);
+#endif
     }
 
     std::string algoName = defaultAlgorithmName;
@@ -901,6 +906,9 @@ int main(int argc, char **argv) {
         so.noMarket = cli.ov.noMarket;
         so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();
         so.energyFactory = makeSessionEnergyOwner;
+#if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
+        so.energyRuntimeFactory=[state=cfg.stateDir](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
+#endif
         so.noEnergy = cli.ov.noEnergy;
         so.resolvedWorkWait = opt.workWaitMs;
         so.stop = &g_stop;

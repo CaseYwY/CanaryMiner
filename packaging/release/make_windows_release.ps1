@@ -30,11 +30,14 @@ if ($LASTEXITCODE -ne 0) { throw "make_windows_release: could not extract $Sourc
 
 $log = Join-Path $WorkDir 'build.log'
 $vsInstaller = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
-$cmd = "set `"PATH=$vsInstaller;%PATH%`" && call `"$vcvars`" >nul &&set `"CUDA_PATH=$cuda`" && cd /d `"$src`" && cmake --preset production-sm120-windows && cmake --build --preset production-sm120-windows"
+$cmd = "set `"PATH=$vsInstaller;%PATH%`" && call `"$vcvars`" >nul &&set `"CUDA_PATH=$cuda`" && cd /d `"$src`" && cmake --preset production-sm120-windows -DCANARY_ENABLE_ENERGY_RUNTIME=OFF && cmake --build --preset production-sm120-windows"
 cmd /c "$cmd > `"$log`" 2>&1"
 if ($LASTEXITCODE -ne 0) { Get-Content $log -Tail 30; throw "make_windows_release: build failed (see $log)" }
 $exe = Join-Path $src 'build\production-sm120-windows\canary-miner.exe'
 if (-not (Test-Path $exe)) { throw "make_windows_release: build did not produce canary-miner.exe" }
+# The qualified single-binary release cannot silently drop a development runtime's required siblings.
+$cache = Get-Content (Join-Path $src 'build\production-sm120-windows\CMakeCache.txt')
+if (-not ($cache -contains 'CANARY_ENABLE_ENERGY_RUNTIME:BOOL=OFF')) { throw "make_windows_release: development energy runtime is not release-qualified" }
 
 $name = "canaryminer-$Version"
 $stage = Join-Path $WorkDir "stage\$name"

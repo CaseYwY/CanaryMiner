@@ -687,7 +687,7 @@ void testChildPipes() {
 }
 
 /** Runs the supervisor over `workers` fake workers and stops it after `stopAfterMs` unless it ends first. */
-int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false) {
+int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}) {
     volatile sig_atomic_t stop = 0;
     SupervisorOptions o = baseOptions();
     o.exe = selfExecutablePath();
@@ -699,6 +699,7 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     o.dashboard = false;
     o.tuning = tuning;
     o.energyCaptureFactory=std::move(capture);o.noEnergy=noEnergy;
+    o.energyRuntimeFactory=std::move(runtime);
     std::atomic<bool> finished{false};
     std::thread timer([&] {
         for (uint64_t t = 0; t < stopAfterMs / 20 && !finished.load(); ++t) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -798,6 +799,7 @@ void testStopAlreadyRequested() {
     TuningHookProbe probe;
     options.tuning = &probe;
     unsigned factories=0;options.energyCaptureFactory=[&]()->std::unique_ptr<EnergyCaptureSink>{++factories;return {};};
+    options.energyRuntimeFactory=[&](bool,bool)->std::unique_ptr<EnergyRuntime>{++factories;return {};};
     Supervisor supervisor(std::move(options));
     CHECK(supervisor.run() == kExitOk);
     CHECK(probe.calls.empty());
@@ -805,7 +807,7 @@ void testStopAlreadyRequested() {
 }
 
 struct CaptureProbeState {unsigned factories=0,starts=0,samples=0,ticks=0,stops=0;bool revoked=false,late=false;std::vector<std::string> devices;};
-class CaptureProbe final:public EnergyCaptureSink {
+class CaptureProbe final:public EnergyRuntime {
     CaptureProbeState &state_;
    public:
     explicit CaptureProbe(CaptureProbeState &s):state_(s){}
@@ -820,6 +822,10 @@ class CaptureProbe final:public EnergyCaptureSink {
     void requestStop()override{state_.revoked=true;}
     void stop()override{CHECK(state_.revoked);++state_.stops;}
     std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{return std::make_shared<const EnergyCaptureSnapshot>();}
+    std::shared_ptr<const EnergyAuthorizationSnapshot> authorizationSnapshot()const override{return std::make_shared<const EnergyAuthorizationSnapshot>();}
+    EnergyHistoryAdmission authorize(uint64_t,uint64_t,const EnergyAuthorizationCommand &)override{return EnergyHistoryAdmission::NotReady;}
+    EnergyHistoryAdmission acknowledge(uint64_t,uint64_t)override{return EnergyHistoryAdmission::NotReady;}
+    std::vector<std::string> selectedDevices()const override{return state_.devices;}
 };
 void testCaptureBridge(){
     CaptureProbeState s;auto factory=[&]()->std::unique_ptr<EnergyCaptureSink>{++s.factories;return std::make_unique<CaptureProbe>(s);};
@@ -828,6 +834,14 @@ void testCaptureBridge(){
     CHECK(s.devices==std::vector<std::string>({seed(0).uuid,seed(1).uuid}));
     CaptureProbeState disabled;auto no=[&]()->std::unique_ptr<EnergyCaptureSink>{++disabled.factories;return std::make_unique<CaptureProbe>(disabled);};
     CHECK(supervisedRun({kFakeChild},1,500,nullptr,no,true)==kExitOk);CHECK(disabled.factories==0);
+    for(bool cli:{false,true}){
+        CaptureProbeState runtime;auto native=[&](bool mining,bool disabled)->std::unique_ptr<EnergyRuntime>{CHECK(mining&&disabled==cli);++runtime.factories;return std::make_unique<CaptureProbe>(runtime);};
+        CHECK(supervisedRun({kFakeChild},1,500,nullptr,{},cli,native)==kExitOk);
+        CHECK(runtime.factories==1&&runtime.starts==1&&runtime.ticks>0&&runtime.stops==1&&runtime.revoked&&!runtime.late);
+    }
+    volatile sig_atomic_t stop=0;CaptureProbeState late;auto options=baseOptions();options.exe="must-not-be-executed";options.stop=&stop;
+    options.energyRuntimeFactory=[&](bool,bool)->std::unique_ptr<EnergyRuntime>{++late.factories;stop=1;return std::make_unique<CaptureProbe>(late);};
+    Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&late.factories==1&&late.starts==0&&late.revoked);
 }
 
 }  // namespace
@@ -843,7 +857,11 @@ int main(int argc, char **argv) {
 #endif
     if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang || std::string(argv[1]) == kFakeLatched))
         return fakeChild(argv[1]);
-    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test")) {
+    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test"
+#ifdef CANARY_ENERGY_RUNTIME_SUPERVISOR_TEST
+        || std::string(argv[1]) == "--energy-runtime-session-test"
+#endif
+        )) {
         if (!platformInit()) return 83;
         StatsServer probe;
         std::string error;
@@ -867,6 +885,12 @@ int main(int argc, char **argv) {
         options.electricityPreferencesPath = (std::filesystem::path(argv[2]) / "electricity-preferences.json").u8string();
         options.energyFactory = makeSessionEnergyOwner;
         options.noEnergy = std::string(argv[1]) == "--no-energy-session-test";
+#ifdef CANARY_ENERGY_RUNTIME_SUPERVISOR_TEST
+        options.energyRuntimeFactory=[state=std::string(argv[2])](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
+        if(!probe.start("127.0.0.1",0,[]{return "{}";},"{}",&error))return 86;
+        options.apiEnabled=true;options.apiPort=probe.port();probe.stop();
+        std::ofstream(std::filesystem::path(argv[2])/"fixture-api-port")<<options.apiPort;
+#endif
         RuntimePreferences defaults;
         RuntimePreferencesStore defaultsStore(std::filesystem::u8path(options.runtimePreferencesPath));
         if (!defaultsStore.load(&defaults, &error)) return 85;

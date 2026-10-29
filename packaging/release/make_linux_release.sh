@@ -55,11 +55,15 @@ tar -xf "$source_tar" -C "$work/src"
 
 (
   cd "$work/src"
-  cmake --preset production-sm120 -DCMAKE_CUDA_COMPILER="$nvcc" >"$work/configure.log" 2>&1
+  cmake --preset production-sm120 -DCMAKE_CUDA_COMPILER="$nvcc" -DCANARY_ENABLE_ENERGY_RUNTIME=OFF >"$work/configure.log" 2>&1
   cmake --build --preset production-sm120 --parallel "$(nproc)" >"$work/build.log" 2>&1
 )
 native="$work/src/build/production-sm120/canary-miner"
 [ -x "$native" ] || { echo "make_linux_release: build did not produce canary-miner" >&2; exit 1; }
+# The single-binary release must not omit a development runtime's required sibling helpers.
+grep -qx 'CANARY_ENABLE_ENERGY_RUNTIME:BOOL=OFF' "$work/src/build/production-sm120/CMakeCache.txt" || {
+  echo "make_linux_release: development energy runtime is not release-qualified" >&2; exit 1;
+}
 
 name="canaryminer-$version"
 stage="$work/stage/$name"

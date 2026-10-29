@@ -9,6 +9,7 @@ struct EnergyAuthorizationAccess {
     std::function<EnergyHistoryAdmission(uint64_t,uint64_t)> acknowledge;
     std::vector<std::string> selectedDevices; // caller's explicit selection, never discovered by the settings renderer
     bool captureActive=false;
+    std::function<std::shared_ptr<const EnergyCaptureSnapshot>()> captureSnapshot;
 };
 enum class EnergyAuthorizationPanelResult { None,Close,Quit };
 enum class EnergyAuthorizationPage { Browse,Edit,Review,Leave };
@@ -98,9 +99,19 @@ class EnergyAuthorizationPanel {
     std::vector<std::string> lines(const EnergyAuthorizationAccess &access={})const{
         using P=EnergyAuthorizationPage;std::vector<std::string> out={"Energy persistence / independent authorization"};
         if(!current){out.push_back("UNAVAILABLE: no authorization helper owner supplied.");out.push_back("Session energy collection alone never permits disk retention.");return out;}
-        out.push_back(std::string("Current capture: ")+(access.captureActive?"frozen active plan":"not active")+(current->cliNoEnergy?" | --no-energy overrides provisioning":""));
+        std::string capture=access.captureActive?"frozen active plan":"not active";
+        if(access.captureSnapshot){const auto s=access.captureSnapshot();if(s){
+            if(s->state==EnergyCaptureState::Collecting)capture="frozen active plan";
+            else if(s->state==EnergyCaptureState::Starting)capture="starting / awaiting helper";
+            else if(s->state==EnergyCaptureState::NeedsReview)capture="paused / recovery review required";
+            else if(s->state==EnergyCaptureState::Faulted||s->state==EnergyCaptureState::ClockFault)capture="unavailable / preserve local history";
+            else capture="not active";}}
+        out.push_back("Current capture: "+capture+(current->cliNoEnergy?" | --no-energy overrides provisioning":""));
+        if(current->startupPending)out.push_back("STARTING: freezing this parent's capture decision. Settings edits wait for a fresh snapshot.");
+        if(access.selectedDevices.empty())out.push_back("Enrollment unavailable: select full explicit GPU UUIDs; idle settings does not discover GPUs.");
         out.push_back(current->pending?"BUSY: bounded helper request; admission is not confirmation.":"IDLE: settings do not start or restart mining.");
         if(current->reply)out.push_back("Last result: "+std::string(status(current->reply->status)));
+        else if(current->state==EnergyAuthorizationOwnerState::Faulted)out.push_back("UNAVAILABLE: authorization helper failed; preserve local stores.");
         if(current->uncertain)out.push_back("UNKNOWN retained original; new mutations blocked until reviewed inspection.");
         if(page==P::Leave){out.push_back("Unsaved draft. D discards and closes; Esc returns to editing.");return out;}
         if(page==P::Edit){out.push_back(std::string(labels()[field])+" = "+input+"_");out.push_back("Whole numbers only. Enter keeps draft; Esc cancels this edit.");return out;}

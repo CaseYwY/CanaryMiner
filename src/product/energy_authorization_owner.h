@@ -13,6 +13,7 @@ struct EnergyAuthorizationSnapshot {
     EnergyAuthorizationOwnerState state=EnergyAuthorizationOwnerState::Stopped;
     uint64_t generation=0,revision=0,lastTicket=0;
     bool pending=false,cliNoEnergy=false,provisionAttempted=false,planAvailable=false,inspectionAvailable=false;
+    bool startupPending=false; // runtime barrier only; no editable snapshot until the capture decision is frozen
     LocalTaskStatus transport=LocalTaskStatus::Unavailable;
     std::optional<EnergyAuthorizationReply> reply;
     std::shared_ptr<const EnergyAuthorizationRequest> uncertain; // retained until a separate reviewed inspection acknowledgement

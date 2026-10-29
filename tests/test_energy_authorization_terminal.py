@@ -1,5 +1,6 @@
 """Native draft/review/save/cancel and controlling-terminal stop; synthetic UUIDs and no collection."""
 from contextlib import closing
+import http.client
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,8 @@ def main():
     import pty
     import termios
     fixture, helper, cli = [str(Path(p).resolve()) for p in sys.argv[1:4]]
+    runtime = str(Path(sys.argv[5]).resolve()) if len(sys.argv) >= 6 and sys.argv[4] == '--runtime' else None
+    supervisor = str(Path(sys.argv[6]).resolve()) if runtime and len(sys.argv) == 7 else None
     checks = 0
     with tempfile.TemporaryDirectory(prefix='canary-authorization-pty-') as directory:
         root = Path(directory)
@@ -27,7 +30,7 @@ def main():
         assert rejected.returncode == 2 and not file.exists()
         checks += 1
 
-        def session(work, command=None):
+        def session(work, command=None, supervised=False):
             nonlocal checks
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 44, 120, 0, 0))
@@ -36,7 +39,8 @@ def main():
                 os.setsid()
                 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
-            child = subprocess.Popen(command or [fixture, helper, str(root)], stdin=slave, stdout=slave, stderr=slave, preexec_fn=own_terminal)
+            default = [runtime, 'settings', '--config', str(config)] if runtime else [fixture, helper, str(root)]
+            child = subprocess.Popen(command or default, stdin=slave, stdout=slave, stderr=slave, preexec_fn=own_terminal)
             os.close(slave)
             transcript = b''
 
@@ -62,6 +66,9 @@ def main():
                 os.write(master, data)
 
             try:
+                if supervised:
+                    until(b'[S]')
+                    send(b's')
                 until(b'CanaryMiner / Settings')
                 send(b'\x1b[C' * 2 + b'\t' + b'\x1b[B' * 3 + b'\r')
                 until(b'Energy persistence / independent authorization', True)
@@ -92,7 +99,8 @@ def main():
             send(b'q')
 
         config = root / 'synthetic-config.json'
-        config.write_text(json.dumps({'schema_version': 1, 'state_dir': str(root)}), encoding='utf8')
+        config.write_text(json.dumps({'schema_version': 1, 'state_dir': str(root),
+                                     'devices': ['GPU-aaaaaaaa-0000-0000-0000-000000000001']}), encoding='utf8')
         session(ordinary, [cli, 'settings', '--config', str(config)])
 
         def cancel(send, until):
@@ -164,9 +172,77 @@ def main():
             send(b'q')
 
         session(reopen)
+        if runtime:
+            def suppressed(send, until):
+                nonlocal checks
+                until(b'--no-energy overrides provisioning')
+                until(b'Current capture: not active')
+                assert file.read_bytes() == before and not (root / 'energy-persistence.json.collector.lock').exists()
+                checks += 2
+                send(b'q')
+
+            session(suppressed, [runtime, 'settings', '--config', str(config), '--no-energy'])
+            cfg = json.loads(config.read_text())
+            cfg['devices'] = ['0']
+            config.write_text(json.dumps(cfg), encoding='utf8')
+
+            def no_discovery(send, until):
+                nonlocal checks
+                until(b'Enrollment unavailable: select full explicit GPU UUIDs')
+                assert file.read_bytes() == before
+                checks += 1
+                send(b'q')
+
+            session(no_discovery)
         assert file.read_bytes() == before and not list(root.glob('*worker-starts*'))
         checks += 1
-    print(f'energy authorization PTY: {checks} checks passed; no collection or mining started')
+        if supervisor:
+            first_session = None
+
+            def active_off(send, until):
+                nonlocal checks, first_session
+                screen = until(b'Current capture: frozen active plan')
+                saved = json.loads(file.read_bytes())
+                first_session = saved[8]
+                assert first_session and first_session.encode() not in screen and saved[6].encode() not in screen
+                with closing(http.client.HTTPConnection('127.0.0.1', int((root / 'fixture-api-port').read_text()), timeout=3)) as connection:
+                    connection.request('GET', '/api/v1/stats')
+                    response = connection.getresponse()
+                    public = response.read()
+                    assert response.status == 200
+                assert all(token.encode() not in public for token in (first_session, saved[6], saved[7][3], str(root), 'energy-persistence'))
+                send(b' v\r')
+                until(b'CONFIRMED saved', True)
+                until(b'Current capture: frozen active plan')
+                assert json.loads(file.read_bytes())[3][0] is False
+                checks += 5
+                send(b'q')
+
+            command = [supervisor, '--energy-runtime-session-test', str(root)]
+            session(active_off, command, True)
+
+            def inactive_on(send, until):
+                nonlocal checks
+                until(b'Current capture: not active')
+                until(b'Persist board-energy history: OFF')
+                send(b' v\r')
+                until(b'CONFIRMED saved', True)
+                until(b'Current capture: not active')
+                assert json.loads(file.read_bytes())[8] == first_session
+                checks += 2
+                send(b'q')
+
+            session(inactive_on, command, True)
+
+            def fresh(send, until):
+                nonlocal checks
+                until(b'Current capture: frozen active plan')
+                assert json.loads(file.read_bytes())[8] != first_session
+                checks += 1
+                send(b'\x03')
+
+            session(fresh, command, True)
+    print(f'energy {"runtime" if runtime else "authorization"} PTY: {checks} checks passed; synthetic host only')
 
 
 if __name__ == '__main__':
