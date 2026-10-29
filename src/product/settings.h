@@ -74,7 +74,7 @@ class SettingsPanel {
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
     void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
-    void updateBillingReview(){if(billingReview.visible&&billingAccess.snapshot)billingReview.update(billingAccess.snapshot());}
+    void updateBillingReview(){if(billingReview.visible)billingReview.sync(billingAccess);}
     void stopBillingReview(){billingReview.key(3,billingAccess);}
 
     SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}) {

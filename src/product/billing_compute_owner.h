@@ -37,6 +37,8 @@ class BillingComputeOwner {
     bool observe(uint64_t generation,std::shared_ptr<const BillingOwnerSnapshot> monetary); // memory-only; replacement revokes candidates
     BillingComputeAdmission notify(uint64_t generation,uint64_t revision,const BillingSourceNotice &notice);
     BillingComputeAdmission refresh(uint64_t generation,uint64_t revision); // explicit retry of last notice, not monetary replay
+    // Consume this exact review once at a separate monetary owner's final admission. No writes or callbacks.
+    bool claimReviewed(uint64_t generation,uint64_t revision,uint64_t monetaryGeneration,uint64_t monetaryRevision);
     bool invalidate(uint64_t generation);
     void requestStop();
     void stop();

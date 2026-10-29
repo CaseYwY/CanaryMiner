@@ -42,7 +42,9 @@ class BillingOwner {
     bool start(uint64_t generation); // once per instance; initial readonly inspection only
     BillingOwnerAdmission refresh(uint64_t generation,uint64_t revision);
     BillingOwnerAdmission createReviewed(uint64_t generation,uint64_t revision);
-    BillingOwnerAdmission submitReviewed(uint64_t generation,uint64_t revision,const BillingChunk &chunk);
+    // Optional one-use final claim runs AFTER bounded input validation, under the monetary admission mutex.
+    // Memory-only, nonblocking, no re-entry to this owner; false revokes the additional review authority.
+    BillingOwnerAdmission submitReviewed(uint64_t generation,uint64_t revision,const BillingChunk &chunk,const std::function<bool()> &claim={});
     BillingOwnerAdmission commitReviewed(uint64_t generation,uint64_t revision); // complete Receiving input only
     BillingOwnerAdmission retryReviewed(uint64_t generation,uint64_t revision);
     BillingOwnerAdmission reconcileReviewed(uint64_t generation,uint64_t revision);

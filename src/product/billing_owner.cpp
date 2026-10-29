@@ -242,7 +242,7 @@ BillingOwnerAdmission BillingOwner::createReviewed(uint64_t g,uint64_t r){return
 BillingOwnerAdmission BillingOwner::commitReviewed(uint64_t g,uint64_t r){return impl_->admit(g,r,A::Commit);}
 BillingOwnerAdmission BillingOwner::retryReviewed(uint64_t g,uint64_t r){return impl_->admit(g,r,A::Retry);}
 BillingOwnerAdmission BillingOwner::reconcileReviewed(uint64_t g,uint64_t r){return impl_->admit(g,r,A::Reconcile);}
-BillingOwnerAdmission BillingOwner::submitReviewed(uint64_t g,uint64_t r,const BillingChunk &chunk){
+BillingOwnerAdmission BillingOwner::submitReviewed(uint64_t g,uint64_t r,const BillingChunk &chunk,const std::function<bool()> &claim){
     auto &s=*impl_;
     // Reserve the one admission slot before bounded copying, but never hold the stop mutex while serializing receipts.
     std::unique_lock<std::mutex> lock(s.mutex);
@@ -260,6 +260,7 @@ BillingOwnerAdmission BillingOwner::submitReviewed(uint64_t g,uint64_t r,const B
         if(!s.eligible(A::Submit))return D::NotReady;
         if(original->sequence!=s.current.view->monetary->committed.sequence+1||original->observedUtcMs>s.last.utcMs||
             (original->receipt&&original->receipt->request.source.nowUtcMs>s.last.utcMs))return D::Invalid;
+        if(claim&&!claim())return D::ReviewChanged;
         return s.enqueue(A::Submit,std::move(original));
     }catch(...){return D::Invalid;}
 }

@@ -27,7 +27,7 @@ struct BillingComputeOwner::Impl {
     std::filesystem::path helper;std::shared_ptr<const BillingOwnerBinding> context;BillingComputePolicy policy;BillingOwnerClock clock;
     EnergyTraceProcessClient client;mutable std::mutex mutex;std::mutex lifecycle;std::condition_variable wake;std::thread thread;
     bool attempted=false,stopped=true;uint64_t epoch=0,lastMonetaryRevision=0;BillingOwnerTime base,last;
-    std::shared_ptr<Job> queued,flight;std::optional<BillingSourceNotice> lastNotice;
+    std::shared_ptr<Job> queued,flight;std::optional<BillingSourceNotice> lastNotice;uint64_t lastNoticeRevision=0;
     std::optional<EnergyHistoryAnchor> sourceWater,moneyWater;
     BillingComputeSnapshot current;std::shared_ptr<const BillingComputeSnapshot> published=std::make_shared<const BillingComputeSnapshot>();
     const std::shared_ptr<const BillingComputeSnapshot> emptyTerminal=published;
@@ -56,11 +56,11 @@ struct BillingComputeOwner::Impl {
         const auto &m=current.monetary->view->monetary->committed;
         if(!notice.checkpoint.sequence||!hash(notice.checkpoint.digest)||!billing_detail::instant(notice.observedUtcMs)||notice.observedUtcMs>last.utcMs||
             notice.throughUtcMs<=m.opening.throughUtcMs||notice.throughUtcMs>notice.observedUtcMs||older(notice.checkpoint,m.source->checkpoint))return A::Invalid;
-        if(!explicitRefresh&&lastNotice&&same(*lastNotice,notice))return A::Duplicate;
+        if(!explicitRefresh&&lastNotice&&lastNoticeRevision==current.monetary->revision&&same(*lastNotice,notice))return A::Duplicate;
         if(current.lastTicket==UINT64_MAX||m.sequence>=context->limits.maxBatches||m.intervals>=context->limits.maxIntervals)return A::NotReady;
         auto j=std::make_shared<Job>();j->ticket=current.lastTicket+1;j->epoch=epoch;j->now=last.utcMs;j->review=current.monetary;j->notice=notice;
         auto next=current;next.state=O::Busy;next.reviewable=false;next.pending=true;next.lastTicket=j->ticket;++next.revision;
-        auto view=std::make_shared<const BillingComputeSnapshot>(next);lastNotice=notice;queued=std::move(j);current=std::move(next);published=std::move(view);wake.notify_one();return A::Queued;
+        auto view=std::make_shared<const BillingComputeSnapshot>(next);lastNotice=notice;lastNoticeRevision=j->review->revision;queued=std::move(j);current=std::move(next);published=std::move(view);wake.notify_one();return A::Queued;
     }
     Result compute(const std::shared_ptr<Job> &j){
         Result out;const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(policy.operationTimeoutMs);
@@ -129,7 +129,7 @@ bool BillingComputeOwner::observe(uint64_t generation,std::shared_ptr<const Bill
         if(monetary==s.current.monetary)return true;
         if(monetary->revision<=s.lastMonetaryRevision)return false;
         s.lastMonetaryRevision=monetary->revision;
-        ++s.epoch;s.cancel();s.current.monetary=std::move(monetary);s.lastNotice.reset();
+        ++s.epoch;s.cancel();s.current.monetary=std::move(monetary); // retain the bounded hint only for a new explicit recompute
         if(s.current.monetary->state==BillingOwnerState::Stopped){s.halt(O::Stopped,s.current.status);return true;}
         if(s.current.monetary->state==BillingOwnerState::ClockFault){s.halt(O::ClockFault,S::Clock);return true;}
         if(s.current.monetary->state==BillingOwnerState::Faulted){s.halt(O::Faulted,S::Attribution);return true;}
@@ -143,6 +143,13 @@ BillingComputeAdmission BillingComputeOwner::notify(uint64_t g,uint64_t r,const 
     try{const auto checked=s.check(g,r);return checked==A::Queued?s.enqueue(notice,false):checked;}catch(...){return A::Invalid;}}
 BillingComputeAdmission BillingComputeOwner::refresh(uint64_t g,uint64_t r){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
     try{const auto checked=s.check(g,r);return checked==A::Queued?(s.lastNotice?s.enqueue(*s.lastNotice,true):A::NotReady):checked;}catch(...){return A::Invalid;}}
+bool BillingComputeOwner::claimReviewed(uint64_t g,uint64_t r,uint64_t mg,uint64_t mr){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
+    try{if(s.check(g,r)!=A::Queued||!s.current.reviewable||!s.current.candidate||s.current.candidate->reviewed!=s.current.monetary||
+            mg!=s.current.monetary->generation||mr!=s.current.monetary->revision)return false;
+        auto next=s.current;next.reviewable=false;next.state=O::Waiting;++next.revision;
+        auto published=std::make_shared<const BillingComputeSnapshot>(next);s.current=std::move(next);s.published=std::move(published);return true;
+    }catch(...){return false;}
+}
 bool BillingComputeOwner::invalidate(uint64_t g){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(s.stopped||g!=s.current.generation||s.epoch==UINT64_MAX)return false;
     ++s.epoch;s.cancel();s.current.monetary.reset();s.lastNotice.reset();s.current.state=O::Waiting;try{s.publish();}catch(...){}s.wake.notify_all();return true;}
 void BillingComputeOwner::requestStop(){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);s.attempted=true;if(s.current.state==O::Stopped)return;

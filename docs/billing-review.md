@@ -12,7 +12,7 @@ M-TARIFF/M-ENERGY; R-UI-007/008, R-TAR-002–005, R-ENG-001, R-SAFE-001/002, R-P
 - **E** reviews **Reconcile** of an Issued Submit stage. It may record a proven settled/unchanged outcome; it does not apply money or adopt ambiguous creation.
 - In review: reveal, review, **Space** acknowledges, **Enter/F2** sends once. **Esc** cancels review; a second Esc closes the page. Up/Down/PgUp/PgDn scroll, **T/B** jump to top/end. **Q/Ctrl+C** revoke the borrowed owner and request the normal session stop.
 
-New chunk Submit remains a separate source/compute orchestration step. These controls cannot edit originals, select files, import/export, delete orphan/partial input, enable collection or automatically initialize another cycle. A helper's live checks remain authoritative after the panel's preliminary eligibility checks.
+[P-05s](billing-candidate-review.md) subsequently supplies a separate **P** candidate view and dual-version reviewed Submit. These controls cannot edit originals, select files, import/export, delete orphan/partial input, enable collection or automatically initialize another cycle. A helper's live checks remain authoritative after the panel's preliminary eligibility checks.
 
 ## Review identity and presentation
 

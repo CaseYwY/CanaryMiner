@@ -85,6 +85,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05r](../billing-compute.md) supplies one default-off readonly notification/query/compute owner. Its immutable candidate freezes the monetary review, full source receipt and hypothetical next prefix; notification hints are not evidence. It has no financial write authority. Native candidate review and runtime source/configuration wiring remain subsequent integration steps.
 
+[P-05s](../billing-candidate-review.md) borrows both owners through native candidate/recovery views. A one-use compute claim executes after bounded original reconstruction and the final monetary check, under monetary→compute lock order. Later helper preflight/CAS and independent confirmation remain authoritative. The UI propagates memory snapshots and exposes only explicit recompute/Submit; runtime source wiring remains separate.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.
