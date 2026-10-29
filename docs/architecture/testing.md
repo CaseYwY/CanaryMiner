@@ -114,6 +114,8 @@ Test zero-ms throttle semantics and safe complete-work-unit boundaries, warm-up/
 
 P-03b [host-wait evidence](../work-wait.md) covers deterministic wait clocks, CLI admission and actual Linux `run.cpp` early-refusal wrappers. It does not qualify a production GPU's wait/energy/game behavior or implement measured profile selection.
 
+[P-09a](../work-profile.md) tests exact offline window/energy/work audit, unequal-duration weighting, donation separation, all sampled overhead and budget boundaries, missing/zero distinction, maximum 32×32 plan, counter/clock/identity/settings changes, game/safety rejection and session-bound stop/drift/expiry latches. These fixture records are not native physical sampling or live-budget qualification.
+
 ## T-OPTIMIZER
 
 Test best eligible estimated net per elapsed time, no-data/nonpositive pause, all configured timers independently, source/curve expiry, hysteresis/cooldowns, switch/test costs and stale asynchronous results. Test current prices rather than historical per-credit valuations, joint-meter interactions and separate normal/game candidates. Heuristic margins are not statistical confidence bounds.

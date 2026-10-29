@@ -117,6 +117,8 @@ The initial [P-05a/P-08a core](../electricity-core.md) is synchronous/pure and u
 
 Owns bounded measurement plans, profile eligibility/fingerprints, drift detection and evidence. It requests safe session transitions but cannot override user stop, thermal limits or a game's test permission. Imported/model-based curves are hints until locally validated.
 
+[P-09a](../work-profile.md) implements the offline fixture audit and immutable exact work/energy profile, with full identity/plan fingerprints and an explicit-session eligibility latch. It has no sampler, drift detector, persistence, controller or runtime activation; those remain separate capabilities.
+
 ### M-OPTIMIZER
 
 Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budgets and pause/resume decisions. Normal/game candidate sets are separate. It consumes fresh inputs and uncertainty; it cannot turn an unverified model into a guaranteed profit statement.
