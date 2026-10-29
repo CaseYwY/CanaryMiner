@@ -1,12 +1,21 @@
 #include "billing_input_fixture.h"
 #include "product/billing_retry_process.h"
+#include "product/billing_input_query.h"
 #include <iostream>
 using namespace billing_input_fixture;
 int main(int argc,char **argv){
-    if(argc!=7)return 2;
+    if(argc!=7&&argc!=8)return 2;
     const auto helper=std::filesystem::absolute(argv[1]),fixture=std::filesystem::absolute(argv[2]),retry=std::filesystem::absolute(argv[3]);
     const auto file=std::filesystem::absolute(std::filesystem::u8path(argv[4]));const std::string action=argv[5],mode=argv[6];std::atomic<bool> cancel{false};
     auto p=plan(file);p.context.binding=binding(side(file,".source.db"));p.context.nowUtcMs=now;
+    if(action=="read-stage"||action=="parent-stage"){
+        if(argc!=8)return 9;
+        if(action=="parent-stage"){BillingInputProcessClient writer(helper);if(!writer.transact(p,"",cancel,10000).confirmed)return 10;}
+        BillingInputQueryClient reader(std::filesystem::absolute(argv[7]));const auto result=reader.transact(p.context,cancel,action=="parent-stage"?60000:10000);
+        std::cout<<"{\"transport\":"<<static_cast<unsigned>(result.transport)<<",\"status\":"<<(result.reply?std::to_string(static_cast<unsigned>(result.reply->status)):"null")
+            <<",\"phase\":"<<(result.reply?std::to_string(static_cast<unsigned>(result.reply->phase)):"null")<<",\"original\":"<<(result.reply&&result.reply->original?"true":"false")
+            <<",\"outcome\":"<<(result.reply&&result.reply->outcome?"true":"false")<<",\"temporary\":"<<(result.reply&&result.reply->replacementPending?"true":"false")<<"}\n";return 0;
+    }
     if(action=="init"){BillingRecoveryStore store;const auto opened=store.open(file,p.context.binding,now,BillingRecoveryOpen::CreateNew);std::cout<<"{\"status\":"<<static_cast<unsigned>(opened)<<"}\n";return 0;}
     if(action=="query"){const auto s=inspect(p);std::cout<<"{\"status\":"<<static_cast<unsigned>(s.status)<<",\"state\":"<<static_cast<unsigned>(s.state)<<",\"sequence\":"<<s.committed.sequence<<"}\n";return 0;}
     if(action=="retry"){p.context.nowUtcMs=now+1000;const auto s=inspect(p);BillingRetryProcessClient client(retry);const auto result=client.transact(p.context,s,cancel,10000);

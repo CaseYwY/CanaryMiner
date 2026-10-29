@@ -70,6 +70,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05n](../billing-input.md) checks large staged originals, ordered CAS pages, strict budgets/identity, reviewed journal/head admission and exact outcome certificates. Independent framing/corruption/crash fixtures prove preserved unknown issuance, source-offline exact recovery, no repeated Commit, explicit non-applying reconciliation, bounded temporary orphan preservation and owned-parent death. Native/background/physical-storage qualification remains separate.
 
+[P-05o](../billing-input-query.md) checks readonly reconstruction from binding/path alone, including partial and maximum originals, rehashed incorrect binding prefixes, changed-page discard, absent versus temporary states, historical outcomes without a live monetary pair and malformed/non-regular records. Owned-parent death and seam checks cover the new reader; no native/physical-storage qualification is implied.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

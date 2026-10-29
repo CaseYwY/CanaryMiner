@@ -45,3 +45,5 @@ Executed evidence:
 - The initial mixed-manifest fixture changed the creation binding digest without its matching seed digest and was rejected in the parent before it could test cross-page mismatch. The fixture now supplies a valid but mismatched pair and checks reply presence; Linux and sanitizer reruns pass. GCC test-only indentation warnings were split structurally, retaining `-Werror`.
 
 This supplies a synchronous background-client boundary. Full-original native review, background recovery/compute ownership, source notification and runtime configuration/cycle/archive/selection integration remain next. Actual sensors/rates, physical disk/kernel faults, production deployment/trust/global reaping, named-timezone/UI qualification and actual-income sources are not certified by CPU/WSL fixtures.
+
+[P-05o](billing-input-query.md) subsequently adds an independent readonly helper that reconstructs complete or partial staged originals from an approved binding/path, including ambiguous temporary-slot presence. Its stored stage certificates remain distinct from current monetary facts.

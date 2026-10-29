@@ -1,4 +1,5 @@
 #include "billing_input_model.h"
+#include "billing_input_query.h"
 #include "local_store_lease.h"
 #include "hash.h"
 #include <cstdio>
@@ -188,5 +189,29 @@ BillingInputReply executeBillingInputRequest(const BillingInputRequest &r){
         if(!s.save(path))return failure(S::Storage);
         return s.reply(r);
     }catch(...){return failure(S::Storage);}
+}
+BillingQueryPageReply executeBillingInputQuery(const BillingQueryPageRequest &r){
+    BillingQueryPageReply result;
+    if(!validBillingInputQuery(r)){result.status=S::Invalid;return result;}
+    try{
+        const auto path=suffix(r.file,".billing-input");LocalStoreLease lease;
+        if(!lease.acquire(suffix(path,".lock")))return result;
+        std::error_code ec;const auto temporary=std::filesystem::symlink_status(suffix(path,".tmp"),ec);
+        if(ec&&ec!=std::errc::no_such_file_or_directory)return result;
+        const std::string pending=!ec&&std::filesystem::exists(temporary)?"1":"0";
+        std::string view="CMBIV1\nabsent\n"+pending+"\n";
+        if(!absent(path)){
+            Stage s;if(!s.load(path))return result;
+            if(s.manifest.file!=r.file||s.manifest.bindingDigest!=r.bindingDigest){result.status=S::Attribution;return result;}
+            if(s.manifest.preparedUtcMs>r.nowUtcMs){result.status=S::Clock;return result;}
+            const auto metadata="["+std::to_string(static_cast<unsigned>(s.phase))+","+certificateText(s.certificate)+","+jsonQuote(s.revision)+","+
+                std::to_string(s.payload.size())+","+jsonQuote(sha256Hex(s.payload))+","+pending+"]";
+            view="CMBIV1\n"+frame(manifestText(s.manifest))+frame(metadata)+frame(s.payload.size()>s.manifest.bindingBytes?s.payload.substr(s.manifest.bindingBytes):"");
+        }
+        if(view.size()>billingInputViewLimit){result.status=S::Capacity;return result;}
+        const auto digest=sha256Hex(view);
+        if((!r.expectedView.empty()&&r.expectedView!=digest)||r.offset>=view.size()){result.status=S::Conflict;return result;}
+        result.status=S::Ok;result.total=view.size();result.viewDigest=digest;result.data=view.substr(r.offset,billingQueryPageBytes);return result;
+    }catch(...){return result;}
 }
 } // namespace om

@@ -5,6 +5,7 @@
 #include "product/billing_query_process.h"
 #include "product/billing_retry_process.h"
 #include "product/billing_input_process.h"
+#include "product/billing_input_query.h"
 #include "product_test_util.h"
 #include <fstream>
 using namespace billing_source_fixture;
@@ -19,7 +20,7 @@ BillingChunk import(BillingLedger &ledger,EnergyTraceProcessClient &reader,int64
     CHECK(c.receipt&&c.receipt->request.source.generation==1&&c.receipt->reply.source.ticket==1);return c;
 }
 std::string longKey(unsigned n){auto s="fixture."+std::to_string(n)+".";return s+std::string(128-s.size(),'x');}
-void maximumReceipt(const std::filesystem::path &root,EnergyTraceProcessClient &reader,BillingQueryProcessClient *monetary,BillingRetryProcessClient *retry,BillingInputProcessClient *staging){
+void maximumReceipt(const std::filesystem::path &root,EnergyTraceProcessClient &reader,BillingQueryProcessClient *monetary,BillingRetryProcessClient *retry,BillingInputProcessClient *staging,BillingInputQueryClient *stagedReader){
     // Keep 15-digit UTC fields while leaving the next civil midnight inside the supported year range.
     constexpr int64_t begin=253402300700000LL-86400000;constexpr uint64_t mono=INT64_MAX-4096;auto b=binding(root/"maximum-source.db",true);
     b.cycleBeginUtcMs=begin;b.cycleEndUtcMs=begin+512;b.plan=electricity_fixture::plan(begin,begin+512);b.evidence.scope=longKey(64);b.evidence.adapter=longKey(65);
@@ -52,14 +53,16 @@ void maximumReceipt(const std::filesystem::path &root,EnergyTraceProcessClient &
     if(staging){BillingInputPlan p;p.context.generation=p.context.ticket=1;p.context.file=root/"maximum-staged.db";p.context.binding=b;p.context.nowUtcMs=r.nowUtcMs;std::atomic<bool> cancel{false};
         const auto created=staging->transact(p,"",cancel,10000);CHECK(created.confirmed&&created.confirmed->state==BillingRecoveryState::Empty);
         if(created.confirmed){p.prior=created.confirmed;p.chunk=original;const auto applied=staging->transact(p,created.reply->revision,cancel,10000);
-            CHECK(applied.confirmed&&applied.confirmed->committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*applied.confirmed->original)==billing_detail::chunkText(original));}}
+            CHECK(applied.confirmed&&applied.confirmed->committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*applied.confirmed->original)==billing_detail::chunkText(original));
+            if(stagedReader){const auto read=stagedReader->transact(p.context,cancel,10000);CHECK(read.reply&&read.reply->outcome&&read.reply->original&&read.reply->outcome->committed.source->checkpoint.sequence==257&&billing_detail::chunkText(*read.reply->original)==billing_detail::chunkText(original));}}}
 }
 }
 int main(int argc,char **argv){
-    CHECK(argc>=2&&argc<=5);if(argc<2||argc>5)return finishTests("billing source");
+    CHECK(argc>=2&&argc<=6);if(argc<2||argc>6)return finishTests("billing source");
     std::unique_ptr<BillingQueryProcessClient> monetary;if(argc>=3)monetary=std::make_unique<BillingQueryProcessClient>(std::filesystem::absolute(argv[2]));
     std::unique_ptr<BillingRetryProcessClient> retry;if(argc>=4)retry=std::make_unique<BillingRetryProcessClient>(std::filesystem::absolute(argv[3]));
-    std::unique_ptr<BillingInputProcessClient> staging;if(argc==5)staging=std::make_unique<BillingInputProcessClient>(std::filesystem::absolute(argv[4]));
+    std::unique_ptr<BillingInputProcessClient> staging;if(argc>=5)staging=std::make_unique<BillingInputProcessClient>(std::filesystem::absolute(argv[4]));
+    std::unique_ptr<BillingInputQueryClient> stagedReader;if(argc==6)stagedReader=std::make_unique<BillingInputQueryClient>(std::filesystem::absolute(argv[5]));
     EnergyTraceProcessClient reader(std::filesystem::absolute(argv[1]));std::atomic<bool> cancel{false};const auto root=std::filesystem::path(makeScratchDir("billing-source"));
     for(bool compact:{false,true}){const auto dir=root/(compact?"v2":"v1");std::filesystem::create_directories(dir);const auto file=dir/"bill.db";auto b=binding(dir/"energy.db",compact);
         CHECK(executeEnergyHistoryRequest(input(b,1)).applied==E::Ok);BillingChunk first,second;BillingSnapshot frozen;
@@ -140,6 +143,6 @@ int main(int argc,char **argv){
         CHECK(executeEnergyHistoryRequest(input(b,1)).applied==E::Ok);const auto q=query(b,{0,sha256Hex(energy_history_detail::bindingText(b.source->binding))});const auto read=reader.transact(q,cancel,5000);BillingChunk chunk;
         CHECK(read.reply&&read.reply->completeTrace&&makeBillingSourceChunk(1,q,*read.reply,&chunk)==S::Unsupported);
         BillingLedger ledger;CHECK(ledger.open(root/"native-bill.db",b,now,BillingOpen::CreateNew)==S::Unsupported&&!std::filesystem::exists(root/"native-bill.db"));}
-    maximumReceipt(root,reader,monetary.get(),retry.get(),staging.get());
+    maximumReceipt(root,reader,monetary.get(),retry.get(),staging.get(),stagedReader.get());
     std::filesystem::remove_all(root);return finishTests("billing source");
 }
