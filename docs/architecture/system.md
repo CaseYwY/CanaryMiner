@@ -123,6 +123,8 @@ Owns bounded measurement plans, profile eligibility/fingerprints, drift detectio
 
 [P-10a](../economic-study.md) supplies an immutable offline exact comparison over one audited profile, full-record-bound reward calibration, complete correlated market windows and a restricted flat board-cost adapter. It retains all permitted candidates and selects only a strictly positive best measured score; it has no runtime controller or handoff authority.
 
+[P-10b](../optimization-schedule.md) adds a noncopyable single-owner request clock borrowing explicit session intent. Its three bounded lanes retain unresolved expired tickets until settlement; stop/clock/Unreaped faults revoke without inventing reaping. The scheduler neither executes requests nor publishes financial/mining authority.
+
 Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budgets and pause/resume decisions. Normal/game candidate sets are separate. It consumes fresh inputs and uncertainty; it cannot turn an unverified model into a guaranteed profit statement.
 
 ### M-GAME
