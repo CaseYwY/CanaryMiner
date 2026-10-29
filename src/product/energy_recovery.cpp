@@ -37,9 +37,10 @@ struct EnergyRecoveryJournal::Impl {
     EnergyHistoryRequest bound,saved;
     EnergyRecoverySnapshot state;
     std::string wire;
-    bool attempted=false,opened=false,present=false;
+    bool attempted=false,opened=false,present=false,queryOnly=false;
     S fail(S status){state={};state.status=status;return status;}
     S write(EnergyRecoveryState next,std::optional<S> result,uint64_t prior,const std::string &digest,const std::string &request){
+        if(queryOnly)return S::Invalid;
         const auto text=record(next,result,prior,digest,request);if(text.size()>fileLimit)return fail(S::Capacity);
         std::error_code ec;const auto target=std::filesystem::symlink_status(path,ec);
         if(ec&&ec!=std::errc::no_such_file_or_directory)return fail(S::Storage);
@@ -84,9 +85,12 @@ struct EnergyRecoveryJournal::Impl {
 };
 EnergyRecoveryJournal::EnergyRecoveryJournal():impl_(new Impl){}
 EnergyRecoveryJournal::~EnergyRecoveryJournal()=default;
-S EnergyRecoveryJournal::open(const EnergyHistoryRequest &r){
+S EnergyRecoveryJournal::open(const EnergyHistoryRequest &r,EnergyRecoveryOpen mode){
     auto &s=*impl_;std::string checked;
     if(s.attempted||r.recovery==EnergyRecoveryMode::Volatile||!encodeEnergyHistoryRequest(r,&checked))return s.fail(S::Invalid);
+    if(mode!=EnergyRecoveryOpen::ReadWrite&&mode!=EnergyRecoveryOpen::QueryOnly)return s.fail(S::Invalid);
+    s.queryOnly=mode==EnergyRecoveryOpen::QueryOnly;
+    if(s.queryOnly&&(r.mode!=EnergyHistoryOpen::Existing||r.recovery!=EnergyRecoveryMode::Inspect||r.batch))return s.fail(S::Invalid);
     s.attempted=true;s.bound=r;s.bound.batch.reset();s.path=r.file;s.path+=".energy-recovery.json";
     std::error_code ec;if(r.mode==EnergyHistoryOpen::CreateNew)std::filesystem::create_directories(s.path.parent_path(),ec);
     if(ec)return s.fail(S::Storage);
@@ -126,12 +130,14 @@ S EnergyRecoveryJournal::open(const EnergyHistoryRequest &r){
 }
 bool EnergyRecoveryJournal::exists()const{return impl_->present;}
 S EnergyRecoveryJournal::initialize(const EnergyHistoryCheckpoint &c){
-    auto &s=*impl_;if(!s.opened||s.present||s.bound.mode!=EnergyHistoryOpen::CreateNew||c.status!=S::Ok||c.sequence||c.digest!=sha256Hex(bindingText(s.bound.binding)))return S::Conflict;
+    auto &s=*impl_;if(s.queryOnly)return S::Invalid;
+    if(!s.opened||s.present||s.bound.mode!=EnergyHistoryOpen::CreateNew||c.status!=S::Ok||c.sequence||c.digest!=sha256Hex(bindingText(s.bound.binding)))return S::Conflict;
     auto request=original(s.bound);std::string wire;if(!encodeEnergyHistoryRequest(request,&wire))return S::Invalid;
     const auto status=s.write(EnergyRecoveryState::Empty,{},0,c.digest,wire);if(status==S::Ok)s.saved=std::move(request);return status;
 }
 S EnergyRecoveryJournal::prepare(const EnergyHistoryRequest &r,const EnergyHistoryCheckpoint &c){
     auto &s=*impl_;std::string checked;
+    if(s.queryOnly)return S::Invalid;
     if(!s.opened||!s.present||s.state.status!=S::Ok||s.state.state==EnergyRecoveryState::Prepared||r.recovery!=EnergyRecoveryMode::Submit||!r.batch||!sameStore(s.bound,r)||c.status!=S::Ok||!hash(c.digest))return S::Conflict;
     if(r.batch->sequence!=c.sequence+1)return S::SequenceGap;
     if(!encodeEnergyHistoryRequest(r,&checked))return S::Invalid;
@@ -140,7 +146,8 @@ S EnergyRecoveryJournal::prepare(const EnergyHistoryRequest &r,const EnergyHisto
     if(status==S::Ok){s.saved=std::move(request);s.state.batch=s.saved.batch;}return status;
 }
 S EnergyRecoveryJournal::settle(S applied){
-    auto &s=*impl_;if(!s.opened||!s.present||s.state.status!=S::Ok||s.state.state!=EnergyRecoveryState::Prepared||!s.saved.batch||
+    auto &s=*impl_;if(s.queryOnly)return S::Invalid;
+    if(!s.opened||!s.present||s.state.status!=S::Ok||s.state.state!=EnergyRecoveryState::Prepared||!s.saved.batch||
         static_cast<unsigned>(applied)>=static_cast<unsigned>(S::Storage))return S::Invalid;
     return s.write(accepted(applied)?EnergyRecoveryState::Confirmed:EnergyRecoveryState::Rejected,applied,s.state.priorSequence,s.state.priorDigest,s.wire);
 }

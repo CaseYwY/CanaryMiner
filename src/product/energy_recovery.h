@@ -2,13 +2,14 @@
 #pragma once
 #include "energy_history_process.h"
 namespace om {
+enum class EnergyRecoveryOpen { ReadWrite, QueryOnly };
 class EnergyRecoveryJournal {
    public:
     EnergyRecoveryJournal();
     ~EnergyRecoveryJournal();
     EnergyRecoveryJournal(const EnergyRecoveryJournal &)=delete;
     EnergyRecoveryJournal &operator=(const EnergyRecoveryJournal &)=delete;
-    EnergyHistoryStatus open(const EnergyHistoryRequest &request);
+    EnergyHistoryStatus open(const EnergyHistoryRequest &request,EnergyRecoveryOpen mode=EnergyRecoveryOpen::ReadWrite);
     bool exists() const;
     EnergyHistoryStatus initialize(const EnergyHistoryCheckpoint &empty);
     EnergyHistoryStatus prepare(const EnergyHistoryRequest &request,const EnergyHistoryCheckpoint &prior);

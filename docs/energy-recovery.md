@@ -29,7 +29,7 @@ Queued admission, a ticket and a Prepared target are **not** committed energy. S
 
 ## Inspection and exact review
 
-`Inspect` never applies or settles a batch. SQLite may perform lock/WAL checkpoint housekeeping; read-only means observation facts and journal contents do not change.
+`Inspect` never applies or settles a batch. SQLite may perform lock/WAL checkpoint housekeeping; read-only means observation facts and journal contents do not change. [P-05i](energy-trace-helper.md) adds an explicit QueryOnly journal handle whose mutation methods reject, paired with a SQLite READONLY ledger for isolated power queries.
 
 - `Empty` requires sequence 0 and the binding seed in both stores.
 - `Prepared` permits either the recorded prior checkpoint or exactly the original batch's resulting checkpoint. The latter also needs read-only exact retained-input proof.

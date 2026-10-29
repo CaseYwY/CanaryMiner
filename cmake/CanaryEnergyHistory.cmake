@@ -6,6 +6,7 @@ add_library(canary_energy_history STATIC
   "${CMAKE_SOURCE_DIR}/src/product/energy_compaction.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_ledger.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_process.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/energy_trace_process.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_recovery.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_capture.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_authorization.cpp"
@@ -35,6 +36,8 @@ add_executable(canary_energy_collector_worker "${CMAKE_SOURCE_DIR}/src/product/e
 target_link_libraries(canary_energy_collector_worker PRIVATE canary_energy_history)
 add_executable(canary_energy_history_worker "${CMAKE_SOURCE_DIR}/src/product/energy_history_worker.cpp")
 target_link_libraries(canary_energy_history_worker PRIVATE canary_energy_history)
+add_executable(canary_energy_trace_worker "${CMAKE_SOURCE_DIR}/src/product/energy_trace_worker.cpp")
+target_link_libraries(canary_energy_trace_worker PRIVATE canary_energy_history)
 if(MSVC)
   target_compile_definitions(canary_energy_history PRIVATE NOMINMAX)
   target_compile_options(canary_energy_history PRIVATE /W3 /utf-8)
