@@ -1,0 +1,11 @@
+# Offline exact composition only; no native startup, source fetcher or reward provider is enabled.
+add_library(canary_forecast STATIC "${CMAKE_SOURCE_DIR}/src/product/income_forecast.cpp")
+target_compile_features(canary_forecast PUBLIC cxx_std_17)
+target_include_directories(canary_forecast PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(canary_forecast PUBLIC canary_credits canary_economics)
+if(MSVC)
+  target_compile_definitions(canary_forecast PRIVATE NOMINMAX)
+  target_compile_options(canary_forecast PRIVATE /W3 /utf-8)
+else()
+  target_compile_options(canary_forecast PRIVATE -Wall -Wextra -Werror=format)
+endif()

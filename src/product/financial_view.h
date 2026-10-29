@@ -34,6 +34,7 @@ struct FinancialView {
     bool electricityConfigured = false, electricityHorizonMatched = false;
     std::optional<double> electricityTodayUsd;
     FinancialEnergyBasis energyBasis = FinancialEnergyBasis::GpuBoardProxy;
+    std::vector<std::string> exactLines; // prevalidated exact backend projection; empty keeps the legacy synthetic display contract
 };
 
 inline std::string financialDisplayNumber(double number, unsigned decimals) {
@@ -62,6 +63,7 @@ inline std::optional<double> productionUsdNow(const TokenProductionView &product
 
 inline std::vector<std::string> financialViewLines(const FinancialView &view) {
     if (!view.enabled) return {};
+    if (!view.exactLines.empty()) return view.exactLines;
     std::vector<std::string> lines;
     const auto &market = view.market;
     const auto latest = latestTokenPriceUsd(market);

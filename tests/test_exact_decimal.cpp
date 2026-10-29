@@ -31,6 +31,7 @@ int main() {
     for (auto entry : {std::pair<const char *, const char *>{"1.245", "1.24"}, {"1.255", "1.26"}, {"-1.245", "-1.24"},
                        {"-1.255", "-1.26"}, {"0.005", "0.00"}, {"0.015", "0.02"}, {"9.999", "10.00"}, {"-0.0001", "0.00"}}) {
         CHECK(number(entry.first).formatRatio(1, 2, &text)); CHECK(text == entry.second);
+        CHECK(number(entry.first).formatRatio(number("1"),2,&text));CHECK(text==entry.second);
     }
     CHECK(number("1").formatRatio(3, 6, &text)); CHECK(text == "0.333333");
     CHECK(number("2").formatRatio(3, 6, &text)); CHECK(text == "0.666667");
@@ -38,6 +39,15 @@ int main() {
     CHECK(number("0.0150001").formatRatio(3, 2, &text)); CHECK(text == "0.01");
     CHECK(number("1").formatRatio(UINT32_MAX, 24, &text)); CHECK(text == "0.000000000232830643708080");
     CHECK(!number("1").formatRatio(0, 2, &text)); CHECK(!number("1").formatRatio(1, 25, &text));
+    text="unchanged";CHECK(!number("1").formatRatio(number("0"),2,&text)&&text=="unchanged");
+    CHECK(!number("1").formatRatio(number("-1"),2,&text)&&text=="unchanged");
+    CHECK(!number("1").formatRatio(number("1"),25,&text)&&text=="unchanged");
+    CHECK(!number("1").formatRatio(number("1"),2,nullptr));
+    CHECK(number("1").formatRatio(number("0.0003"),8,&text)&&text=="3333.33333333");
+    CHECK(number("0.00015").formatRatio(number("0.03"),2,&text)&&text=="0.00");
+    CHECK(number("0.00045").formatRatio(number("0.03"),2,&text)&&text=="0.02");
+    CHECK(number("0."+std::string(47,'0')+"1").formatRatio(number(std::string(96,'9')),24,&text)&&text=="0.000000000000000000000000");
+    CHECK(number(std::string(96,'9')).formatRatio(number("0."+std::string(47,'0')+"1"),0,&text)&&text==std::string(96,'9')+std::string(48,'0'));
     for (int a = -20; a <= 20; ++a) for (int b = -20; b <= 20; ++b) {
         CHECK(number(std::to_string(a)).add(number(std::to_string(b)), &out)); CHECK(out.text() == std::to_string(a + b));
         CHECK(number(std::to_string(a)).subtract(number(std::to_string(b)), &out)); CHECK(out.text() == std::to_string(a - b));

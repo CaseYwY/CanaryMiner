@@ -84,6 +84,8 @@ Declare the future-load/activity, price, reward and schedule assumptions. Unknow
 
 Rolling actual-24h income and today's calendar forecast are independent rows with different intervals. A pool's daily buckets may be insufficient for exact rolling 24h; show the available interval/partial status rather than invent per-hour allocation.
 
+[P-08j](../income-forecast.md) implements an initial fixture-only exact composition: a report includes posted milliseconds through `now`, queries today from `day.begin - 1` exclusively, and schedules future work from `now + 1` inclusively to the civil-day end exclusively. Models require explicit earning/posting alignment and one coherent committed source snapshot; a revised snapshot/profile invalidates the previous model. The reference valuation clock may advance within the same day without changing report/credit times; expiry uses that advancing clock, and day rollover requires a fresh report. Exact net-posted-token/user-work sums remain a numerator/denominator through valuation; zero calibrated income is valid only with complete positive work. A separately labelled full-day synthetic power scenario can supply the matching estimated cost, but it is not accrued actual billing state or native runtime activation.
+
 ## 6. Energy, electricity and estimated net return
 
 ```text

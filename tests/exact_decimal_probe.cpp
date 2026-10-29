@@ -6,10 +6,13 @@ int main() {
     unsigned denominator = 0, places = 0;
     while (std::cin >> left >> right >> denominator >> places) {
         om::ExactDecimal a, b, sum, difference, product;
-        std::string rounded;
+        std::string rounded,ratio;
         if (!om::ExactDecimal::parse(left, &a) || !om::ExactDecimal::parse(right, &b) || !a.add(b, &sum) || !a.subtract(b, &difference) ||
             !a.multiply(b, &product) || !a.formatRatio(denominator, places, &rounded)) return 1;
-        std::cout << sum.text() << ' ' << difference.text() << ' ' << product.text() << ' ' << a.compare(b) << ' ' << rounded << '\n';
+        auto divisor=b;if(divisor.negative()&&!om::ExactDecimal{}.subtract(b,&divisor))return 1;
+        if(divisor.zero()&&!om::ExactDecimal::parse("1",&divisor))return 1;
+        if(!a.formatRatio(divisor,places,&ratio))return 1;
+        std::cout << sum.text() << ' ' << difference.text() << ' ' << product.text() << ' ' << a.compare(b) << ' ' << rounded << ' ' << ratio << '\n';
     }
     return 0;
 }

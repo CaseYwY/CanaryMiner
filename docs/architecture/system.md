@@ -57,6 +57,8 @@ Owns attributable credit facts and source revision/deduplication. The main panel
 
 Owns today's scenario forecast and estimated USD net-profit views. It combines actual credited portions, eligible future productive time, revenue assumptions, tariff/energy results and valuation coverage; it never edits actual credit facts. It emits a missing-data reason rather than a false numeric total.
 
+[P-08j](../income-forecast.md) supplies pure fixture-qualified composition: exact civil-day/posted-ms windows, coherent committed-read identities, complete matched user-work calibration and explicit future donation/pause/switch slots. Immutable reward ratios remain exact through current-price and same-horizon scenario-cost arithmetic; display alone rounds. The ordinary native `FinancialView` accepts prevalidated exact lines, exercised only by the synthetic preview. Real source/work qualification, a coherent helper adapter and bounded monotonic lifecycle owner, actual accrued bill continuation and production activation remain separate.
+
 ### M-TARIFF
 
 Owns immutable plan revisions, local billing state and pure counterfactual evaluation. Components include supported energy rules, calendars, taxes, minimum bills and optional stateful settlement extensions. Plan adapters declare capabilities; an unsupported tax/demand/prepaid/export rule must not be replaced by an unlabeled national average.

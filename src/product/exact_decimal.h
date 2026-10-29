@@ -19,6 +19,8 @@ class ExactDecimal {
     bool multiply(const ExactDecimal &other, ExactDecimal *out) const;
     // Explicit display-only round-half-even, including nonterminating means; underlying sum stays exact.
     bool formatRatio(uint32_t denominator, unsigned places, std::string *out) const;
+    // Arbitrary bounded positive decimal denominator; division still occurs only at display time.
+    bool formatRatio(const ExactDecimal &denominator, unsigned places, std::string *out) const;
    private:
     std::string coefficient_ = "0";
     unsigned scale_ = 0;

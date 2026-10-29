@@ -128,4 +128,22 @@ bool ExactDecimal::formatRatio(uint32_t denominator, unsigned places, std::strin
     }
     *out = (negative ? "-" : "") + quotient; return true;
 }
+bool ExactDecimal::formatRatio(const ExactDecimal &denominator,unsigned places,std::string *out)const{
+    if(!out||denominator.zero()||denominator.negative()||places>24)return false;
+    // At most 168 numerator / 144 denominator digits; never materialize an unbounded decimal expansion.
+    const int shift=static_cast<int>(places)+static_cast<int>(denominator.scale_)-static_cast<int>(scale_);
+    const auto dividend=coefficient_+std::string(shift>0?static_cast<size_t>(shift):0,'0');
+    const auto divisor=denominator.coefficient_+std::string(shift<0?static_cast<size_t>(-shift):0,'0');
+    std::string quotient,remainder="0";
+    for(char c:dividend){
+        remainder=strip(remainder+c);unsigned digit=0;
+        while(compareDigits(remainder,divisor)>=0){remainder=minus(remainder,divisor);++digit;}
+        quotient.push_back(static_cast<char>('0'+digit));
+    }
+    quotient=strip(quotient);const int half=compareDigits(plus(remainder,remainder),divisor);
+    if(half>0||(!half&&(quotient.back()-'0')%2))quotient=plus(quotient,"1");
+    const bool negative=negative_&&quotient!="0";
+    if(places){if(quotient.size()<=places)quotient.insert(0,places+1-quotient.size(),'0');quotient.insert(quotient.size()-places,1,'.');}
+    *out=(negative?"-":"")+quotient;return true;
+}
 }  // namespace om
