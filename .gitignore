@@ -61,3 +61,4 @@ manual-market-preferences.json*
 *.credit-recovery.json*
 electricity-preferences.json*
 tariff-declaration.json*
+energy-history.sqlite3*

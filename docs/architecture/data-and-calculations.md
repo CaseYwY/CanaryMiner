@@ -104,6 +104,8 @@ Both bill branches use the same opening state and horizon and must not mutate th
 
 See [international billing research](../research/international-electricity-billing.md) for progressive versus all-units, signed rates, TOU, calendar/effective-date, tax/demand, prepaid and export/credit contracts. Not every researched structure is implemented. Unsupported rules require a declared simpler estimate or no cost-based scheduling.
 
+The initial [observed-energy ledger](../energy-history.md) integrates raw integer milliwatts over mapped monotonic intervals with no per-interval rounding. Queries and explicit independent reset windows are half-open `[begin,end)` and retain missing/prehistory/inter-session/tail coverage. A new measurement session cannot reuse a prior parent session's monotonic domain or continue its last power value. Reset windows only select accumulated observations; they never erase the source history, manufacture a measured zero opening or feed a board-power register into a whole-meter bill. Input origin/basis and private channel binding remain immutable per store.
+
 ## 7. Curves, calibration and optimization
 
 Profile identity includes local device identity, software/driver/kernel version, work shape, throttle mechanism, thermal environment, measurement basis, warm-up/repetition/window and evidence freshness. Never copy one machine's frequencies, identifiers, power or profit numbers into shipped defaults.

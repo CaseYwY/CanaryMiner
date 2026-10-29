@@ -90,3 +90,5 @@ ctest --preset tests -R "^(session_energy|session_energy_terminal|config_schemas
 ```
 
 [P-05c](tariff-declaration.md) subsequently adds separate native combined-rule and declared-opening settings, without feeding this session owner. Still unfinished: observed persistent billing ledgers and independent reset clocks, named reporting-zone packaging, persistent energy history, qualified driver/whole-PC/incremental adapters and baselines, real-source actual-today/reward forecasts and net FX integration, economic curves/policy/game/TLS/i18n and full release qualification. The whole planning-book objective remains active.
+
+[P-05d/P-08c](energy-history.md) subsequently implements a separate bounded raw-power history/reset-window core and isolated owner. It does not change this session collector's memory-only activation or convert its generation/ordinal label into persistent identity. Native persistence consent/binding, long-run retention, durable pending input and the producer bridge remain integration work; monetary bill state and the other forecast/release gates above remain unfinished.

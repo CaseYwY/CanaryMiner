@@ -32,6 +32,8 @@
 
 **Atomic source checkpoints:** P-07e adds [fixture cursor persistence and one-page admission](../credit-cursor.md). Explicit v2 streams commit facts and cursors together, retain exact pending input and disclose committed checkpoints separately. No v1 migration, real provider/fetcher or production financial activation is implied.
 
+**Observed energy history:** P-05d/P-08c adds [bounded raw-power history and explicit independent reset windows](../energy-history.md), exact coverage, cross-session identity and isolated atomic storage/recovery. Native persistence consent/device binding, durable pending input, long-run compaction, monetary billing state and production activation remain unfinished.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order
@@ -72,6 +74,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
 | Declared combined bill/time arithmetic | Offline-tested pure core and native combined-rule/declared-opening settings; no certified supplier adapter, measured persistent billing/reset state or runtime activation |
 | Native flat-energy defaults and session board energy | Default-off native review/save and bounded session-only model; typed power validity/coverage, not whole-PC/incremental energy or net income |
+| Persistent observed power and independent reset windows | Bounded audited core/helper/owner implemented; explicit windows only, no native persistence activation, long-run compaction or monetary bill state |
 | Automatic profitability selection | Not implemented |
 | Tested game pause/coexist policies | Not implemented in this fork |
 | Stratum TLS | Not implemented |
