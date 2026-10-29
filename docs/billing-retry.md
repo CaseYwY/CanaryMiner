@@ -26,3 +26,5 @@ Executed evidence:
 - Linux/WSL/direct GCC: retry/crash **34/56**, query/lifecycle **76/20**, final pending/crash **97/206**, source/storage **486/32** and legacy billing/recovery **90/41** pass. Linux own-code/helper/probe **ASan+UBSan** passes that selection, including final rebuilt maximum-source/large-binding recovery cases. Existing energy dependencies are reused from the previously instrumented build; the two extra process checks and eight extra pending checks remain Linux/POSIX-specific.
 
 This is fixture/CPU/WSL evidence, not physical storage failure, deployed trust/lifecycle, real billing sources or native activation. No new UI/PTY or named-timezone qualification is claimed. Large-input creation/submission staging, native review/background ownership, cycle/archive management and real-source/rule qualification remain unfinished.
+
+[P-05n](billing-input.md) subsequently adds separate large-input staging and explicit CreateNew/Submit. Its Issued state never substitutes for this helper's reviewed exact-retry authority.

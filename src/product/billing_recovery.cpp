@@ -168,6 +168,9 @@ struct BillingRecoveryStore::Impl {
 };
 BillingRecoveryStore::BillingRecoveryStore():impl_(new Impl){}
 BillingRecoveryStore::~BillingRecoveryStore()=default;
+std::string billingJournalRevision(const std::filesystem::path &file,const std::string &bound,const BillingRecoverySnapshot &snapshot){
+    return sha256Hex(body(snapshot,file,bound,snapshot.original?chunkText(*snapshot.original):"null"));
+}
 S BillingRecoveryStore::open(const std::filesystem::path &file,const BillingBinding &binding,int64_t now,O mode,BillingLimits limits){
     auto &s=*impl_;if(s.attempted)return S::Invalid;s.attempted=true;
     const auto valid=validateBinding(binding,limits,now);if(valid!=S::Ok)return s.fail(valid);
@@ -231,6 +234,24 @@ S BillingRecoveryStore::retry(const BillingChunk &chunk,const std::string &revis
         if((checked.state!=R::Prepared&&checked.state!=R::Confirmed)||!hash(revision)||revision!=checked.revision||!boundedChunk(chunk)||chunkText(chunk)!=s.original)return S::Conflict;
         if(checked.state==R::Confirmed)return S::Replay;
         return s.apply(now,true);
+    }catch(...){return s.fail(S::Storage);}
+}
+S BillingRecoveryStore::submitReviewed(const std::filesystem::path &file,const std::string &expected,const std::string &revision,
+                                       uint64_t sequence,const std::string &digest,const BillingChunk &chunk,int64_t now){
+    auto &s=*impl_;if(s.attempted)return S::Invalid;s.attempted=true;
+    const auto text=file.u8string();
+    if(!hash(expected)||!hash(revision)||!hash(digest)||!instant(now)||!file.is_absolute()||text.size()>4096||text.find('\0')!=std::string::npos||
+        sequence>=4096||!boundedChunk(chunk)||chunk.sequence!=sequence+1)return s.fail(S::Invalid);
+    s.file=file;s.path=file;s.path+=".billing-recovery";
+    try{
+        auto lock=s.path;lock+=".lock";if(!s.lease.acquire(lock))return s.fail(S::Storage);
+        const auto loaded=s.load(now,expected);if(loaded!=S::Ok)return s.fail(loaded);
+        if(s.state.state==R::Prepared||s.state.revision!=revision)return s.fail(S::Conflict);
+        const auto opened=s.ledger.open(file,s.binding,now,BillingOpen::Existing,s.limits);if(opened!=S::Ok)return s.fail(opened);
+        s.ready=true;const auto checked=s.inspect(now);
+        if(checked.status!=S::Ok)return checked.status;
+        if(checked.state==R::Diverged||checked.committed.sequence!=sequence||checked.committed.digest!=digest)return S::Conflict;
+        return submit(chunk,now);
     }catch(...){return s.fail(S::Storage);}
 }
 #ifdef CANARY_BILLING_TESTING

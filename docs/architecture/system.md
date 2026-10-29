@@ -75,6 +75,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05m](../billing-retry.md) separately isolates exact existing-original recovery. The helper checks binding/revision/original digests before writable ledger access; it never stages new input. A compact confirmed-state certificate is reconstructed against the parent's full reviewed original. Lost replies and failed retries preserve uncertainty for later readonly inspection.
 
+[P-05n](../billing-input.md) adds a separate staged-input helper under stage→journal→ledger leases. Manifest-bound pages durably preserve up to a full 1-MiB binding plus 128-KiB chunk without changing transport ceilings. Issued precedes new monetary work; Complete requires exact outcome proof. Explicit submission reconciliation only reads monetary facts; ambiguous creation is preserved. Native ownership remains unconnected.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

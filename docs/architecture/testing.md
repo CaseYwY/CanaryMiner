@@ -68,6 +68,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05m](../billing-retry.md) checks review-token refusal before write, exact isolated retry and compact proof verification. Independent source-offline fixtures exercise pre/post-COMMIT death, lost proof, one-event replay and failed-retry byte preservation; owned parent death and ordinary seam exclusion cover the new helper. Runtime staging/ownership and physical-storage qualification remain separate.
 
+[P-05n](../billing-input.md) checks large staged originals, ordered CAS pages, strict budgets/identity, reviewed journal/head admission and exact outcome certificates. Independent framing/corruption/crash fixtures prove preserved unknown issuance, source-offline exact recovery, no repeated Commit, explicit non-applying reconciliation, bounded temporary orphan preservation and owned-parent death. Native/background/physical-storage qualification remains separate.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

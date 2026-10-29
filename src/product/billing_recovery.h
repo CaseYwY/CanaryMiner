@@ -28,6 +28,10 @@ class BillingRecoveryStore {
     // One existing-only recovery operation. Review tokens are checked under the journal lease before writable ledger access.
     BillingStatus retryReviewed(const std::filesystem::path &absoluteFile,const std::string &expectedBindingDigest,
                                const std::string &reviewedRevision,const std::string &reviewedOriginalDigest,int64_t nowUtcMs);
+    // New input requires the exact reviewed journal AND audited monetary head under the same ordered leases.
+    BillingStatus submitReviewed(const std::filesystem::path &absoluteFile,const std::string &expectedBindingDigest,
+                                const std::string &reviewedRevision,uint64_t priorSequence,const std::string &priorDigest,
+                                const BillingChunk &chunk,int64_t nowUtcMs);
     BillingStatus submit(const BillingChunk &chunk,int64_t nowUtcMs);
     BillingStatus retry(const BillingChunk &reviewedOriginal,const std::string &reviewedRevision,int64_t nowUtcMs);
    private:
@@ -37,6 +41,7 @@ class BillingRecoveryStore {
     friend struct BillingRecoveryTestPeer;
 #endif
 };
+std::string billingJournalRevision(const std::filesystem::path &file,const std::string &canonicalBinding,const BillingRecoverySnapshot &snapshot);
 #ifdef CANARY_BILLING_TESTING
 enum class BillingRecoveryTestPoint { None, BeforeJournalReplace, AfterPrepared, BeforeCommit, AfterCommit, AfterSettled, FailSettlement };
 struct BillingRecoveryTestPeer {static void interrupt(BillingRecoveryStore &store,BillingRecoveryTestPoint point);};
