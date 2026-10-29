@@ -1,5 +1,7 @@
 # Native local credit-recovery review (P-07d)
 
+Follow-up [P-07e](credit-cursor.md) adds committed-checkpoint status and full original BEFORE/AFTER review for opt-in fixture cursor streams. Tokens default hidden and are revealed locally with the other private fields. Exact reviewed retry may atomically commit facts plus cursor; there is no manual cursor edit or production collector activation. The original P-07d behavior/evidence below remains applicable to non-cursor streams.
+
 This slice adds **S → Privacy → Credit recovery / collection status** to the existing native terminal settings. It introduces no GUI/browser, production collector, source registration, file picker, account manifest, importer/exporter, source cursor or income activation. With the ordinary miner or idle settings the page truthfully says **UNAVAILABLE: no qualified local credit collector/owner is active** and does not open, create or replay a credit store. `FinancialView.enabled` remains false.
 
 Requirements: R-UI-007/008, R-INC-001/003–007, R-SAFE-001/002, R-PRIV-002; all remain partial where broader functionality is missing. This integrates the native review/controller with the [isolated owner](credit-owner.md) and [durable pending core](credit-recovery.md). Only the test-only native harness injects a real fixture-bound owner; production activation still needs a qualified source and reviewed binding, helper installation and collection lifecycle.

@@ -40,6 +40,8 @@ class CreditLedgerOwner {
     CreditLedgerOwner &operator=(const CreditLedgerOwner &) = delete;
     bool start(uint64_t generation); // explicit nonzero increasing generation; performs only an async preflight query
     CreditEnqueueResult submit(uint64_t generation, const CreditBatch &batch, const std::vector<CreditQuerySpec> &queries = {});
+    // Cursor streams admit one page from the reviewed committed checkpoint; no speculative next-page queue.
+    CreditEnqueueResult submitPage(uint64_t generation,uint64_t revision,const CreditBatch &batch,const std::vector<CreditQuerySpec> &queries = {});
     CreditEnqueueResult refresh(uint64_t generation, const std::vector<CreditQuerySpec> &queries = {});
     // Explicit reviewed recovery only: retry exact retained batch identity/content. Never run automatically after stop/fault.
     CreditEnqueueResult retryUncertain(uint64_t generation);

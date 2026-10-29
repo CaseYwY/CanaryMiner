@@ -23,14 +23,16 @@ bool validContract(const CreditSourceContract &c) {
         identifier(c.contractVersion) && identifier(c.scopeId) && identifier(c.scopeGeneration) && c.timeBasis == CreditTimeBasis::PostedUtcMilliseconds &&
         c.revisionModel == CreditRevisionModel::ReplacementValues && c.amountBasis == CreditAmountBasis::PostedNetOfPoolCharges &&
         c.scaleDeclared && c.amountScale <= ExactDecimal::maxScale && instant(c.historyStartMs) &&
-        (c.scope == CreditScope::Account ? c.accountScopeAcknowledged : !c.accountScopeAcknowledged);
+        (c.scope == CreditScope::Account ? c.accountScopeAcknowledged : !c.accountScopeAcknowledged) &&
+        (!c.cursor || (identifier(c.cursor->version) && c.cursor->version.rfind("fixture.",0)==0 && validCreditCursorToken(c.cursor->initial)));
 }
 std::string bindingText(const CreditSourceContract &c) {
     return "[" + std::to_string(static_cast<unsigned>(c.qualification)) + "," + std::to_string(static_cast<unsigned>(c.asset)) + "," +
         std::to_string(static_cast<unsigned>(c.scope)) + "," + jsonQuote(c.provider) + "," + jsonQuote(c.contractVersion) + "," + jsonQuote(c.scopeId) + "," +
         jsonQuote(c.scopeGeneration) + "," + std::to_string(static_cast<unsigned>(c.timeBasis)) + "," + std::to_string(static_cast<unsigned>(c.revisionModel)) + "," +
         std::to_string(static_cast<unsigned>(c.amountBasis)) + "," +
-        std::to_string(c.scaleDeclared ? 1 : 0) + "," + std::to_string(c.accountScopeAcknowledged ? 1 : 0) + "," + std::to_string(c.amountScale) + "," + std::to_string(c.historyStartMs) + "]";
+        std::to_string(c.scaleDeclared ? 1 : 0) + "," + std::to_string(c.accountScopeAcknowledged ? 1 : 0) + "," + std::to_string(c.amountScale) + "," + std::to_string(c.historyStartMs) +
+        (c.cursor ? ",["+jsonQuote(c.cursor->version)+","+jsonQuote(c.cursor->initial)+"]" : "") + "]";
 }
 bool validRecord(const CreditRevision &r, const CreditSourceContract &c, int64_t asOf) {
     if (!identifier(r.id) || !r.revision || r.revision > static_cast<uint64_t>(INT64_MAX) || !instant(r.postedAtMs) ||
@@ -68,7 +70,8 @@ std::string canonicalBatch(const CreditBatch &b) {
         if (i) text += ',';
         text += "[" + std::to_string(b.coverage[i].fromExclusiveMs) + "," + std::to_string(b.coverage[i].throughInclusiveMs) + "]";
     }
-    return text + "]]";  // local rediscovery time is not provider snapshot identity; replay cannot freshen old coverage
+    return text + "]" + (b.cursor ? ",["+jsonQuote(b.cursor->before)+","+jsonQuote(b.cursor->after)+"]" : "") + "]";
+    // Local rediscovery time is not snapshot identity; replay cannot freshen old coverage/cursors.
 }
 struct Param {
     bool text = false;
@@ -80,6 +83,9 @@ struct Param {
 }  // namespace
 
 bool validCreditSourceContract(const CreditSourceContract &c) { return validContract(c); }
+bool validCreditCursorToken(const std::string &s) {
+    return !s.empty() && s.size()<=512 && std::all_of(s.begin(),s.end(),[](unsigned char c){return c>=33 && c<=126;});
+}
 bool sameCreditSourceContract(const CreditSourceContract &a, const CreditSourceContract &b) { return bindingText(a) == bindingText(b); }
 bool boundedCreditBatchInput(const CreditBatch &b, int64_t now) {
     if (!validContract(b.binding) || !instant(now) || !instant(b.observedAtMs) || b.observedAtMs > now || !instant(b.sourceAsOfMs) || b.sourceAsOfMs > b.observedAtMs ||
@@ -87,6 +93,8 @@ bool boundedCreditBatchInput(const CreditBatch &b, int64_t now) {
     std::set<std::string> ids;
     for (const auto &r : b.records) if (!validRecord(r,b.binding,b.sourceAsOfMs) || !ids.insert(r.id).second) return false;
     for (const auto &c : b.coverage) if (c.fromExclusiveMs < b.binding.historyStartMs-1 || c.fromExclusiveMs >= c.throughInclusiveMs || c.throughInclusiveMs > b.sourceAsOfMs) return false;
+    if (b.cursor.has_value()!=b.binding.cursor.has_value() || (b.cursor && (!validCreditCursorToken(b.cursor->before) || !validCreditCursorToken(b.cursor->after) ||
+        b.cursor->before==b.cursor->after || b.cursor->after==b.binding.cursor->initial || (b.sequence==1 && b.cursor->before!=b.binding.cursor->initial)))) return false;
     return true;
 }
 
@@ -118,6 +126,7 @@ struct CreditLedger::Impl {
     uint64_t sequence = 0;
     int64_t sourceAsOf = 0, observed = 0;
     std::string lastBatch;
+    std::string nextCursor, lastSnapshot;
 #ifdef CANARY_CREDIT_TESTING
     bool crash = false;
 #endif
@@ -168,19 +177,46 @@ struct CreditLedger::Impl {
         std::string binding, batch;
         if (q.step() != 100 || !text(q.value, 0, &binding) || binding != bindingText(contract) || !integer(q.value, 1, &seq) || seq < 0 ||
             !integer(q.value, 2, &asOf) || !integer(q.value, 3, &at) || !text(q.value, 4, &batch) || q.step() != 101) return false;
-        if ((!seq && (asOf || at || !batch.empty())) || (seq && (!instant(asOf) || !instant(at) || asOf > at || batch.empty()))) return false;
+        if (static_cast<uint64_t>(seq)>limits.maxSnapshots || (!seq && (asOf || at || !batch.empty())) || (seq && (!instant(asOf) || !instant(at) || asOf > at || batch.empty()))) return false;
         if (seq) {
             JsonValue root, expected;
             uint64_t number = 0, time = 0;
             if (!boundedPublicJson(batch) || !parseJsonStrict(batch,&root,nullptr) || !parseJsonStrict(bindingText(contract),&expected,nullptr) ||
-                !root.isArray() || root.items.size() != 6 || !sameJson(root.items[0],expected) || !root.items[1].asUint64(&number) || number != static_cast<uint64_t>(seq) ||
+                !root.isArray() || root.items.size() != (contract.cursor?7u:6u) || !sameJson(root.items[0],expected) || !root.items[1].asUint64(&number) || number != static_cast<uint64_t>(seq) ||
                 !root.items[2].isString() || !identifier(root.items[2].text) || !root.items[3].asUint64(&time) || time != static_cast<uint64_t>(asOf) ||
                 !root.items[4].isArray() || root.items[4].items.size() > 512 || !root.items[5].isArray() || root.items[5].items.size() > 128) return false;
             Statement snapshot(this,"SELECT sequence,source_asof,observed FROM snapshots WHERE id=?",{root.items[2].text});
             int64_t found = 0, snapshotAsOf = 0, snapshotObserved = 0;
             if (snapshot.step() != 100 || !integer(snapshot.value,0,&found) || found != seq || !integer(snapshot.value,1,&snapshotAsOf) || snapshotAsOf != asOf ||
-                !integer(snapshot.value,2,&snapshotObserved) || snapshotObserved != at || snapshot.step() != 101) return false;
+                 !integer(snapshot.value,2,&snapshotObserved) || snapshotObserved != at || snapshot.step() != 101) return false;
+            lastSnapshot=root.items[2].text;
+            if(contract.cursor){
+                const auto &step=root.items[6];
+                if(!step.isArray()||step.items.size()!=2||!step.items[0].isString()||!step.items[1].isString()||
+                    !validCreditCursorToken(step.items[0].text)||!validCreditCursorToken(step.items[1].text)||step.items[0].text==step.items[1].text)return false;
+                nextCursor=step.items[1].text;
+            }
         }
+        if(contract.cursor){
+            Statement progress(this,"SELECT sequence,cursor_before,cursor_after,id,source_asof,observed FROM snapshots ORDER BY sequence");
+            std::string cursor=contract.cursor->initial;int64_t count=0,previousAsOf=0,previousObserved=0;int code=0;
+            while((code=progress.step())==100){
+                std::string before,after,id;int64_t number=0,pageAsOf=0,pageObserved=0;
+                if(++count>seq||!integer(progress.value,0,&number)||number!=count||!text(progress.value,1,&before)||!text(progress.value,2,&after)||
+                    before!=cursor||!validCreditCursorToken(after)||after==before||after==contract.cursor->initial||
+                    !text(progress.value,3,&id)||!identifier(id)||!integer(progress.value,4,&pageAsOf)||!integer(progress.value,5,&pageObserved)||
+                    !instant(pageAsOf)||!instant(pageObserved)||pageAsOf<contract.historyStartMs-1||pageAsOf<previousAsOf||pageObserved<previousObserved||
+                    pageAsOf>pageObserved||pageAsOf>asOf||pageObserved>at)return false;
+                cursor=std::move(after);previousAsOf=pageAsOf;previousObserved=pageObserved;
+            }
+            if(code!=101||count!=seq||(seq&&cursor!=nextCursor))return false;
+            int64_t repeated=0;if(!scalar("SELECT count(*) FROM (SELECT cursor_after FROM snapshots GROUP BY cursor_after HAVING count(*)>1)",&repeated)||repeated)return false;
+            if(seq){JsonValue last;if(!parseJsonStrict(batch,&last,nullptr))return false;
+                Statement previous(this,"SELECT cursor_before,cursor_after FROM snapshots WHERE sequence=?",{seq});std::string before,after;
+                if(previous.step()!=100||!text(previous.value,0,&before)||!text(previous.value,1,&after)||previous.step()!=101||before!=last.items[6].items[0].text||after!=last.items[6].items[1].text)return false;}
+            nextCursor=cursor;
+        }
+        if(!seq)lastSnapshot.clear();
         int64_t snapshots = 0, invalid = 0;
         if (!scalar("SELECT count(*) FROM snapshots", &snapshots) || snapshots != seq || static_cast<uint64_t>(snapshots) > limits.maxSnapshots ||
             !scalar("SELECT count(*) FROM snapshots WHERE sequence<1 OR sequence>(SELECT sequence FROM meta WHERE id=1)",&invalid) || invalid) return false;
@@ -247,7 +283,7 @@ struct CreditLedger::Impl {
         if (code != 101) return false;
         if (sequence) {
             JsonValue root;
-            if (!parseJsonStrict(lastBatch,&root,nullptr) || !root.isArray() || root.items.size() != 6 || !root.items[5].isArray() || root.items[5].items.size() != out->size()) return false;
+            if (!parseJsonStrict(lastBatch,&root,nullptr) || !root.isArray() || root.items.size() != (contract.cursor?7u:6u) || !root.items[5].isArray() || root.items[5].items.size() != out->size()) return false;
             for (size_t i = 0; i < out->size(); ++i) {
                 const auto &r = root.items[5].items[i]; uint64_t from = 0, through = 0;
                 if (!r.isArray() || r.items.size() != 2 || !r.items[0].asUint64(&from) || !r.items[1].asUint64(&through) ||
@@ -295,7 +331,7 @@ CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const C
         s.api.busyTimeout(s.db, 0);
         s.api.limit(s.db, 0, 1024 * 1024 + 4096); s.api.limit(s.db, 1, 65536); s.api.limit(s.db, 2, 128); s.api.limit(s.db, 3, 32); s.api.limit(s.db, 7, 0);
         int64_t app = 0, version = 0;
-        if (!s.scalar("PRAGMA application_id", &app) || !s.scalar("PRAGMA user_version", &version) || (!absent && (app != kApplication || version != 1))) return CreditLedgerStatus::Storage;
+        if (!s.scalar("PRAGMA application_id", &app) || !s.scalar("PRAGMA user_version", &version) || (!absent && (app != kApplication || version != (contract.cursor?2:1)))) return CreditLedgerStatus::Storage;
         if (!s.exec("PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-2048;")) return CreditLedgerStatus::Storage;
         if (!absent) {
             int64_t extra = 0;
@@ -313,10 +349,12 @@ CreditLedgerStatus CreditLedger::open(const std::filesystem::path &path, const C
             if (!s.exec("BEGIN IMMEDIATE; CREATE TABLE meta(id INTEGER PRIMARY KEY CHECK(id=1),binding TEXT NOT NULL,sequence INTEGER NOT NULL,source_asof INTEGER NOT NULL,observed INTEGER NOT NULL,last_batch TEXT NOT NULL);"
                 "CREATE TABLE records(id TEXT PRIMARY KEY NOT NULL,revision INTEGER NOT NULL,kind INTEGER NOT NULL,reference TEXT NOT NULL,posted_ms INTEGER NOT NULL,amount TEXT NOT NULL);"
                 "CREATE TABLE versions(id TEXT NOT NULL,revision INTEGER NOT NULL,kind INTEGER NOT NULL,reference TEXT NOT NULL,posted_ms INTEGER NOT NULL,amount TEXT NOT NULL,first_sequence INTEGER NOT NULL REFERENCES snapshots(sequence),PRIMARY KEY(id,revision));"
-                "CREATE TABLE coverage(start_ms INTEGER PRIMARY KEY,end_ms INTEGER NOT NULL);"
-                "CREATE TABLE snapshots(id TEXT PRIMARY KEY NOT NULL,sequence INTEGER NOT NULL UNIQUE,source_asof INTEGER NOT NULL,observed INTEGER NOT NULL);")) return CreditLedgerStatus::Storage;
+                "CREATE TABLE coverage(start_ms INTEGER PRIMARY KEY,end_ms INTEGER NOT NULL);")) return CreditLedgerStatus::Storage;
+            if(!s.exec(std::string("CREATE TABLE snapshots(id TEXT PRIMARY KEY NOT NULL,sequence INTEGER NOT NULL UNIQUE,source_asof INTEGER NOT NULL,observed INTEGER NOT NULL")+
+                (contract.cursor?",cursor_before TEXT NOT NULL,cursor_after TEXT NOT NULL UNIQUE":"")+");"))return CreditLedgerStatus::Storage;
             if (!s.write("INSERT INTO meta VALUES(1,?,0,0,0,'')", {bindingText(contract)}) ||
-                !s.exec("PRAGMA application_id=" + std::to_string(kApplication) + "; PRAGMA user_version=1; COMMIT;")) { s.exec("ROLLBACK;"); return CreditLedgerStatus::Storage; }
+                !s.exec("PRAGMA application_id=" + std::to_string(kApplication) + "; PRAGMA user_version="+std::to_string(contract.cursor?2:1)+"; COMMIT;")) { s.exec("ROLLBACK;"); return CreditLedgerStatus::Storage; }
+            if(contract.cursor)s.nextCursor=contract.cursor->initial;
         }
         s.ready = true; return CreditLedgerStatus::Ok;
     } catch (...) { return CreditLedgerStatus::Storage; }
@@ -329,6 +367,7 @@ CreditLedgerStatus CreditLedger::apply(const CreditBatch &input, int64_t now) {
     if (!instant(now) || !instant(input.observedAtMs) || input.observedAtMs > now || !instant(input.sourceAsOfMs) || input.sourceAsOfMs > input.observedAtMs ||
         input.sourceAsOfMs < s.contract.historyStartMs - 1) return CreditLedgerStatus::Clock;
     if (!input.sequence || input.sequence > static_cast<uint64_t>(INT64_MAX) || !identifier(input.snapshotId) || input.records.size() > 512) return CreditLedgerStatus::Invalid;
+    if(input.cursor.has_value()!=s.contract.cursor.has_value() || (input.cursor && !boundedCreditBatchInput(input,now)))return CreditLedgerStatus::Invalid;
     try {
         CreditBatch batch = input;
         if (!normalizeCoverage(&batch.coverage, s.contract, batch.sourceAsOfMs)) return CreditLedgerStatus::Invalid;
@@ -344,6 +383,11 @@ CreditLedgerStatus CreditLedger::apply(const CreditBatch &input, int64_t now) {
         if (batch.sequence < s.sequence) return CreditLedgerStatus::StaleBatch;
         if (batch.sequence == s.sequence) return canonical == s.lastBatch ? CreditLedgerStatus::Replay : CreditLedgerStatus::Conflict;
         if (batch.sequence != s.sequence + 1) return CreditLedgerStatus::SequenceGap;
+        if(batch.cursor){
+            if(batch.cursor->before!=s.nextCursor)return CreditLedgerStatus::Conflict;
+            Impl::Statement used(&s,"SELECT sequence FROM snapshots WHERE cursor_after=?",{batch.cursor->after});
+            const int code=used.step();if(code==100)return CreditLedgerStatus::Conflict;if(code!=101)return s.storageFailure();
+        }
         if (batch.observedAtMs < s.observed || batch.sourceAsOfMs < s.sourceAsOf) return CreditLedgerStatus::Clock;
         if (batch.sequence > s.limits.maxSnapshots) return CreditLedgerStatus::Capacity;
         { Impl::Statement prior(&s,"SELECT sequence FROM snapshots WHERE id=?",{batch.snapshotId});
@@ -351,7 +395,8 @@ CreditLedgerStatus CreditLedger::apply(const CreditBatch &input, int64_t now) {
         const auto oldAsOf = s.sourceAsOf;
         struct Restore { Impl &s; int64_t old; bool committed = false; ~Restore() { if (!committed) s.sourceAsOf = old; } } restore{s,oldAsOf};
         s.sourceAsOf = batch.sourceAsOfMs;
-        if (!s.write("INSERT INTO snapshots VALUES(?,?,?,?)",{batch.snapshotId,static_cast<int64_t>(batch.sequence),batch.sourceAsOfMs,batch.observedAtMs})) return s.storageFailure();
+        if(batch.cursor){if(!s.write("INSERT INTO snapshots VALUES(?,?,?,?,?,?)",{batch.snapshotId,static_cast<int64_t>(batch.sequence),batch.sourceAsOfMs,batch.observedAtMs,batch.cursor->before,batch.cursor->after}))return s.storageFailure();}
+        else if (!s.write("INSERT INTO snapshots VALUES(?,?,?,?)",{batch.snapshotId,static_cast<int64_t>(batch.sequence),batch.sourceAsOfMs,batch.observedAtMs})) return s.storageFailure();
         for (const auto &r : batch.records) {
             Impl::Statement old(&s, "SELECT id,revision,kind,reference,posted_ms,amount FROM versions WHERE id=? AND revision=?", {r.id, static_cast<int64_t>(r.revision)});
             const int code = old.step();
@@ -382,6 +427,7 @@ CreditLedgerStatus CreditLedger::apply(const CreditBatch &input, int64_t now) {
         if (!s.exec("COMMIT;")) return s.storageFailure();
         transaction.committed = true; restore.committed = true;
         s.sequence = batch.sequence; s.observed = batch.observedAtMs; s.lastBatch = canonical;
+        s.lastSnapshot=batch.snapshotId;if(batch.cursor)s.nextCursor=batch.cursor->after;
         return CreditLedgerStatus::Ok;
     } catch (...) { return s.storageFailure(); }
 }
@@ -407,6 +453,21 @@ CreditLedgerStatus CreditLedger::verifyLatest(const CreditBatch &input, int64_t 
     } catch (...) { return s.storageFailure(); }
 }
 
+CreditCursorCheckpoint CreditLedger::cursor(int64_t now){
+    auto &s=*impl_;CreditCursorCheckpoint result;
+    if(!s.ready)return result;
+    if(!s.contract.cursor){result.status=CreditLedgerStatus::Unsupported;return result;}
+    if(!instant(now)){result.status=CreditLedgerStatus::Clock;return result;}
+    try{
+        if(!s.exec("BEGIN;"))return result;
+        struct Read {Impl &s;bool ended=false;~Read(){if(!ended&&!s.exec("ROLLBACK;"))s.ready=false;}} read{s};
+        if(!s.metadata()){s.storageFailure();return result;}
+        if(now<s.observed){result.status=CreditLedgerStatus::Clock;return result;}
+        if(!s.exec("ROLLBACK;")){s.storageFailure();return result;}read.ended=true;
+        result.status=CreditLedgerStatus::Ok;result.sequence=s.sequence;result.snapshotId=s.lastSnapshot;result.next=s.nextCursor;
+        result.sourceAsOfMs=s.sourceAsOf;result.observedAtMs=s.observed;return result;
+    }catch(...){s.storageFailure();return {};}
+}
 CreditTotals CreditLedger::query(int64_t start, int64_t end, int64_t now) {
     auto &s = *impl_;
     CreditTotals result; result.fromExclusiveMs = start; result.throughInclusiveMs = end;

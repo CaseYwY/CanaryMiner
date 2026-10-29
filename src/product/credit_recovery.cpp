@@ -18,7 +18,7 @@ std::string batchIdentity(CreditProcessRequest r) {
     return encodeCreditRequest(r,&wire) ? wire : std::string();
 }
 std::string recordText(CreditRecoveryState state, std::optional<CreditLedgerStatus> applied, const std::string &request) {
-    const auto body = "[\"CMCJ1\","+std::to_string(static_cast<unsigned>(state))+","+
+    const auto body = std::string(request.rfind("[\"CMCR3\",",0)==0?"[\"CMCJ2\",":"[\"CMCJ1\",")+std::to_string(static_cast<unsigned>(state))+","+
         (applied?std::to_string(static_cast<unsigned>(*applied)):"null")+","+request;
     // Corruption detection only, not authentication/encryption against a local user who can rewrite the directory.
     return body+","+jsonQuote(sha256Hex(body))+"]";
@@ -114,7 +114,7 @@ CreditLedgerStatus CreditRecoveryJournal::open(const CreditProcessRequest &reque
     if (input.bad() || input.gcount()>static_cast<std::streamsize>(fileLimit)) return s.fail(CreditLedgerStatus::Storage);
     text.resize(static_cast<size_t>(input.gcount()));
     JsonValue root; uint64_t state=0, result=0;
-    if (!parseJsonStrict(text,&root,nullptr) || !root.isArray() || root.items.size()!=5 || !root.items[0].isString() || root.items[0].text!="CMCJ1" ||
+    if (!parseJsonStrict(text,&root,nullptr) || !root.isArray() || root.items.size()!=5 || !root.items[0].isString() || (root.items[0].text!="CMCJ1" && root.items[0].text!="CMCJ2") ||
         !root.items[1].asUint64(&state) || state<static_cast<unsigned>(CreditRecoveryState::Prepared) || state>static_cast<unsigned>(CreditRecoveryState::Rejected)) return s.fail(CreditLedgerStatus::Storage);
     s.state=static_cast<CreditRecoveryState>(state);
     if (root.items[2].type!=JsonValue::Type::Null) {
@@ -125,7 +125,7 @@ CreditLedgerStatus CreditRecoveryJournal::open(const CreditProcessRequest &reque
         (s.state==CreditRecoveryState::Confirmed && (!s.applied || (*s.applied!=CreditLedgerStatus::Ok && *s.applied!=CreditLedgerStatus::Replay))) ||
         (s.state==CreditRecoveryState::Rejected && (!s.applied || !definite(*s.applied) || *s.applied==CreditLedgerStatus::Ok || *s.applied==CreditLedgerStatus::Replay))) return s.fail(CreditLedgerStatus::Storage);
     // Decode the original request from the canonical envelope without accepting a second serialization dialect.
-    const auto requestBegin=text.find(",[\"CMCR1\",");
+    const auto requestBegin=text.find(root.items[0].text=="CMCJ2"?",[\"CMCR3\",":",[\"CMCR1\",");
     const auto digestBegin=text.rfind(",\"");
     if (requestBegin==std::string::npos || digestBegin==std::string::npos || digestBegin<=requestBegin || digestBegin-requestBegin-1>creditRecoveryRequestLimit) return s.fail(CreditLedgerStatus::Storage);
     s.wire=text.substr(requestBegin+1,digestBegin-requestBegin-1);

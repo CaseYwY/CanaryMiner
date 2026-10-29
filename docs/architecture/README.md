@@ -30,6 +30,8 @@
 
 **Native credit review:** P-07d adds [private-original-input/status review and revision-bound exact retry](../credit-review.md) under Privacy. Ordinary settings opens no credit store/collector and clearly reports unavailable; the test-only fixture exercises the real helper. Tickets are not durable cursors, and changed review, lost reply or failed retry cannot erase uncertainty or enable income.
 
+**Atomic source checkpoints:** P-07e adds [fixture cursor persistence and one-page admission](../credit-cursor.md). Explicit v2 streams commit facts and cursors together, retain exact pending input and disclose committed checkpoints separately. No v1 migration, real provider/fetcher or production financial activation is implied.
+
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 
 ## Read in this order

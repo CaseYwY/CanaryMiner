@@ -101,8 +101,13 @@ class CreditReviewPanel {
         if(s->reply){out.push_back("Reply ticket "+std::to_string(s->reply->ticket)+" | ledger open "+status(s->reply->opened)+" | apply "+(s->reply->applied?status(*s->reply->applied):"not attempted"));
             if(s->reply->recovery)out.push_back("Journal/proof status: "+status(s->reply->recovery->status)+" | retained apply receipt "+(s->reply->recovery->applied?status(*s->reply->recovery->applied):"none"));}
         out.push_back("Retained durable entry sequence: "+std::to_string(s->durableSequence)+" (not necessarily committed)");
+        if(s->binding.cursor){
+            const auto *c=s->reply&&s->reply->cursor?&*s->reply->cursor:nullptr;
+            out.push_back("Committed source checkpoint: "+(c?status(c->status):std::string("unavailable"))+(c&&c->status==CreditLedgerStatus::Ok?" | sequence "+std::to_string(c->sequence):""));
+            out.push_back("A committed checkpoint is separate from pending recovery; only Ready with no pending job can admit a next page.");
+        }
         const CreditBatch *batch=s->uncertainBatch?s->uncertainBatch.get():s->reply&&s->reply->recovery&&s->reply->recovery->batch?&*s->reply->recovery->batch:nullptr;
-        if(!reveal)out.push_back("PRIVATE values hidden: provider/scope/IDs, original times/amounts/records/coverage. I reveals locally.");
+        if(!reveal)out.push_back("PRIVATE values hidden: provider/scope/IDs/cursors, original times/amounts/records/coverage. I reveals locally.");
         else{
             const auto &b=s->binding;out.push_back("LOCAL PRIVATE review - do not upload screenshots, state bundles or raw input.");
             out.push_back("Provider / contract: "+safe(b.provider)+" / "+safe(b.contractVersion));
@@ -114,7 +119,10 @@ class CreditReviewPanel {
                 (b.scaleDeclared?"declared scale "+std::to_string(b.amountScale):"MISSING declared scale"));
             out.push_back("Declared history start UTC ms: "+std::to_string(b.historyStartMs));
             out.push_back("Durable entry ID: "+safe(s->durableSnapshotId)+" | uncertain ID: "+safe(s->uncertainSnapshotId));
+            if(b.cursor){out.push_back("Cursor contract: "+safe(b.cursor->version));out.push_back("Initial cursor: "+safe(b.cursor->initial,512));
+                if(s->reply&&s->reply->cursor&&s->reply->cursor->status==CreditLedgerStatus::Ok){const auto &c=*s->reply->cursor;out.push_back("Committed next cursor: "+safe(c.next,512));out.push_back("Committed checkpoint snapshot: "+safe(c.snapshotId)+" | original observed UTC ms "+std::to_string(c.observedAtMs));}}
             if(batch){out.push_back("ORIGINAL retained batch: sequence "+std::to_string(batch->sequence)+" / ID "+safe(batch->snapshotId));
+                if(batch->cursor){out.push_back("Original cursor BEFORE: "+safe(batch->cursor->before,512));out.push_back("Original cursor AFTER: "+safe(batch->cursor->after,512));}
                 out.push_back("Original source-as-of UTC ms "+std::to_string(batch->sourceAsOfMs)+" / observed UTC ms "+std::to_string(batch->observedAtMs)+" (not refreshed by review/retry)");
                 out.push_back("Original records "+std::to_string(batch->records.size())+" / coverage assertions "+std::to_string(batch->coverage.size())+" (empty coverage means unknown, not zero)");
                 for(size_t i=0;i<batch->records.size()&&i<512;++i){const auto &r=batch->records[i];out.push_back("Record "+std::to_string(i+1)+": "+safe(r.id)+" revision "+std::to_string(r.revision)+" | "+(r.kind==CreditKind::PostedCredit?"posted credit":"posted adjustment")+" | posted UTC ms "+std::to_string(r.postedAtMs)+" | replacement "+r.amount.text()+" PRL | reference "+safe(r.reference));}
@@ -122,12 +130,12 @@ class CreditReviewPanel {
             else out.push_back("Original input unavailable in this snapshot; no replay can be reviewed here.");
         }
         if(reviewing){out.push_back(std::string(acknowledged?"[x]":"[ ]")+" Replay EXACT retained original ONCE; it may already have committed. No values/timestamps/IDs are edited.");out.push_back("Only an Ok/exact Replay plus persisted confirmation/proof can resolve; queue admission is not success.");}
-        out.push_back("No deletion, rebuild, cursor advancement, income calculation, mining start/restart or automatic retry.");
+        out.push_back(s->binding.cursor?"No manual cursor edits/deletion/rebuild/income/mining actions. Exact retry may atomically commit facts + cursor; never automatic.":"No deletion, rebuild, cursor advancement, income calculation, mining start/restart or automatic retry.");
         return out;
     }
    private:
     static bool eligible(const std::shared_ptr<const CreditOwnerSnapshot> &s){return s&&s->persistentRecovery&&s->state==CreditOwnerState::NeedsReconciliation&&s->writeOutcomeUnknown&&s->uncertainBatch&&!s->pendingJobs&&s->binding.qualification==CreditQualification::SyntheticFixture;}
-    static std::string safe(const std::string &text){std::string s;for(unsigned char c:text){if(s.size()>=128){s+="...";break;}s+=c>=32&&c<=126?static_cast<char>(c):'?';}return s.empty()?"none":s;}
+    static std::string safe(const std::string &text,size_t maximum=128){std::string s;for(unsigned char c:text){if(s.size()>=maximum){s+="...";break;}s+=c>=32&&c<=126?static_cast<char>(c):'?';}return s.empty()?"none":s;}
     static const char *ownerName(CreditOwnerState s){switch(s){case CreditOwnerState::Stopped:return "Stopped";case CreditOwnerState::Starting:return "Starting";case CreditOwnerState::Ready:return "Ready";case CreditOwnerState::Busy:return "Busy";case CreditOwnerState::NeedsReconciliation:return "NeedsReconciliation";case CreditOwnerState::Faulted:return "Faulted";}return "Unknown";}
     static const char *recoveryName(CreditRecoveryState s){switch(s){case CreditRecoveryState::Disabled:return "Disabled";case CreditRecoveryState::Empty:return "Empty";case CreditRecoveryState::Prepared:return "Prepared";case CreditRecoveryState::Confirmed:return "Confirmed";case CreditRecoveryState::Rejected:return "Rejected";case CreditRecoveryState::Diverged:return "Diverged";case CreditRecoveryState::Unavailable:return "Unavailable";}return "Unknown";}
     static const char *meaning(CreditRecoveryState s){switch(s){case CreditRecoveryState::Disabled:return "No durable protocol; not permission to bypass a pending journal.";case CreditRecoveryState::Empty:return "No retained journal entry; not proof of complete empty source history.";case CreditRecoveryState::Prepared:return "Original intent retained; final write outcome not established. New batches blocked.";case CreditRecoveryState::Confirmed:return "Retained receipt needs current latest-ledger proof; no new replay by opening this page.";case CreditRecoveryState::Rejected:return "New batch definitely rejected; preserve original. Corrected source input needs separate review.";case CreditRecoveryState::Diverged:return "Receipt and current ledger disagree; no recreate/delete/automatic repair. New batches blocked.";case CreditRecoveryState::Unavailable:return "Journal/store/binding unavailable; preserve files, never rebuild as zero.";}return "Unknown state; no action permission.";}

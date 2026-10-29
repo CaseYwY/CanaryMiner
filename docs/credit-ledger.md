@@ -1,5 +1,7 @@
 # Attributable posted-credit ledger core (P-07a)
 
+Follow-up [P-07e](credit-cursor.md) adds an opt-in repeatable/acyclic fixture page contract, schema-v2 cursor steps committed atomically with facts, read-only checkpoints and revision-bound single-page owner admission. The v1 non-cursor contract documented here remains supported without migration. Real source collection/qualification remains separate.
+
 **Implemented durable core, qualified only for explicitly synthetic fixtures.** This is not a working Kryptex/other-pool income integration. No production credit provider is registered, the supervisor opens no credit file, and `FinancialView.enabled` remains false. Accepted counters, wallet balances, payouts and market observations cannot create credits. Requirements R-INC-001/003–007 are partial; R-INC-002/P-08 calendar forecasting remains separate.
 
 ## Source contract before numbers

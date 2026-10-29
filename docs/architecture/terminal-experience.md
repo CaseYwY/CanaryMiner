@@ -65,6 +65,8 @@ P-05c [combined-tariff declarations](../tariff-declaration.md) add a second Elec
 
 P-07d [credit recovery review](../credit-review.md) is a third Privacy field, not an ingestion switch. Default empty callbacks show unavailable and never open a store. Injected immutable snapshots distinguish tickets/durable input/current proof/unknown outcomes; identifiers and original quantities/times require an explicit local reveal. R→I→Space→Enter reviews then admits one exact original retry under an atomic generation/revision check. Esc/Q/Ctrl+C, persistent acknowledgement focus, no duplicate Enter and separate dirty UI drafts remain native terminal behaviors; no deletion/rebuild/automatic retry or production source activation is added.
 
+P-07e [cursor review](../credit-cursor.md) distinguishes committed checkpoint status from retained pending BEFORE/AFTER. Opaque tokens are hidden by default and fully scrollable after explicit reveal. A pending target, queue ticket or successful inspection cannot authorize another page while reconciliation/stop/fault is active. Exact reviewed retry can atomically commit the original facts and cursor; manual cursor edits are unavailable.
+
 Implemented Log controls add renderer-owned **observed** UTC timestamps; they do not remove or reinterpret timestamps embedded in raw worker text. Default follow tracks the latest output; Up/PageUp holds scroll and F resumes. Turning follow off freezes that page's current snapshot while background collection continues. Re-entering the page takes a new frozen snapshot. Unclassified raw lines have an independent inclusion option; they are not guessed to be warnings because their text contains a keyword.
 
 ## Accessibility and internationalization

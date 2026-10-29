@@ -28,6 +28,7 @@ struct CreditProcessReply {
     std::optional<CreditLedgerStatus> applied;
     std::vector<CreditTotals> totals;
     std::optional<CreditRecoverySnapshot> recovery;
+    std::optional<CreditCursorCheckpoint> cursor; // committed ledger progress, separate from retained pending input
 };
 struct CreditProcessResult {
     LocalTaskStatus transport = LocalTaskStatus::Unavailable;

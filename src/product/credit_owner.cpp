@@ -49,6 +49,7 @@ struct CreditLedgerOwner::Impl {
         if (cancel.load() || (!initial && !opened)) return result;
         if (queries.size() > 4) { result.status = CreditEnqueueStatus::Invalid; return result; }
         if (uncertain && batch && !recovery) { result.status = CreditEnqueueStatus::NeedsReconciliation; return result; }
+        if(binding.cursor&&(!jobs.empty()||inFlight)){result.status=CreditEnqueueStatus::Full;return result;}
         if (jobs.size()+(inFlight?1:0) >= policy.maxJobs) { result.status = CreditEnqueueStatus::Full; return result; }
         const auto now = clock();
         if (now < lastUtc || current.lastAcceptedTicket == UINT64_MAX) { result.status = CreditEnqueueStatus::Invalid; return result; }
@@ -64,8 +65,10 @@ struct CreditLedgerOwner::Impl {
         if (wire.size() > policy.maxWireBytes-current.reservedWireBytes) { result.status = CreditEnqueueStatus::Full; return result; }
         j->bytes = wire.size(); j->recovery = recovery; jobs.push_back(j);
         const auto previousTicket = current.lastAcceptedTicket; const auto previousUtc = lastUtc;
+        const auto previousState=current.state;
         current.reservedWireBytes += j->bytes; current.lastAcceptedTicket = r.ticket; lastUtc = now;
-        try { publish(); } catch (...) { jobs.pop_back(); current.reservedWireBytes -= j->bytes; current.lastAcceptedTicket = previousTicket; lastUtc = previousUtc; throw; }
+        if(binding.cursor&&!initial)current.state=CreditOwnerState::Busy;
+        try { publish(); } catch (...) { jobs.pop_back(); current.reservedWireBytes -= j->bytes; current.lastAcceptedTicket = previousTicket; lastUtc = previousUtc;current.state=previousState;throw; }
         wait.notify_one();
         result.status = CreditEnqueueStatus::Queued; result.ticket = r.ticket; return result;
     }
@@ -92,6 +95,7 @@ struct CreditLedgerOwner::Impl {
                 if (current.reply) {
                     current.lastCompletedTicket = job->request.ticket;
                     if (current.reply->applied && !accepted(*current.reply->applied)) ok = false;
+                    if(binding.cursor&&(!current.reply->cursor||current.reply->cursor->status!=CreditLedgerStatus::Ok||current.reply->applied==CreditLedgerStatus::StaleBatch))ok=false;
                     for (const auto &t : current.reply->totals) if (t.status != CreditLedgerStatus::Ok) ok = false;
                     if (current.reply->recovery) {
                         const auto &recovered=*current.reply->recovery;
@@ -132,6 +136,7 @@ CreditLedgerOwner::~CreditLedgerOwner() { stop(); }
 bool CreditLedgerOwner::start(uint64_t generation) {
     auto &s = *impl_; std::lock_guard<std::mutex> control(s.lifecycle); std::lock_guard<std::mutex> lock(s.mutex);
     if (s.thread.joinable() || !generation || generation <= s.greatestGeneration || !localTaskPath(s.file) || !validCreditSourceContract(s.binding) ||
+        (s.binding.cursor&&!s.policy.persistentRecovery) ||
         !s.policy.maxJobs || s.policy.maxJobs > 32 || s.policy.maxWireBytes < 1024 || s.policy.maxWireBytes > 8*1024*1024 || s.policy.operationTimeoutMs < 50 || s.policy.operationTimeoutMs > 60000) return false;
     try {
         s.greatestGeneration = generation;
@@ -145,7 +150,18 @@ bool CreditLedgerOwner::start(uint64_t generation) {
 CreditEnqueueResult CreditLedgerOwner::submit(uint64_t generation, const CreditBatch &batch, const std::vector<CreditQuerySpec> &queries) {
     auto &s = *impl_; std::lock_guard<std::mutex> lock(s.mutex);
     if (generation != s.current.generation) return {CreditEnqueueStatus::StaleGeneration,0};
+    if(s.binding.cursor)return {CreditEnqueueStatus::Invalid,0}; // use checkpoint/revision-bound submitPage
     try { return s.enqueue(&batch,queries,false); } catch (...) { return {CreditEnqueueStatus::Invalid,0}; }
+}
+CreditEnqueueResult CreditLedgerOwner::submitPage(uint64_t generation,uint64_t revision,const CreditBatch &batch,const std::vector<CreditQuerySpec> &queries){
+    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
+    if(generation!=s.current.generation)return {CreditEnqueueStatus::StaleGeneration,0};
+    if(!revision||revision!=s.current.revision)return {CreditEnqueueStatus::ReviewChanged,0};
+    if(!s.binding.cursor||!s.policy.persistentRecovery)return {CreditEnqueueStatus::Invalid,0};
+    if(s.current.state!=CreditOwnerState::Ready||s.uncertain||!s.jobs.empty()||s.inFlight||!s.current.reply||!s.current.reply->cursor||s.current.reply->cursor->status!=CreditLedgerStatus::Ok)return {CreditEnqueueStatus::NotReady,0};
+    const auto &cursor=*s.current.reply->cursor;
+    if(!batch.cursor||cursor.sequence>=s.policy.ledger.maxSnapshots||batch.sequence!=cursor.sequence+1||batch.cursor->before!=cursor.next)return {CreditEnqueueStatus::Invalid,0};
+    try{return s.enqueue(&batch,queries,false);}catch(...){return {CreditEnqueueStatus::Invalid,0};}
 }
 CreditEnqueueResult CreditLedgerOwner::refresh(uint64_t generation, const std::vector<CreditQuerySpec> &queries) {
     auto &s = *impl_; std::lock_guard<std::mutex> lock(s.mutex);
@@ -155,6 +171,7 @@ CreditEnqueueResult CreditLedgerOwner::refresh(uint64_t generation, const std::v
 CreditEnqueueResult CreditLedgerOwner::retryUncertain(uint64_t generation) {
     auto &s = *impl_; std::lock_guard<std::mutex> lock(s.mutex);
     if (generation != s.current.generation) return {CreditEnqueueStatus::StaleGeneration,0};
+    if(s.binding.cursor)return {CreditEnqueueStatus::Invalid,0}; // cursor recovery requires the reviewed revision API
     if (!s.uncertain || !s.jobs.empty() || s.inFlight) return {CreditEnqueueStatus::NotReady,0};
     try { return s.enqueue(&*s.uncertain->request.batch,{},true); } catch (...) { return {CreditEnqueueStatus::Invalid,0}; }
 }

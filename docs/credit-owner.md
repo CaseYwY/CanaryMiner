@@ -1,5 +1,7 @@
 # Isolated bounded credit ownership (P-07b)
 
+[P-07e](credit-cursor.md) additionally supports explicit fixture cursors via `submitPage(generation, revision, page)`: one outstanding job, predecessor/sequence checked against committed progress, Busy published on admission and persistent recovery required. The legacy submission/volatile behavior below applies to non-cursor streams only. Neither ticket nor pending receipt substitutes for the schema-v2 transactional checkpoint.
+
 Follow-up: [P-07d](credit-review.md) adds native immutable-snapshot review and `retryReviewed(generation, revision)` to bind the user's final admission atomically to the reviewed state. It does not qualify a real source or start a production credit collector.
 
 **Offline/synthetic host integration only.** This batch adds a real native ledger helper, serialized bounded background jobs and immutable results; no production supervisor starts them. `FinancialView.enabled` remains false, no real source is qualified, and there is no new mining authorization, account/credential connector, manual income importer or today's forecast. [P-07a](credit-ledger.md) remains the durable-fact/schema contract; accepted-share history and its owner are unchanged.

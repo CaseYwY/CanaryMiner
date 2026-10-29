@@ -24,4 +24,12 @@ inline om::CreditBatch batch(uint64_t sequence, int64_t now, std::vector<om::Cre
     om::CreditBatch b; b.binding = contract(); b.sequence = sequence; b.snapshotId = "synthetic-snapshot-" + std::to_string(sequence);
     b.sourceAsOfMs = now; b.observedAtMs = now; b.records = std::move(records); b.coverage = {{b.binding.historyStartMs - 1,now}}; return b;
 }
+inline om::CreditSourceContract cursorContract() {
+    auto c=contract();c.cursor=om::CreditCursorContract{"fixture.exclusive-acyclic-v1","fixture:initial"};return c;
+}
+inline om::CreditBatch page(uint64_t sequence,int64_t now,std::vector<om::CreditRevision> records={},std::string before={},std::string after={}) {
+    auto b=batch(sequence,now,std::move(records));b.binding=cursorContract();b.coverage.clear();
+    b.cursor=om::CreditCursorStep{before.empty()?(sequence==1?b.binding.cursor->initial:"fixture:page-"+std::to_string(sequence-1)):std::move(before),
+        after.empty()?"fixture:page-"+std::to_string(sequence):std::move(after)};return b;
+}
 }  // namespace credit_fixture

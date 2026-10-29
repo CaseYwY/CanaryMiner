@@ -38,6 +38,8 @@ Test actual credits versus balance/payout/pending/share count; worker versus wal
 
 [P-07c](../credit-recovery.md) adds durable original intent/receipt, owner recreation, checksum/binding preservation, no-auto-replay inspection, read-only current-ledger proof and failed-retry non-erasure. Separate processes exit at prepared/applied/confirmed boundaries and recover without doubling or freshening. This does not prove live-parent death with an unreaped/stuck helper, genuine power loss, source-cursor/native recovery UI or production activation.
 
+[P-07e](../credit-cursor.md) tests atomic facts/cursor crash rollback, wrong predecessor/cycles/empty pages, strict v1/v2 and wire/journal compatibility, corruption/missing-file preservation, eight concurrent same-revision producers, stop/fault/refresh invalidation and exact recovery after prepared/unsettled/lost/bad acknowledgements. Native PTY checks committed versus pending progress and full hidden/revealed long tokens. This remains fixture-source evidence, not real-provider pagination or physical durability qualification.
+
 ## T-FORECAST
 
 Test today's actual-so-far plus remaining eligible expected income, calendar 23/24/25-hour days, delayed/incomplete current-day credits, uncertain schedules, switching/donation/fees without double deduction, and the separate rolling-24h row. Test no-tariff row omission versus configured zero/negative rate, missing price/FX/reward/cost data, negative valid estimated net values and matching revenue/cost horizons. Labels must say estimated, not realized.

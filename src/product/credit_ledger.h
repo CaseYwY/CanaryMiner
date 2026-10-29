@@ -16,6 +16,10 @@ enum class CreditAsset { Unsupported, PearlMainnetNative };
 enum class CreditTimeBasis { Unsupported, PostedUtcMilliseconds };
 enum class CreditRevisionModel { Unsupported, ReplacementValues };
 enum class CreditAmountBasis { Unsupported, PostedNetOfPoolCharges };
+// Opt-in fixture contract: repeatable exclusive pages, stable revision IDs and acyclic opaque cursors.
+// An empty page may advance only with a distinct cursor; cursor progress never asserts income coverage.
+struct CreditCursorContract { std::string version, initial; };
+struct CreditCursorStep { std::string before, after; };
 struct CreditSourceContract {
     CreditQualification qualification = CreditQualification::Unsupported;
     CreditAsset asset = CreditAsset::Unsupported;
@@ -27,6 +31,7 @@ struct CreditSourceContract {
     bool scaleDeclared = false, accountScopeAcknowledged = false;
     unsigned amountScale = 0;
     int64_t historyStartMs = 0;  // declared lower included history boundary, not inferred lifetime/inception
+    std::optional<CreditCursorContract> cursor; // new schema-v2 stream only; no implicit adoption/migration
 };
 enum class CreditKind { PostedCredit, PostedAdjustment };
 struct CreditRevision {
@@ -48,11 +53,13 @@ struct CreditBatch {
     std::vector<CreditRevision> records;
     // Replaces, never silently unions with, previous completeness claims. Empty means unknown coverage, not zero income.
     std::vector<CreditCoverage> coverage;
+    std::optional<CreditCursorStep> cursor;
 };
 // Pure bounded input checks shared by IPC/queue admission; they do not qualify a real provider or consult a store.
 bool validCreditSourceContract(const CreditSourceContract &contract);
 bool sameCreditSourceContract(const CreditSourceContract &a, const CreditSourceContract &b);
 bool boundedCreditBatchInput(const CreditBatch &batch, int64_t nowUtcMs);
+bool validCreditCursorToken(const std::string &token);
 struct CreditLedgerLimits {
     size_t maxRecords = 100000, maxVersions = 400000;
     size_t maxSnapshots = 400000;
@@ -61,6 +68,12 @@ struct CreditLedgerLimits {
 enum class CreditLedgerStatus { Ok, Replay, StaleBatch, Invalid, Unsupported, Attribution, Conflict, SequenceGap, Clock, Capacity, Storage };
 const char *creditLedgerStatusName(CreditLedgerStatus status);
 enum class CreditCompleteness { Unavailable, Partial, Complete };
+struct CreditCursorCheckpoint {
+    CreditLedgerStatus status = CreditLedgerStatus::Storage;
+    uint64_t sequence = 0;
+    std::string snapshotId, next;
+    int64_t sourceAsOfMs = 0, observedAtMs = 0;
+};
 struct CreditTotals {
     CreditLedgerStatus status = CreditLedgerStatus::Storage;
     CreditCompleteness completeness = CreditCompleteness::Unavailable;
@@ -82,6 +95,7 @@ class CreditLedger {
     CreditLedgerStatus apply(const CreditBatch &batch, int64_t nowUtcMs);
     // Read-only proof for the current latest snapshot only. Never inserts/replays a missing batch.
     CreditLedgerStatus verifyLatest(const CreditBatch &batch, int64_t nowUtcMs);
+    CreditCursorCheckpoint cursor(int64_t nowUtcMs); // read-only committed progress, never a queue/journal receipt
     CreditTotals query(int64_t fromExclusiveMs, int64_t throughInclusiveMs, int64_t nowUtcMs);
     CreditTotals cumulative(int64_t throughInclusiveMs, int64_t nowUtcMs);
    private:
