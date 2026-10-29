@@ -1,6 +1,7 @@
 # Optional local observed-power/reset-window module. No production collector/persistence activation.
 add_library(canary_energy_history STATIC
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_model.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/energy_compaction.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_ledger.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_process.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_recovery.cpp"

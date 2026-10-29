@@ -22,12 +22,11 @@ constexpr size_t fileLimit=energyHistoryRequestLimit+512;
 bool hash(const std::string &s){return s.size()==64&&s.find_first_not_of("0123456789abcdef")==std::string::npos;}
 bool accepted(S s){return s==S::Ok||s==S::Replay;}
 bool sameStore(const EnergyHistoryRequest &a,const EnergyHistoryRequest &b){
-    return a.file==b.file&&bindingText(a.binding)==bindingText(b.binding)&&a.limits.maxBatches==b.limits.maxBatches&&a.limits.maxReadings==b.limits.maxReadings&&
-        a.limits.maxSessions==b.limits.maxSessions&&a.limits.maxWindows==b.limits.maxWindows&&a.limits.maxDatabaseBytes==b.limits.maxDatabaseBytes;
+    return a.file==b.file&&bindingText(a.binding)==bindingText(b.binding)&&sameEnergyHistoryLimits(a.limits,b.limits);
 }
 EnergyHistoryRequest original(EnergyHistoryRequest r){r.generation=r.ticket=1;r.queries.clear();r.mode=EnergyHistoryOpen::Existing;r.recovery=EnergyRecoveryMode::Volatile;if(r.batch)r.nowUtcMs=r.batch->observedAtMs;return r;}
 std::string record(EnergyRecoveryState state,std::optional<S> applied,uint64_t prior,const std::string &digest,const std::string &request){
-    const auto body="[\"CMEJ1\","+std::to_string(static_cast<unsigned>(state))+","+(applied?std::to_string(static_cast<unsigned>(*applied)):"null")+","+
+    const auto body=std::string(request.rfind("[\"CMEQ3\",",0)==0?"[\"CMEJ2\",":"[\"CMEJ1\",")+std::to_string(static_cast<unsigned>(state))+","+(applied?std::to_string(static_cast<unsigned>(*applied)):"null")+","+
         std::to_string(prior)+","+jsonQuote(digest)+","+request;
     return body+","+jsonQuote(sha256Hex(body))+"]"; // corruption checksum, not authentication against directory rewrites
 }
@@ -101,12 +100,12 @@ S EnergyRecoveryJournal::open(const EnergyHistoryRequest &r){
     std::string text(fileLimit+1,'\0');in.read(&text[0],static_cast<std::streamsize>(text.size()));
     if(in.bad()||in.gcount()>static_cast<std::streamsize>(fileLimit))return s.fail(S::Storage);
     text.resize(static_cast<size_t>(in.gcount()));JsonValue root;uint64_t state=0,applied=0;
-    if(!boundedPublicJson(text)||!parseJsonStrict(text,&root,nullptr)||!root.isArray()||root.items.size()!=7||!root.items[0].isString()||root.items[0].text!="CMEJ1"||
-        !root.items[1].asUint64(&state)||state<1||state>4||!root.items[3].asUint64(&s.state.priorSequence)||s.state.priorSequence>r.limits.maxBatches||
+    if(!boundedPublicJson(text)||!parseJsonStrict(text,&root,nullptr)||!root.isArray()||root.items.size()!=7||!root.items[0].isString()||(root.items[0].text!="CMEJ1"&&root.items[0].text!="CMEJ2")||
+        !root.items[1].asUint64(&state)||state<1||state>4||!root.items[3].asUint64(&s.state.priorSequence)||s.state.priorSequence>(r.limits.compaction?lifetimeBatchLimit:r.limits.maxBatches)||
         !root.items[4].isString()||!hash(root.items[4].text))return s.fail(S::Storage);
     s.state.state=static_cast<EnergyRecoveryState>(state);s.state.priorDigest=root.items[4].text;
     if(root.items[2].type!=JsonValue::Type::Null){if(!root.items[2].asUint64(&applied)||applied>static_cast<unsigned>(S::Storage))return s.fail(S::Storage);s.state.applied=static_cast<S>(applied);}
-    const auto begin=text.find(",[\"CMEQ1\","),end=text.rfind(",\"");
+    const auto begin=text.find(root.items[0].text=="CMEJ2"?",[\"CMEQ3\",":",[\"CMEQ1\","),end=text.rfind(",\"");
     if(begin==std::string::npos||end==std::string::npos||end<=begin||end-begin-1>energyHistoryRequestLimit)return s.fail(S::Storage);
     s.wire=text.substr(begin+1,end-begin-1);std::string canonical;
     if(!decodeEnergyHistoryRequest(s.wire,&s.saved)||s.saved.recovery!=EnergyRecoveryMode::Volatile||s.saved.mode!=EnergyHistoryOpen::Existing||!s.saved.queries.empty()||

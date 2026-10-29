@@ -37,20 +37,26 @@ struct EnergyHistoryBatch {
     std::vector<EnergyHistoryReading> readings;
     std::vector<EnergyResetWindow> windows;
 };
-struct EnergyHistoryLimits {
-    size_t maxBatches = 4096, maxReadings = 131072, maxSessions = 1024, maxWindows = 4096;
-    uint64_t maxDatabaseBytes = 64*1024*1024;
+struct EnergyCompactionPolicy {
+    size_t afterBatches=512, maxSegments=32768; // exact segments; capacity rejects rather than averaging/downsampling
 };
-enum class EnergyHistoryStatus { Ok, Replay, Invalid, Attribution, Conflict, SequenceGap, Clock, Capacity, Storage };
+struct EnergyHistoryLimits {
+    size_t maxBatches = 4096, maxReadings = 131072, maxSessions = 1024, maxWindows = 4096; // v2: first two bound uncompacted detail, others lifetime
+    uint64_t maxDatabaseBytes = 64*1024*1024;
+    std::optional<EnergyCompactionPolicy> compaction={}; // explicit new schema-v2 store; never adopt/migrate v1
+};
+enum class EnergyHistoryStatus { Ok, Replay, Invalid, Attribution, Conflict, SequenceGap, Clock, Capacity, Storage, DetailExpired };
 enum class EnergyHistoryOpen { Existing, CreateNew }; // never recreate missing/corrupt history implicitly
 enum class EnergyHistoryCoverage { Unavailable, Partial, Complete };
 const char *energyHistoryStatusName(EnergyHistoryStatus status);
 bool validEnergyHistoryBinding(const EnergyHistoryBinding &binding);
 bool validEnergyHistoryLimits(const EnergyHistoryLimits &limits);
+bool sameEnergyHistoryLimits(const EnergyHistoryLimits &a,const EnergyHistoryLimits &b);
 bool boundedEnergyHistoryBatch(const EnergyHistoryBinding &binding, const EnergyHistoryBatch &batch, int64_t nowUtcMs);
 struct EnergyHistoryCheckpoint {
     EnergyHistoryStatus status = EnergyHistoryStatus::Storage;
     uint64_t sequence = 0, readingCount = 0, sessionCount = 0, windowCount = 0;
+    uint64_t compactedSequence = 0; // raw originals before this sequence expired; exact aggregate intervals remain
     std::string batchId, sessionId, digest; // audited chain head; local corruption/recovery binding, not authentication
     int64_t observedAtMs = 0, throughUtcMs = 0;
 };

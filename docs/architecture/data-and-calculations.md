@@ -108,6 +108,8 @@ The initial [observed-energy ledger](../energy-history.md) integrates raw intege
 
 [Durable energy recovery](../energy-recovery.md) retains the exact observation batch and its **prior committed** sequence/hash before append. Neither Prepared's target sequence nor a queue ticket contributes energy. Restart inspection accepts only that prior prefix or the exact original's resulting head; successful explicit retry does not renew observation times, add duplicate integrals or authorize continuation of an old sampling session. A failed retry leaves unresolved Prepared evidence intact.
 
+[Opt-in exact compaction](../energy-compaction.md) preserves summed milliwatts and covered-channel counts as exact piecewise intervals, with active per-channel continuity retained separately. Arbitrary millisecond queries and independent reset projections clip those intervals without rounding or average-power interpolation. Raw per-channel originals before the exposed compaction boundary expire; DetailExpired is neither exact replay proof nor missing aggregate energy. Segment growth remains bounded and capacity rejects instead of weakening precision or coverage.
+
 ## 7. Curves, calibration and optimization
 
 Profile identity includes local device identity, software/driver/kernel version, work shape, throttle mechanism, thermal environment, measurement basis, warm-up/repetition/window and evidence freshness. Never copy one machine's frequencies, identifiers, power or profit numbers into shipped defaults.

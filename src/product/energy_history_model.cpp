@@ -84,9 +84,11 @@ bool parseBatchValue(const JsonValue &v,const EnergyHistoryBinding &binding,Ener
 EnergyHistoryStatus Model::advance(const EnergyHistoryBinding &binding,const EnergyHistoryBatch &b,const EnergyHistoryLimits &limits) {
     using S=EnergyHistoryStatus;
     if(b.sequence!=head.sequence+1)return S::SequenceGap;
+    if(limits.compaction&&b.id!="energy."+std::to_string(b.sequence))return S::Invalid;
     if(batchIds.count(b.id))return S::Conflict;
     if(b.observedAtMs<head.observedAtMs)return S::Clock;
-    if(head.sequence>=limits.maxBatches||b.readings.size()>limits.maxReadings-head.readingCount||
+    if(head.sequence>=(limits.compaction?lifetimeBatchLimit:limits.maxBatches)||
+        (limits.compaction?b.readings.size()>limits.maxReadings:b.readings.size()>limits.maxReadings-head.readingCount)||
         b.windows.size()>limits.maxWindows-head.windowCount)return S::Capacity;
     for(const auto &w:b.windows){
         const auto key=std::make_pair(w.registerId,w.periodId);if(windows.count(key))return S::Conflict;
@@ -119,7 +121,9 @@ EnergyHistoryStatus Model::advance(const EnergyHistoryBinding &binding,const Ene
         channel.last=r;lastMono=r.monotonicMs;lastWall=r.utcMs;lastContinuity=r.continuity;head.throughUtcMs=mapped;
     }
     head.status=S::Ok;head.sequence=b.sequence;head.batchId=b.id;head.observedAtMs=b.observedAtMs;
-    head.readingCount+=b.readings.size();head.sessionCount=sessions.size();head.windowCount=windows.size();batchIds.insert(b.id);
+    head.readingCount+=b.readings.size();head.sessionCount=sessions.size();head.windowCount=windows.size();
+    if(limits.compaction)batchIds.clear(); // sequence-derived v2 IDs cannot be reused, including after raw expiry
+    batchIds.insert(b.id);
     return S::Ok;
 }
 EnergyHistoryTotals Model::query(const EnergyHistoryBinding &binding,int64_t begin,int64_t end,int64_t now) const {
@@ -129,6 +133,12 @@ EnergyHistoryTotals Model::query(const EnergyHistoryBinding &binding,int64_t beg
     t.status=EnergyHistoryStatus::Ok;t.observedAtMs=head.observedAtMs;
     t.requestedDeviceMs=static_cast<uint64_t>(end-begin)*binding.channels.size();
     ExactDecimal milli;ExactDecimal::parse("0.001",&milli);
+    for(const auto &i:segments){const auto a=(std::max)(begin,i.begin),z=(std::min)(end,i.end);if(a>=z)continue;
+        const auto dt=static_cast<uint64_t>(z-a);ExactDecimal n;
+        if(!decimal(i.milliwatts).multiply(decimal(dt),&n)||!n.multiply(milli,&n)||!t.knownKwh.numerator.add(n,&t.knownKwh.numerator)){
+            EnergyHistoryTotals fail;fail.status=EnergyHistoryStatus::Capacity;fail.beginUtcMs=begin;fail.endUtcMs=end;return fail;}
+        t.coveredDeviceMs+=dt*i.coveredChannels;
+    }
     for(const auto &i:intervals){const auto a=(std::max)(begin,i.begin),z=(std::min)(end,i.end);if(a>=z)continue;
         const auto dt=static_cast<uint64_t>(z-a);ExactDecimal n;
         if(!decimal(i.milliwatts).multiply(decimal(dt),&n)||!n.multiply(milli,&n)||!t.knownKwh.numerator.add(n,&t.knownKwh.numerator)){
@@ -151,7 +161,13 @@ bool validEnergyHistoryBinding(const EnergyHistoryBinding &b) {
 }
 bool validEnergyHistoryLimits(const EnergyHistoryLimits &l) {
     return l.maxBatches&&l.maxBatches<=4096&&l.maxReadings&&l.maxReadings<=131072&&l.maxSessions&&l.maxSessions<=1024&&l.maxWindows&&l.maxWindows<=4096&&
-        l.maxDatabaseBytes>=1024*1024&&l.maxDatabaseBytes<=128*1024*1024;
+        l.maxDatabaseBytes>=1024*1024&&l.maxDatabaseBytes<=128*1024*1024&&
+        (!l.compaction||(l.compaction->afterBatches&&l.compaction->afterBatches<=l.maxBatches&&l.compaction->maxSegments&&l.compaction->maxSegments<=32768));
+}
+bool sameEnergyHistoryLimits(const EnergyHistoryLimits &a,const EnergyHistoryLimits &b){
+    return a.maxBatches==b.maxBatches&&a.maxReadings==b.maxReadings&&a.maxSessions==b.maxSessions&&a.maxWindows==b.maxWindows&&
+        a.maxDatabaseBytes==b.maxDatabaseBytes&&a.compaction.has_value()==b.compaction.has_value()&&
+        (!a.compaction||(a.compaction->afterBatches==b.compaction->afterBatches&&a.compaction->maxSegments==b.compaction->maxSegments));
 }
 bool boundedEnergyHistoryBatch(const EnergyHistoryBinding &binding,const EnergyHistoryBatch &b,int64_t now) {
     using namespace energy_history_detail;
@@ -175,6 +191,7 @@ const char *energyHistoryStatusName(EnergyHistoryStatus s) {
         case EnergyHistoryStatus::Clock:return "energy clock/continuity fault";
         case EnergyHistoryStatus::Capacity:return "energy history capacity";
         case EnergyHistoryStatus::Storage:return "energy storage/integrity unavailable; preserve history";
+        case EnergyHistoryStatus::DetailExpired:return "original energy batch detail expired; aggregate retained";
     }return "unsupported energy history state";
 }
 } // namespace om

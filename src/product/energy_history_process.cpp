@@ -20,7 +20,7 @@ bool u(const JsonValue &v,uint64_t &n,uint64_t max=INT64_MAX){return v.asUint64(
 bool time(const JsonValue &v,int64_t &n){uint64_t x=0;if(!u(v,x,lastUtcMs))return false;n=static_cast<int64_t>(x);return true;}
 bool str(const JsonValue &v,std::string &s,size_t max=4096){if(!v.isString()||v.text.size()>max||v.text.find('\0')!=std::string::npos)return false;s=v.text;return true;}
 bool null(const JsonValue &v){return v.type==JsonValue::Type::Null;}
-bool status(const JsonValue &v,EnergyHistoryStatus &s){uint64_t n=0;if(!u(v,n,static_cast<unsigned>(EnergyHistoryStatus::Storage)))return false;s=static_cast<EnergyHistoryStatus>(n);return true;}
+bool status(const JsonValue &v,EnergyHistoryStatus &s){uint64_t n=0;if(!u(v,n,static_cast<unsigned>(EnergyHistoryStatus::DetailExpired)))return false;s=static_cast<EnergyHistoryStatus>(n);return true;}
 bool decimal(const JsonValue &v,ExactDecimal &d){return v.isString()&&v.text.size()<=150&&ExactDecimal::parse(v.text,&d)&&d.text()==v.text&&!d.negative();}
 bool valid(const EnergyHistoryRequest &r){
     if(!r.generation||!r.ticket||!localTaskPath(r.file)||!validEnergyHistoryBinding(r.binding)||!validEnergyHistoryLimits(r.limits)||!instant(r.nowUtcMs)||r.binding.historyBeginUtcMs>r.nowUtcMs||
@@ -36,18 +36,21 @@ bool valid(const EnergyHistoryRequest &r){
         (q.registerId.empty()? !q.periodId.empty():!identifier(q.registerId)||!identifier(q.periodId)))return false;
     return !r.batch||boundedEnergyHistoryBatch(r.binding,*r.batch,r.nowUtcMs);
 }
-std::string headText(const EnergyHistoryCheckpoint &c,bool persistent){
+std::string headText(const EnergyHistoryCheckpoint &c,bool persistent,bool compact){
     return "["+std::to_string(static_cast<unsigned>(c.status))+","+std::to_string(c.sequence)+","+std::to_string(c.readingCount)+","+std::to_string(c.sessionCount)+","+
-        std::to_string(c.windowCount)+","+jsonQuote(c.batchId)+","+jsonQuote(c.sessionId)+","+std::to_string(c.observedAtMs)+","+std::to_string(c.throughUtcMs)+(persistent?","+jsonQuote(c.digest):"")+"]";
+        std::to_string(c.windowCount)+","+jsonQuote(c.batchId)+","+jsonQuote(c.sessionId)+","+std::to_string(c.observedAtMs)+","+std::to_string(c.throughUtcMs)+
+        ((persistent||compact)?","+jsonQuote(c.digest):"")+(compact?","+std::to_string(c.compactedSequence):"")+"]";
 }
 bool head(const JsonValue &v,const EnergyHistoryRequest &r,EnergyHistoryCheckpoint &c){
     const bool persistent=r.recovery!=EnergyRecoveryMode::Volatile;
-    if(!array(v,persistent?10:9))return false;
+    const bool compact=r.limits.compaction.has_value();
+    if(!array(v,compact?11:persistent?10:9))return false;
     const auto &a=v.items;
-    if(!status(a[0],c.status)||!u(a[1],c.sequence,r.limits.maxBatches)||!u(a[2],c.readingCount,r.limits.maxReadings)||!u(a[3],c.sessionCount,r.limits.maxSessions)||
+    if(!status(a[0],c.status)||!u(a[1],c.sequence,compact?lifetimeBatchLimit:r.limits.maxBatches)||!u(a[2],c.readingCount,compact?128*c.sequence:r.limits.maxReadings)||!u(a[3],c.sessionCount,r.limits.maxSessions)||
         !u(a[4],c.windowCount,r.limits.maxWindows)||!str(a[5],c.batchId,128)||!str(a[6],c.sessionId,128)||!time(a[7],c.observedAtMs)||!time(a[8],c.throughUtcMs))return false;
-    if(persistent&&(!str(a[9],c.digest,64)||(c.status==S::Ok?!hash(c.digest):!c.digest.empty())))return false;
-    if(persistent&&c.status==S::Ok&&!c.sequence&&c.digest!=sha256Hex(bindingText(r.binding)))return false;
+    if((persistent||compact)&&(!str(a[9],c.digest,64)||(c.status==S::Ok?!hash(c.digest):!c.digest.empty())))return false;
+    if((persistent||compact)&&c.status==S::Ok&&!c.sequence&&c.digest!=sha256Hex(bindingText(r.binding)))return false;
+    if(compact&&(!u(a[10],c.compactedSequence,c.sequence)||c.sequence-c.compactedSequence>=r.limits.compaction->afterBatches))return false;
     if(c.status!=EnergyHistoryStatus::Ok||!c.sequence)return !c.sequence&&!c.readingCount&&!c.sessionCount&&!c.windowCount&&c.batchId.empty()&&c.sessionId.empty()&&!c.observedAtMs&&!c.throughUtcMs;
     return identifier(c.batchId)&&c.sessionCount<=c.sequence&&c.readingCount<=128*c.sequence&&c.windowCount<=32*c.sequence&&
         (c.sessionCount||c.windowCount)&&c.observedAtMs>=r.binding.historyBeginUtcMs&&c.observedAtMs<=r.nowUtcMs&&c.throughUtcMs<=c.observedAtMs&&
@@ -80,7 +83,7 @@ std::string recoveryText(const EnergyRecoverySnapshot &s){
 }
 bool recovery(const JsonValue &v,const EnergyHistoryRequest &r,const EnergyHistoryReply &reply,EnergyRecoverySnapshot &s){
     uint64_t state=0;if(!array(v,6)||!status(v.items[0],s.status)||!u(v.items[1],state,static_cast<unsigned>(R::Unavailable))||
-        !u(v.items[2],s.priorSequence,r.limits.maxBatches)||!str(v.items[3],s.priorDigest,64))return false;
+        !u(v.items[2],s.priorSequence,r.limits.compaction?lifetimeBatchLimit:r.limits.maxBatches)||!str(v.items[3],s.priorDigest,64))return false;
     s.state=static_cast<R>(state);
     if(!null(v.items[4])){EnergyHistoryBatch b;if(!parseBatchValue(v.items[4],r.binding,&b)||!boundedEnergyHistoryBatch(r.binding,b,r.nowUtcMs))return false;s.batch=std::move(b);}
     if(!null(v.items[5])){S applied;if(!status(v.items[5],applied))return false;s.applied=applied;}
@@ -104,25 +107,29 @@ bool recovery(const JsonValue &v,const EnergyHistoryRequest &r,const EnergyHisto
 bool encodeEnergyHistoryRequest(const EnergyHistoryRequest &r,std::string *wire){
     if(!wire||!valid(r))return false;
     try{
-        std::string text=std::string(r.recovery==EnergyRecoveryMode::Volatile?"[\"CMEQ1\",":"[\"CMEQ2\",")+std::to_string(r.generation)+","+std::to_string(r.ticket)+","+jsonQuote(r.file.u8string())+","+bindingText(r.binding)+",["+
+        std::string text=std::string(r.limits.compaction?"[\"CMEQ3\",":r.recovery==EnergyRecoveryMode::Volatile?"[\"CMEQ1\",":"[\"CMEQ2\",")+std::to_string(r.generation)+","+std::to_string(r.ticket)+","+jsonQuote(r.file.u8string())+","+bindingText(r.binding)+",["+
             std::to_string(r.limits.maxBatches)+","+std::to_string(r.limits.maxReadings)+","+std::to_string(r.limits.maxSessions)+","+std::to_string(r.limits.maxWindows)+","+
             std::to_string(r.limits.maxDatabaseBytes)+"],"+std::to_string(static_cast<unsigned>(r.mode))+","+std::to_string(r.nowUtcMs)+","+
             (r.batch?batchText(*r.batch):"null")+",[";
         for(size_t i=0;i<r.queries.size();++i){if(i)text+=',';const auto &q=r.queries[i];text+="["+std::to_string(q.beginUtcMs)+","+std::to_string(q.endUtcMs)+","+jsonQuote(q.registerId)+","+jsonQuote(q.periodId)+"]";}
-        text+="]";if(r.recovery!=EnergyRecoveryMode::Volatile)text+=","+std::to_string(static_cast<unsigned>(r.recovery));
+        text+="]";if(r.recovery!=EnergyRecoveryMode::Volatile||r.limits.compaction)text+=","+std::to_string(static_cast<unsigned>(r.recovery));
+        if(r.limits.compaction)text+=",["+std::to_string(r.limits.compaction->afterBatches)+","+std::to_string(r.limits.compaction->maxSegments)+"]";
         text+="]";if(text.size()>requestLimit||!boundedPublicJson(text))return false;*wire=std::move(text);return true;
     }catch(...){return false;}
 }
 bool decodeEnergyHistoryRequest(const std::string &wire,EnergyHistoryRequest *out){
     if(!out||wire.size()>requestLimit||!boundedPublicJson(wire))return false;
     JsonValue v;if(!parseJsonStrict(wire,&v,nullptr)||!v.isArray()||v.items.empty()||!v.items[0].isString())return false;
-    const bool persistent=v.items[0].text=="CMEQ2";if(!array(v,persistent?11:10)||(!persistent&&v.items[0].text!="CMEQ1"))return false;
+    const bool compact=v.items[0].text=="CMEQ3",persistent=v.items[0].text=="CMEQ2";
+    if(!array(v,compact?12:persistent?11:10)||(!compact&&!persistent&&v.items[0].text!="CMEQ1"))return false;
     const auto &a=v.items;EnergyHistoryRequest r;std::string path;uint64_t mode=0,n[5]={};
     if(!u(a[1],r.generation,UINT64_MAX)||!u(a[2],r.ticket,UINT64_MAX)||!str(a[3],path)||
         !parseBindingValue(a[4],&r.binding)||!array(a[5],5)||!u(a[6],mode,1)||!time(a[7],r.nowUtcMs)||!a[9].isArray()||a[9].items.size()>4)return false;
     for(size_t i=0;i<5;++i)if(!u(a[5].items[i],n[i],128*1024*1024))return false;
     r.limits={static_cast<size_t>(n[0]),static_cast<size_t>(n[1]),static_cast<size_t>(n[2]),static_cast<size_t>(n[3]),n[4]};r.mode=static_cast<EnergyHistoryOpen>(mode);
-    if(persistent){uint64_t recoveryMode=0;if(!u(a[10],recoveryMode,3)||!recoveryMode)return false;r.recovery=static_cast<EnergyRecoveryMode>(recoveryMode);}
+    if(persistent||compact){uint64_t recoveryMode=0;if(!u(a[10],recoveryMode,3)||(!compact&&!recoveryMode))return false;r.recovery=static_cast<EnergyRecoveryMode>(recoveryMode);}
+    if(compact){uint64_t after=0,segments=0;if(!array(a[11],2)||!u(a[11].items[0],after,4096)||!u(a[11].items[1],segments,32768))return false;
+        r.limits.compaction=EnergyCompactionPolicy{static_cast<size_t>(after),static_cast<size_t>(segments)};}
     try{r.file=std::filesystem::u8path(path);}catch(...){return false;}
     if(!null(a[8])){EnergyHistoryBatch b;if(!parseBatchValue(a[8],r.binding,&b))return false;r.batch=std::move(b);}
     for(const auto &s:a[9].items){EnergyHistoryQuery q;if(!array(s,4)||!time(s.items[0],q.beginUtcMs)||!time(s.items[1],q.endUtcMs)||!str(s.items[2],q.registerId,128)||!str(s.items[3],q.periodId,128))return false;r.queries.push_back(std::move(q));}
@@ -132,20 +139,24 @@ bool decodeEnergyHistoryRequest(const std::string &wire,EnergyHistoryRequest *ou
 bool encodeEnergyHistoryReply(const EnergyHistoryRequest &r,const EnergyHistoryReply &reply,std::string *wire){
     if(!wire||!valid(r)||reply.totals.size()>4)return false;
     const bool persistent=r.recovery!=EnergyRecoveryMode::Volatile;if(persistent!=reply.recovery.has_value())return false;
-    std::string text=std::string(persistent?"[\"CMEA2\",":"[\"CMEA1\",")+std::to_string(reply.generation)+","+std::to_string(reply.ticket)+","+std::to_string(static_cast<unsigned>(reply.opened))+","+
-        (reply.applied?std::to_string(static_cast<unsigned>(*reply.applied)):"null")+","+headText(reply.checkpoint,persistent)+",[";
+    const bool compact=r.limits.compaction.has_value();
+    std::string text=std::string(compact?"[\"CMEA3\",":persistent?"[\"CMEA2\",":"[\"CMEA1\",")+std::to_string(reply.generation)+","+std::to_string(reply.ticket)+","+std::to_string(static_cast<unsigned>(reply.opened))+","+
+        (reply.applied?std::to_string(static_cast<unsigned>(*reply.applied)):"null")+","+headText(reply.checkpoint,persistent,compact)+",[";
     for(size_t i=0;i<reply.totals.size();++i){if(i)text+=',';text+=totalText(reply.totals[i]);}
-    text+="]";if(persistent)text+=","+recoveryText(*reply.recovery);text+="]";
+    text+="]";if(persistent)text+=","+recoveryText(*reply.recovery);else if(compact)text+=",null";text+="]";
     EnergyHistoryReply checked;if(!decodeEnergyHistoryReply(r,text,&checked))return false;*wire=std::move(text);return true;
 }
 bool decodeEnergyHistoryReply(const EnergyHistoryRequest &r,const std::string &wire,EnergyHistoryReply *out){
     if(!out||!valid(r)||wire.size()>localTaskResponseLimit||!boundedPublicJson(wire))return false;
     const bool persistent=r.recovery!=EnergyRecoveryMode::Volatile;
-    JsonValue v;if(!parseJsonStrict(wire,&v,nullptr)||!array(v,persistent?8:7))return false;
+    const bool compact=r.limits.compaction.has_value();
+    JsonValue v;if(!parseJsonStrict(wire,&v,nullptr)||!array(v,(persistent||compact)?8:7))return false;
     const auto &a=v.items;EnergyHistoryReply reply;
-    if(!a[0].isString()||a[0].text!=(persistent?"CMEA2":"CMEA1")||!u(a[1],reply.generation,UINT64_MAX)||!u(a[2],reply.ticket,UINT64_MAX)||reply.generation!=r.generation||reply.ticket!=r.ticket||
+    if(!a[0].isString()||a[0].text!=(compact?"CMEA3":persistent?"CMEA2":"CMEA1")||!u(a[1],reply.generation,UINT64_MAX)||!u(a[2],reply.ticket,UINT64_MAX)||reply.generation!=r.generation||reply.ticket!=r.ticket||
         !status(a[3],reply.opened)||!head(a[5],r,reply.checkpoint)||!a[6].isArray())return false;
     if(!null(a[4])){EnergyHistoryStatus s;if(!status(a[4],s))return false;reply.applied=s;}
+    if(reply.opened==S::DetailExpired||reply.checkpoint.status==S::DetailExpired||(!compact&&reply.applied==S::DetailExpired))return false;
+    if(compact&&!persistent&&!null(a[7]))return false;
     if(reply.opened!=EnergyHistoryStatus::Ok){if(reply.applied||!a[6].items.empty()||reply.checkpoint.status==EnergyHistoryStatus::Ok)return false;}
     else{
         if(reply.applied.has_value()!=r.batch.has_value()||a[6].items.size()!=r.queries.size())return false;
@@ -160,6 +171,7 @@ bool decodeEnergyHistoryReply(const EnergyHistoryRequest &r,const std::string &w
             if(reply.applied==EnergyHistoryStatus::Ok&&(c.sequence!=r.batch->sequence||c.batchId!=r.batch->id||c.observedAtMs!=r.batch->observedAtMs))return false;
             if(c.sequence==r.batch->sequence&&(c.batchId!=r.batch->id||c.observedAtMs!=r.batch->observedAtMs))return false;
         }
+        if(reply.applied==S::DetailExpired&&(!r.batch||reply.checkpoint.status!=S::Ok||r.batch->sequence>=reply.checkpoint.compactedSequence))return false;
     }
     if(persistent){EnergyRecoverySnapshot s;if(!recovery(a[7],r,reply,s))return false;
         if(reply.applied&&accepted(*reply.applied)&&s.status!=S::Ok)return false;
@@ -199,11 +211,11 @@ EnergyHistoryReply executeEnergyHistoryRequest(const EnergyHistoryRequest &r){
                 reply.applied=journal.prepare(r,ledger.checkpoint(r.nowUtcMs));
                 if(reply.applied==S::Ok){
 #ifdef CANARY_ENERGY_RECOVERY_TESTING
-                    if(r.batch->id=="fixture.exit-prepared")std::_Exit(88);
+                    if(r.batch->id=="fixture.exit-prepared"||(r.file.filename()=="fixture.compact-prepared.db"&&r.batch->sequence==2))std::_Exit(88);
 #endif
                     reply.applied=ledger.apply(*r.batch,r.nowUtcMs);
 #ifdef CANARY_ENERGY_RECOVERY_TESTING
-                    if(r.batch->id=="fixture.exit-committed"&&accepted(*reply.applied))std::_Exit(89);
+                    if((r.batch->id=="fixture.exit-committed"||(r.file.filename()=="fixture.compact-committed.db"&&r.batch->sequence==2))&&accepted(*reply.applied))std::_Exit(89);
 #endif
                     if(*reply.applied!=S::Storage&&journal.settle(*reply.applied)!=S::Ok)reply.applied=S::Storage;
                 }

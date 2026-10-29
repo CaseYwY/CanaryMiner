@@ -19,7 +19,7 @@ int main(int argc,char **argv){
 #ifdef CANARY_ENERGY_HISTORY_WORKER_TESTING
         if(request.batch&&request.batch->id=="fixture.stall-after"&&reply.applied==EnergyHistoryStatus::Ok){
             std::ofstream(marker).put('1');std::this_thread::sleep_for(std::chrono::seconds(60));}
-        if(request.batch&&request.batch->id=="fixture.bad-ack")return writeLocalTaskOutput("[\"CMEA1\"]")?0:4;
+        if(request.batch&&(request.batch->id=="fixture.bad-ack"||(request.file.filename()=="fixture.compact-bad-ack.db"&&request.batch->sequence==2)))return writeLocalTaskOutput("[\"CMEA1\"]")?0:4;
 #endif
         wire.clear();return encodeEnergyHistoryReply(request,reply,&wire)&&writeLocalTaskOutput(wire)?0:4;
     }catch(...){return 5;} // never print readings, channel keys, paths or storage diagnostics
