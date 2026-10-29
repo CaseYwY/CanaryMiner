@@ -118,6 +118,8 @@ P-03b [host-wait evidence](../work-wait.md) covers deterministic wait clocks, CL
 
 ## T-OPTIMIZER
 
+[P-10a](../economic-study.md) checks exact ranking by net/real-time, prospective transitions/tests, source/record binding, market/FX completeness/freshness, restricted tariff capabilities, zero/signed inputs and capacity refusal. A deterministic independent Fraction oracle checks every candidate value and ordering across varied dimensions; these are synthetic offline studies, not live optimizer qualification.
+
 Test best eligible estimated net per elapsed time, no-data/nonpositive pause, all configured timers independently, source/curve expiry, hysteresis/cooldowns, switch/test costs and stale asynchronous results. Test current prices rather than historical per-credit valuations, joint-meter interactions and separate normal/game candidates. Heuristic margins are not statistical confidence bounds.
 
 ## T-GAME
