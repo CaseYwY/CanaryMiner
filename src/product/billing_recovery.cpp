@@ -96,7 +96,7 @@ struct BillingRecoveryStore::Impl {
         if(!ok){std::filesystem::remove(temp,ec);return fail(S::Storage);}
         next.revision=revision;state=std::move(next);original=input;return S::Ok;
     }
-    S load(int64_t now){
+    S load(int64_t now,const std::string &expectedBinding={}){
         std::error_code ec;if(!std::filesystem::is_regular_file(std::filesystem::symlink_status(path,ec))||ec)return S::Storage;
         std::ifstream in(path,std::ios::binary);if(!in)return S::Storage;
         std::string text(fileLimit+1,'\0');in.read(&text[0],static_cast<std::streamsize>(text.size()));
@@ -104,6 +104,11 @@ struct BillingRecoveryStore::Impl {
         text.resize(static_cast<size_t>(in.gcount()));size_t at=6;std::string metadata,saved;
         if(text.rfind("CMBJ1\n",0)!=0||!part(text,at,metadataLimit,metadata)||!part(text,at,bindingLimit,saved)||!part(text,at,chunkLimit,original)||text.size()-at!=65||text.back()!='\n')return S::Storage;
         state.revision=text.substr(at,64);if(!hash(state.revision)||sha256Hex(text.substr(0,at))!=state.revision)return S::Storage;
+        if(!expectedBinding.empty()){
+            if(sha256Hex(saved)!=expectedBinding)return S::Attribution;
+            if(!parseBinding(saved,binding,limits))return S::Storage;
+            const auto valid=validateBinding(binding,limits,now);if(valid!=S::Ok)return valid;bound=saved;
+        }
         JsonValue root;uint64_t kind=0,result=0,recorded=0;
         if(!parseJsonStrict(metadata,&root,nullptr)||!root.isArray()||root.items.size()!=6)return S::Storage;
         const auto &a=root.items;
@@ -182,6 +187,17 @@ S BillingRecoveryStore::open(const std::filesystem::path &file,const BillingBind
     }catch(...){return s.fail(S::Storage);}
 }
 BillingRecoverySnapshot BillingRecoveryStore::inspect(int64_t now)const{return impl_->inspect(now);}
+S BillingRecoveryStore::openQuery(const std::filesystem::path &file,const std::string &expected,int64_t now){
+    auto &s=*impl_;if(s.attempted)return S::Invalid;s.attempted=true;
+    const auto text=file.u8string();if(!hash(expected)||!instant(now)||!file.is_absolute()||text.size()>4096||text.find('\0')!=std::string::npos)return s.fail(S::Invalid);
+    s.file=file;s.path=file;s.path+=".billing-recovery";s.queryOnly=true;
+    try{
+        auto lock=s.path;lock+=".lock";if(!s.lease.acquire(lock))return s.fail(S::Storage);
+        const auto loaded=s.load(now,expected);if(loaded!=S::Ok)return s.fail(loaded);
+        const auto opened=s.ledger.open(file,s.binding,now,BillingOpen::Inspect,s.limits);if(opened!=S::Ok)return s.fail(opened);
+        s.ready=true;return S::Ok;
+    }catch(...){return s.fail(S::Storage);}
+}
 S BillingRecoveryStore::submit(const BillingChunk &chunk,int64_t now){
     auto &s=*impl_;if(!s.ready)return S::Storage;if(s.queryOnly)return S::Unsupported;
     try{

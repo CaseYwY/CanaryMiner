@@ -71,6 +71,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05k](../billing-pending.md) adds a synchronous ordered recovery-store facade: complete canonical binding/chunk frames are durable before monetary apply, and exact source receipts survive process loss. QueryOnly returns committed prefix and pending input separately. Explicit retry checks the inspected revision and full original, never re-fetches and never clears failed uncertainty. This precedes bounded monetary transport/background ownership.
 
+[P-05l](../billing-query.md) adds a parent-bound existing-only monetary reader: it verifies the caller-approved binding digest, audits under ordered leases and returns 48-KiB byte pages under one complete-view hash. The client reconstructs full original and committed state only after all bounded pages agree. Native periodic ownership and isolated write/retry transports remain unconnected.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

@@ -64,6 +64,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05k](../billing-pending.md) checks durable monetary originals at flushed-temp, Prepared, pre/post-COMMIT and settlement boundaries, including failed-settlement restart. Independent processes retry exact receipts after their synthetic source is removed; stale/changed original, failed retry and divergent/absent/corrupt pairs preserve bytes. Maximum source envelopes and a >1-MiB framed binding/chunk round-trip without widening shared parsers. Readonly methods refuse writes and ordinary artifacts exclude crash seams. Physical storage and bounded native transport remain separate qualification.
 
+[P-05l](../billing-query.md) checks full-original paging, changed-view discard, malformed headers/frames, generation/ticket/hash/offset consistency, wrong helpers and whole-transaction Busy/cancel/deadline. Parent-death probes own their processes and preserve originals; Prepared and committed-but-unconfirmed views remain readonly with the energy source offline. Large canonical binding and maximum source receipts exercise the new decoder/helper, without production/source or write-transport qualification.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

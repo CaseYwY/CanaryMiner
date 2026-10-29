@@ -1,5 +1,5 @@
 # Optional synchronous fixture billing store. No native runtime or source adapter is enabled by linking the core.
-add_library(canary_billing STATIC "${CMAKE_SOURCE_DIR}/src/product/billing_ledger.cpp" "${CMAKE_SOURCE_DIR}/src/product/billing_recovery.cpp")
+add_library(canary_billing STATIC "${CMAKE_SOURCE_DIR}/src/product/billing_ledger.cpp" "${CMAKE_SOURCE_DIR}/src/product/billing_recovery.cpp" "${CMAKE_SOURCE_DIR}/src/product/billing_codec.cpp" "${CMAKE_SOURCE_DIR}/src/product/billing_query_process.cpp")
 target_compile_features(canary_billing PUBLIC cxx_std_17)
 target_include_directories(canary_billing PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(canary_billing PUBLIC canary_economics canary_energy_history PRIVATE ${CMAKE_DL_LIBS})
@@ -9,3 +9,5 @@ if(MSVC)
 else()
   target_compile_options(canary_billing PRIVATE -Wall -Wextra -Werror)
 endif()
+add_executable(canary_billing_query_worker "${CMAKE_SOURCE_DIR}/src/product/billing_query_worker.cpp")
+target_link_libraries(canary_billing_query_worker PRIVATE canary_billing)

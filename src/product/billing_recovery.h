@@ -23,6 +23,8 @@ class BillingRecoveryStore {
     BillingStatus open(const std::filesystem::path &absoluteFile,const BillingBinding &binding,int64_t nowUtcMs,
                        BillingRecoveryOpen mode=BillingRecoveryOpen::Existing,BillingLimits limits={});
     BillingRecoverySnapshot inspect(int64_t nowUtcMs)const; // never settles, retries or repairs
+    // Existing-only READONLY lookup for an isolated reader. The caller must already approve the complete binding digest.
+    BillingStatus openQuery(const std::filesystem::path &absoluteFile,const std::string &expectedBindingDigest,int64_t nowUtcMs);
     BillingStatus submit(const BillingChunk &chunk,int64_t nowUtcMs);
     BillingStatus retry(const BillingChunk &reviewedOriginal,const std::string &reviewedRevision,int64_t nowUtcMs);
    private:

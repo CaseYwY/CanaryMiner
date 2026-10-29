@@ -11,4 +11,6 @@ std::string bindingText(const BillingBinding &binding,const BillingLimits &limit
 std::string chunkText(const BillingChunk &chunk);
 bool parseChunk(const std::string &text,const PowerEvidence &evidence,BillingChunk &out);
 std::string stateText(const BillingSnapshot &snapshot);
+bool parseBinding(const std::string &text,BillingBinding &binding,BillingLimits &limits);
+bool parseState(const std::string &text,const BillingBinding &binding,const BillingLimits &limits,int64_t nowUtcMs,BillingSnapshot &snapshot);
 } } // namespace om::billing_detail

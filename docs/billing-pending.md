@@ -47,3 +47,5 @@ Executed evidence:
 These are CPU/fixture/WSL and logical-capacity tests; physical disk/full-power-loss, installed helper trust/lifecycle, real sources and runtime qualification remain separate. No new named-timezone or UI/PTY qualification is claimed.
 
 Next: bounded monetary helper transport and background ownership, including revision-bound full-original review/transfer larger than a single existing response; native source/configuration/cycle/archive handling follows. No public wire budget is enlarged or original discarded to fit a later transport.
+
+[P-05l](billing-query.md) subsequently supplies parent-bound readonly inspection and complete-original paging under a single view digest. Write/retry transport, native review and background ownership remain separate.

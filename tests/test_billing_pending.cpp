@@ -86,6 +86,8 @@ int main(){
         const auto saved=bytes(recoveryJournal(path));CHECK(saved.size()>1024*1024&&saved.size()<1024*1024+128*1024);
         {BillingRecoveryStore query;CHECK(query.open(path,large,now,O::QueryOnly)==S::Ok);const auto s=query.inspect(now);
             CHECK(s.state==R::Confirmed&&s.original->trace.intervals.size()==512&&billing_detail::chunkText(*s.original)==billing_detail::chunkText(c)&&bytes(recoveryJournal(path))==saved);}
+        {BillingRecoveryStore query;CHECK(query.openQuery(path,sha256Hex(billing_detail::bindingText(large,{})),now)==S::Ok);const auto s=query.inspect(now);
+            CHECK(s.state==R::Confirmed&&query.submit(c,now)==S::Unsupported&&query.retry(*s.original,s.revision,now)==S::Unsupported&&bytes(recoveryJournal(path))==saved);}
         auto excessive=c;excessive.sequence=2;excessive.trace.intervals.push_back({T+512,T+513,d("1")});
         BillingRecoveryStore store;CHECK(store.open(path,large,now)==S::Ok&&store.submit(excessive,now)==S::Invalid&&bytes(recoveryJournal(path))==saved);}
     {const auto path=root/"page-cap.db";auto bound=billing_fixture::binding();const auto at=T+2*electricity_fixture::hour;BillingLimits cap;cap.maxDatabaseBytes=1024*1024;
