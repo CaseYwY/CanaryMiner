@@ -34,5 +34,6 @@ struct Model {
     // Caller stages a copy for atomic rejection. No rounding, I/O or system-time inference.
     EnergyHistoryStatus advance(const EnergyHistoryBinding &binding, const EnergyHistoryBatch &batch, const EnergyHistoryLimits &limits);
     EnergyHistoryTotals query(const EnergyHistoryBinding &binding, int64_t begin, int64_t end, int64_t now) const;
+    EnergyHistoryTrace trace(const EnergyHistoryBinding &binding,int64_t begin,int64_t end,int64_t now,size_t maxIntervals) const;
 };
 } // namespace om::energy_history_detail

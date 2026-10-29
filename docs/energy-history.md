@@ -6,6 +6,8 @@
 
 Requirements: R-ENG-001, R-TAR-003, R-SAFE-001/002, R-PRIV-002 and R-REL-001 remain partial. Modules: M-ENERGY/M-TARIFF. Tests: T-ENERGY/T-TARIFF/T-INTENT/T-PRIVACY/T-RELEASE. D-37 defines this slice. It supplies neither attributable income nor a bill, forecast, tariff activation or hardware-control permission.
 
+[P-05h](energy-trace.md) adds a separate SQLite READONLY `ExistingQuery` mode and bounded exact full-coverage power traces from one audited committed snapshot. Raw/compacted chronology is retained for future tariff integration; the existing write/recovery IPC does not gain this mode, and no runtime billing source is activated.
+
 ## Binding and observation identity
 
 `EnergyHistoryBinding` is immutable for one store: power basis, origin, adapter, private scope, ordered private channel keys and the declared local-history lower boundary. It is not device discovery or proof of lifetime coverage. Channels must be distinct, with 1–64 entries. All identifiers are bounded ASCII keys (1–128 characters), not terminal text, account credentials or executable paths.

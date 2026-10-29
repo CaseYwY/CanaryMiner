@@ -149,6 +149,41 @@ EnergyHistoryTotals Model::query(const EnergyHistoryBinding &binding,int64_t beg
     if(t.coverage==EnergyHistoryCoverage::Complete)t.completeKwh=t.knownKwh;
     return t;
 }
+EnergyHistoryTrace Model::trace(const EnergyHistoryBinding &binding,int64_t begin,int64_t end,int64_t now,size_t maximum) const {
+    using S=EnergyHistoryStatus;EnergyHistoryTrace result;
+    if(!maximum||maximum>512){result.status=S::Invalid;return result;}
+    result.totals=query(binding,begin,end,now);result.status=result.totals.status;
+    if(result.status!=S::Ok)return result;
+    result.binding=binding;result.checkpoint=head;
+    if(result.totals.coverage!=EnergyHistoryCoverage::Complete)return result;
+    // These are the existing absolute model budgets, independent of a caller's smaller output budget.
+    if(intervals.size()>131072||segments.size()>32768){result.status=S::Capacity;return result;}
+    struct Event {int64_t at,mw,count;};std::vector<Event> events;
+    events.reserve(2*(intervals.size()+segments.size())+2);events.push_back({begin,0,0});events.push_back({end,0,0});
+    const auto add=[&](int64_t a,int64_t z,uint64_t mw,unsigned count){
+        a=(std::max)(a,begin);z=(std::min)(z,end);if(a>=z)return true;
+        if(!count||count>binding.channels.size()||mw>static_cast<uint64_t>(count)*UINT32_MAX)return false;
+        events.push_back({a,static_cast<int64_t>(mw),count});events.push_back({z,-static_cast<int64_t>(mw),-static_cast<int64_t>(count)});return true;
+    };
+    for(const auto &i:segments)if(!add(i.begin,i.end,i.milliwatts,i.coveredChannels)){result.status=S::Storage;return result;}
+    for(const auto &i:intervals)if(i.channel>=binding.channels.size()||!add(i.begin,i.end,i.milliwatts,1)){result.status=S::Storage;return result;}
+    std::sort(events.begin(),events.end(),[](const Event &a,const Event &b){return a.at<b.at;});
+    PowerTrace output;output.evidence=binding.evidence;int64_t mw=0,count=0,prior=begin;ExactDecimal integral,milli;ExactDecimal::parse("0.001",&milli);
+    for(size_t i=0;i<events.size();){const auto at=events[i].at;
+        if(at>prior){
+            if(count!=static_cast<int64_t>(binding.channels.size())||mw<0||static_cast<uint64_t>(mw)>static_cast<uint64_t>(count)*UINT32_MAX){result.status=S::Storage;return result;}
+            ExactDecimal watts,part;
+            if(!decimal(static_cast<uint64_t>(mw)).multiply(milli,&watts)||!watts.multiply(decimal(static_cast<uint64_t>(at-prior)),&part)||!integral.add(part,&integral)){result.status=S::Capacity;return result;}
+            if(!output.intervals.empty()&&output.intervals.back().watts.compare(watts)==0)output.intervals.back().endUtcMs=at;
+            else{if(output.intervals.size()==maximum){result.status=S::Capacity;return result;}output.intervals.push_back({prior,at,std::move(watts)});}
+        }
+        do{mw+=events[i].mw;count+=events[i].count;++i;}while(i<events.size()&&events[i].at==at);
+        if(count<0||count>static_cast<int64_t>(binding.channels.size())||mw<0||static_cast<uint64_t>(mw)>static_cast<uint64_t>(count)*UINT32_MAX){result.status=S::Storage;return result;}
+        prior=at;
+    }
+    if(mw||count||prior!=end||output.intervals.empty()||integral.compare(result.totals.knownKwh.numerator)!=0){result.status=S::Storage;return result;}
+    result.completeTrace=std::move(output);return result;
+}
 } // namespace energy_history_detail
 bool validEnergyHistoryBinding(const EnergyHistoryBinding &b) {
     using namespace energy_history_detail;

@@ -24,7 +24,7 @@ struct EnergyHistoryLedger::Impl {
     SqliteRuntime api;
     SqliteDb *db=nullptr;
     LocalStoreLease lease;
-    bool attempted=false,ready=false;
+    bool attempted=false,ready=false,readOnly=false;
     EnergyHistoryBinding binding;
     EnergyHistoryLimits limits;
     Model model;
@@ -97,17 +97,20 @@ EnergyHistoryStatus EnergyHistoryLedger::open(const std::filesystem::path &path,
     if(s.attempted)return S::Invalid;
     s.attempted=true;
     if(!validEnergyHistoryBinding(binding)||!validEnergyHistoryLimits(limits)||!instant(now)||binding.historyBeginUtcMs>now||!path.is_absolute()||
-        (mode!=EnergyHistoryOpen::Existing&&mode!=EnergyHistoryOpen::CreateNew))return S::Invalid;
-    s.binding=binding;s.limits=limits;
+        (mode!=EnergyHistoryOpen::Existing&&mode!=EnergyHistoryOpen::CreateNew&&mode!=EnergyHistoryOpen::ExistingQuery))return S::Invalid;
+    s.binding=binding;s.limits=limits;s.readOnly=mode==EnergyHistoryOpen::ExistingQuery;
     try{
         if(!s.api.load())return S::Storage;
         std::error_code ec;
         if(mode==EnergyHistoryOpen::CreateNew)std::filesystem::create_directories(path.parent_path(),ec);
+        else if(!std::filesystem::is_regular_file(std::filesystem::symlink_status(path,ec))||ec)return S::Storage;
         if(ec)return S::Storage;
         auto lock=path;lock+=".lock";if(!s.lease.acquire(lock))return S::Storage;
         const auto status=std::filesystem::symlink_status(path,ec);
         const bool absent=ec==std::errc::no_such_file_or_directory||(!ec&&status.type()==std::filesystem::file_type::not_found);
         if(mode==EnergyHistoryOpen::CreateNew){if(!absent)return S::Conflict;
+            for(const auto *suffix:{"-wal","-shm","-journal"}){auto companion=path;companion+=suffix;const auto st=std::filesystem::symlink_status(companion,ec);
+                if(ec!=std::errc::no_such_file_or_directory&&(ec||st.type()!=std::filesystem::file_type::not_found))return S::Storage;}
 #if defined(_WIN32)
             HANDLE file=CreateFileW(path.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
             if(file==INVALID_HANDLE_VALUE)return S::Storage;
@@ -118,13 +121,13 @@ EnergyHistoryStatus EnergyHistoryLedger::open(const std::filesystem::path &path,
             ::close(fd);
 #endif
         }else if(absent||ec||!std::filesystem::is_regular_file(status)||std::filesystem::file_size(path)>limits.maxDatabaseBytes)return S::Storage;
-        if(s.api.openV2(path.u8string().c_str(),&s.db,2|0x10000|0x1000000,nullptr)!=0)return S::Storage;
+        if(s.api.openV2(path.u8string().c_str(),&s.db,(s.readOnly?1:2)|0x10000|0x1000000,nullptr)!=0)return S::Storage;
         s.api.busyTimeout(s.db,0);
         s.api.limit(s.db,0,static_cast<int>((limits.compaction?energySnapshotLimit:batchWireLimit)+4096));s.api.limit(s.db,1,65536);s.api.limit(s.db,2,32);s.api.limit(s.db,3,32);s.api.limit(s.db,7,0);
         int64_t app=0,version=0;
-        if(!s.scalar("PRAGMA application_id",&app)||!s.scalar("PRAGMA user_version",&version)||(mode==EnergyHistoryOpen::Existing&&(app!=application||version!=(limits.compaction?2:1))))return S::Storage;
+        if(!s.scalar("PRAGMA application_id",&app)||!s.scalar("PRAGMA user_version",&version)||(mode!=EnergyHistoryOpen::CreateNew&&(app!=application||version!=(limits.compaction?2:1))))return S::Storage;
         if(!s.exec("PRAGMA trusted_schema=OFF; PRAGMA foreign_keys=ON; PRAGMA temp_store=MEMORY; PRAGMA cache_size=-2048;"))return S::Storage;
-        if(mode==EnergyHistoryOpen::Existing){
+        if(mode!=EnergyHistoryOpen::CreateNew){
             int64_t extra=0;
             const auto extraSql=limits.compaction?"SELECT count(*) FROM sqlite_master WHERE type IN ('trigger','view') OR (type='table' AND name NOT IN ('meta','events','retention'))":
                 "SELECT count(*) FROM sqlite_master WHERE type IN ('trigger','view') OR (type='table' AND name NOT IN ('meta','events'))";
@@ -137,9 +140,12 @@ EnergyHistoryStatus EnergyHistoryLedger::open(const std::filesystem::path &path,
             if(!s.audit())return S::Storage;
             if(now<s.model.head.observedAtMs)return S::Clock;
         }
-        if(!s.isText("PRAGMA journal_mode=WAL","wal")||!s.exec("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=256; PRAGMA journal_size_limit=1048576;"))return S::Storage;
-        int64_t page=0;
-        if(!s.scalar("PRAGMA page_size",&page)||page<512||page>65536||!s.exec("PRAGMA max_page_count="+std::to_string(limits.maxDatabaseBytes/static_cast<uint64_t>(page))))return S::Storage;
+        if(s.readOnly){if(!s.isText("PRAGMA journal_mode","wal"))return S::Storage;}
+        else if(!s.isText("PRAGMA journal_mode=WAL","wal")||!s.exec("PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=256; PRAGMA journal_size_limit=1048576;"))return S::Storage;
+        int64_t page=0,pages=0;
+        if(!s.scalar("PRAGMA page_size",&page)||page<512||page>65536||!s.scalar("PRAGMA page_count",&pages)||pages<0||
+            (mode!=EnergyHistoryOpen::CreateNew&&pages<1)||static_cast<uint64_t>(pages)>limits.maxDatabaseBytes/static_cast<uint64_t>(page))return S::Storage;
+        if(!s.readOnly&&!s.exec("PRAGMA max_page_count="+std::to_string(limits.maxDatabaseBytes/static_cast<uint64_t>(page))))return S::Storage;
         if(mode==EnergyHistoryOpen::CreateNew){
             s.digest=sha256Hex(bindingText(binding));
             if(!s.exec("BEGIN IMMEDIATE;"+metaSql+";"+eventsSql+";"+(limits.compaction?retentionSql+";":""))||!s.write("INSERT INTO meta VALUES(1,?,0,?)",{bindingText(binding),s.digest})||
@@ -153,6 +159,7 @@ EnergyHistoryStatus EnergyHistoryLedger::open(const std::filesystem::path &path,
 EnergyHistoryStatus EnergyHistoryLedger::apply(const EnergyHistoryBatch &b,int64_t now){
     using S=EnergyHistoryStatus;auto &s=*impl_;
     if(!s.ready)return S::Storage;
+    if(s.readOnly)return S::Invalid;
     if(!boundedEnergyHistoryBatch(s.binding,b,now)||(s.limits.compaction&&b.id!="energy."+std::to_string(b.sequence)))return S::Invalid;
     if(now<s.model.head.observedAtMs)return S::Clock;
     try{
@@ -209,6 +216,13 @@ EnergyHistoryTotals EnergyHistoryLedger::registerTotal(const std::string &reg,co
     const auto i=s.model.windows.find({reg,period});
     if(i==s.model.windows.end()){t.status=EnergyHistoryStatus::Invalid;return t;}
     return s.model.query(s.binding,i->second.beginUtcMs,(std::min)(through,i->second.endUtcMs),now);
+}
+EnergyHistoryTrace EnergyHistoryLedger::queryTrace(int64_t begin,int64_t end,int64_t now,size_t maximum) const {
+    const auto &s=*impl_;if(!s.ready)return {};
+    try{auto result=s.model.trace(s.binding,begin,end,now,maximum);
+        if(result.checkpoint.status==EnergyHistoryStatus::Ok)result.checkpoint.digest=s.digest;
+        return result;
+    }catch(...){EnergyHistoryTrace result;result.status=EnergyHistoryStatus::Capacity;return result;}
 }
 #ifdef CANARY_ENERGY_HISTORY_TESTING
 void EnergyHistoryTestPeer::crashBeforeCommit(EnergyHistoryLedger &ledger){ledger.impl_->crash=true;}

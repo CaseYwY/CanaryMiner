@@ -46,7 +46,7 @@ struct EnergyHistoryLimits {
     std::optional<EnergyCompactionPolicy> compaction={}; // explicit new schema-v2 store; never adopt/migrate v1
 };
 enum class EnergyHistoryStatus { Ok, Replay, Invalid, Attribution, Conflict, SequenceGap, Clock, Capacity, Storage, DetailExpired };
-enum class EnergyHistoryOpen { Existing, CreateNew }; // never recreate missing/corrupt history implicitly
+enum class EnergyHistoryOpen { Existing, CreateNew, ExistingQuery }; // ExistingQuery is SQLite READONLY; no creation/apply
 enum class EnergyHistoryCoverage { Unavailable, Partial, Complete };
 const char *energyHistoryStatusName(EnergyHistoryStatus status);
 bool validEnergyHistoryBinding(const EnergyHistoryBinding &binding);
@@ -68,6 +68,13 @@ struct EnergyHistoryTotals {
     ElectricityAmount knownKwh;
     std::optional<ElectricityAmount> completeKwh;
 };
+struct EnergyHistoryTrace {
+    EnergyHistoryStatus status=EnergyHistoryStatus::Storage;
+    EnergyHistoryBinding binding;
+    EnergyHistoryCheckpoint checkpoint; // one audited committed model for the head, totals and trace
+    EnergyHistoryTotals totals;
+    std::optional<PowerTrace> completeTrace; // absent if ANY selected-channel/time coverage is missing
+};
 class EnergyHistoryLedger {
    public:
     EnergyHistoryLedger();
@@ -81,6 +88,8 @@ class EnergyHistoryLedger {
     EnergyHistoryStatus verifyCommitted(const EnergyHistoryBatch &batch, int64_t nowUtcMs); // read-only exact retained input proof
     EnergyHistoryCheckpoint checkpoint(int64_t nowUtcMs) const;
     EnergyHistoryTotals query(int64_t beginUtcMs, int64_t endUtcMs, int64_t nowUtcMs) const;
+    // Exact summed held watts, never average power. Capacity refuses rather than smoothing/partial trace publication.
+    EnergyHistoryTrace queryTrace(int64_t beginUtcMs,int64_t endUtcMs,int64_t nowUtcMs,size_t maxIntervals=512) const;
     EnergyHistoryTotals registerTotal(const std::string &registerId, const std::string &periodId, int64_t throughUtcMs, int64_t nowUtcMs) const;
    private:
     struct Impl;
