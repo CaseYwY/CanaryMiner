@@ -72,6 +72,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05o](../billing-input-query.md) checks readonly reconstruction from binding/path alone, including partial and maximum originals, rehashed incorrect binding prefixes, changed-page discard, absent versus temporary states, historical outcomes without a live monetary pair and malformed/non-regular records. Owned-parent death and seam checks cover the new reader; no native/physical-storage qualification is implied.
 
+[P-05p](../billing-owner.md) checks default-off single-flight ownership, current/staged snapshot changes, preflight/live CAS, exact bounded receipt admission, loss/restart/retry/reconcile, retained older uncertainty, stop/invalidate/clock/rollback revocation and deadline behavior. Separate parents exercise owned helper death and readonly reconstruction; an isolated Unreaped seam checks terminal admission, including invalidated results. Native/physical/kernel/deployment qualification remains separate.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

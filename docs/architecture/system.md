@@ -79,6 +79,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05o](../billing-input-query.md) separately isolates staged-original reads. An approved complete binding lets the parent reconstruct exact staged prefix bytes without retransmitting that binding. One digest binds up to four pages; partial originals, stored outcomes, absent stage and temporary-slot ambiguity remain explicit. It opens neither monetary nor energy stores and supplies no restart action.
 
+[P-05p](../billing-owner.md) serializes those helper clients on one default-off background owner. Stage/current-money/stage observations are revalidated against the reviewed generation/revision before explicit action. Complete input/retained intent/confirmed action proof stay separate from current monetary views. Stop and latched faults prevent revival; native integration and source compute remain unconnected.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

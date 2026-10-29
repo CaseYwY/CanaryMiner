@@ -34,3 +34,5 @@ Executed evidence:
 - The temporary-slot presence flag was added after the first run. One in-progress sanitizer wrapper encountered revised assertions with its older probe and stopped with a missing-output-key error; the final probe, helpers and selected tests were rebuilt together and pass. That interrupted intermediate selection is not counted as a completed run.
 
 Full-original native review and a background recovery/compute owner still need to combine this **staging** snapshot with a separate current monetary snapshot and generation/revision-bound actions. Explicit partial/orphan management, runtime source/configuration/cycle/archive binding and production qualification remain open. CPU/WSL/sanitizer evidence does not qualify physical storage faults, deployed trust/global reaping, real sensors/rates, named-timezone/UI rendering or actual income.
+
+[P-05p](billing-owner.md) subsequently composes both readonly views and explicit recovery actions in a default-off background owner. Native full-original review and source/compute/runtime binding remain follow-ups.

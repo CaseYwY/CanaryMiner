@@ -34,7 +34,8 @@ def process_identity(pid):
         try:
             fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
             return fields[19], fields[0]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # procfs can report ESRCH when the task exits after open but before read.
             return None
 
     original = current()
