@@ -185,7 +185,7 @@ int main(int argc,char **argv){
         CHECK(owner.submit(2,owner.snapshot()->revision,next)==EnergyHistoryAdmission::Invalid);owner.stop();
     }
     for(const auto &id:std::vector<std::string>{"fixture.stall-before","fixture.stall-after","fixture.bad-ack"}){
-        const auto path=root/(id+".db");EnergyHistoryOwner owner(fixture,path,binding(),{},300,[]{return T+20000;});CHECK(owner.start(1,EnergyHistoryOpen::CreateNew)&&ready(owner));
+        const auto path=root/(id+".db");EnergyHistoryOwner owner(fixture,path,binding(),{},300,[]{return T+20000;},false);CHECK(owner.start(1,EnergyHistoryOpen::CreateNew)&&ready(owner));
         auto batch=first();batch.id=id;CHECK(owner.submit(1,owner.snapshot()->revision,batch)==EnergyHistoryAdmission::Queued);
         CHECK(until([&]{return owner.snapshot()->state==EnergyHistoryOwnerState::Faulted;}));CHECK(owner.snapshot()->uncertainBatch&&owner.snapshot()->uncertainBatch->id==id);
         const auto retained=owner.snapshot()->uncertainBatch;owner.stop();CHECK(owner.start(2)&&ready(owner));

@@ -3,6 +3,7 @@ add_library(canary_energy_history STATIC
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_model.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_ledger.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_process.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/energy_recovery.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_owner.cpp")
 target_compile_features(canary_energy_history PUBLIC cxx_std_17)
 target_include_directories(canary_energy_history PUBLIC "${CMAKE_SOURCE_DIR}/src")

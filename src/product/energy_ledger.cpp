@@ -134,11 +134,7 @@ EnergyHistoryStatus EnergyHistoryLedger::apply(const EnergyHistoryBatch &b,int64
     if(now<s.model.head.observedAtMs)return S::Clock;
     try{
         const auto body=batchText(b);
-        if(b.sequence<=s.model.head.sequence){ // any retained committed sequence, not merely the most recent receipt
-            Impl::Statement q(&s,"SELECT id,body FROM events WHERE sequence=?",{static_cast<int64_t>(b.sequence)});std::string id,stored;
-            if(q.step()!=100||!s.text(q.value,0,&id)||!s.text(q.value,1,&stored)||q.step()!=101)return s.fail();
-            return id==b.id&&stored==body?S::Replay:S::Conflict;
-        }
+        if(b.sequence<=s.model.head.sequence)return verifyCommitted(b,now);
         auto next=s.model;const auto valid=next.advance(s.binding,b,s.limits);if(valid!=S::Ok)return valid;
         const auto digest=sha256Hex(s.digest+"|"+body);
         if(!s.exec("BEGIN IMMEDIATE;"))return s.fail();
@@ -151,12 +147,23 @@ EnergyHistoryStatus EnergyHistoryLedger::apply(const EnergyHistoryBatch &b,int64
         s.model=std::move(next);s.digest=digest;return S::Ok;
     }catch(...){s.exec("ROLLBACK;");return s.fail();}
 }
+EnergyHistoryStatus EnergyHistoryLedger::verifyCommitted(const EnergyHistoryBatch &b,int64_t now){
+    using S=EnergyHistoryStatus;auto &s=*impl_;
+    if(!s.ready)return S::Storage;
+    if(!boundedEnergyHistoryBatch(s.binding,b,now))return S::Invalid;
+    if(now<s.model.head.observedAtMs)return S::Clock;
+    if(b.sequence>s.model.head.sequence)return S::SequenceGap;
+    try{Impl::Statement q(&s,"SELECT id,body FROM events WHERE sequence=?",{static_cast<int64_t>(b.sequence)});std::string id,stored;
+        if(q.step()!=100||!s.text(q.value,0,&id)||!s.text(q.value,1,&stored)||q.step()!=101)return s.fail();
+        return id==b.id&&stored==batchText(b)?S::Replay:S::Conflict;
+    }catch(...){return s.fail();}
+}
 EnergyHistoryCheckpoint EnergyHistoryLedger::checkpoint(int64_t now) const {
     const auto &s=*impl_;EnergyHistoryCheckpoint c;
     if(!s.ready)return c;
     if(!instant(now)){c.status=EnergyHistoryStatus::Invalid;return c;}
     if(now<s.model.head.observedAtMs){c.status=EnergyHistoryStatus::Clock;return c;}
-    return s.model.head;
+    c=s.model.head;c.digest=s.digest;return c;
 }
 EnergyHistoryTotals EnergyHistoryLedger::query(int64_t begin,int64_t end,int64_t now) const {
     const auto &s=*impl_;EnergyHistoryTotals t;t.beginUtcMs=begin;t.endUtcMs=end;

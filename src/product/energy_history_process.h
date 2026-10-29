@@ -3,6 +3,9 @@
 #include "local_task_process.h"
 
 namespace om {
+enum class EnergyRecoveryMode { Volatile, Inspect, Submit, Retry };
+enum class EnergyRecoveryState { Disabled, Empty, Prepared, Confirmed, Rejected, Diverged, Unavailable };
+constexpr size_t energyHistoryRequestLimit=64*1024;
 struct EnergyHistoryQuery {
     int64_t beginUtcMs=0,endUtcMs=0;
     std::string registerId,periodId; // optional exact-window assertion; mismatch rejects instead of choosing another period
@@ -16,6 +19,15 @@ struct EnergyHistoryRequest {
     int64_t nowUtcMs=0;
     std::optional<EnergyHistoryBatch> batch;
     std::vector<EnergyHistoryQuery> queries;
+    EnergyRecoveryMode recovery=EnergyRecoveryMode::Volatile; // v1 compatibility; public owner uses persistent modes by default
+};
+struct EnergyRecoverySnapshot {
+    EnergyHistoryStatus status=EnergyHistoryStatus::Storage;
+    EnergyRecoveryState state=EnergyRecoveryState::Unavailable;
+    uint64_t priorSequence=0;
+    std::string priorDigest;
+    std::optional<EnergyHistoryBatch> batch;
+    std::optional<EnergyHistoryStatus> applied;
 };
 struct EnergyHistoryReply {
     uint64_t generation=0,ticket=0;
@@ -23,6 +35,7 @@ struct EnergyHistoryReply {
     std::optional<EnergyHistoryStatus> applied;
     EnergyHistoryCheckpoint checkpoint;
     std::vector<EnergyHistoryTotals> totals;
+    std::optional<EnergyRecoverySnapshot> recovery;
 };
 struct EnergyHistoryProcessResult {
     LocalTaskStatus transport=LocalTaskStatus::Unavailable;

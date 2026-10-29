@@ -11,6 +11,7 @@ struct EnergyHistoryOwnerSnapshot {
     uint64_t generation=0,revision=0,lastTicket=0;
     bool pending=false,creationOutcomeUnknown=false;
     LocalTaskStatus transport=LocalTaskStatus::Unavailable;
+    EnergyRecoveryState recoveryState=EnergyRecoveryState::Disabled;
     std::shared_ptr<const EnergyHistoryBatch> uncertainBatch; // private immutable original input; no automatic replay
     std::optional<EnergyHistoryReply> reply;
 };
@@ -18,7 +19,7 @@ using EnergyHistoryClock=std::function<int64_t()>; // pure UTC clock only
 class EnergyHistoryOwner {
    public:
     EnergyHistoryOwner(std::filesystem::path helper,std::filesystem::path file,EnergyHistoryBinding binding,
-                       EnergyHistoryLimits limits={},unsigned timeoutMs=10000,EnergyHistoryClock clock={});
+                       EnergyHistoryLimits limits={},unsigned timeoutMs=10000,EnergyHistoryClock clock={},bool persistentRecovery=true);
     ~EnergyHistoryOwner();
     EnergyHistoryOwner(const EnergyHistoryOwner &)=delete;
     EnergyHistoryOwner &operator=(const EnergyHistoryOwner &)=delete;

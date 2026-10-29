@@ -32,7 +32,7 @@
 
 **Atomic source checkpoints:** P-07e adds [fixture cursor persistence and one-page admission](../credit-cursor.md). Explicit v2 streams commit facts and cursors together, retain exact pending input and disclose committed checkpoints separately. No v1 migration, real provider/fetcher or production financial activation is implied.
 
-**Observed energy history:** P-05d/P-08c adds [bounded raw-power history and explicit independent reset windows](../energy-history.md), exact coverage, cross-session identity and isolated atomic storage/recovery. Native persistence consent/device binding, durable pending input, long-run compaction, monetary billing state and production activation remain unfinished.
+**Observed energy history:** P-05d/P-08c adds [bounded raw-power history and explicit independent reset windows](../energy-history.md), exact coverage, cross-session identity and isolated atomic storage/recovery. P-05e/P-08d adds [durable pending originals/receipts](../energy-recovery.md), prefix-bound restart inspection and explicit exact retry. Native persistence consent/device binding, long-run compaction, monetary billing state and production activation remain unfinished.
 
 **Book validation:** four documentation-contract test cases pass. The final Windows selection passed 15/15 tests (14 product regressions plus the book contract); Linux focused display/settings checks and real PTY/fake-supervisor scenarios also passed. These are host/document checks, not production CUDA, game or live-income qualification.
 

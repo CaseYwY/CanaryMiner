@@ -51,7 +51,7 @@ bool boundedEnergyHistoryBatch(const EnergyHistoryBinding &binding, const Energy
 struct EnergyHistoryCheckpoint {
     EnergyHistoryStatus status = EnergyHistoryStatus::Storage;
     uint64_t sequence = 0, readingCount = 0, sessionCount = 0, windowCount = 0;
-    std::string batchId, sessionId;
+    std::string batchId, sessionId, digest; // audited chain head; local corruption/recovery binding, not authentication
     int64_t observedAtMs = 0, throughUtcMs = 0;
 };
 struct EnergyHistoryTotals {
@@ -72,6 +72,7 @@ class EnergyHistoryLedger {
     EnergyHistoryStatus open(const std::filesystem::path &file, const EnergyHistoryBinding &binding, int64_t nowUtcMs,
                              EnergyHistoryOpen mode = EnergyHistoryOpen::Existing, EnergyHistoryLimits limits = {});
     EnergyHistoryStatus apply(const EnergyHistoryBatch &batch, int64_t nowUtcMs);
+    EnergyHistoryStatus verifyCommitted(const EnergyHistoryBatch &batch, int64_t nowUtcMs); // read-only exact retained input proof
     EnergyHistoryCheckpoint checkpoint(int64_t nowUtcMs) const;
     EnergyHistoryTotals query(int64_t beginUtcMs, int64_t endUtcMs, int64_t nowUtcMs) const;
     EnergyHistoryTotals registerTotal(const std::string &registerId, const std::string &periodId, int64_t throughUtcMs, int64_t nowUtcMs) const;

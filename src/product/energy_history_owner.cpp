@@ -1,4 +1,5 @@
 #include "energy_history_owner.h"
+#include "energy_history_model.h"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -17,6 +18,7 @@ struct EnergyHistoryOwner::Impl {
     EnergyHistoryLimits limits;
     unsigned timeout;
     EnergyHistoryClock clock;
+    bool persistentRecovery;
     mutable std::mutex mutex;
     std::mutex lifecycle;
     std::condition_variable wake;
@@ -29,8 +31,8 @@ struct EnergyHistoryOwner::Impl {
     uint64_t greatestGeneration=0;
     int64_t lastUtc=0;
     std::string ownedSession;
-    Impl(std::filesystem::path helper,std::filesystem::path path,EnergyHistoryBinding b,EnergyHistoryLimits l,unsigned ms,EnergyHistoryClock c)
-        :client(std::move(helper)),file(std::move(path)),binding(std::move(b)),limits(l),timeout(ms),clock(c?std::move(c):EnergyHistoryClock(utcNow)){}
+    Impl(std::filesystem::path helper,std::filesystem::path path,EnergyHistoryBinding b,EnergyHistoryLimits l,unsigned ms,EnergyHistoryClock c,bool persistent)
+        :client(std::move(helper)),file(std::move(path)),binding(std::move(b)),limits(l),timeout(ms),clock(c?std::move(c):EnergyHistoryClock(utcNow)),persistentRecovery(persistent){}
     void publish(){current.pending=static_cast<bool>(queued||inFlight);current.uncertainBatch=uncertain;++current.revision;published=std::make_shared<const EnergyHistoryOwnerSnapshot>(current);}
     void retain(const std::shared_ptr<const Job> &job){
         if(!job)return;
@@ -51,6 +53,7 @@ struct EnergyHistoryOwner::Impl {
         auto job=std::make_shared<Job>();auto &r=job->request;
         r.generation=current.generation;r.ticket=current.lastTicket+1;r.file=file;r.binding=binding;r.limits=limits;r.mode=mode;r.nowUtcMs=now;r.queries=queries;
         if(b)r.batch=*b;
+        if(persistentRecovery)r.recovery=b?(retry?EnergyRecoveryMode::Retry:EnergyRecoveryMode::Submit):EnergyRecoveryMode::Inspect;
         job->retry=retry;std::string wire;if(!encodeEnergyHistoryRequest(r,&wire))return EnergyHistoryAdmission::Invalid;
         const auto oldState=current.state;const auto oldUtc=lastUtc;
         queued=job;current.lastTicket=r.ticket;lastUtc=now;current.state=initial?EnergyHistoryOwnerState::Starting:EnergyHistoryOwnerState::Busy;
@@ -67,9 +70,19 @@ struct EnergyHistoryOwner::Impl {
                 if(cancel){inFlight.reset();return;}
                 current.transport=result.transport;current.reply=std::move(result.reply);
                 bool ok=current.transport==LocalTaskStatus::Ok&&current.reply&&current.reply->opened==EnergyHistoryStatus::Ok&&current.reply->checkpoint.status==EnergyHistoryStatus::Ok;
+                bool recovered=false;
                 if(current.reply){if(current.reply->applied&&!accepted(*current.reply->applied))ok=false;
+                    if(current.reply->recovery){const auto &s=*current.reply->recovery;current.recoveryState=s.state;
+                        if(s.status!=EnergyHistoryStatus::Ok)ok=false;
+                        if(s.state==EnergyRecoveryState::Diverged&&!s.batch)ok=false;
+                        if(s.batch&&(s.state==EnergyRecoveryState::Prepared||s.state==EnergyRecoveryState::Diverged)){
+                            recovered=true;
+                            if(!uncertain)uncertain=std::make_shared<const EnergyHistoryBatch>(*s.batch);
+                            else if(energy_history_detail::batchText(*uncertain)!=energy_history_detail::batchText(*s.batch))ok=false;
+                        }
+                    }
                     for(const auto &t:current.reply->totals)if(t.status!=EnergyHistoryStatus::Ok)ok=false;}
-                if(result.writeOutcomeUnknown)retain(job);
+                if(result.writeOutcomeUnknown&&!recovered)retain(job);
                 if(ok&&job->retry)uncertain.reset();
                 if(ok){
                     current.creationOutcomeUnknown=false;
@@ -82,8 +95,8 @@ struct EnergyHistoryOwner::Impl {
         }catch(...){try{std::lock_guard<std::mutex> lock(mutex);if(cancel)return;retain(inFlight);queued.reset();inFlight.reset();cancel=true;current.state=EnergyHistoryOwnerState::Faulted;publish();}catch(...){cancel=true;}}
     }
 };
-EnergyHistoryOwner::EnergyHistoryOwner(std::filesystem::path helper,std::filesystem::path file,EnergyHistoryBinding binding,EnergyHistoryLimits limits,unsigned timeout,EnergyHistoryClock clock)
-    :impl_(new Impl(std::move(helper),std::move(file),std::move(binding),limits,timeout,std::move(clock))){}
+EnergyHistoryOwner::EnergyHistoryOwner(std::filesystem::path helper,std::filesystem::path file,EnergyHistoryBinding binding,EnergyHistoryLimits limits,unsigned timeout,EnergyHistoryClock clock,bool persistentRecovery)
+    :impl_(new Impl(std::move(helper),std::move(file),std::move(binding),limits,timeout,std::move(clock),persistentRecovery)){}
 EnergyHistoryOwner::~EnergyHistoryOwner(){stop();}
 bool EnergyHistoryOwner::start(uint64_t generation,EnergyHistoryOpen mode){
     auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);std::lock_guard<std::mutex> lock(s.mutex);

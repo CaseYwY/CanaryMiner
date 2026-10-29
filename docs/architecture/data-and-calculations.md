@@ -106,6 +106,8 @@ See [international billing research](../research/international-electricity-billi
 
 The initial [observed-energy ledger](../energy-history.md) integrates raw integer milliwatts over mapped monotonic intervals with no per-interval rounding. Queries and explicit independent reset windows are half-open `[begin,end)` and retain missing/prehistory/inter-session/tail coverage. A new measurement session cannot reuse a prior parent session's monotonic domain or continue its last power value. Reset windows only select accumulated observations; they never erase the source history, manufacture a measured zero opening or feed a board-power register into a whole-meter bill. Input origin/basis and private channel binding remain immutable per store.
 
+[Durable energy recovery](../energy-recovery.md) retains the exact observation batch and its **prior committed** sequence/hash before append. Neither Prepared's target sequence nor a queue ticket contributes energy. Restart inspection accepts only that prior prefix or the exact original's resulting head; successful explicit retry does not renew observation times, add duplicate integrals or authorize continuation of an old sampling session. A failed retry leaves unresolved Prepared evidence intact.
+
 ## 7. Curves, calibration and optimization
 
 Profile identity includes local device identity, software/driver/kernel version, work shape, throttle mechanism, thermal environment, measurement basis, warm-up/repetition/window and evidence freshness. Never copy one machine's frequencies, identifiers, power or profit numbers into shipped defaults.
