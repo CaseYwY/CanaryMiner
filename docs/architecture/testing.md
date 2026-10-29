@@ -58,6 +58,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05c](../tariff-declaration.md) checks native nested rule/opening edits, complete independent review/save, strict nested schema, decimal/time/capability limits, plan/opening binding and stale-writer preservation. Hand-derived combined totals and continuation exercise decoding into the existing pure core. POSIX PTY authors the example from blank fields, keeps independent UI drafts, rejects same-key edits and verifies no active-session activation plus editor SIGINT. Declared openings do not certify observed billing/reset persistence, meter/supplier identity or physical durability.
 
+[P-05g](../billing-ledger.md) checks exact prefix/full-cycle equivalence, provisional all-units repricing, end-only floors, signed rates, no duplicated fees and named-clock 23h/25h restart settlement. An independent Fraction oracle compares exact numerator/delta/energy and half-even display. Separate SQLite/process tests cover empty-versus-zero, immutable binding, replay/conflict/gap refusal, read-only preservation, orphan companions, page-cap rollback and pre-COMMIT death; rehashed fabricated state must fail arithmetic replay. The page-cap fixture does not establish physical disk failure or source/helper/runtime qualification.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

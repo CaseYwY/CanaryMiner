@@ -65,6 +65,8 @@ Owns today's scenario forecast and estimated USD net-profit views. It combines a
 
 Owns immutable plan revisions, local billing state and pure counterfactual evaluation. Components include supported energy rules, calendars, taxes, minimum bills and optional stateful settlement extensions. Plan adapters declare capabilities; an unsupported tax/demand/prepaid/export rule must not be replaced by an unlabeled national average.
 
+[P-05g](../billing-ledger.md) supplies exact prefix accrual and an independent synchronous fixture-only monetary store. Complete original chunks, recomputed state and a chained head share one transaction; immutable source/plan/cycle/budgets begin at the explicit zero origin. READONLY inspection and exact replay preserve uncertainty. One committed prefix can seed complete-remainder scenarios without recording them as observations. No renderer/supervisor calls the new library; observed source/checkpoint adaptation, pending recovery and bounded isolated ownership precede runtime activation.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

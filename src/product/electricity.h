@@ -106,7 +106,17 @@ ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpenin
 // Full coverage only. Horizon stays within one explicitly supplied cycle (<=370 elapsed days).
 // All-units/floor require the remainder through cycle end; no short-horizon free allowance or assumed future load.
 BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, const PowerTrace &trace,
-                         int64_t endUtcMs, int64_t decisionUtcMs);
+                          int64_t endUtcMs, int64_t decisionUtcMs);
+// Exact contiguous-prefix arithmetic. Provisional totals are NOT a payable utility bill or an incremental mining cost.
+// All-units reprices the accumulated register; minimum-cycle floors apply only at the explicit cycle end.
+struct BillAccrual {
+    ElectricityStatus status=ElectricityStatus::Unavailable;
+    std::optional<BillOpening> ending;
+    std::optional<ElectricityAmount> provisionalChange,provisionalTotal,settledTotal;
+    bool settlementDependent=false; // future cycle quantity can change already accrued all-units/floor amounts
+};
+BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
+                      int64_t endUtcMs,int64_t observedUtcMs);
 struct CounterfactualBill {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     BillEstimate withoutMining, withMining;

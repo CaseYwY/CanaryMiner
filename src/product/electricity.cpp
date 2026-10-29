@@ -28,7 +28,7 @@ ElectricityStatus validateTrace(const PowerTrace &trace, int64_t begin, int64_t 
     }
     return cursor == end ? ElectricityStatus::Ok : ElectricityStatus::Unavailable;
 }
-ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_t end, int64_t decision) {
+ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_t end, int64_t decision,bool accrual=false) {
     if (!p.declared || !s.declared) return ElectricityStatus::Unavailable;
     if (p.unsupportedRules || p.rounding != TariffRounding::FinalDisplayOnly) return ElectricityStatus::Unsupported;
     if (!evidenceValid(s.evidence) || (p.origin != TariffOrigin::SyntheticFixture && p.origin != TariffOrigin::UserDeclaredOffline) || !textKey(p.key) || !textKey(p.territory) || !textKey(p.supplier) || !textKey(p.product) || p.currency.size() != 3 ||
@@ -40,7 +40,7 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
     if (p.revisions.empty()) return ElectricityStatus::Unavailable;
     if (p.revisions.size() > 128) return ElectricityStatus::Capacity;
     if (p.tiers != TierMode::None && p.tiers != TierMode::Progressive && p.tiers != TierMode::AllUnits) return ElectricityStatus::Unsupported;
-    if ((p.tiers == TierMode::AllUnits || p.minimumCycleSubtotal) && end != s.cycleEndUtcMs) return ElectricityStatus::Unsupported;
+    if (!accrual && (p.tiers == TierMode::AllUnits || p.minimumCycleSubtotal) && end != s.cycleEndUtcMs) return ElectricityStatus::Unsupported;
     if (p.tiers == TierMode::AllUnits && p.revisions.size() != 1) return ElectricityStatus::Unsupported;
     std::set<std::string> keys;
     int64_t previousEnd = p.revisions.front().beginUtcMs;
@@ -187,10 +187,10 @@ EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerO
 ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
-BillEstimate evaluateBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &trace, int64_t end, int64_t decision) {
+static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision,bool accrual) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
     result.planKey = p.key; result.territory = p.territory; result.supplier = p.supplier; result.product = p.product; result.origin = p.origin; result.clock = p.clock; result.decisionUtcMs = decision;
-    result.status = validatePlan(p,opening,end,decision);
+    result.status = validatePlan(p,opening,end,decision,accrual);
     if (result.status != ElectricityStatus::Ok) return result;
     result.timeDatabaseVersion = civilAt(p.clock,opening.throughUtcMs).databaseVersion;
     result.status = validateTrace(trace,opening.throughUtcMs,end);
@@ -200,7 +200,7 @@ BillEstimate evaluateBill(const TariffPlan &p, const BillOpening &opening, const
     if (evidence.origin == PowerOrigin::ObservedTelemetry && end > decision) { result.status = ElectricityStatus::NotYetKnown; return result; }
     if (trace.evidence.basis != PowerBasis::WholeMeterImport) {
         // Standalone GPU/PC/incremental-wall energy proxies cannot establish shared allowances or a total meter bill.
-        if (p.tiers != TierMode::None || p.minimumCycleSubtotal || !p.cycleCharge.zero() || !opening.importedKwh.numerator.zero() || !opening.accruedSubtotal.numerator.zero() ||
+        if (p.tiers != TierMode::None || p.minimumCycleSubtotal || !p.cycleCharge.zero() || (!accrual&&(!opening.importedKwh.numerator.zero() || !opening.accruedSubtotal.numerator.zero())) ||
             std::any_of(p.revisions.begin(),p.revisions.end(),[](const TariffRevision &r){return !r.chargePerCivilDay.zero();})) {
             result.status = ElectricityStatus::Unsupported; return result;
         }
@@ -246,7 +246,7 @@ BillEstimate evaluateBill(const TariffPlan &p, const BillOpening &opening, const
         if (!tierCost(p.revisions[0].bands,p.tiers,opening.importedKwh.numerator,&before) || !tierCost(p.revisions[0].bands,p.tiers,quantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta)) { result.status = ElectricityStatus::Capacity; return result; }
     }
     if (!opening.accruedSubtotal.numerator.add(cost,&state.accruedSubtotal.numerator)) { result.status = ElectricityStatus::Capacity; return result; }
-    if (p.minimumCycleSubtotal) {
+    if (p.minimumCycleSubtotal && end==opening.cycleEndUtcMs) {
         ExactDecimal floor;
         if (!p.minimumCycleSubtotal->multiply(number(wattMsPerKwh),&floor)) { result.status = ElectricityStatus::Capacity; return result; }
         if (state.accruedSubtotal.numerator.compare(floor) < 0) state.accruedSubtotal.numerator = floor;
@@ -256,6 +256,21 @@ BillEstimate evaluateBill(const TariffPlan &p, const BillOpening &opening, const
     if (!cost.multiply(*p.subtotalMultiplier,&charge.numerator)) { result.status = ElectricityStatus::Capacity; return result; }
     state.importedKwh.numerator = quantity; state.throughUtcMs = end;
     result.ending = state; result.charge = charge; result.cycleSettled = end == state.cycleEndUtcMs; result.status = ElectricityStatus::Ok;
+    return result;
+}
+BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision) {
+    return evaluateBillImpl(p,opening,trace,end,decision,false);
+}
+BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed) {
+    BillAccrual result;
+    if(end>observed){result.status=ElectricityStatus::NotYetKnown;return result;}
+    const auto step=evaluateBillImpl(p,opening,trace,end,observed,true);result.status=step.status;
+    if(step.status!=ElectricityStatus::Ok)return result;
+    ElectricityAmount total;
+    if(!step.ending->accruedSubtotal.numerator.multiply(*p.subtotalMultiplier,&total.numerator)){result.status=ElectricityStatus::Capacity;return result;}
+    result.ending=step.ending;result.provisionalChange=step.charge;result.provisionalTotal=total;
+    if(step.cycleSettled)result.settledTotal=total;
+    else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value();
     return result;
 }
 CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &base, const PowerTrace &with, int64_t end, int64_t decision) {

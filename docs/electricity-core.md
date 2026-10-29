@@ -6,6 +6,8 @@ The later [P-05b/P-08b native session slice](session-energy.md) separately adds 
 
 [P-05c](tariff-declaration.md) adds native composition and persisted declared-opening settings for this model. They remain offline; no measured accumulator, independent reset ledger or runtime financial activation is supplied.
 
+[P-05g](billing-ledger.md) adds `accrueBill` for exact provisional prefixes and a separate fixture monetary ledger. The full-settlement restrictions below continue to apply to `evaluateBill`/`counterfactualBill`; prefix amounts are not shortened utility bills. The ledger is unused by the ordinary runtime pending source/checkpoint adaptation and isolated recovery ownership.
+
 Code: `src/product/civil_time.*`, `src/product/electricity.*`; target: `canary_economics`. Related requirements: R-TAR-001–005, R-ENG-001; test families T-TARIFF/T-ENERGY and calendar prerequisites of T-FORECAST. All input declarations remain caller assertions, not provider qualification.
 
 ## Time ADR
