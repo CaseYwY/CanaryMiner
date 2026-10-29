@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Offline combined tariff and declared whole-meter opening v1",
+  "description": "64 KiB, 512 total rows. Structural schema only; the native decoder additionally checks canonical decimal capacity, chronological coverage, tier topology, fixed clock, publication and cycle/opening invariants. No runtime activation or measured billing/reset ledger.",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
+  "properties": {
+    "schema_version": {"const": 1, "type": "integer"},
+    "country": {"$ref": "#/$defs/label"},
+    "source_reference": {"$ref": "#/$defs/label"},
+    "acknowledged": {"type": "boolean", "const": true},
+    "confirmed_utc": {"type": "integer", "minimum": 1, "maximum": 253402300799},
+    "reset_policy": {"const": "explicit_cycle_only"},
+    "plan": {"$ref": "#/$defs/plan"},
+    "opening": {"$ref": "#/$defs/opening"}
+  },
+  "$defs": {
+    "label": {"type": "string", "pattern": "^[!-~](?:[ -~]{0,126}[!-~])?$"},
+    "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,37})(\\.[0-9]{0,17}[1-9])?$"},
+    "optionalDecimal": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/decimal"}]},
+    "instant": {"type": "integer", "minimum": 0, "maximum": 253402300799999},
+    "clock": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "fixed_offset_seconds"],
+      "properties": {"kind": {"enum": ["utc", "fixed_standard"]}, "fixed_offset_seconds": {"type": "integer", "minimum": -64800, "maximum": 64800}}
+    },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "territory", "supplier", "product", "currency", "clock", "tiers", "rounding", "cycle_charge", "minimum_cycle_subtotal", "subtotal_multiplier", "revisions"],
+      "properties": {
+        "key": {"$ref": "#/$defs/label"}, "territory": {"$ref": "#/$defs/label"}, "supplier": {"$ref": "#/$defs/label"}, "product": {"$ref": "#/$defs/label"},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "clock": {"$ref": "#/$defs/clock"},
+        "tiers": {"enum": ["none", "progressive", "all_units"]}, "rounding": {"const": "final_display_only"},
+        "cycle_charge": {"$ref": "#/$defs/decimal"}, "minimum_cycle_subtotal": {"$ref": "#/$defs/optionalDecimal"}, "subtotal_multiplier": {"$ref": "#/$defs/decimal"},
+        "revisions": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/revision"}}
+      }
+    },
+    "revision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "begin_utc_ms", "end_utc_ms", "published_utc_ms", "time_mode", "base_rate_per_kwh", "charge_per_civil_day", "calendar", "dynamic", "bands"],
+      "properties": {
+        "key": {"$ref": "#/$defs/label"}, "begin_utc_ms": {"$ref": "#/$defs/instant"}, "end_utc_ms": {"$ref": "#/$defs/instant"}, "published_utc_ms": {"$ref": "#/$defs/instant"},
+        "time_mode": {"enum": ["constant", "calendar", "dynamic"]}, "base_rate_per_kwh": {"$ref": "#/$defs/decimal"}, "charge_per_civil_day": {"$ref": "#/$defs/decimal"},
+        "calendar": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/calendar"}},
+        "dynamic": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/dynamic"}},
+        "bands": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/band"}}
+      }
+    },
+    "calendar": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "begin_minute", "end_minute", "weekday_mask", "month_mask", "priority", "date", "published_utc_ms", "rate_per_kwh"],
+      "properties": {
+        "key": {"$ref": "#/$defs/label"}, "begin_minute": {"type": "integer", "minimum": 0, "maximum": 1439}, "end_minute": {"type": "integer", "minimum": 1, "maximum": 1440},
+        "weekday_mask": {"type": "integer", "minimum": 1, "maximum": 127}, "month_mask": {"type": "integer", "minimum": 1, "maximum": 4095}, "priority": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "date": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}]},
+        "published_utc_ms": {"$ref": "#/$defs/instant"}, "rate_per_kwh": {"$ref": "#/$defs/decimal"}
+      }
+    },
+    "dynamic": {
+      "type": "object", "additionalProperties": false, "required": ["begin_utc_ms", "end_utc_ms", "published_utc_ms", "rate_per_kwh"],
+      "properties": {"begin_utc_ms": {"$ref": "#/$defs/instant"}, "end_utc_ms": {"$ref": "#/$defs/instant"}, "published_utc_ms": {"$ref": "#/$defs/instant"}, "rate_per_kwh": {"$ref": "#/$defs/decimal"}}
+    },
+    "band": {
+      "type": "object", "additionalProperties": false, "required": ["through_kwh", "rate_per_kwh"],
+      "properties": {"through_kwh": {"$ref": "#/$defs/optionalDecimal"}, "rate_per_kwh": {"$ref": "#/$defs/decimal"}}
+    },
+    "opening": {
+      "type": "object", "additionalProperties": false,
+      "required": ["key", "scope", "adapter", "basis", "origin", "cycle_begin_utc_ms", "cycle_end_utc_ms", "through_utc_ms", "imported_kwh", "accrued_subtotal", "time_database_version"],
+      "properties": {
+        "key": {"$ref": "#/$defs/label"}, "scope": {"$ref": "#/$defs/label"}, "adapter": {"$ref": "#/$defs/label"}, "basis": {"const": "whole_meter_import"}, "origin": {"const": "declared_forecast"},
+        "cycle_begin_utc_ms": {"$ref": "#/$defs/instant"}, "cycle_end_utc_ms": {"$ref": "#/$defs/instant"}, "through_utc_ms": {"$ref": "#/$defs/instant"},
+        "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"const": "explicit-fixed-clock"}
+      }
+    }
+  }
+}

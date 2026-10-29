@@ -184,6 +184,9 @@ EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerO
     else result.status = result.coveredMs ? ElectricityStatus::Partial : ElectricityStatus::Unavailable;
     return result;
 }
+ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
+    return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
+}
 BillEstimate evaluateBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &trace, int64_t end, int64_t decision) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
     result.planKey = p.key; result.territory = p.territory; result.supplier = p.supplier; result.product = p.product; result.origin = p.origin; result.clock = p.clock; result.decisionUtcMs = decision;

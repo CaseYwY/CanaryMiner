@@ -298,6 +298,10 @@ worker retry. `--no-energy` disables optional collection for this session withou
 Unknown power is not zero; known energy/cost carry model/basis/time/coverage. This excludes complex/shared utility billing,
 whole-PC/incremental measurement, persistent energy history and net income; no installed miner is replaced.
 
+**S → Electricity → Combined tariff / declared whole-meter opening** provides [offline composite settings](docs/tariff-declaration.md),
+including progressive/all-units bands, calendar/dynamic rules and an explicitly declared opening scenario.
+Review saves a separate local file; it does not activate runtime combined billing or supply a measured/reset ledger.
+
 **S → Privacy → Credit recovery / collection status** provides the [native review seam](docs/credit-review.md).
 Without a qualified active collector it reports unavailable and opens no ledger. Synthetic tests cover private original-input
 review and one explicit revision-bound retry; there is no production ingestion, automatic replay, deletion/rebuild or income activation.

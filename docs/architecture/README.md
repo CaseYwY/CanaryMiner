@@ -68,7 +68,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Exact posted-credit storage/valuation core | Implemented and tested for synthetic contracts only; no real source or runtime activation |
 | Actual-credit adapters and financial income dashboard | Not implemented |
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
-| Declared combined bill/time arithmetic | Offline-tested pure core; no certified supplier adapter or persistent billing/reset state |
+| Declared combined bill/time arithmetic | Offline-tested pure core and native combined-rule/declared-opening settings; no certified supplier adapter, measured persistent billing/reset state or runtime activation |
 | Native flat-energy defaults and session board energy | Default-off native review/save and bounded session-only model; typed power validity/coverage, not whole-PC/incremental energy or net income |
 | Automatic profitability selection | Not implemented |
 | Tested game pause/coexist policies | Not implemented in this fork |

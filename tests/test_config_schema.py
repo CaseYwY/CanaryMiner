@@ -187,6 +187,35 @@ class ElectricityPreferencesSchemaTests(unittest.TestCase):
         self.assertEqual(set(schema['required']), set(schema['properties']))
 
 
+class TariffDeclarationSchemaTests(unittest.TestCase):
+    def test_example_and_strict_nested_contract(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertIn('SYNTHETIC', example['source_reference'])
+        self.assertEqual(example['opening']['origin'], 'declared_forecast')
+        self.assertEqual(example['plan']['tiers'], 'progressive')
+        self.assertEqual(example['plan']['revisions'][0]['time_mode'], 'calendar')
+        for path, value in ((('schema_version',), 2), (('acknowledged',), False),
+                            (('plan', 'currency'), 'USDT'), (('plan', 'cycle_charge'), 0.2),
+                            (('plan', 'cycle_charge'), '1e2'), (('opening', 'basis'), 'gpu_board'),
+                            (('opening', 'origin'), 'observed_telemetry'), (('reset_policy',), 'monthly_auto')):
+            bad = json.loads(json.dumps(example))
+            target = bad
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            self.assertTrue(validate(bad, schema, schema))
+        # Unknown nested rule families must never silently become a simpler declared tariff.
+        bad = json.loads(json.dumps(example))
+        bad['plan']['revisions'][0]['demand_charge'] = '0'
+        self.assertTrue(validate(bad, schema, schema))
+        for definition in schema['$defs'].values():
+            if definition.get('type') == 'object':
+                self.assertFalse(definition['additionalProperties'])
+                self.assertEqual(set(definition['required']), set(definition['properties']))
+
+
 class StatsSchemaTests(unittest.TestCase):
     def test_schema_covers_the_writer(self):
         schema = load('config/stats-v1.schema.json')

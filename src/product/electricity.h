@@ -101,6 +101,8 @@ struct BillEstimate {
     int64_t decisionUtcMs = 0;
     bool cycleSettled = false;
 };
+// Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
+ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening);
 // Full coverage only. Horizon stays within one explicitly supplied cycle (<=370 elapsed days).
 // All-units/floor require the remainder through cycle end; no short-horizon free allowance or assumed future load.
 BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, const PowerTrace &trace,

@@ -50,6 +50,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05a](../electricity-core.md) executes a declared supported-rule subset, exact rational arithmetic/oracle checks and explicit offline IANA day/fold/gap/TOU cases. It does not complete all 34 research specifications or qualify a supplier plan; unsupported families and dependency authentication/packaging remain listed there.
 
+[P-05c](../tariff-declaration.md) checks native nested rule/opening edits, complete independent review/save, strict nested schema, decimal/time/capability limits, plan/opening binding and stale-writer preservation. Hand-derived combined totals and continuation exercise decoding into the existing pure core. POSIX PTY authors the example from blank fields, keeps independent UI drafts, rejects same-key edits and verifies no active-session activation plus editor SIGINT. Declared openings do not certify observed billing/reset persistence, meter/supplier identity or physical durability.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

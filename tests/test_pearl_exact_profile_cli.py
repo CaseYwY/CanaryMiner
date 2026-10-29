@@ -18,7 +18,8 @@ class ExactProfileCliTests(unittest.TestCase):
                 '-DCANARY_PEARL_EXPERIMENT_COMMON_DIM=8192', '-DCANARY_PEARL_EXPERIMENT_LARGE_SHAPES=1',
                 '-include', 'tests/pearl_cli_stubs/cuda_stub.h', 'src/core/miner.cu',
                 'src/core/registry.cu', 'tests/test_pearl_cli_stubs.cpp', 'src/product/exact_decimal.cpp',
-                'src/product/manual_market.cpp', 'src/product/energy_owner.cpp', '-pthread', '-o', str(binary)]
+                'src/product/manual_market.cpp', 'src/product/energy_owner.cpp', 'src/product/civil_time.cpp',
+                'src/product/electricity.cpp', 'src/product/tariff_declaration.cpp', '-pthread', '-o', str(binary)]
             result = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=90)
             self.assertEqual(result.returncode, 0, result.stderr)
             baseline = {k:v for k,v in os.environ.items() if not k.startswith('CANARY_PEARL_')}

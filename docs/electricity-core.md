@@ -4,6 +4,8 @@ P-05a / P-08a implements **pure local host-side foundations**, not production fi
 
 The later [P-05b/P-08b native session slice](session-energy.md) separately adds reviewed **flat energy-only** declarations and a default-off streaming GPU-board model from existing telemetry. It does not activate this full-bill/counterfactual API, combined-rule settings, persistent billing state, actual-income/net forecasts or hardware qualification. Its explicit mapped-UTC guard is an adapter/model contract, not a change to this pure function's exact input-clock rules.
 
+[P-05c](tariff-declaration.md) adds native composition and persisted declared-opening settings for this model. They remain offline; no measured accumulator, independent reset ledger or runtime financial activation is supplied.
+
 Code: `src/product/civil_time.*`, `src/product/electricity.*`; target: `canary_economics`. Related requirements: R-TAR-001–005, R-ENG-001; test families T-TARIFF/T-ENERGY and calendar prerequisites of T-FORECAST. All input declarations remain caller assertions, not provider qualification.
 
 ## Time ADR

@@ -28,7 +28,8 @@ if a.compat_include: inc=['-I'+a.compat_include]+inc
 TUS=[('miner','src/core/miner.cu'),('registry','src/core/registry.cu'),('pearl_algo','src/algos/pearl-pow/algo.cu'),('run','src/core/run.cpp')]
 idx={n:i for i,(n,_) in enumerate(TUS)}
 if a.only: TUS=[t for t in TUS if t[0]=='pearl_algo']
-else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market','src/product/manual_market.cpp'),('energy_owner','src/product/energy_owner.cpp')]
+else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market','src/product/manual_market.cpp'),('energy_owner','src/product/energy_owner.cpp'),
+              ('civil_time','src/product/civil_time.cpp'),('electricity','src/product/electricity.cpp'),('tariff_declaration','src/product/tariff_declaration.cpp')]
 out.mkdir(parents=True,exist_ok=True)
 env=dict(os.environ,PATH=str(T/'bin')+os.pathsep+os.environ['PATH'])
 def comp(t):

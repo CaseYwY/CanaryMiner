@@ -624,10 +624,14 @@ class Supervisor {
                         },static_cast<uint64_t>(time(nullptr)),[this](ElectricityPreferences &p,std::string *error){
                             if(!electricityStore_){if(error)*error="Electricity target unavailable.";return false;}
                             return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),error)&&electricityStore_->save(p,error);
-                        });
+                        },[this](const JsonValue &p,std::string *error){return tariffStore_&&tariffStore_->save(p,error);});
                         if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
                         if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.running=true; context.cliDisabled=opt_.noMarket; context.effective=manualEffective_; openManualMarketControls(&settings_,manualStore_.get(),context); }
                         if(result==SettingsResult::OpenElectricity){ElectricitySettingsContext context;context.running=true;context.cliNoEnergy=opt_.noEnergy;context.effective=electricityEffective_;context.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;openElectricityControls(&settings_,electricityStore_.get(),context);}
+                        if(result==SettingsResult::OpenTariff){
+                            if(!tariffStore_&&!opt_.electricityPreferencesPath.empty())tariffStore_.reset(new TariffDeclarationStore(std::filesystem::u8path(opt_.electricityPreferencesPath).parent_path()/"tariff-declaration.json"));
+                            openTariffControls(&settings_,tariffStore_.get());
+                        }
                         if (result == SettingsResult::Quit) {
                             settings_.visible = false;
                             nextFrame_ = 0;
@@ -776,6 +780,7 @@ class Supervisor {
     ManualMarketPreferences manualEffective_;
     ManualMarketProjector manualProjection_;
     std::unique_ptr<ElectricityPreferencesStore> electricityStore_;
+    std::unique_ptr<TariffDeclarationStore> tariffStore_;
     ElectricityPreferences electricityEffective_;
     std::unique_ptr<SessionEnergySink> energy_;
     SettingsPanel settings_;

@@ -89,4 +89,4 @@ cmake --build --preset tests --target test_session_energy test_product_superviso
 ctest --preset tests -R "^(session_energy|session_energy_terminal|config_schemas|native_build_recipe)$" --output-on-failure
 ```
 
-Still unfinished: composable tariff/reset/opening-state native settings and persistent billing ledgers, named reporting-zone packaging, persistent energy history, qualified driver/whole-PC/incremental adapters and baselines, real-source actual-today/reward forecasts and net FX integration, economic curves/policy/game/TLS/i18n and full release qualification. The whole planning-book objective remains active.
+[P-05c](tariff-declaration.md) subsequently adds separate native combined-rule and declared-opening settings, without feeding this session owner. Still unfinished: observed persistent billing ledgers and independent reset clocks, named reporting-zone packaging, persistent energy history, qualified driver/whole-PC/incremental adapters and baselines, real-source actual-today/reward forecasts and net FX integration, economic curves/policy/game/TLS/i18n and full release qualification. The whole planning-book objective remains active.

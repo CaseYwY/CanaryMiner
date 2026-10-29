@@ -162,6 +162,12 @@ Contents
   sample-and-hold estimates, not whole-PC/incremental energy, a utility bill, persistent history, income or net profit.
   See docs/session-energy.md for scope, source, clock, storage, activation and unqualified release gates.
 
+  Combined tariff: S -> Electricity -> Combined tariff / declared whole-meter opening.
+  Enter opens sections/tables; A adds blank rows; X confirms draft-row removal; V/F2 reviews before Save.
+  Decimal fees/rates/opening quantities are explicit (empty is missing, not zero). Rule/opening UTC uses milliseconds.
+  Saves only tariff-declaration.json: offline whole-meter scenario, not a measured/reset ledger or live activation.
+  See docs/tariff-declaration.md for supported compositions, fixed clocks, exclusions and version binding.
+
   Credit recovery / collection status: S -> Privacy. Without a qualified active collector this page reports unavailable
   and opens no credit store. Its fixture-tested review hides private original input until explicitly revealed;
   one acknowledged exact retry is bound to the owner generation/revision. Queue tickets are not durable source cursors.

@@ -2,6 +2,14 @@
 # Every test builds with -Wall -Wformat -Werror=format; the CLI host tests also build with -Werror.
 enable_testing()
 set(R ${CMAKE_SOURCE_DIR})
+add_executable(test_tariff_declaration ${R}/tests/test_tariff_declaration.cpp)
+target_link_libraries(test_tariff_declaration PRIVATE canary_economics)
+if(MSVC)
+  target_compile_options(test_tariff_declaration PRIVATE /W3 /utf-8 /wd4996)
+else()
+  target_compile_options(test_tariff_declaration PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME tariff_declaration COMMAND $<TARGET_FILE:test_tariff_declaration> WORKING_DIRECTORY ${R})
 add_executable(test_session_energy ${R}/tests/test_session_energy.cpp)
 target_link_libraries(test_session_energy PRIVATE canary_economics)
 if(MSVC)
@@ -503,6 +511,8 @@ add_test(NAME prepare_cancel COMMAND $<TARGET_FILE:test_prepare_cancel> WORKING_
 if(NOT WIN32)
 add_test(NAME python_unittests COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests -p test_*.py WORKING_DIRECTORY ${R})
 add_test(NAME session_energy_terminal COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_session_energy_terminal.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:test_product_supervisor>)
+add_test(NAME tariff_declaration_terminal COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_tariff_declaration_terminal.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:test_product_supervisor>)
+set_tests_properties(tariff_declaration_terminal PROPERTIES TIMEOUT 60)
 set_tests_properties(session_energy_terminal PROPERTIES TIMEOUT 60)
 add_test(NAME credit_review_terminal COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_credit_review_terminal.py $<TARGET_FILE:credit_review_fixture> $<TARGET_FILE:canary_credit_worker> $<TARGET_FILE:test_pearl_cuda_cli_host>)
 set_tests_properties(credit_review_terminal PROPERTIES TIMEOUT 45)
@@ -528,10 +538,10 @@ endif()
 set_tests_properties(format_error_class_is_an_error PROPERTIES WILL_FAIL TRUE)
 
 # Native ordinary CLI and the supervised PTY fixture use the same exact offline projector as the product binary.
-foreach(target test_pearl_cuda_cli_host test_pearl_overlap_capable_cli_host test_pearl_a_root_fusion_capable_cli_host test_product_supervisor)
+foreach(target test_pearl_cuda_cli_host test_pearl_overlap_capable_cli_host test_pearl_a_root_fusion_capable_cli_host test_pearl_wm8_fixed_capable_cli_host test_pearl_bk32_fixed_capable_cli_host test_pearl_wm4_reuse_capable_cli_host test_product_supervisor)
   target_link_libraries(${target} PRIVATE canary_economics)
 endforeach()
-# Native private recovery views format exact retained decimals but do not activate/link a credit collector.
-foreach(target test_product_settings test_product_display test_product_runtime_settings test_product_history canary_settings_preview)
-  target_link_libraries(${target} PRIVATE canary_market)
+# Native settings validate offline tariff declarations; no credit collector is constructed.
+foreach(target test_product_settings test_product_display test_product_runtime_settings test_product_history canary_settings_preview test_manual_market test_credit_review credit_review_fixture)
+  target_link_libraries(${target} PRIVATE canary_economics)
 endforeach()

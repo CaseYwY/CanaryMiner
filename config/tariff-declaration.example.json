@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "country": "synthetic-country",
+  "source_reference": "SYNTHETIC EXAMPLE ONLY - not a supplier plan or measured opening",
+  "acknowledged": true,
+  "confirmed_utc": 1800000000,
+  "reset_policy": "explicit_cycle_only",
+  "plan": {
+    "key": "synthetic-combined-v1",
+    "territory": "synthetic-territory",
+    "supplier": "synthetic-supplier",
+    "product": "synthetic-combined-plan",
+    "currency": "USD",
+    "clock": {"kind": "utc", "fixed_offset_seconds": 0},
+    "tiers": "progressive",
+    "rounding": "final_display_only",
+    "cycle_charge": "2",
+    "minimum_cycle_subtotal": null,
+    "subtotal_multiplier": "1.1",
+    "revisions": [{
+      "key": "synthetic-r1",
+      "begin_utc_ms": 1800000000000,
+      "end_utc_ms": 1800086400000,
+      "published_utc_ms": 1799999999000,
+      "time_mode": "calendar",
+      "base_rate_per_kwh": "0.2",
+      "charge_per_civil_day": "0.1",
+      "calendar": [{
+        "key": "synthetic-evening",
+        "begin_minute": 1080,
+        "end_minute": 1320,
+        "weekday_mask": 127,
+        "month_mask": 4095,
+        "priority": 1,
+        "date": null,
+        "published_utc_ms": 1799999999000,
+        "rate_per_kwh": "0.4"
+      }],
+      "dynamic": [],
+      "bands": [
+        {"through_kwh": "10", "rate_per_kwh": "0.05"},
+        {"through_kwh": null, "rate_per_kwh": "0.15"}
+      ]
+    }]
+  },
+  "opening": {
+    "key": "synthetic-opening-v1",
+    "scope": "synthetic-whole-meter-scenario",
+    "adapter": "user-declared-offline",
+    "basis": "whole_meter_import",
+    "origin": "declared_forecast",
+    "cycle_begin_utc_ms": 1800000000000,
+    "cycle_end_utc_ms": 1800086400000,
+    "through_utc_ms": 1800000000000,
+    "imported_kwh": "0",
+    "accrued_subtotal": "0",
+    "time_database_version": "explicit-fixed-clock"
+  }
+}

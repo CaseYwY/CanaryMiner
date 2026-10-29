@@ -3,6 +3,7 @@ option(CANARY_ENABLE_NAMED_TZDB "Enable reviewed app-private date-tz / IANA time
 add_library(canary_economics STATIC
   "${CMAKE_SOURCE_DIR}/src/product/civil_time.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/electricity.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/tariff_declaration.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_owner.cpp")
 target_compile_features(canary_economics PUBLIC cxx_std_17)
 target_include_directories(canary_economics PUBLIC "${CMAKE_SOURCE_DIR}/src")
