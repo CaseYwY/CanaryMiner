@@ -66,6 +66,8 @@ Add plan-specific official worked-example comparisons before labelling an adapte
 
 [P-05l](../billing-query.md) checks full-original paging, changed-view discard, malformed headers/frames, generation/ticket/hash/offset consistency, wrong helpers and whole-transaction Busy/cancel/deadline. Parent-death probes own their processes and preserve originals; Prepared and committed-but-unconfirmed views remain readonly with the energy source offline. Large canonical binding and maximum source receipts exercise the new decoder/helper, without production/source or write-transport qualification.
 
+[P-05m](../billing-retry.md) checks review-token refusal before write, exact isolated retry and compact proof verification. Independent source-offline fixtures exercise pre/post-COMMIT death, lost proof, one-event replay and failed-retry byte preservation; owned parent death and ordinary seam exclusion cover the new helper. Runtime staging/ownership and physical-storage qualification remain separate.
+
 ## T-ENERGY
 
 Test elapsed-time W-to-kWh integration, irregular samples, invalid units/NaN/negative sensor power, gaps, matched baseline/subtraction, multiple GPUs/shared meters and signed cost conversion. Distinguish missing power from zero power and full-board game load from miner incremental energy. Persist and display measurement basis/coverage.

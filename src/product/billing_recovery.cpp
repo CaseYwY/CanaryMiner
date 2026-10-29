@@ -212,6 +212,18 @@ S BillingRecoveryStore::submit(const BillingChunk &chunk,int64_t now){
         const auto saved=s.write(std::move(next),input);return saved==S::Ok?s.apply(now,false):saved;
     }catch(...){return s.fail(S::Storage);}
 }
+S BillingRecoveryStore::retryReviewed(const std::filesystem::path &file,const std::string &expected,const std::string &revision,const std::string &inputDigest,int64_t now){
+    auto &s=*impl_;if(s.attempted)return S::Invalid;s.attempted=true;
+    const auto text=file.u8string();if(!hash(expected)||!hash(revision)||!hash(inputDigest)||!instant(now)||!file.is_absolute()||text.size()>4096||text.find('\0')!=std::string::npos)return s.fail(S::Invalid);
+    s.file=file;s.path=file;s.path+=".billing-recovery";
+    try{
+        auto lock=s.path;lock+=".lock";if(!s.lease.acquire(lock))return s.fail(S::Storage);
+        const auto loaded=s.load(now,expected);if(loaded!=S::Ok)return s.fail(loaded);
+        if((s.state.state!=R::Prepared&&s.state.state!=R::Confirmed)||!s.state.original||s.state.revision!=revision||sha256Hex(s.original)!=inputDigest)return s.fail(S::Conflict);
+        const auto opened=s.ledger.open(file,s.binding,now,BillingOpen::Existing,s.limits);if(opened!=S::Ok)return s.fail(opened);
+        s.ready=true;return retry(*s.state.original,revision,now);
+    }catch(...){return s.fail(S::Storage);}
+}
 S BillingRecoveryStore::retry(const BillingChunk &chunk,const std::string &revision,int64_t now){
     auto &s=*impl_;if(!s.ready)return S::Storage;if(s.queryOnly)return S::Unsupported;
     try{

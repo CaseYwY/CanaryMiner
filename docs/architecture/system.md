@@ -73,6 +73,8 @@ Owns immutable plan revisions, local billing state and pure counterfactual evalu
 
 [P-05l](../billing-query.md) adds a parent-bound existing-only monetary reader: it verifies the caller-approved binding digest, audits under ordered leases and returns 48-KiB byte pages under one complete-view hash. The client reconstructs full original and committed state only after all bounded pages agree. Native periodic ownership and isolated write/retry transports remain unconnected.
 
+[P-05m](../billing-retry.md) separately isolates exact existing-original recovery. The helper checks binding/revision/original digests before writable ledger access; it never stages new input. A compact confirmed-state certificate is reconstructed against the parent's full reviewed original. Lost replies and failed retries preserve uncertainty for later readonly inspection.
+
 ### M-ENERGY
 
 Owns timestamped power/energy adapters and integration. Board, whole-system and matched incremental-wall observations are different bases. It rejects invalid units/gaps instead of assuming idle/missing power is zero. Shared measurement cannot be assigned to every GPU independently.

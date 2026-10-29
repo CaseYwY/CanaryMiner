@@ -37,3 +37,5 @@ Executed evidence:
 - GCC initially rejected four misleading-indentation sites in the new binding/state codec. Statements were split, warning-as-error retained, then the complete selection rebuilt. The client also checks the aggregate deadline after final parsing before publication.
 
 These tests do not qualify physical disk/kernel stalls, global helper quarantine, deployed trust/dependencies, real sensors/rates, named-timezone deployment or actual income. No new UI/PTY, real-source or native runtime activation is claimed.
+
+[P-05m](billing-retry.md) subsequently adds a separate existing-only reviewed retry helper. It consumes exact binding/revision/original digests and supplies a compact confirmation proof reconstructed against the retained full original; this readonly helper keeps its existing authority.
