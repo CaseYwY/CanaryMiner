@@ -63,10 +63,10 @@ bool EconomicCommandOwner::startAfterMeasurement(OptimizationTime now,const Work
         if(!record){p.halt(S::Faulted);return false;}
         p.anchor={record->measurement->admitted.utcMs,record->measurement->admitted.monotonicMs};p.last=now;
         if(!p.clock(now)||p.policy.commandLeaseMs<100||p.policy.commandLeaseMs>workerControlMaxLeaseMs||!p.policy.guard.enabled||
-            !p.guard.startMeasured(now,plan,*record->measurement,paused)){p.halt(S::Faulted);return false;}
+            !p.guard.startMeasured(now,plan,*record->measurement,paused)){measurement.failedHandoff();p.halt(S::Faulted);return false;}
         p.planKey=workProfilePlanFingerprint(plan);p.settled=paused;p.view.commandRevision=paused.command.revision;
         p.view.measurement=record;p.view.state=S::Running;return true;
-    }catch(...){p.halt(S::Faulted);return false;}}
+    }catch(...){measurement.failedHandoff();p.halt(S::Faulted);return false;}}
 std::optional<WorkerCommand> EconomicCommandOwner::poll(OptimizationTime now,uint64_t revision,const WorkProfilePlan &plan,const WorkProfileConditions &conditions,uint64_t permission){auto &p=*impl_;
     if(p.view.state!=S::Running)return {};
     try{if(!p.clock(now)||p.view.state!=S::Running)return {};

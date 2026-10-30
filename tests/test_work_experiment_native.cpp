@@ -1,6 +1,7 @@
 // Self-owned CPU peers over actual native pipes. Parent-supplied observations and all economics are explicitly synthetic.
 #include "economic_fixture.h"
 #include "product/work_experiment_owner.h"
+#include "product/work_experiment_budget.h"
 #include "product/economic_command_owner.h"
 #include "product/worker_process_owner.h"
 #include "product_test_util.h"
@@ -45,7 +46,9 @@ void run(const std::filesystem::path &exe,unsigned mode){
     auto sample=[&](WorkMeasurementTime t){WorkProfileSample s;s.generation=token.epoch;s.counterEpoch=1;s.fingerprint=workProfileFingerprint(settings.identity);
         s.utcMs=t.utcMs;s.monotonicMs=t.monotonicMs;s.appliedHostWaitMs=installed;s.completeWorkBoundary=s.safetyTelemetryValid=s.thermalSafe=s.gameStateKnown=true;
         s.milliwatts=installed?100000:200000;s.userTmacs=d(std::to_string((t.monotonicMs-anchor)*2));s.donationTmacs=d(std::to_string(t.monotonicMs-anchor));return s;};
-    WorkExperimentOwner owner({true,300,80,5000},settings,binding,issuer,intent,token);
+    WorkExperimentBudgetPolicy limits;limits.enabled=true;limits.maximumAttempts=2;limits.maximumReservedElapsedMs=16000;limits.maximumReservedEnergy.numerator=d("20000000");
+    WorkExperimentBudget reservations(limits,settings,intent,token);CHECK(reservations.start(began));
+    WorkExperimentOwner owner({true,300,80,5000},settings,binding,issuer,intent,token,&reservations);
     EconomicParentBudget budget({true,0,10000,2,4},intent,token);CHECK(budget.start(optimization(began)));
     const auto baseline=now();CHECK(owner.start(sample(baseline),baseline,conditions,baseline.monotonicMs+2000));
     uint64_t lastSample=baseline.monotonicMs;bool withdrawn=false;size_t issued=0;
@@ -94,10 +97,14 @@ void run(const std::filesystem::path &exe,unsigned mode){
                 sleep();
             }
             CHECK(applied&&submitted&&economy.snapshot().measurement==original&&budget.snapshot().transitionsInWindow==1);
-            economy.requestStop();process.requestStop();evaluator.stop();
+            process.requestStop();process.stop();const auto ended=process.snapshot();CHECK(ended.done&&ended.reaped&&ended.exitCode==0);
+            t=now();issuer.requestStop();CHECK(economy.retire(optimization(t))&&reservations.retire(issuer,t));evaluator.stop();
+            CHECK(!reservations.snapshot().attached&&reservations.snapshot().attempts==1&&reservations.snapshot().reservedElapsedMs==settings.maximumElapsedMs);
         }
     }
     owner.requestStop();process.stop();const auto final=process.snapshot();CHECK(final.done&&final.reaped&&final.revoked&&final.exitCode==0);
+    CHECK(reservations.snapshot().attempts==1&&reservations.snapshot().reservedEnergy.numerator.text()=="10000000");
+    if(mode)CHECK(reservations.snapshot().state!=WorkExperimentBudgetState::Running&&reservations.snapshot().attached);
 }
 }
 int main(int argc,char **argv){if(argc>2&&std::string(argv[1])=="--experiment-child")return child(argc,argv);

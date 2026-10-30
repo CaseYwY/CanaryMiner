@@ -61,6 +61,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-09c](../work-experiment-owner.md) supplies that exclusive command owner around capture. A completed record enters bounded Pause-only holding; only the matching economic owner can consume its one-use transfer. Initial admission/parent budget and cumulative clocks persist, and economic studies must postdate the transfer barrier. The enclosing fleet/source coordinator still owns actual delivery/revocation, sampling and parent-wide retest/replacement admission.
 
+[P-09d](../work-experiment-budget.md) supplies optional parent-slot experiment reservations. The budget outlives owners, reserves each whole attempt before Run and keeps one attachment across economic transfer; stopped/settled retirement releases only the attachment. Completed observations and reserved amounts remain distinct. The enclosing native coordinator still owns source qualification, real reaping, overlap prevention and complete admission/revocation.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

@@ -2,6 +2,7 @@
 #pragma once
 #include "work_measurement.h"
 namespace om {
+class WorkExperimentBudget;
 struct WorkExperimentPolicy {
     bool enabled=false;
     uint64_t commandLeaseMs=1000,renewalMarginMs=100,handoffTimeoutMs=5000;
@@ -32,7 +33,7 @@ struct WorkExperimentSnapshot {
 // and revoke the native channel immediately on revokeRequired. Retest admission/reaping remains external.
 class WorkExperimentOwner {
    public:
-    WorkExperimentOwner(WorkExperimentPolicy,WorkProfilePlan,WorkerControlBinding,WorkerControlIssuer &,const SessionIntent &,SessionToken);
+    WorkExperimentOwner(WorkExperimentPolicy,WorkProfilePlan,WorkerControlBinding,WorkerControlIssuer &,const SessionIntent &,SessionToken,WorkExperimentBudget *budget=nullptr);
     ~WorkExperimentOwner();
     WorkExperimentOwner(const WorkExperimentOwner &)=delete;
     WorkExperimentOwner &operator=(const WorkExperimentOwner &)=delete;
@@ -49,6 +50,7 @@ class WorkExperimentOwner {
     // Consumed only by the matching economic owner, never by a caller-provided record or arbitrary Pause.
     std::shared_ptr<const WorkExperimentRecord> release(WorkerControlIssuer &,const SessionIntent &,SessionToken,
         WorkMeasurementTime,const WorkProfilePlan &,WorkerReceipt *);
+    void failedHandoff(); // successor admission failure only; public late callbacks remain inert after transfer
     friend class EconomicCommandOwner;
 };
 } // namespace om

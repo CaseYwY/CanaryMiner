@@ -1,4 +1,5 @@
 #include "work_experiment_owner.h"
+#include "work_experiment_budget.h"
 #include "evidence_deadline.h"
 #include <algorithm>
 namespace om {
@@ -15,11 +16,12 @@ struct WorkExperimentOwner::Impl {
     bool attempted=false;WorkMeasurementTime anchor,last,baseline;std::optional<WorkerCommand> flight;
     EvidenceDeadline budgetExpiry,runExpiry,handoffExpiry;
     std::vector<std::shared_ptr<const WorkExperimentRunBinding>> runs;
-    Impl(WorkExperimentPolicy p,WorkProfilePlan f,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t)
-        :policy(p),plan(std::make_shared<const WorkProfilePlan>(std::move(f))),issuer(w),intent(i),token(t),capture(*plan,std::move(b),w,i,t){}
+    WorkExperimentBudget *budget=nullptr;
+    Impl(WorkExperimentPolicy p,WorkProfilePlan f,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,WorkExperimentBudget *parent)
+        :policy(p),plan(std::make_shared<const WorkProfilePlan>(std::move(f))),issuer(w),intent(i),token(t),capture(*plan,std::move(b),w,i,t),budget(parent){}
     void halt(R r){if(view.state==S::Transferred)return;
         attempted=true;if(view.state!=S::Stopped&&view.state!=S::Faulted){view.state=r==R::Stopped?S::Stopped:S::Faulted;view.status=r;}
-        view.revokeRequired=true;view.handoffUntilMonoMs=0;capture.requestStop();issuer.requestStop();}
+        view.revokeRequired=true;view.handoffUntilMonoMs=0;capture.requestStop();issuer.requestStop();if(budget)budget->fail(this,r);}
     bool clock(WorkMeasurementTime now){
         if(now.utcMs<0||now.utcMs>253402300799999LL||!now.monotonicMs||now.utcMs<last.utcMs||now.monotonicMs<last.monotonicMs){halt(R::Clock);return false;}
         const auto wall=static_cast<uint64_t>(now.utcMs-anchor.utcMs),mono=now.monotonicMs-anchor.monotonicMs;
@@ -33,6 +35,7 @@ struct WorkExperimentOwner::Impl {
         if(!live(view.state))return false;
         if(!intent.permits(token)){halt(R::Stopped);return false;}
         if(!clock(now))return false;
+        if(budget){const auto status=budget->check(this,now);if(status!=R::Ok){halt(status);return false;}}
         const auto worker=issuer.snapshot(now.monotonicMs);
         if(worker.state!=WorkerControlState::Active||!exact(worker)){halt(worker.state==WorkerControlState::ClockFault?R::Clock:
             worker.state==WorkerControlState::Stopped?R::Stopped:R::Attribution);return false;}
@@ -55,8 +58,8 @@ struct WorkExperimentOwner::Impl {
         return true;
     }
 };
-WorkExperimentOwner::WorkExperimentOwner(WorkExperimentPolicy p,WorkProfilePlan f,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t)
-    :impl_(new Impl(p,std::move(f),std::move(b),w,i,t)){}
+WorkExperimentOwner::WorkExperimentOwner(WorkExperimentPolicy p,WorkProfilePlan f,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,WorkExperimentBudget *budget)
+    :impl_(new Impl(p,std::move(f),std::move(b),w,i,t,budget)){}
 WorkExperimentOwner::~WorkExperimentOwner(){if(live(impl_->view.state))requestStop();}
 bool WorkExperimentOwner::start(WorkProfileSample sample,WorkMeasurementTime now,const WorkProfileConditions &c,uint64_t permission){auto &p=*impl_;
     if(p.attempted)return false;
@@ -67,6 +70,7 @@ bool WorkExperimentOwner::start(WorkProfileSample sample,WorkMeasurementTime now
             p.policy.renewalMarginMs>p.policy.commandLeaseMs/2||!p.policy.handoffTimeoutMs||p.policy.handoffTimeoutMs>60000){p.halt(R::Invalid);return false;}
         p.anchor=p.last=now;p.baseline={sample.utcMs,sample.monotonicMs};
         if(!p.clock(now)||!p.capture.start(std::move(sample),now,c)){p.halt(p.capture.snapshot().status);return false;}
+        if(p.budget){const auto status=p.budget->admit(&p,p.issuer,p.intent,p.token,*p.plan,now);if(status!=R::Ok){p.halt(status);return false;}}
         p.view.receipt=p.issuer.snapshot(now.monotonicMs).settled;p.view.commandRevision=1;p.view.state=S::Running;p.view.status=R::Ok;
         return p.check(now,c,permission);
     }catch(...){p.halt(R::Capacity);return false;}}
@@ -76,6 +80,7 @@ bool WorkExperimentOwner::append(uint64_t sequence,WorkProfileSample sample,Work
         if(!p.capture.append(sequence,std::move(sample),now,c)){p.halt(p.capture.snapshot().status);return false;}
         if(p.capture.snapshot().state==M::Complete){
             if(p.view.pending||!p.view.receipt||p.view.receipt->kind!=K::Paused){p.halt(R::Attribution);return false;}
+            if(p.budget&&!p.budget->complete(&p,*p.capture.snapshot().record,p.capture.snapshot().observedEnergy,now)){p.halt(p.budget->snapshot().status);return false;}
             p.view.record=std::make_shared<const WorkExperimentRecord>(WorkExperimentRecord{p.capture.snapshot().record,std::move(p.runs)});
             p.view.state=S::Holding;
         }
@@ -131,6 +136,8 @@ std::shared_ptr<const WorkExperimentRecord> WorkExperimentOwner::release(WorkerC
             workProfilePlanFingerprint(plan)!=workProfilePlanFingerprint(*p.plan)||p.view.pending||!p.exact(current)||
             current.state!=WorkerControlState::Active||p.view.receipt->kind!=K::Paused||!receipt||
             !p.handoffExpiry.clip(1,time(now),time(completed),p.policy.handoffTimeoutMs)){p.halt(R::Attribution);return {};}
+        if(p.budget&&!p.budget->transfer(&p,*p.view.receipt,now)){p.halt(p.budget->snapshot().status);return {};}
         *receipt=*p.view.receipt;p.view.state=S::Transferred;p.view.handoffUntilMonoMs=0;return p.view.record;
     }catch(...){p.halt(R::Capacity);return {};}}
+void WorkExperimentOwner::failedHandoff(){auto &p=*impl_;if(p.budget&&p.view.state==S::Transferred)p.budget->fail(&p,R::Attribution);}
 } // namespace om
