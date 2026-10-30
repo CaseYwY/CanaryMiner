@@ -57,6 +57,7 @@
 #include "energy_owner.h"
 #include "energy_capture.h"
 #include "session_intent.h"
+#include "worker_fleet.h"
 #include "accepted_history.h"
 #include "stats.h"
 #include "stats_server.h"
@@ -65,6 +66,9 @@ namespace om {
 
 inline uint64_t supervisorNowMs() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+inline GameGuardTime supervisorControlTime(){
+    return {std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(),supervisorNowMs()};
 }
 
 /** Full path of this executable (the children are started from it). */
@@ -393,6 +397,8 @@ struct SupervisorOptions {
     BillingReviewAccess billingReviewAccess; // default empty; borrowed owner must outlive this supervisor
     bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
+    WorkerFleetFactory workerFleetFactory; // default empty; one fixed lifetime, never reconstructed on a worker retry
+    WorkerFleetEvidenceSource workerFleetEvidence; // trusted memory-only source; missing evidence holds every controlled worker
 };
 
 /** What the supervisor knows about one worker at one moment. */
@@ -545,6 +551,16 @@ class Supervisor {
         if (opt_.stop && *opt_.stop) {settings_.stopBillingReview();return kExitOk;}
         sessionToken_ = intent_.explicitStart();
         if (!intent_.permits(sessionToken_)) return kExitFaultLatched;
+        if(opt_.workerFleetFactory){
+            if(opt_.tuning||opt_.drainMs>60000){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
+            try{fleet_=opt_.workerFleetFactory(intent_,sessionToken_);}catch(...){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
+            if(opt_.stop&&*opt_.stop)intent_.stop();
+            if(!fleet_||!intent_.permits(sessionToken_)||!fleet_->start(static_cast<unsigned>(opt_.seeds.size()),supervisorControlTime())){
+                intent_.stop();bool unresolved=false;
+                if(fleet_){fleet_->stop();for(unsigned i=0;i<opt_.seeds.size();++i)unresolved=unresolved||fleet_->snapshot(i).ownershipUnresolved;}
+                settings_.stopBillingReview();return !unresolved&&opt_.stop&&*opt_.stop?kExitOk:kExitFaultLatched;
+            }
+        }
         const uint64_t t0 = supervisorNowMs();
         if (!opt_.uiPreferencesPath.empty() && opt_.dashboard) {
             uiStore_.reset(new UiPreferencesStore(std::filesystem::u8path(opt_.uiPreferencesPath)));
@@ -637,7 +653,7 @@ class Supervisor {
             printf("\x1b[2J\x1b[?25l");  // hide the cursor while the dashboard owns the screen
         }
         KeyReader keys;
-        bool stopping = false, forced = false, quit = false;
+        bool stopping = false, forced = false, quit = false, controlFault = false;
         uint64_t stopDeadline = 0, nextSummary = 0;
         for (;;) {
             const uint64_t now = supervisorNowMs();
@@ -699,6 +715,14 @@ class Supervisor {
                 stopping = true;
                 stopDeadline = now + opt_.drainMs + 5000;
             }
+            if(fleet_){
+                if(!stopping){WorkerFleetEvidence evidence;
+                    try{if(opt_.workerFleetEvidence)evidence=opt_.workerFleetEvidence(sessionToken_.epoch);}catch(...){controlFault=true;beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}
+                    if(!stopping&&opt_.stop&&*opt_.stop){beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}
+                    if(!stopping)fleet_->tick(supervisorControlTime(),evidence);
+                    if(fleet_->state()==WorkerFleetState::Faulted){controlFault=true;beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}}
+                for(size_t i=0;i<workers_.size();++i)for(auto &line:fleet_->takeLines(static_cast<unsigned>(i)))inbox_.emplace_back(i,std::move(line));
+            }
             drainInbox(tty);
             if (opt_.tuning) {
                 std::vector<std::string> events;
@@ -714,7 +738,18 @@ class Supervisor {
             bool alive = false, pending = false;
             for (size_t i = 0; i < workers_.size(); ++i) {
                 Worker &w = *workers_[i];
-                if (w.proc && w.proc->started() && !w.proc->finished()) {
+                if(fleet_){
+                    const auto control=fleet_->snapshot(static_cast<unsigned>(i));
+                    if(control.ownershipUnresolved)controlFault=true;
+                    if(control.requested&&!control.done){alive=true;
+                        if(!stopping&&now>=w.nextSampleAt){sample(i);w.nextSampleAt=now+(tty?500:250);}
+                        if(control.pauseRequested){w.view.state=control.paused?"Paused":"Pausing";w.view.detail=control.paused?"controlled work boundary held":"waiting for drained work boundary";w.view.lastRateMs=0;}
+                    }else if(control.done&&!w.controlledExitHandled){w.controlledExitHandled=true;
+                        int code=control.exitCode;
+                        if(control.ownershipUnresolved||(!stopping&&!stopRequested&&code!=0&&code!=7&&code!=8&&!control.retryable))code=kExitFaultLatched;
+                        forced=forced||code==kExitShutdownForced;
+                        onExit(i,code,now,stopping||stopRequested);}
+                }else if (w.proc && w.proc->started() && !w.proc->finished()) {
                     if (now >= w.nextSampleAt) {
                         sample(i);
                         w.nextSampleAt = now + (tty ? 500 : 250);
@@ -756,11 +791,12 @@ class Supervisor {
                 printf("%s\n", renderPlainSummary(buildModel(now, t0), time(nullptr)).c_str());
                 fflush(stdout);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(tty ? 50 : 250));
+            std::this_thread::sleep_for(std::chrono::milliseconds(tty||fleet_ ? 50 : 250));
         }
         settings_.stopBillingReview();
         if(energyCapture_)energyCapture_->requestStop();
         if(forecast_)forecast_->requestStop();
+        if(fleet_)fleet_->requestStop();
         for (auto &w : workers_) {
             if (!w->proc) continue;
             int code = 0;
@@ -781,6 +817,8 @@ class Supervisor {
         if (energy_) energy_->stop();
         if (energyCapture_) energyCapture_->stop();
         if (forecast_) forecast_->stop();
+        if(fleet_){fleet_->stop();for(unsigned i=0;i<workers_.size();++i){const auto control=fleet_->snapshot(i);
+            controlFault=controlFault||control.ownershipUnresolved;forced=forced||control.exitCode==kExitShutdownForced;}}
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -793,7 +831,7 @@ class Supervisor {
         if (tty) printf("%s\n", summary.c_str());
         else printLine(summary);
         if (failed) intent_.stop();
-        return forced ? kExitShutdownForced : failed && !quit && !(opt_.stop && *opt_.stop) ? kExitFaultLatched : kExitOk;
+        return controlFault ? kExitFaultLatched : forced ? kExitShutdownForced : failed && !quit && !(opt_.stop && *opt_.stop) ? kExitFaultLatched : kExitOk;
     }
 
    private:
@@ -806,6 +844,7 @@ class Supervisor {
         bool nvmlOk = false;
         bool restartPending = false;
         bool stopping = false;
+        bool controlledExitHandled=false;
         uint64_t restartAt = 0;
         uint64_t nextSampleAt = 0;
         uint64_t nextEnergyAt = 0;
@@ -847,6 +886,7 @@ class Supervisor {
     std::unique_ptr<AcceptedHistory> history_;
     SessionIntent intent_;
     SessionToken sessionToken_;
+    std::unique_ptr<WorkerFleet> fleet_; // destroyed before its borrowed intent; retained across child restarts/settings
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
@@ -872,6 +912,14 @@ class Supervisor {
         ++w.historyGeneration;
         w.historySeen = w.historyOutage = false;
         w.historyLastUtc = static_cast<int64_t>(time(nullptr));
+        if(fleet_){
+            w.controlledExitHandled=false;w.view.haveStats=false;w.view.state="Pausing";w.view.detail="waiting for controlled startup";
+            if(!fleet_->launch(static_cast<unsigned>(i),std::filesystem::u8path(opt_.exe),workerArgs(opt_.userArgs,w.view.seed,w.port,opt_.resolvedWorkWait),
+                static_cast<unsigned>(opt_.drainMs+5000),supervisorControlTime())){
+                w.controlledExitHandled=true;onExit(i,kExitFaultLatched,now,false,"controlled worker admission refused");
+            }else addEvent(workerLabel(w)+": controlled worker requested");
+            return;
+        }
         w.proc.reset(new ChildProcess());
         const size_t slot = i;
         std::string err;
@@ -895,6 +943,7 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        if(fleet_)fleet_->requestStop();
         settings_.stopBillingReview();
         if(forecast_)forecast_->requestStop();
         if(energy_)energy_->requestStop();
@@ -928,6 +977,9 @@ class Supervisor {
         w.seen = false;
         w.view.haveStats = false;
         w.view.detail = spawnError.empty() ? "exited with code " + std::to_string(code) : spawnError;
+        if(fleet_&&(code==kExitOk||code==kExitShutdownForced)){
+            w.view.state="Stopped";addEvent(workerLabel(w)+": "+w.view.detail+"; explicit new start required");return;
+        }
         if (code == kExitFaultLatched) {
             w.view.state = "Error";
             w.view.detail += "; worker fault is latched; explicit new start required";

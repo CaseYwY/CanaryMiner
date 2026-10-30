@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "../src/product/fee.h"
+#include "cpu_telemetry_fixture.h"
 #include "../src/product/supervisor.h"
 #include "../src/product/manual_market.h"
 #include "product_test_util.h"

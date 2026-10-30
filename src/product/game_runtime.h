@@ -12,6 +12,8 @@ class GameRuntime {
     GameRuntime &operator=(const GameRuntime &)=delete;
     bool start(GameGuardTime now); // single-use; no implicit SessionIntent::explicitStart
     const GameGuardSnapshot &tick(GameGuardTime now,const GameSafety &safety,std::shared_ptr<const GameProfitWindow> profit={});
+    // Restricts a caller's already bounded deadline to the exact evidence consumed by the immediately preceding tick.
+    uint64_t runDeadline(GameGuardTime now,uint64_t upperMonoMs)const;
     void requestStop(); // revoke guard and detector before joining
     void stop();
     GameRuntimeState state()const{return state_;}
@@ -23,6 +25,7 @@ class GameRuntime {
     GameProcessTarget target_;GameDetectionPolicy detectionPolicy_;GameGuardPolicy policy_;
     bool bindingValid_=false,attempted_=false;
     GameRuntimeState state_=GameRuntimeState::Dormant;
+    GameGuardTime lastTick_;uint64_t runUntil_=0;
     GameSessionGuard guard_;
     GameDetectionOwner detector_; // fixed lifetime: no replacement/reset setter
     void fault(GameGuardTime now);

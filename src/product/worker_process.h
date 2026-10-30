@@ -25,10 +25,11 @@ class WorkerControlClient final:public RunPauseControl {
    private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };
-enum class WorkerProcessState { Dormant, Running, Stopping, Exited, Failed, Unreaped };
+enum class WorkerProcessState { Dormant, Running, Stopping, Exited, Disconnected, Failed, Unreaped };
 struct WorkerProcessPoll {
     WorkerProcessState state=WorkerProcessState::Dormant;
     int exitCode=-1;
+    bool controlFault=false; // survives a simultaneous actual exit observation
     std::vector<WorkerReceipt> receipts; // at most 16 per poll; private, never log/stats fields
     std::string output; // at most 8192 bytes per poll, separate from the control channel; caller redacts
 };

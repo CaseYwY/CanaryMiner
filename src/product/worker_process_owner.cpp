@@ -46,12 +46,15 @@ struct WorkerProcessOwner::Impl {
                     }}
                 if(cancel.load()&&!stopping){process.requestStop();stopping=true;deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);}
                 const auto p=process.poll();
+                fault=fault||p.controlFault;
                 {std::lock_guard<std::mutex> lock(mutex);append(p.output);
                     if(!cancel.load()&&!fault&&p.state==WorkerProcessState::Running)for(const auto &receipt:p.receipts)view.receipt=receipt;}
                 if(p.state==WorkerProcessState::Exited){
                     complete(fault||p.exitCode==8?WorkerOwnerState::Faulted:WorkerOwnerState::Exited,fault?8:p.exitCode,process.reaped());return;
                 }
                 if(p.state==WorkerProcessState::Unreaped){fault=true;break;}
+                if(p.state==WorkerProcessState::Disconnected&&!stopping){process.requestStop();stopping=true;deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);
+                    std::lock_guard<std::mutex> lock(mutex);view.state=WorkerOwnerState::Stopping;view.revoked=true;}
                 if(p.state==WorkerProcessState::Failed&&!stopping){fault=true;process.requestStop();stopping=true;deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);
                     std::lock_guard<std::mutex> lock(mutex);view.state=WorkerOwnerState::Faulted;view.revoked=true;}
                 if(stopping&&std::chrono::steady_clock::now()>=deadline)break;

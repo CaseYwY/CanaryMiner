@@ -200,7 +200,7 @@ void WorkerControlClient::pauseBoundary(bool held)noexcept{std::lock_guard<std::
 void WorkerControlClient::pauseHeld()noexcept{std::lock_guard<std::mutex> lock(impl_->mutex);if(impl_->held&&impl_->gate)impl_->gate->pauseBoundary(true);}
 
 struct WorkerControlProcess::Impl {
-    bool attempted=false,owned=false,settled=false,unknown=false,reserved=false,blocked=false;
+    bool attempted=false,owned=false,settled=false,unknown=false,reserved=false,blocked=false,controlFault=false;
     WorkerProcessState state=WorkerProcessState::Dormant;int exit=-1;
     WorkerControlBinding binding;Channel channel;Native logs=invalid;WorkerControlFramer frames;
 #if defined(_WIN32)
@@ -253,7 +253,7 @@ struct WorkerControlProcess::Impl {
         do{if(observe())return true;if(Clock::now()>=until)break;std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(true);
         unreaped();return false;
     }
-    void fail(){channel.close();state=WorkerProcessState::Failed;}
+    void fail(){channel.close();controlFault=true;state=WorkerProcessState::Failed;}
     bool launch(const std::filesystem::path &exe,const std::vector<std::string> &args,const std::atomic<bool> &cancel){
 #if defined(_WIN32)
         SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};Native childIn=invalid,childOut=invalid,logWrite=invalid,null=invalid,parent=invalid;
@@ -349,15 +349,18 @@ WorkerProcessPoll WorkerControlProcess::poll(){
     if(p.state==WorkerProcessState::Running){
         if(!p.channel.flush(workerControlNowMs()))p.fail();
         if(p.state==WorkerProcessState::Running){char bytes[workerControlChunkLimit];size_t count=0;const auto result=readBytes(p.channel.input,bytes,sizeof(bytes),count);
-            if(result==IO::Failed||result==IO::Closed)p.fail();
+            if(result==IO::Failed)p.fail();
+            else if(result==IO::Closed){if(!p.frames.complete())p.fail();else{p.channel.close();p.state=WorkerProcessState::Disconnected;}}
             else if(count&&!p.frames.feed(std::string_view(bytes,count),[&](std::string_view frame){WorkerReceipt r;
                 if(!decodeWorkerReceipt(frame,&r)||!sameBinding(r.command.binding,p.binding))return false;
                 out.receipts.push_back(std::move(r));return true;}))p.fail();}}
     if(p.logs!=invalid){char bytes[8192];size_t count=0;const auto result=readBytes(p.logs,bytes,sizeof(bytes),count);
         if(count)out.output.assign(bytes,count);
         if(result==IO::Closed||result==IO::Failed)closeNative(p.logs);}
+    const bool streamEnded=p.state==WorkerProcessState::Running||p.state==WorkerProcessState::Disconnected||p.state==WorkerProcessState::Failed;
     if(p.owned)p.observe();
-    out.state=p.state;out.exitCode=p.exit;return out;
+    if(streamEnded&&p.settled&&!p.frames.complete())p.controlFault=true; // actual exit cannot erase an incomplete/malformed receipt stream
+    out.state=p.state;out.exitCode=p.exit;out.controlFault=p.controlFault;return out;
 }
 void WorkerControlProcess::requestStop(){auto &p=*impl_;p.attempted=true;p.channel.close();
     if(p.state!=WorkerProcessState::Exited&&p.state!=WorkerProcessState::Unreaped)p.state=WorkerProcessState::Stopping;}

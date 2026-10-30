@@ -4,6 +4,8 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
+**Latest bounded slice: P-11g.** [Lifetime game-to-worker supervision](../game-worker-session.md) retains one game runtime and parent identity across admitted worker replacements, clips Run leases to original evidence validity and connects an optional supervisor factory. Ordinary CLI/safety activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; the older slice summaries below are historical context.
+
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 
 **History batch:** P-04 adds local observed accepted counters with optional system SQLite, rolling windows, coverage/recovery and `--no-history`. See [history semantics](../accepted-history.md) and [validation](../history-validation.md). It is not a complete pool-acknowledgement or token-income ledger.
@@ -76,7 +78,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Native flat-energy defaults and session board energy | Default-off native review/save and bounded session-only model; typed power validity/coverage, not whole-PC/incremental energy or net income |
 | Persistent observed power and independent reset windows | Bounded audited core/helper/owner implemented; explicit windows only, no native persistence activation, long-run compaction or monetary bill state |
 | Automatic profitability selection | Not implemented |
-| Tested game pause/coexist policies | Not implemented in this fork |
+| Tested game pause/coexist policies | CPU-tested episode/profit guard, native detector, cooperative pause and optional lifetime supervisor bridge; ordinary activation and real experience/economic qualification remain open |
 | Stratum TLS | Not implemented |
 | First internationalization language packs | Not implemented |
 

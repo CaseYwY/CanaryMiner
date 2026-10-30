@@ -1,6 +1,6 @@
 # Owned worker transport and opt-in child entry (P-11f)
 
-M-GAME/M-SUPERVISOR; R-GAME-004/005/006 and R-SAFE-001/002; T-GAME/T-INTENT; D-67. This slice carries the [P-11e protocol](worker-control.md) over a separately owned native channel, supplies cancellable worker IO and a background process owner, and admits that channel in an explicit development build of the native child entry. The ordinary supervisor has not yet been connected to this owner or the lifetime game runtime.
+M-GAME/M-SUPERVISOR; R-GAME-004/005/006 and R-SAFE-001/002; T-GAME/T-INTENT; D-67. This slice carries the [P-11e protocol](worker-control.md) over a separately owned native channel, supplies cancellable worker IO and a background process owner, and admits that channel in an explicit development build of the native child entry. The subsequent [P-11g bridge](game-worker-session.md) connects the lifetime game runtime through a default-empty supervisor factory; ordinary CLI binding remains absent.
 
 ## Private bootstrap and entropy
 
@@ -30,7 +30,7 @@ The log queue retains at most 32 whole lines / 32768 bytes, with an 8192-byte li
 
 `CANARY_ENABLE_WORKER_CONTROL_RUNTIME` defaults **OFF**. Ordinary builds refuse the internal flag. The development variant accepts it only for an ordinary untuned worker run; benchmark, research/evidence, asynchronous selectors, tuning, invalid/duplicate handles and unowned channels refuse. The real `miner.cu` entry proves initial empty/drained Pause **before device discovery**, then installs the same client in `RunOptions::workPause`. Its legacy stdin watcher is omitted for this controlled child. CPU host stubs verify Run handoff by trapping the first forbidden device call.
 
-No ordinary supervisor constructs the owner, generates identities or supplies game-controlled Run commands yet. Stable parent identity provisioning, lifetime game supervision, native mode/target review, evidence-to-lease composition, result admission and production packaging remain required. Both production release recipes explicitly configure and verify this development capability OFF.
+The [P-11g bridge](game-worker-session.md) supplies stable parent identity provisioning, lifetime game supervision, evidence-to-lease composition and result admission. It distinguishes EOF from actual exit and retains incomplete/malformed receipt faults even when a poll also sees exit. Ordinary startup still supplies no factory: native mode/target review, qualified safety, latency isolation, CLI binding and production packaging remain required. Both production release recipes explicitly configure and verify this development capability OFF.
 
 Windows parent death is bound by the assigned Job; Linux parent death is verified after child adoption. A loader/entry stall before Linux installs `PDEATHSIG`, genuine uninterruptible kernel waits, hostile same-user handle manipulation and installed-binary/loader trust are not certified. Launch, thread scheduling and kernel calls are not hard real-time operations. The background owner isolates ordinary launch/IO latency; unresolved native operations must never be replaced to manufacture progress.
 
