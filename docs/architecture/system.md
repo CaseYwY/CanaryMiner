@@ -137,6 +137,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 [P-11d](../work-pause.md) supplies a default-null borrowed control in the shared run loop, with drain-before-pause and refresh-after-resume boundaries. User/donation hooks freeze productive accounting and preserve the remaining no-work timeout. Internal control faults terminate the outer loop without restarting or masquerading as fee-pool failure. Native settings and the fenced parent/worker channel remain separate.
 
+[P-11e](../worker-control.md) adds a strict bounded private protocol, one-flight parent issuer and serialized worker memory gate under frozen session/worker keys, epoch/slot/generation and original command deadlines. Received and Paused receipts stay distinct; expiry/stop cannot revive, and a renewed hold does not alter productive accounting. Production pipe ownership, supervisor/game composition and native settings remain subsequent integration.
+
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
 ### M-TLS

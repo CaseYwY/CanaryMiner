@@ -1,0 +1,10 @@
+# Private bounded protocol and memory gate only; no ordinary entry-point activation.
+add_library(canary_worker_control STATIC "${CMAKE_SOURCE_DIR}/src/product/worker_control.cpp")
+target_compile_features(canary_worker_control PUBLIC cxx_std_17)
+target_include_directories(canary_worker_control PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(canary_worker_control PUBLIC Threads::Threads)
+if(MSVC)
+  target_compile_options(canary_worker_control PRIVATE /W3 /utf-8)
+else()
+  target_compile_options(canary_worker_control PRIVATE -Wall -Wextra -Werror)
+endif()

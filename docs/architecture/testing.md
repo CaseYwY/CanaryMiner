@@ -134,6 +134,8 @@ Test best eligible estimated net per elapsed time, no-data/nonpositive pause, al
 
 [P-11d](../work-pause.md) checks the actual shared loop using a compile-isolated CPU/in-memory-source fixture, plus the ordinary source's early-pause/admission path under aborting device/network wrappers on Linux. Ordering, fresh resume, fetch/prepare races, bounded pause polling, null-control behavior and drain/clock/stop failure are covered. Fee simulations preserve productive time, remaining watchdog age, obligation and no-restart fault behavior. Artifact checks exclude the test seam from ordinary objects; CPU evidence does not qualify GPU timing or game experience.
 
+[P-11e](../worker-control.md) checks canonical schemas and fragmented bounded streams, complete incarnation/revision/time fencing, single-flight acknowledgement, receipt/quiescence separation, clock/expiry/stop non-revival and concurrent gate observation. Owned native CPU pipe probes cover real fragmented delivery, old Run replay, idle/partial-frame expiry, foreign binding, overflow and EOF. The shared-loop fixture installs the real gate for initial/mid-work pause, fresh resume and terminal refusal. These are not production pipe-lifecycle or GPU/game timing qualification.
+
 Test off/pause/coexist, launcher/game/manual triggers, debounce/detection failure, no permission/no FPS/no valid baseline safe fallback, actual matched scene metrics, experience limits/VRAM/thermal headroom and bounded authorized testing. Test qualified auto-entry/exit restoration, economic pause/recovery and user stop not reviving. No injection/anti-cheat bypass/focus stealing/game killing; generic launcher tests do not count as gameplay evidence.
 
 ## T-TLS
