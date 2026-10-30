@@ -51,6 +51,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-03i/P-11n](../pending-run-revocation.md) makes the actual fleet revoke all owned channels when a pending Run is no longer covered by the complete current safety/game deadline. No free command slot or new Pause is required for this terminal revocation; background owners retain actual drain/reap responsibility.
 
+[P-10h](../economic-parent-budget.md) keeps one logical slot's economic reference budget in the explicit parent, above its replaceable guards/issuers. Stopped/settled reference retirement accounts the final original receipt before detaching; new incarnations preserve cooldown, rolling history and the parent clock anchor. A reference retirement is not actual process reaping or replacement permission; the future execution owner must enforce both boundaries.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

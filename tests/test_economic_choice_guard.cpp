@@ -175,6 +175,125 @@ void refusals(){Fixture f;
         if(mode==3)x.conditions.fault=true;
         CHECK(x.check(2).state==S::Faulted&&!x.guard->snapshot().point);}
 }
+struct ParentFixture {
+    SessionIntent intent;SessionToken token=intent.explicitStart();OptimizationTime now=at();EconomicInput base=input();
+    EconomicGuardPolicy guardPolicy=policy();EconomicParentBudgetPolicy budgetPolicy;
+    EconomicEvaluationOwner owner{evaluator(),intent,token};std::unique_ptr<EconomicParentBudget> budget;
+    std::unique_ptr<WorkerControlIssuer> issuer;std::unique_ptr<WorkerControlGate> gate;std::unique_ptr<EconomicChoiceGuard> guard;
+    WorkerControlBinding worker=binding();unsigned installed=77;uint64_t revision=1;
+    explicit ParentFixture(unsigned maximum=2,uint64_t window=10000,uint64_t cooldown=2000,unsigned incarnations=4){
+        guardPolicy.minimumEvaluations=1;guardPolicy.confirmationMs=0;guardPolicy.maximumTransitions=maximum;
+        guardPolicy.transitionWindowMs=window;guardPolicy.cooldownMs=cooldown;
+        budgetPolicy={true,cooldown,window,maximum,incarnations};budget=std::make_unique<EconomicParentBudget>(budgetPolicy,intent,token);
+        base.generation=token.epoch;prices(base);CHECK(owner.start(now)&&budget->start(now));CHECK(attach(0));
+    }
+    bool attach(uint64_t ms,int64_t skew=0){now=at(ms);now.utcMs+=skew;guard.reset();gate.reset();issuer.reset();
+        issuer=std::make_unique<WorkerControlIssuer>(worker,intent,token);
+        gate=std::make_unique<WorkerControlGate>(worker,[this]{return now.monotonicMs;});if(!issuer->start(now.monotonicMs))return false;
+        const auto c=issuer->issue(D::Pause,now.monotonicMs,5000);CHECK(c&&gate->receive(*c)==WorkerCommandResult::Accepted);if(!c)return false;
+        gate->pauseBoundary(true);CHECK(issuer->acknowledge(*gate->snapshot().receipt,now.monotonicMs)==WorkerReceiptResult::Settled);
+        guard=std::make_unique<EconomicChoiceGuard>(guardPolicy,worker,owner,*issuer,intent,token,budget.get());return guard->start(now,base.currentPlan);
+    }
+    const EconomicGuardSnapshot &check(uint64_t ms){now=at(ms);if(!owner.snapshot().contextRevision)owner.poll(now,revision,base.currentPlan,base.conditions);
+        return guard->check(now,revision,base.currentPlan,base.conditions);}
+    void study(uint64_t ms,bool immediate=false){now=at(ms);const auto ticket=owner.poll(now,revision,base.currentPlan,base.conditions).requests[1];CHECK(ticket.has_value());if(!ticket)return;
+        auto in=base;in.nowUtcMs=now.utcMs;in.nowMonoMs=now.monotonicMs;in.electricity.opening.throughUtcMs=now.utcMs+1;
+        in.electricity.opening.timeDatabaseVersion=civilAt(in.electricity.plan.clock,now.utcMs+1).databaseVersion;
+        CHECK(owner.submit(*ticket,revision,std::move(in),now)==EconomicSubmission::Accepted);
+        const auto end=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        do{owner.poll(at(ms+(immediate?0:1)),revision,base.currentPlan,base.conditions);if(!owner.snapshot().pending)break;std::this_thread::sleep_for(std::chrono::milliseconds(1));}while(std::chrono::steady_clock::now()<end);
+        CHECK(!owner.snapshot().pending&&owner.snapshot().study);now=at(ms+(immediate?0:1));
+    }
+    WorkerCommand send(uint64_t ms,D directive,std::optional<unsigned> wait=std::nullopt){now=at(ms);const auto c=issuer->issue(directive,now.monotonicMs,5000,wait);
+        CHECK(c&&gate->receive(*c)==WorkerCommandResult::Accepted);return *c;}
+    WorkerReceipt apply(uint64_t ms,D directive,std::optional<unsigned> wait=std::nullopt,bool deliver=true){send(ms,directive,wait);
+        gate->pauseBoundary(directive==D::Pause);if(directive==D::Run)CHECK(gate->applyWorkWait(installed)==WorkControlRequest::Run);
+        const auto r=*gate->snapshot().receipt;if(deliver)CHECK(issuer->acknowledge(r,now.monotonicMs)==WorkerReceiptResult::Settled);return r;}
+    bool retire(uint64_t ms){now=at(ms);issuer->requestStop();return guard->retire(now);}
+    void next(){++worker.workerGeneration;worker.workerKey=std::string(32,static_cast<char>('2'+worker.workerGeneration-1));}
+};
+void parentBudgets(){
+    {ParentFixture f;CHECK(f.retire(1));f.study(1000,true);f.next();CHECK(f.attach(1000));
+        CHECK_MSG("a pre-replacement study in the same millisecond cannot prove post-replacement order",f.check(1000).reason==R::PostApplicationStudy&&!f.guard->snapshot().point);
+        f.study(2000);CHECK(f.check(2001).action==A::Resume);CHECK(f.retire(2002));}
+    {ParentFixture f(1);f.study(0);CHECK(f.check(1).action==A::Resume);f.apply(2,D::Run,0);CHECK(f.check(2).transitionsInWindow==1);
+        CHECK(f.retire(3));CHECK(f.budget->snapshot().state==S::Running&&!f.budget->snapshot().attached&&f.budget->snapshot().transitionsInWindow==1);
+        f.next();CHECK(f.attach(4));f.study(1000);auto s=f.check(1001);CHECK(s.action==A::Pause&&s.reason==R::Cooldown&&s.transitionsInWindow==1);
+        s=f.check(2002);CHECK(s.action==A::Pause&&s.reason==R::Budget); // original application survives a new worker's initial Pause
+        f.apply(4900,D::Pause);CHECK(f.check(4900).state==S::Running);f.study(5000);
+        CHECK(f.check(5001).reason==R::Budget);f.apply(9000,D::Pause);f.check(9000);f.study(10000);
+        CHECK(f.check(10001).reason==R::Budget);s=f.check(10002);CHECK(s.action==A::Resume&&s.transitionsInWindow==0);
+        f.apply(10003,D::Run,0);CHECK(f.check(10003).transitionsInWindow==1);CHECK(f.retire(10004));
+        CHECK(!f.guard->retire(at(10004))&&f.budget->snapshot().state==S::Running);}
+    {ParentFixture f(1,1000,0);f.apply(2,D::Run,0);f.check(2);CHECK(f.retire(3));f.next();CHECK(f.attach(4));
+        const auto delayed=f.apply(900,D::Run,0,false);CHECK(f.check(1050).reason==R::Pending&&f.budget->snapshot().transitionsInWindow==0);
+        CHECK(f.issuer->acknowledge(delayed,at(1100).monotonicMs)==WorkerReceiptResult::Settled);
+        CHECK(f.check(1100).state==S::Faulted&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.apply(2,D::Run,0); // the last receipt is accounted even if retirement precedes the next guard check
+        CHECK(f.retire(3));CHECK(f.budget->snapshot().transitionsInWindow==1);f.next();CHECK(f.attach(4));
+        f.apply(5,D::Run,0);CHECK(f.retire(6)&&f.budget->snapshot().transitionsInWindow==2);f.next();CHECK(f.attach(7));
+        f.apply(8,D::Run,0);CHECK(!f.retire(9)&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.apply(2,D::Run,0);f.check(2);f.apply(3,D::Run,0);CHECK(f.retire(4));
+        CHECK(f.budget->snapshot().transitionsInWindow==1);f.next();CHECK(f.attach(5));f.apply(6,D::Run,0);CHECK(f.check(6).transitionsInWindow==2);CHECK(f.retire(7));}
+    for(unsigned mode=0;mode<9;++mode){ParentFixture f;CHECK(f.retire(2));f.next();
+        if(mode==0)f.worker.workerKey=binding().workerKey;
+        if(mode==1)++f.worker.workerGeneration;
+        if(mode==2)f.worker.workerGeneration=1;
+        if(mode==3)f.worker.sessionKey[0]='a';
+        if(mode==4)++f.worker.slot;
+        if(mode==5)++f.guardPolicy.maximumTransitions;
+        if(mode==6)++f.guardPolicy.transitionWindowMs;
+        if(mode==7)++f.guardPolicy.cooldownMs;
+        if(mode==8)--f.base.currentPlan.maximumSampleGapMs;
+        CHECK_MSG(("parent replacement mismatch "+std::to_string(mode)).c_str(),!f.attach(3)&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f(2,10000,2000,1);CHECK(f.retire(2));f.next();CHECK_MSG("parent incarnation budget",!f.attach(3)&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;CHECK(!f.guard->retire(at(1))&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.send(2,D::Run,0);CHECK(f.issuer->acknowledge(*f.gate->snapshot().receipt,at(2).monotonicMs)==WorkerReceiptResult::Waiting);
+        CHECK(!f.retire(3)&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.apply(2,D::Run);CHECK(f.check(2).state==S::Faulted&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.apply(1,D::Pause);f.apply(2,D::Pause);CHECK(!f.retire(3)&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.guard.reset();CHECK(f.budget->snapshot().state==S::Faulted);f.next();CHECK(!f.attach(2));}
+    {ParentFixture f;EconomicChoiceGuard overlap(f.guardPolicy,f.worker,f.owner,*f.issuer,f.intent,f.token,f.budget.get());
+        CHECK(!overlap.start(at(1),f.base.currentPlan)&&f.budget->snapshot().state==S::Faulted&&f.check(1).state==S::Faulted);}
+    {ParentFixture f;CHECK(f.retire(2));f.next();WorkerControlIssuer early(f.worker,f.intent,f.token);CHECK(early.start(at(1).monotonicMs));
+        const auto c=early.issue(D::Pause,at(1).monotonicMs,5000);CHECK(c.has_value());
+        CHECK(early.acknowledge({*c,K::Paused,at(1).monotonicMs},at(1).monotonicMs)==WorkerReceiptResult::Settled);
+        EconomicChoiceGuard overlappingTime(f.guardPolicy,f.worker,f.owner,early,f.intent,f.token,f.budget.get());
+        CHECK(!overlappingTime.start(at(3),f.base.currentPlan)&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;CHECK(f.retire(2));f.next();CHECK(f.attach(3));
+        EconomicParentBudget reset(f.budgetPolicy,f.intent,f.token);CHECK(reset.start(at(3)));
+        EconomicChoiceGuard wrongGeneration(f.guardPolicy,f.worker,f.owner,*f.issuer,f.intent,f.token,&reset);
+        CHECK(!wrongGeneration.start(at(3),f.base.currentPlan)&&reset.snapshot().state==S::Faulted);CHECK(f.retire(4));}
+    {ParentFixture f;f.check(0);auto shifted=at(1);shifted.utcMs+=1500;f.guard->check(shifted,1,f.base.currentPlan,f.base.conditions);
+        CHECK(f.guard->retire(shifted)==false&&f.budget->snapshot().state==S::Faulted);}
+    {ParentFixture f;f.check(0);auto shifted=at(1);shifted.utcMs+=1500;CHECK(f.guard->check(shifted,1,f.base.currentPlan,f.base.conditions).state==S::Running);
+        f.issuer->requestStop();CHECK(f.guard->retire(shifted));f.next();CHECK(f.attach(2,1500));
+        shifted=at(3);shifted.utcMs+=2100;CHECK(f.guard->check(shifted,1,f.base.currentPlan,f.base.conditions).state==S::ClockFault);
+        CHECK(f.budget->snapshot().state==S::ClockFault);}
+    for(unsigned mode=0;mode<3;++mode){ParentFixture f;
+        if(mode==0)f.intent.stop();
+        if(mode==1)f.budget->requestStop();
+        if(mode==2)f.guard->requestStop();
+        CHECK(f.check(1).state==S::Stopped&&f.budget->snapshot().state==S::Stopped);f.guard.reset();
+        CHECK(f.budget->snapshot().state==S::Stopped&&!f.budget->start(at(2)));f.intent.stop();f.intent.explicitStart();f.next();CHECK(!f.attach(2));}
+    {Fixture f;EconomicParentBudgetPolicy p{true,2000,10000,2,4};SessionIntent other;const auto token=other.explicitStart();EconomicParentBudget foreign(p,other,token);CHECK(foreign.start(at()));
+        EconomicChoiceGuard guard(policy(),binding(),f.owner,f.issuer,f.intent,f.token,&foreign);CHECK(!guard.start(at(),f.plan)&&foreign.snapshot().state==S::Faulted);}
+}
+void parentPolicy(){SessionIntent intent;const auto token=intent.explicitStart();
+    for(unsigned mode=0;mode<7;++mode){EconomicParentBudgetPolicy p{true,0,1000,1,1};
+        if(mode==0)p.cooldownMs=86400001;
+        if(mode==1)p.transitionWindowMs=999;
+        if(mode==2)p.transitionWindowMs=86400001;
+        if(mode==3)p.maximumTransitions=0;
+        if(mode==4)p.maximumTransitions=257;
+        if(mode==5)p.maximumIncarnations=0;
+        if(mode==6)p.maximumIncarnations=257;
+        EconomicParentBudget budget(p,intent,token);CHECK(!budget.start(at())&&budget.snapshot().state==S::Faulted&&!budget.start(at(1)));}
+    {EconomicParentBudget budget({},intent,token);CHECK(!budget.start(at())&&budget.snapshot().state==S::Disabled);}
+    {EconomicParentBudget budget({true,0,1000,1,1},intent,token);budget.requestStop();CHECK(!budget.start(at())&&budget.snapshot().state==S::Stopped);}
+    for(auto now:{OptimizationTime{-1,1},OptimizationTime{T,0},OptimizationTime{253402300800000LL,1}}){
+        EconomicParentBudget budget({true,0,1000,1,1},intent,token);CHECK(!budget.start(now)&&budget.snapshot().state==S::ClockFault);}
+}
 #if defined(CANARY_ECONOMIC_EVALUATION_TESTING)
 std::mutex buildMutex;std::condition_variable buildWake;bool held=false,entered=false,released=false;
 struct BlockBuild {
@@ -209,7 +328,7 @@ std::shared_ptr<const EconomicStudy> economicEvaluationTestBuild(const EconomicI
 }
 }
 #endif
-int main(){confirmation();appliedAndBudgets();expiryAndStop();originalBoundaries();refusals();
+int main(){confirmation();appliedAndBudgets();expiryAndStop();originalBoundaries();refusals();parentBudgets();parentPolicy();
 #if defined(CANARY_ECONOMIC_EVALUATION_TESTING)
     pendingOwnership();return finishTests("economic controlled temporal references");
 #else

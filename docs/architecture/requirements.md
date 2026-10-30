@@ -118,6 +118,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-03i/P-11n](../pending-run-revocation.md) makes current safety/game revocation win over an unsettled Run in the actual fleet. Missing or shortened deadline coverage faults/revokes the owned channels, with reaping observed separately and no safe-input revival. R-SAFE-001/002 and R-GAME-004/005 remain partial pending qualified safety, ordinary activation and physical timing/experience acceptance.
 
+[P-10h](../economic-parent-budget.md) retains each logical slot's reference cooldown/rolling transitions across replacement guards under the same parent, with exact final-receipt retirement and original cumulative clocks. R-OPT-001/003 and R-SAFE-001/002 remain partial: complete decision-to-command binding, reservations, actual process replacement/reaping admission, qualified inputs and ordinary activation remain open.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.

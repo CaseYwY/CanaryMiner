@@ -12,6 +12,56 @@ bool safe(const WorkProfileConditions &c){return c.safetyTelemetryValid&&c.therm
 bool validEconomicGuardPolicy(const EconomicGuardPolicy &p){return p.margins.enabled&&validEconomicChoicePolicy(p.margins)&&p.result.enabled&&
     p.result.maximumResultAgeMs&&p.result.maximumResultAgeMs<=day&&p.confirmationMs<=3600000&&p.maximumConfirmationGapMs&&p.maximumConfirmationGapMs<=day&&
     p.cooldownMs<=day&&p.transitionWindowMs>=1000&&p.transitionWindowMs<=day&&p.minimumEvaluations&&p.minimumEvaluations<=32&&p.maximumTransitions&&p.maximumTransitions<=256;}
+struct EconomicParentBudget::Impl {
+    EconomicParentBudgetPolicy policy;const SessionIntent &intent;SessionToken token;EconomicParentBudgetSnapshot view;
+    bool attempted=false;OptimizationTime anchor,last;uint64_t retiredAt=0;
+    std::string sessionKey,planKey;unsigned slot=0;const void *attached=nullptr;
+    std::vector<std::string> workerKeys;std::deque<uint64_t> transitions;std::optional<uint64_t> lastTransition;
+    Impl(EconomicParentBudgetPolicy p,const SessionIntent &i,SessionToken t):policy(p),intent(i),token(t){}
+    void halt(S state){if(view.state==S::Stopped||view.state==S::Faulted||view.state==S::ClockFault)return;view.state=state;attempted=true;}
+    void count(uint64_t now){view.transitionsInWindow=static_cast<unsigned>(std::count_if(transitions.begin(),transitions.end(),
+        [&](uint64_t at){return now-at<policy.transitionWindowMs;}));}
+    bool time(OptimizationTime now){
+        if(!intent.permits(token)){halt(S::Stopped);return false;}
+        if(view.state!=S::Running)return false;
+        if(now.utcMs<last.utcMs||now.utcMs>lastUtc||now.monotonicMs<last.monotonicMs){halt(S::ClockFault);return false;}
+        const auto wall=static_cast<uint64_t>(now.utcMs-anchor.utcMs),mono=now.monotonicMs-anchor.monotonicMs;
+        if((wall>mono?wall-mono:mono-wall)>2000){halt(S::ClockFault);return false;}
+        last=now;count(now.monotonicMs);return true;
+    }
+    bool attach(const void *owner,const SessionIntent &i,SessionToken t,const EconomicGuardPolicy &p,const WorkerReceipt &initial,
+        const std::string &plan,OptimizationTime now){
+        if(!time(now))return false;
+        const auto &b=initial.command.binding;
+        if(&i!=&intent||t.epoch!=token.epoch||attached||p.cooldownMs!=policy.cooldownMs||p.transitionWindowMs!=policy.transitionWindowMs||
+            p.maximumTransitions!=policy.maximumTransitions||view.incarnations>=policy.maximumIncarnations||
+            b.workerGeneration!=view.workerGeneration+1||initial.command.issuedMonoMs<(view.incarnations?retiredAt:anchor.monotonicMs)||
+            (view.incarnations&&(b.sessionKey!=sessionKey||b.slot!=slot||plan!=planKey))||
+            std::find(workerKeys.begin(),workerKeys.end(),b.workerKey)!=workerKeys.end()){halt(S::Faulted);return false;}
+        if(!view.incarnations){sessionKey=b.sessionKey;slot=b.slot;planKey=plan;}
+        workerKeys.push_back(b.workerKey);attached=owner;view.attached=true;++view.incarnations;view.workerGeneration=b.workerGeneration;return true;
+    }
+    bool record(const void *owner,uint64_t applied,uint64_t now){
+        if(view.state!=S::Running||attached!=owner||applied>now||(lastTransition&&applied<*lastTransition)){halt(S::Faulted);return false;}
+        // Prune against the next ORIGINAL application, never a delayed receipt/read time.
+        while(!transitions.empty()&&applied-transitions.front()>=policy.transitionWindowMs)transitions.pop_front();
+        if(transitions.size()>=policy.maximumTransitions){halt(S::Faulted);return false;}
+        transitions.push_back(applied);lastTransition=applied;count(now);return true;
+    }
+    bool retire(const void *owner,OptimizationTime now){if(!time(now)||attached!=owner){halt(S::Faulted);return false;}
+        attached=nullptr;view.attached=false;retiredAt=now.monotonicMs;return true;}
+};
+EconomicParentBudget::EconomicParentBudget(EconomicParentBudgetPolicy p,const SessionIntent &i,SessionToken t):impl_(new Impl(p,i,t)){}
+EconomicParentBudget::~EconomicParentBudget()=default;
+bool EconomicParentBudget::start(OptimizationTime now){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+    if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
+    if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
+    if(p.policy.cooldownMs>day||p.policy.transitionWindowMs<1000||p.policy.transitionWindowMs>day||!p.policy.maximumTransitions||
+        p.policy.maximumTransitions>256||!p.policy.maximumIncarnations||p.policy.maximumIncarnations>256){p.halt(S::Faulted);return false;}
+    if(now.utcMs<0||now.utcMs>lastUtc||!now.monotonicMs){p.halt(S::ClockFault);return false;}
+    p.anchor=p.last=now;p.view.state=S::Running;return true;}
+void EconomicParentBudget::requestStop(){impl_->halt(S::Stopped);}
+const EconomicParentBudgetSnapshot &EconomicParentBudget::snapshot()const{return impl_->view;}
 struct EconomicChoiceGuard::Impl {
     EconomicGuardPolicy policy;WorkerControlBinding expected;const EconomicEvaluationOwner &evaluation;WorkerControlIssuer &worker;
     const SessionIntent &intent;SessionToken token;EconomicGuardSnapshot view;bool attempted=false;
@@ -21,22 +71,25 @@ struct EconomicChoiceGuard::Impl {
     std::shared_ptr<const EconomicStudy> study;std::unique_ptr<EconomicStudyUse> use;
     uint64_t resultSequence=0,sourceCeiling=0,lastEvaluation=0,blockedSequence=0;
     std::optional<size_t> confirming;uint64_t firstConfirmation=0,lastConfirmation=0,countedEvaluation=0;bool counted=false;
-    Impl(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t)
-        :policy(std::move(p)),expected(std::move(b)),evaluation(e),worker(w),intent(i),token(t){}
+    EconomicParentBudget *budget=nullptr;bool attached=false,retired=false;
+    Impl(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,EconomicParentBudget *parent)
+        :policy(std::move(p)),expected(std::move(b)),evaluation(e),worker(w),intent(i),token(t),budget(parent){}
     void clearChoice(){view.action=A::None;view.reason=R::Missing;view.arithmetic=C::Unavailable;view.point.reset();view.hostWaitMs.reset();view.validUntilMonoMs=0;}
     void resetConfirmation(){confirming.reset();view.confirmations=0;firstConfirmation=lastConfirmation=0;}
     void dropStudy(){study.reset();use.reset();sourceCeiling=0;view.resultSequence=0;resetConfirmation();}
-    void halt(S s){view.state=s;clearChoice();view.reason=R::Terminal;dropStudy();}
+    void halt(S s){view.state=s;clearChoice();view.reason=R::Terminal;dropStudy();if(budget&&attached&&!retired)budget->impl_->halt(s);}
     bool time(OptimizationTime now){
         if(!intent.permits(token)){halt(S::Stopped);return false;}
         if(view.state!=S::Running)return false;
+        if(budget&&!budget->impl_->time(now)){halt(budget->snapshot().state);return false;}
         if(now.utcMs<last.utcMs||now.utcMs>lastUtc||now.monotonicMs<last.monotonicMs){halt(S::ClockFault);return false;}
         const auto wall=static_cast<uint64_t>(now.utcMs-anchor.utcMs),mono=now.monotonicMs-anchor.monotonicMs;
         if((wall>mono?wall-mono:mono-wall)>2000){halt(S::ClockFault);return false;}last=now;return true;
     }
     // Retain at most maximumTransitions originals until the NEXT application, not its possibly delayed consumption.
-    void countTransitions(uint64_t now){view.transitionsInWindow=static_cast<unsigned>(std::count_if(transitions.begin(),transitions.end(),
-        [&](uint64_t at){return now-at<policy.transitionWindowMs;}));}
+    void countTransitions(uint64_t now){if(budget){budget->impl_->count(now);view.transitionsInWindow=budget->snapshot().transitionsInWindow;lastTransition=budget->impl_->lastTransition;}
+        else view.transitionsInWindow=static_cast<unsigned>(std::count_if(transitions.begin(),transitions.end(),
+            [&](uint64_t at){return now-at<policy.transitionWindowMs;}));}
     bool observe(OptimizationTime now){
         const auto s=worker.snapshot(now.monotonicMs);
         if(s.state==WorkerControlState::Stopped){halt(S::Stopped);return false;}
@@ -49,8 +102,11 @@ struct EconomicChoiceGuard::Impl {
             if(!sameMode)resetConfirmation();
             view.reason=R::Pending;return false;
         }
-        if(!s.settled||!binding(s.settled->command.binding,expected)||!observed){halt(S::Faulted);return false;}
-        const auto &r=*s.settled;
+        if(!s.settled){halt(S::Faulted);return false;}
+        return applyReceipt(now,*s.settled);
+    }
+    bool applyReceipt(OptimizationTime now,const WorkerReceipt &r){
+        if(!binding(r.command.binding,expected)||!observed){halt(S::Faulted);return false;}
         if(r.command.revision==observed->command.revision){if(!receipt(r,*observed)){halt(S::Faulted);return false;}}
         else{
             if(observed->command.revision==UINT64_MAX||r.command.revision!=observed->command.revision+1||r.observedMonoMs<observed->observedMonoMs){halt(S::Faulted);return false;}
@@ -61,13 +117,16 @@ struct EconomicChoiceGuard::Impl {
             const bool changed=previous.kind!=current.kind||(current.kind==K::AppliedWait&&previous.hostWaitMs!=current.hostWaitMs);
             if(changed){modeChanged=r.observedMonoMs;postMode=true;resetConfirmation();
                 if(current.kind==K::AppliedWait){
-                    while(!transitions.empty()&&r.observedMonoMs-transitions.front()>=policy.transitionWindowMs)transitions.pop_front();
-                    if(transitions.size()>=policy.maximumTransitions){halt(S::Faulted);return false;}
-                    transitions.push_back(r.observedMonoMs);lastTransition=r.observedMonoMs;countTransitions(now.monotonicMs);}}
+                    if(budget){if(!budget->impl_->record(this,r.observedMonoMs,now.monotonicMs)){halt(S::Faulted);return false;}}
+                    else{while(!transitions.empty()&&r.observedMonoMs-transitions.front()>=policy.transitionWindowMs)transitions.pop_front();
+                        if(transitions.size()>=policy.maximumTransitions){halt(S::Faulted);return false;}
+                        transitions.push_back(r.observedMonoMs);lastTransition=r.observedMonoMs;}
+                    countTransitions(now.monotonicMs);}}
             observed=r;
         }
         view.workerRevision=r.command.revision;
-        if(current.kind==K::Unknown){view.action=A::Pause;view.reason=R::UnknownApplication;resetConfirmation();return false;}
+        if(current.kind==K::Unknown){if(budget){halt(S::Faulted);return false;}
+            view.action=A::Pause;view.reason=R::UnknownApplication;resetConfirmation();return false;}
         return true;
     }
     bool reference(OptimizationTime now,const WorkProfilePlan &plan,const WorkProfileConditions &conditions){
@@ -120,9 +179,9 @@ struct EconomicChoiceGuard::Impl {
         view.validUntilMonoMs=(std::min)(view.validUntilMonoMs,confirmationEnd);
     }
 };
-EconomicChoiceGuard::EconomicChoiceGuard(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t)
-    :impl_(new Impl(std::move(p),std::move(b),e,w,i,t)){}
-EconomicChoiceGuard::~EconomicChoiceGuard()=default;
+EconomicChoiceGuard::EconomicChoiceGuard(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,EconomicParentBudget *budget)
+    :impl_(new Impl(std::move(p),std::move(b),e,w,i,t,budget)){}
+EconomicChoiceGuard::~EconomicChoiceGuard(){auto &p=*impl_;if(p.budget&&p.attached&&!p.retired)p.budget->impl_->halt(S::Faulted);}
 bool EconomicChoiceGuard::start(OptimizationTime now,const WorkProfilePlan &plan){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
     if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
@@ -134,7 +193,10 @@ bool EconomicChoiceGuard::start(OptimizationTime now,const WorkProfilePlan &plan
         if(s.state!=WorkerControlState::Active||s.pending||!s.settled||s.settled->kind!=WorkerReceiptKind::Paused||s.settled->command.revision!=1||
             !binding(s.settled->command.binding,p.expected)||p.evaluation.snapshot().state!=EconomicEvaluationState::Running){p.halt(S::Faulted);return false;}
         p.observed=s.settled;p.current.kind=K::Paused;p.modeChanged=s.settled->observedMonoMs;p.view.workerRevision=1;
-        p.frozen=plan;p.planKey=workProfilePlanFingerprint(plan);p.anchor=p.last=now;p.view.state=S::Running;return true;
+        p.frozen=plan;p.planKey=workProfilePlanFingerprint(plan);
+        if(p.budget){if(!p.budget->impl_->attach(&p,p.intent,p.token,p.policy,*s.settled,p.planKey,now)){p.halt(p.budget->snapshot().state);return false;}
+            p.attached=true;p.postMode=p.budget->snapshot().incarnations>1;}
+        p.anchor=p.last=now;p.view.state=S::Running;p.countTransitions(now.monotonicMs);return true;
     }catch(...){p.halt(S::Faulted);return false;}
 }
 const EconomicGuardSnapshot &EconomicChoiceGuard::check(OptimizationTime now,uint64_t revision,const WorkProfilePlan &plan,const WorkProfileConditions &conditions){auto &p=*impl_;
@@ -156,5 +218,13 @@ const EconomicGuardSnapshot &EconomicChoiceGuard::check(OptimizationTime now,uin
     }catch(...){p.halt(S::Faulted);}return p.view;
 }
 void EconomicChoiceGuard::requestStop(){impl_->attempted=true;impl_->halt(S::Stopped);}
+bool EconomicChoiceGuard::retire(OptimizationTime now){auto &p=*impl_;
+    if(!p.budget||!p.attached||p.retired)return false;
+    try{if(!p.time(now))return false;
+        const auto s=p.worker.snapshot(now.monotonicMs);
+        if(s.state!=WorkerControlState::Stopped||s.pending||!s.settled||!p.applyReceipt(now,*s.settled)){p.halt(S::Faulted);return false;}
+        if(!p.budget->impl_->retire(&p,now)){p.halt(p.budget->snapshot().state);return false;}
+        p.retired=true;p.halt(S::Stopped);return true;
+    }catch(...){p.halt(S::Faulted);return false;}}
 const EconomicGuardSnapshot &EconomicChoiceGuard::snapshot()const{return impl_->view;}
 } // namespace om
