@@ -1,6 +1,6 @@
 # Pearl market and pool-credit provider research
 
-**Evidence reviewed:** 2026-10-28. **Status:** adapter design research, not an implemented integration or a live-data qualification.
+**Evidence reviewed:** 2026-10-28; Kryptex schema/export clarification rechecked 2026-10-30. **Status:** adapter design research, not an implemented integration or a live-data qualification.
 
 This note supports `R-MKT-001`–`003`, `R-INC-001`–`007` and `R-OPT-002` in [requirements](../architecture/requirements.md). The controlling definitions are [data and calculations](../architecture/data-and-calculations.md), especially §§3–5 and 7. HTTPS implementation must preserve the boundaries in [secure transport backends](secure-transport-backends.md), §6.
 
@@ -160,10 +160,13 @@ The following are **documentation path templates only; none was requested**. `{c
 | `.../miner/chart/{address}/{worker}` and `.../{worker}/{scheme}` | `WorkerChartPoint { timestamp, hashrate, shares }`; optional `days`; scheme enum `solo`, `pps`, `prop`. | Operational work history, **not a token-credit ledger**. A worker parameter does not imply worker reward records exist. |
 | `/{coin}/api/v3/miner/workers/{address}` | `PaginatedWorkers { count, results }`; `Worker { worker, scheme, hashrate, shares, last_share }`. | Worker status and activity, not credited token amounts; visible workers do not prove account exclusivity or historical membership. |
 | `.../miner/balance/{address}` | `Balance { total, threshold, reached_pct, unconfirmed, confirmed }`. | **No.** Balance and pending/confirmed stocks are not production flows. |
-| `.../miner/payouts/{address}`, `/stats`, `/csv` | `Payout { date, received, txid, status }`; paginated history has `count/results`; stats include `paid`, `unpaid`, `reward.week/month`. | **No.** Transaction IDs identify payouts, not individual earning credits; moving earned funds is not new production. Weekly/monthly aggregates have no per-credit identity/attribution contract. |
+| `.../miner/payouts/{address}`, `/stats` | JSON `Payout { date, received, txid, status }`; paginated history has `count/results`; stats include `paid`, `unpaid`, `reward.week/month`. | **No.** Transaction IDs identify payouts, not individual earning credits; moving earned funds is not new production. Weekly/monthly aggregates have no per-credit identity/attribution contract. |
+| `.../miner/payouts/{address}/csv` | Payout history as `text/csv`, schema `string`. Headers, column order, delimiter, precision and retention are not documented. | **No.** A payout export is not a posted-credit ledger. The JSON Payout fields above are not verified CSV columns. |
 | `.../miner/blocks/{address}` | `MinerBlock` includes block `hash`, `height`, `reward`, `date`, `status`, plus `worker`, `scheme`, `miner_effort`; paginated. | **No general credit substitute.** A found block or chain reward is not a documented final pool credit to this worker. No stable credit revision/reversal or PPS+ attribution contract is supplied. |
 
 The paths and fields above are direct schema facts.[^kryptex-schema] The insufficiency conclusions follow from this project's actual-income contract, not a claim that Kryptex internally lacks a ledger.
+
+The [2026-10-30 export guidance](kryptex-credit-export.md) confirms the raw schema hash is unchanged, distinguishes direct-wallet PRL from account-converted BTC and records the official wallet-search/Payouts navigation. It does not establish an earnings-export button or add missing provider guarantees. Initial format review needs only field names/unit labels or explicitly synthetic examples, not private account exports.
 
 ### Stable identity, revisions and attribution
 
