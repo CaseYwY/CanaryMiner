@@ -198,6 +198,8 @@ WorkControlRequest WorkerControlClient::requestState()const noexcept{std::lock_g
 bool WorkerControlClient::pauseRequested()const noexcept{return requestState()!=WorkControlRequest::Run;}
 void WorkerControlClient::pauseBoundary(bool held)noexcept{std::lock_guard<std::mutex> lock(impl_->mutex);impl_->held=held;if(impl_->gate)impl_->gate->pauseBoundary(held);}
 void WorkerControlClient::pauseHeld()noexcept{std::lock_guard<std::mutex> lock(impl_->mutex);if(impl_->held&&impl_->gate)impl_->gate->pauseBoundary(true);}
+WorkControlRequest WorkerControlClient::applyWorkWait(unsigned &ms)noexcept{std::lock_guard<std::mutex> lock(impl_->mutex);
+    const auto state=impl_->state();return state==WorkControlRequest::Run&&impl_->gate?impl_->gate->applyWorkWait(ms):state;}
 
 struct WorkerControlProcess::Impl {
     bool attempted=false,owned=false,settled=false,unknown=false,reserved=false,blocked=false,controlFault=false;

@@ -4,7 +4,7 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-10d.** [Owned economic computation](../economic-evaluation-owner.md) connects the independent request clocks to one CPU thread and the original-result validity gate. Exact tickets, current-context revisions and actual completion fence publication; expired work remains owned and stop revokes before join. Complete safety/financial qualification, native source binding, selection hysteresis/actuation, hard driver-stall exit, ordinary non-Off activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
+**Latest bounded slice: P-03h/P-10e.** [Boundary-applied host waits](../worker-wait.md) add explicit 0–1000-ms settings and a distinct original WaitApplied receipt through the actual shared worker loop and private channel. Accepted remains pending, and v1 bytes retain their meaning. [Owned economic computation](../economic-evaluation-owner.md) precedes this slice; decision-to-receipt binding, hysteresis, complete safety/financial qualification, ordinary activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 

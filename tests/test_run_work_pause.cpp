@@ -22,6 +22,7 @@ struct Rig {
     mutable unsigned polls=0;
     bool acknowledged=false,stopInPause=false,failDrain=false,pauseInPrepare=false,pauseInFetch=false;
     bool enabledHint=false,configured=false,sourceMade=false,uncontrolled=false,pauseOrdering=true;
+    bool waitOrdering=true;std::vector<unsigned> appliedWaits;
     WorkerControlGate *gate=nullptr;uint64_t *gateClock=nullptr;unsigned gateMode=0;
     WorkerControlClient *nativeClient=nullptr;
     unsigned searches=0,submits=0,drains=0,resumes=0,fetches=0,version=1;
@@ -53,18 +54,24 @@ struct Source:JobSource {
         if(r.pauseInFetch&&r.fetches==1)r.requested=true;
         return true;
     }
-    bool submit(const Job &,const Solution &,std::string *)override{++active->submits;active->events.push_back("submit");return true;}
+    bool submit(const Job &,const Solution &,std::string *)override{++active->submits;active->events.push_back("submit");
+        if(active->gate&&active->gateMode==6&&active->submits==1)active->waitOrdering=active->waitOrdering&&active->gate->snapshot().receipt->kind==WorkerReceiptKind::Accepted;
+        return true;}
 };
 struct Algo:Algorithm {
     const char *name()const override{return "pearl-pow";}
     PearlRuntimeCapability pearlRuntimeCapability()const noexcept override{return PearlRuntimeCapability::CanonicalCudaPoolV1;}
-    void configure(const RunOptions &)override{active->configured=true;active->events.push_back("configure");}
+    void configure(const RunOptions &)override{active->configured=true;active->events.push_back("configure");
+        if(active->gate&&active->gateMode==6)active->waitOrdering=active->waitOrdering&&active->gate->snapshot().receipt->kind==WorkerReceiptKind::WaitApplied;}
     size_t memoryBytes(const Job &)const override{return 0;}
     bool prepare(const Job &j)override{active->events.push_back("prepare"+std::to_string(j.epoch));if(active->pauseInPrepare&&j.epoch==1)active->requested=true;return true;}
     bool search(const Job &j,uint64_t nonce,uint64_t,std::vector<Solution> *out)override{
         auto &r=*active;++r.searches;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
         if(r.nativeClient){std::this_thread::sleep_for(std::chrono::milliseconds(5));if(r.searches>=1000)r.stop=1;return true;}
-        if(r.gate){if(r.searches==1)r.gate->receive({binding(),3,1000,2000,WorkerDirective::Pause});else r.stop=1;return true;}
+        if(r.gate){if(r.gateMode==6){const auto view=r.gate->snapshot();r.waitOrdering=r.waitOrdering&&view.receipt&&view.receipt->kind==WorkerReceiptKind::WaitApplied;
+                if(view.receipt&&view.receipt->command.hostWaitMs)r.appliedWaits.push_back(*view.receipt->command.hostWaitMs);
+                if(r.searches==1)r.gate->receive({binding(),3,1000,2000,WorkerDirective::Run,0});else r.stop=1;
+            }else if(r.searches==1)r.gate->receive({binding(),3,1000,2000,WorkerDirective::Pause});else r.stop=1;return true;}
         if(r.pauseInPrepare||r.pauseInFetch||r.version==2||(r.uncontrolled&&r.searches==2))r.stop=1;else r.requested=true;
         return true;
     }
@@ -145,5 +152,15 @@ int main(int argc,char **argv){
         CHECK(r.searches==(mode==3?2u:1u)&&event(r,"submit")<event(r,"complete"));
         if(mode==3)CHECK(event(r,"fetch2")<event(r,"search2"));
     }
+    {Rig r;active=&r;WorkerControlGate gate(binding(),[]{return 1000;});r.gate=&gate;r.gateMode=6;
+        Algo algo;Hook hook;auto o=options(r);o.workPause=&gate;o.loopHook=&hook;std::atomic<bool> sent{false};
+        CHECK(gate.receive({binding(),1,1000,2000,WorkerDirective::Pause})==WorkerCommandResult::Accepted);
+        std::thread sender([&]{const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(std::chrono::steady_clock::now()<until){const auto view=gate.snapshot();if(view.receipt&&view.receipt->kind==WorkerReceiptKind::Paused){
+                sent=gate.receive({binding(),2,1000,2000,WorkerDirective::Run,10})==WorkerCommandResult::Accepted;return;}
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));}gate.fail();});
+        const auto result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);sender.join();
+        CHECK(sent&&result==0&&r.searches==2&&r.submits==2&&!r.enabledHint);
+        CHECK(r.waitOrdering&&r.appliedWaits==std::vector<unsigned>({10,0}));}
     return finishTests("shared run-loop cooperative pause");
 }

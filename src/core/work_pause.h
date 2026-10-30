@@ -12,6 +12,8 @@ class RunPauseControl {
     virtual WorkControlRequest requestState()const noexcept{return pauseRequested()?WorkControlRequest::Pause:WorkControlRequest::Run;}
     virtual void pauseBoundary(bool paused)noexcept=0; // worker-thread notification after drain / before resumed work
     virtual void pauseHeld()noexcept{} // still at the same drained boundary; may acknowledge a newer pause revision
+    // Worker thread only, at a reconciled boundary after pause handling. Installing a wait does not prove work started.
+    virtual WorkControlRequest applyWorkWait(unsigned &)noexcept{return requestState();}
 };
 template<class Stopped,class Drain,class Changed,class Now,class Sleep>
 WorkPauseResult pauseAtWorkBoundary(RunPauseControl &control,Stopped stopped,Drain drain,Changed changed,Now now,Sleep sleep){

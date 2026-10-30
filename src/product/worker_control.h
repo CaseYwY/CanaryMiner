@@ -21,8 +21,9 @@ struct WorkerCommand {
     WorkerControlBinding binding;
     uint64_t revision=0,issuedMonoMs=0,deadlineMonoMs=0;
     WorkerDirective directive=WorkerDirective::Pause;
+    std::optional<unsigned> hostWaitMs=std::nullopt; // v2 Run only; complete-batch milliseconds, not a duty cycle
 };
-enum class WorkerReceiptKind { Accepted, Paused }; // Accepted never proves quiescence or that a search started
+enum class WorkerReceiptKind { Accepted, Paused, WaitApplied }; // Accepted never proves quiescence or setting application
 struct WorkerReceipt {WorkerCommand command;WorkerReceiptKind kind=WorkerReceiptKind::Accepted;uint64_t observedMonoMs=0;};
 bool validWorkerControlBinding(const WorkerControlBinding &);
 bool validWorkerCommand(const WorkerCommand &);
@@ -62,10 +63,11 @@ class WorkerControlGate final:public RunPauseControl {
     WorkControlRequest requestState()const noexcept override;
     void pauseBoundary(bool paused)noexcept override;
     void pauseHeld()noexcept override;
+    WorkControlRequest applyWorkWait(unsigned &)noexcept override;
    private:
     const WorkerControlBinding binding_;WorkerControlClock clock_;mutable std::mutex mutex_;
     mutable WorkerControlSnapshot view_;mutable uint64_t lastMonoMs_=0;
-    uint64_t startupDeadline_=0;bool confirmedInitialPause_=false;
+    uint64_t startupDeadline_=0;bool confirmedInitialPause_=false,waitControlled_=false;
     bool time()const;void confirmPause();
 };
 enum class WorkerReceiptResult { Settled, Waiting, Duplicate, Rejected, Terminal };
@@ -81,15 +83,17 @@ class WorkerControlIssuer {
     WorkerControlIssuer(const WorkerControlIssuer &)=delete;
     WorkerControlIssuer &operator=(const WorkerControlIssuer &)=delete;
     bool start(uint64_t nowMonoMs);
-    std::optional<WorkerCommand> issue(WorkerDirective,uint64_t nowMonoMs,uint64_t leaseMs);
+    std::optional<WorkerCommand> issue(WorkerDirective,uint64_t nowMonoMs,uint64_t leaseMs,std::optional<unsigned> hostWaitMs=std::nullopt);
     WorkerReceiptResult acknowledge(const WorkerReceipt &,uint64_t nowMonoMs);
     WorkerControlIssuerSnapshot snapshot(uint64_t nowMonoMs);
     bool paused(uint64_t nowMonoMs); // current matching proof only; issue/revoke/expiry immediately invalidates it
+    std::optional<WorkerReceipt> appliedWait(uint64_t nowMonoMs); // exact original boundary receipt, never Accepted
     void requestStop();
    private:
     const WorkerControlBinding binding_;const SessionIntent &intent_;const SessionToken token_;
-    WorkerControlIssuerSnapshot view_;bool attempted_=false,initialPauseConfirmed_=false;
+    WorkerControlIssuerSnapshot view_;bool attempted_=false,initialPauseConfirmed_=false,waitControlled_=false;
     uint64_t revision_=0,lastMonoMs_=0,deadline_=0;
+    std::optional<uint64_t> acceptedMonoMs_; // original current-command Accepted time, if delivered before its boundary receipt
     bool time(uint64_t now);void fault();
 };
 } // namespace om

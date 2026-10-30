@@ -22,6 +22,7 @@ class WorkerControlClient final:public RunPauseControl {
     WorkControlRequest requestState()const noexcept override;
     void pauseBoundary(bool)noexcept override;
     void pauseHeld()noexcept override;
+    WorkControlRequest applyWorkWait(unsigned &)noexcept override;
    private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

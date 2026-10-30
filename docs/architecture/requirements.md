@@ -110,6 +110,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-10d](../economic-evaluation-owner.md) connects the request clocks and validity gate through one owned CPU evaluator. Exact tickets, explicit current-context revisions, original evaluation clocks and actual completion fence admission; timeout/stop cannot replace a still-owned calculation or revive its result. R-OPT-001/002/003 and R-SAFE-001/002 remain partial pending native source-change notifications, selection hysteresis/applied-setting ownership, qualified financial/safety inputs and ordinary runtime activation.
 
+[P-03h/P-10e](../worker-wait.md) supplies actual boundary-applied 0–1000-ms host waits through optional v2 worker commands. Accepted is distinct from WaitApplied, the original lease is not renewed, and controlled Run cannot silently downgrade to v1. R-PRO-003/R-OPT-003/R-SAFE-001/002 remain partial pending decision/profile/context-to-receipt binding, candidate hysteresis/budgets, qualified safety/measurement/economics and ordinary activation.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.

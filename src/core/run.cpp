@@ -317,12 +317,20 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         return 1;
     }
 
+    unsigned appliedWorkWaitMs=opt.workWaitMs;
     const auto pauseBoundary=[&](){
         if(!opt.workPause)return WorkPauseResult::Ready;
-        return pauseAtWorkBoundary(*opt.workPause,[&]{return *stop!=0;},[&]{return algo->discardPearlLookahead();},
+        for(;;){const auto paused=pauseAtWorkBoundary(*opt.workPause,[&]{return *stop!=0;},[&]{return algo->discardPearlLookahead();},
             [&](bool paused){if(opt.loopHook)opt.loopHook->pauseChanged(paused);},[](){return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());},
             [](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));});
+            if(paused!=WorkPauseResult::Ready)return paused;
+            if(*stop)return WorkPauseResult::Stopped;
+            const auto state=opt.workPause->applyWorkWait(appliedWorkWaitMs);
+            if(*stop||state==WorkControlRequest::Stop)return WorkPauseResult::Stopped;
+            if(state==WorkControlRequest::Fault||appliedWorkWaitMs>kMaxWorkWaitMs)return WorkPauseResult::Failed;
+            if(state==WorkControlRequest::Run)return WorkPauseResult::Ready;
+        }
     };
     // An initial pause also precedes configuration, telemetry, preparation and source construction.
     const auto initialPause=pauseBoundary();
@@ -647,17 +655,21 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
                 return hookExit;
             }
         }
-        if (workWaitDue && opt.workWaitMs) {
+        const auto beforeWait=pauseBoundary(); // reconcile/apply before the complete-batch delay, never during a search
+        if(beforeWait==WorkPauseResult::Stopped)break;
+        if(beforeWait==WorkPauseResult::Failed)return kRunPauseFault;
+        if (workWaitDue && appliedWorkWaitMs) {
             // No lookahead GPU work may overlap a host-idle interval. Hinting below is disabled in this mode.
             if (!algo->discardPearlLookahead()) return 1;
-            const auto result = waitAfterWork(opt.workWaitMs, [&] { return *stop != 0; }, [] {
+            const auto result = waitAfterWork(appliedWorkWaitMs, [&] { return *stop != 0||
+                (opt.workPause&&opt.workPause->requestState()!=WorkControlRequest::Run); }, [] {
                 return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()).count());
             }, [](uint64_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });
-            if (result == WorkWaitResult::Stopped) break;
-            if (result != WorkWaitResult::Ready) return 1;
-            workWaitDue = false;
+            if (*stop) break;
+            if (result != WorkWaitResult::Ready&&result!=WorkWaitResult::Stopped) return 1;
         }
+        workWaitDue = false;
         const auto paused=pauseBoundary(); // previous batch's proofs are reconciled; no fetch/search during the pause
         if(paused==WorkPauseResult::Stopped)break;
         if(paused==WorkPauseResult::Failed)return kRunPauseFault;
@@ -882,7 +894,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         uint64_t rangeNext=0;
         const bool rangeHasNext = !opt.pearlWorkRange.enabled ||
             opt.pearlWorkRange.next(nonceCounter,batch.nonces,&rangeNext);
-        const bool hint = !opt.workPause && !opt.workWaitMs && rangeHasNext && batch.nonces == 1 && !opt.formalBenchmark.enabled &&
+        const bool hint = !opt.workPause && !appliedWorkWaitMs && rangeHasNext && batch.nonces == 1 && !opt.formalBenchmark.enabled &&
             !*stop && algo && !std::strcmp(algo->name(),"pearl-pow");
         const uint64_t nextHint = opt.pearlWorkRange.enabled ? rangeNext : noncePrefix | ((nonceCounter + batch.nonces) & nonceMask);
         algo->pearlNextAttemptHint(hint,nextHint);

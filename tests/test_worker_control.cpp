@@ -141,5 +141,88 @@ void concurrency(){
     for(unsigned i=0;i<200;++i){const auto view=gate.snapshot();good=good&&view.state==S::Active;}
     gate.requestStop();done=true;worker.join();CHECK(good&&gate.requestState()==WorkControlRequest::Stop&&gate.receive(command(2))==C::Rejected);
 }
+void waitCodec(){
+    const std::string prefix="11111111111111111111111111111111 1 0 1 22222222222222222222222222222222 2 1000 2000 R";
+    auto c=command(2,1000,D::Run);std::string wire;
+    CHECK(encodeWorkerCommand(c,&wire)&&wire=="CMWC1 "+prefix+"\n");
+    CHECK(encodeWorkerReceipt(receipt(c,K::Accepted),&wire)&&wire=="CMWA1 "+prefix+" A 1000\n");
+    CHECK(!encodeWorkerReceipt(receipt(c,K::WaitApplied),&wire));
+    for(unsigned ms:{0u,1u,1000u}){c.hostWaitMs=ms;WorkerCommand back;
+        const auto suffix=prefix+" "+std::to_string(ms);
+        CHECK(encodeWorkerCommand(c,&wire)&&wire=="CMWC2 "+suffix+"\n"&&decodeWorkerCommand(wire,&back)&&sameWorkerCommand(c,back));
+        for(size_t split=0;split<=wire.size();++split){WorkerControlFramer framer;unsigned calls=0;
+            const auto take=[&](std::string_view s){++calls;WorkerCommand parsed;return decodeWorkerCommand(s,&parsed)&&sameWorkerCommand(c,parsed);};
+            CHECK(framer.feed(std::string_view(wire).substr(0,split),take)&&framer.feed(std::string_view(wire).substr(split),take)&&framer.complete()&&calls==1);}
+        for(auto kind:{K::Accepted,K::WaitApplied}){WorkerReceipt out;
+            CHECK(encodeWorkerReceipt(receipt(c,kind,1001),&wire)&&wire=="CMWA2 "+suffix+(kind==K::Accepted?" A ":" W ")+"1001\n"&&
+                decodeWorkerReceipt(wire,&out)&&sameWorkerCommand(c,out.command)&&out.kind==kind&&out.observedMonoMs==1001);}
+        CHECK(!encodeWorkerReceipt(receipt(c,K::Paused),&wire));
+    }
+    for(const auto *tail:{"", " -1", " +1", " 00", " 01", " 1001", " 1e2", " 0 extra", " 4294967296"}){
+        WorkerCommand out=command(9);CHECK(!decodeWorkerCommand("CMWC2 "+prefix+tail+"\n",&out)&&out.revision==9);}
+    for(const auto &bad:{"CMWC1 "+prefix+" 0\n","CMWC3 "+prefix+" 0\n","CMWC2 "+prefix+" 0\r\n"}){WorkerCommand out;CHECK(!decodeWorkerCommand(bad,&out));}
+    for(const auto &bad:{"CMWA1 "+prefix+" W 1000\n","CMWA1 "+prefix+" 0 W 1000\n","CMWA2 "+prefix+" 0 P 1000\n",
+        "CMWA2 "+prefix+" 0 W 2000\n","CMWA2 "+prefix+" 0 W 999\n","CMWA2 "+prefix+" 0 X 1000\n"}){WorkerReceipt out;CHECK(!decodeWorkerReceipt(bad,&out));}
+    c.hostWaitMs=1001;CHECK(!encodeWorkerCommand(c,&wire));c.hostWaitMs=0;c.directive=D::Pause;CHECK(!encodeWorkerCommand(c,&wire));
 }
-int main(){codecs();framing();endToEnd();refusal();parentFences();concurrency();return finishTests("fenced worker command protocol");}
+struct WaitFixture {
+    SessionIntent intent;SessionToken token=intent.explicitStart();uint64_t now=1000;
+    WorkerControlIssuer parent{binding(),intent,token};WorkerControlGate gate{binding(),[&]{return now;}};
+    WaitFixture(){CHECK(parent.start(now));const auto c=parent.issue(D::Pause,now,1000);CHECK(c&&gate.receive(*c)==C::Accepted);
+        gate.pauseBoundary(true);CHECK(parent.acknowledge(*gate.snapshot().receipt,now)==A::Settled);}
+    WorkerCommand run(unsigned ms=10){const auto c=parent.issue(D::Run,now,1000,ms);CHECK(c&&gate.receive(*c)==C::Accepted);return *c;}
+};
+void waitBoundary(){
+    {WaitFixture f;unsigned applied=77;auto c=f.run();const auto accepted=*f.gate.snapshot().receipt;
+        CHECK(accepted.kind==K::Accepted&&f.parent.acknowledge(accepted,f.now)==A::Waiting&&!f.parent.appliedWait(f.now));
+        CHECK(!f.parent.issue(D::Run,f.now,1000,20)&&f.parent.snapshot(f.now).pending.has_value());
+        CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Pause&&applied==77&&f.gate.snapshot().receipt->kind==K::Accepted);
+        f.gate.pauseBoundary(false);++f.now;
+        CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Run&&applied==10);
+        const auto original=*f.gate.snapshot().receipt;
+        CHECK(original.kind==K::WaitApplied&&original.observedMonoMs==1001&&sameWorkerCommand(original.command,c));
+        CHECK(f.parent.acknowledge(original,f.now)==A::Settled&&f.parent.appliedWait(f.now)->command.hostWaitMs==10);
+        ++f.now;CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Run&&f.gate.snapshot().receipt->observedMonoMs==1001);
+        CHECK(f.gate.receive(c)==C::Duplicate&&f.parent.acknowledge(original,f.now)==A::Duplicate);
+        c=f.run(0);CHECK(!f.parent.appliedWait(f.now)&&f.gate.snapshot().receipt->kind==K::Accepted&&applied==10);
+        CHECK(f.parent.acknowledge(original,f.now)==A::Duplicate&&f.parent.snapshot(f.now).pending->hostWaitMs==0);
+        CHECK(f.parent.acknowledge(*f.gate.snapshot().receipt,f.now)==A::Waiting&&!f.parent.appliedWait(f.now));
+        ++f.now;CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Run&&applied==0);
+        CHECK(f.parent.acknowledge(*f.gate.snapshot().receipt,f.now)==A::Settled&&f.parent.appliedWait(f.now)->observedMonoMs==1003);
+        const auto pause=f.parent.issue(D::Pause,f.now,1000);CHECK(pause&&f.gate.receive(*pause)==C::Accepted&&!f.parent.appliedWait(f.now));
+        CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Pause&&applied==0);
+        f.gate.pauseBoundary(true);CHECK(f.parent.acknowledge(*f.gate.snapshot().receipt,f.now)==A::Settled&&f.parent.paused(f.now));
+        CHECK(!f.parent.issue(D::Run,f.now,1000)&&f.parent.snapshot(f.now).state==S::Faulted);
+        auto downgrade=command(5,f.now,D::Run);CHECK(f.gate.receive(downgrade)==C::Rejected&&f.gate.applyWorkWait(applied)==WorkControlRequest::Fault);}
+    for(unsigned mode=0;mode<5;++mode){WaitFixture f;unsigned applied=77;const auto c=f.run();f.gate.pauseBoundary(false);
+        if(mode==0)f.now=c.deadlineMonoMs;
+        if(mode==1)--f.now;
+        if(mode==2)f.gate.requestStop();
+        if(mode==3)f.gate.fail();
+        if(mode==4){auto pause=command(3,f.now);CHECK(f.gate.receive(pause)==C::Accepted);}
+        CHECK(f.gate.applyWorkWait(applied)!=(WorkControlRequest::Run)&&applied==77&&f.gate.snapshot().receipt->kind==K::Accepted);}
+    for(unsigned mode=0;mode<6;++mode){WaitFixture f;unsigned applied=77;f.run();f.gate.pauseBoundary(false);
+        CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Run);auto proof=*f.gate.snapshot().receipt;
+        if(mode==0)proof.command.hostWaitMs=11;
+        if(mode==1)proof.command.hostWaitMs.reset();
+        if(mode==2)++proof.command.revision;
+        if(mode==3)++proof.command.binding.workerGeneration;
+        if(mode==4)++proof.observedMonoMs;
+        if(mode==5)proof.command.directive=D::Pause;
+        CHECK(f.parent.acknowledge(proof,f.now)==A::Rejected&&!f.parent.appliedWait(f.now)&&f.parent.snapshot(f.now).pending.has_value());}
+    for(bool stop:{false,true}){WaitFixture f;unsigned applied=77;const auto c=f.run();f.gate.pauseBoundary(false);
+        CHECK(f.gate.applyWorkWait(applied)==WorkControlRequest::Run);const auto proof=*f.gate.snapshot().receipt;
+        if(stop)f.intent.stop();else f.now=c.deadlineMonoMs;
+        CHECK(f.parent.acknowledge(proof,f.now)==A::Terminal&&!f.parent.appliedWait(f.now)&&!f.parent.snapshot(f.now).pending);
+        f.intent.stop();f.intent.explicitStart();CHECK(!f.parent.issue(D::Run,f.now,1000,0));}
+    for(unsigned mode=0;mode<2;++mode){WaitFixture f;CHECK(!f.parent.issue(mode?D::Run:D::Pause,f.now,1000,mode?1001:0));CHECK(f.parent.snapshot(f.now).state==S::Faulted);}
+    {WaitFixture f;const auto c=f.run();auto changed=c;changed.hostWaitMs=11;unsigned applied=77;
+        CHECK(f.gate.receive(changed)==C::Rejected&&f.gate.applyWorkWait(applied)==WorkControlRequest::Fault&&applied==77);}
+    for(bool wait:{false,true})for(unsigned mode=0;mode<2;++mode){WaitFixture f;
+        const auto c=wait?f.run():*f.parent.issue(D::Pause,f.now,1000);auto accepted=receipt(c,K::Accepted,1002);f.now=1003;
+        CHECK(f.parent.acknowledge(accepted,f.now)==A::Waiting&&f.parent.acknowledge(accepted,f.now)==A::Waiting);
+        auto changed=accepted;if(mode==0){changed.kind=wait?K::WaitApplied:K::Paused;changed.observedMonoMs=1001;}else changed.observedMonoMs=1003;
+        CHECK(f.parent.acknowledge(changed,f.now)==A::Rejected&&f.parent.snapshot(f.now).state==S::Faulted&&f.parent.snapshot(f.now).pending.has_value());}
+}
+}
+int main(){codecs();framing();endToEnd();refusal();parentFences();concurrency();waitCodec();waitBoundary();return finishTests("fenced worker command protocol");}

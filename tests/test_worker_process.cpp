@@ -133,7 +133,23 @@ void nativeEntries(const std::filesystem::path &shared,const std::filesystem::pa
         CHECK(process.submit(command(4,D::Run))&&receipt(process,4,K::Accepted,&output));
         std::this_thread::sleep_for(std::chrono::milliseconds(25));process.requestStop();
         const auto final=waitFor(process,[](const auto &v){return v.state==S::Exited;},&output);
-        CHECK(final.exitCode==0&&output.find("NATIVEFINAL ")!=output.npos);}
+         CHECK(final.exitCode==0&&output.find("NATIVEFINAL ")!=output.npos);}
+    {WorkerControlProcess process;std::string output;SessionIntent intent;auto token=intent.explicitStart();WorkerControlIssuer issuer(binding(),intent,token);
+        CHECK(issuer.start(workerControlNowMs()));const auto initial=issuer.issue(D::Pause,workerControlNowMs(),3000);
+        CHECK(initial&&process.start(shared,{"--channel-fixture"},*initial,cancel));
+        bool acceptedSound=true;
+        const auto settle=[&](K kind){bool applied=false;
+            waitFor(process,[&](const auto &v){for(const auto &r:v.receipts){const auto result=issuer.acknowledge(r,workerControlNowMs());
+                    if(r.kind==K::Accepted&&r.command.hostWaitMs)acceptedSound=acceptedSound&&result==WorkerReceiptResult::Waiting&&!issuer.appliedWait(workerControlNowMs());
+                    if(r.kind==kind&&result==WorkerReceiptResult::Settled)applied=true;}
+                return applied||v.state==S::Exited||v.state==S::Failed;},&output);return applied;};
+        CHECK(settle(K::Paused)&&issuer.paused(workerControlNowMs()));
+        for(unsigned ms:{1000u,0u}){const auto request=issuer.issue(D::Run,workerControlNowMs(),3000,ms);
+            CHECK(request&&process.submit(*request)&&settle(K::WaitApplied));const auto proof=issuer.appliedWait(workerControlNowMs());
+            CHECK(proof&&proof->command.hostWaitMs==ms&&proof->observedMonoMs>=request->issuedMonoMs);
+            const auto pause=issuer.issue(D::Pause,workerControlNowMs(),3000);CHECK(pause&&process.submit(*pause)&&settle(K::Paused)&&!issuer.appliedWait(workerControlNowMs()));}
+        process.requestStop();const auto final=waitFor(process,[](const auto &v){return v.state==S::Exited;},&output);
+        CHECK(final.exitCode==0&&process.reaped()&&acceptedSound&&output.find("CMWC2")==output.npos&&output.find("CMWA2")==output.npos);}
     const std::vector<std::string> args={"run","--algo","pearl-pow","--worker-child","--worker-id","0","--pool","fixture.invalid:1","--wallet",std::string("prl1")+std::string(59,'q'),
         "--pearl-network","mainnet","--pearl-target-semantics","base-before-penalty"};
     for(unsigned mode=0;mode<3;++mode){WorkerControlProcess process;std::string output;
