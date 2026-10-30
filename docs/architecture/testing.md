@@ -126,6 +126,8 @@ Test best eligible estimated net per elapsed time, no-data/nonpositive pause, al
 
 ## T-GAME
 
+[P-11a](../game-session-guard.md) checks complete time-weighted ten-minute net, exact zero/loss latching, positive-data non-revival, stale/unavailable data, fresh exit debounce, cached/substituted detections, identity changes, proof/source/time mapping, thermal pauses and terminal stop. Synthetic episode tests do not qualify actual gameplay, process detection or physical pause latency.
+
 Test off/pause/coexist, launcher/game/manual triggers, debounce/detection failure, no permission/no FPS/no valid baseline safe fallback, actual matched scene metrics, experience limits/VRAM/thermal headroom and bounded authorized testing. Test qualified auto-entry/exit restoration, economic pause/recovery and user stop not reviving. No injection/anti-cheat bypass/focus stealing/game killing; generic launcher tests do not count as gameplay evidence.
 
 ## T-TLS

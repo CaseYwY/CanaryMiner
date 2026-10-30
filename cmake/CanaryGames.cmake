@@ -1,0 +1,11 @@
+# Game episode/profit contracts only. No process inspection, game metrics or ordinary mining activation.
+add_library(canary_games STATIC "${CMAKE_SOURCE_DIR}/src/product/game_profit.cpp" "${CMAKE_SOURCE_DIR}/src/product/game_guard.cpp")
+target_compile_features(canary_games PUBLIC cxx_std_17)
+target_include_directories(canary_games PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(canary_games PUBLIC canary_forecast)
+if(MSVC)
+  target_compile_definitions(canary_games PRIVATE NOMINMAX)
+  target_compile_options(canary_games PRIVATE /W3 /utf-8)
+else()
+  target_compile_options(canary_games PRIVATE -Wall -Wextra -Werror)
+endif()
