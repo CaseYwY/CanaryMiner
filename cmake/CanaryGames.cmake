@@ -13,6 +13,7 @@ add_library(canary_game_detection STATIC
   "${CMAKE_SOURCE_DIR}/src/product/game_detection.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/game_detection_native.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/game_detection_owner.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/game_runtime.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/private_entropy.cpp")
 target_compile_features(canary_game_detection PUBLIC cxx_std_17)
 target_include_directories(canary_game_detection PUBLIC "${CMAKE_SOURCE_DIR}/src")

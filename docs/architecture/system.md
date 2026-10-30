@@ -133,6 +133,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 [P-11b](../game-detection.md) adds an opt-in isolated native detector and single-use background owner. Exact basename/adapter selection, salted process creation identities and request-bound original scan clocks remain private. Partial/native permission failures are Unknown; cached results cannot renew exit evidence. The ordinary factory and miner actuator remain absent.
 
+[P-11c](../game-runtime.md) owns that detector and the episode guard by value for one explicit session token. Original snapshots reach the same guard throughout its lifetime; source/clock faults cancel detection, and stop revokes before join. The live detection-ownership accessor is separate from historical guard evidence. Supervisor admission and cooperative worker actuation remain subsequent integration.
+
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
 ### M-TLS

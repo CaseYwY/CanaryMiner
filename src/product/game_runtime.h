@@ -1,0 +1,30 @@
+// Single-control-thread lifetime binding of one detector to one episode guard. No miner/worker actuator.
+#pragma once
+#include "game_detection_owner.h"
+namespace om {
+enum class GameRuntimeState { Dormant, Off, Active, Stopped, Faulted };
+class GameRuntime {
+   public:
+    GameRuntime(std::filesystem::path helper,GameProcessTarget target,GameDetectionPolicy detection,GameGuardPolicy policy,
+        GameProfitBinding binding,const SessionIntent &intent,SessionToken token);
+    ~GameRuntime();
+    GameRuntime(const GameRuntime &)=delete;
+    GameRuntime &operator=(const GameRuntime &)=delete;
+    bool start(GameGuardTime now); // single-use; no implicit SessionIntent::explicitStart
+    const GameGuardSnapshot &tick(GameGuardTime now,const GameSafety &safety,std::shared_ptr<const GameProfitWindow> profit={});
+    void requestStop(); // revoke guard and detector before joining
+    void stop();
+    GameRuntimeState state()const{return state_;}
+    const GameGuardSnapshot &snapshot()const{return guard_.snapshot();}
+    // Current helper ownership, including revocation and late Unreaped. Never a mining permission.
+    std::shared_ptr<const GameDetectionSnapshot> detection()const{return detector_.snapshot();}
+   private:
+    const SessionIntent &intent_;SessionToken token_;
+    GameProcessTarget target_;GameDetectionPolicy detectionPolicy_;GameGuardPolicy policy_;
+    bool bindingValid_=false,attempted_=false;
+    GameRuntimeState state_=GameRuntimeState::Dormant;
+    GameSessionGuard guard_;
+    GameDetectionOwner detector_; // fixed lifetime: no replacement/reset setter
+    void fault(GameGuardTime now);
+};
+} // namespace om
