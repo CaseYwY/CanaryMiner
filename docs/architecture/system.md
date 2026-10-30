@@ -53,6 +53,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-10h](../economic-parent-budget.md) keeps one logical slot's economic reference budget in the explicit parent, above its replaceable guards/issuers. Stopped/settled reference retirement accounts the final original receipt before detaching; new incarnations preserve cooldown, rolling history and the parent clock anchor. A reference retirement is not actual process reaping or replacement permission; the future execution owner must enforce both boundaries.
 
+[P-10i](../economic-command-owner.md) owns command issuance/acknowledgement after the initial Pause, using its own checked guard and immutable study. It retains one exact flight and a historical Run/application record, detects bypassed issuer mutations and exposes immediate channel-revocation requirements. The enclosing native owner remains responsible for delivery, drain, reaping and retry admission; ordinary factories do not activate this seam.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

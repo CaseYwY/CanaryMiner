@@ -15,6 +15,11 @@ def main():
         assert hook not in guard, 'ordinary reference guard contains the evaluator test hook'
         assert b'synthetic guard computation barrier' in guard_controlled, 'controlled guard did not retain its computation barrier'
         checks += 2
+    if len(sys.argv) > 6:
+        commands, commands_controlled = (Path(p).read_bytes() for p in sys.argv[6:8])
+        assert hook not in commands, 'ordinary command owner contains the evaluator test hook'
+        assert b'synthetic command computation barrier' in commands_controlled, 'controlled command owner did not retain its computation barrier'
+        checks += 2
     print(f'economic evaluation artifacts: {checks} production/fixture isolation checks passed')
 
 

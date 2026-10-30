@@ -16,6 +16,8 @@ An outstanding command is not overwritten with a later Pause. An enclosing safet
 
 [P-03i/P-11n](pending-run-revocation.md) connects that rule to the actual game worker session: an uncovered pending Run faults/revokes the fleet even if its receipt is withheld or its current source deadline has only shortened.
 
+[P-10i](economic-command-owner.md) binds opt-in in-memory issuance to the exact immutable economic decision/profile/context and original source/permission ceilings. Only its exact WaitApplied can attach an application fact to that retained Run; Accepted and copied snapshots cannot. Native process/supervisor integration remains separate, and the wire format is unchanged.
+
 ## Worker-thread application
 
 `RunPauseControl::applyWorkWait` is a bounded in-memory worker-thread hook. The shared run loop owns one local effective wait for its lifetime, initialized from the frozen run options. Only the reconciled boundary calls this hook. `WorkerControlGate` serializes the command, checks the original lease and refuses application while held, stopped, expired or faulted. It installs the requested value before producing WaitApplied. Repeated boundary calls and duplicate commands preserve the first application time. The native `WorkerControlClient` forwards the hook to that same gate; its I/O thread cannot manufacture application evidence.

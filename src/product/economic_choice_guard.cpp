@@ -74,7 +74,7 @@ struct EconomicChoiceGuard::Impl {
     EconomicParentBudget *budget=nullptr;bool attached=false,retired=false;
     Impl(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,EconomicParentBudget *parent)
         :policy(std::move(p)),expected(std::move(b)),evaluation(e),worker(w),intent(i),token(t),budget(parent){}
-    void clearChoice(){view.action=A::None;view.reason=R::Missing;view.arithmetic=C::Unavailable;view.point.reset();view.hostWaitMs.reset();view.validUntilMonoMs=0;}
+    void clearChoice(){view.action=A::None;view.reason=R::Missing;view.arithmetic=C::Unavailable;view.point.reset();view.hostWaitMs.reset();view.validUntilMonoMs=view.sourceValidUntilMonoMs=0;}
     void resetConfirmation(){confirming.reset();view.confirmations=0;firstConfirmation=lastConfirmation=0;}
     void dropStudy(){study.reset();use.reset();sourceCeiling=0;view.resultSequence=0;resetConfirmation();}
     void halt(S s){view.state=s;clearChoice();view.reason=R::Terminal;dropStudy();if(budget&&attached&&!retired)budget->impl_->halt(s);}
@@ -147,9 +147,10 @@ struct EconomicChoiceGuard::Impl {
         if((eligible.state!=EconomicUseState::Eligible&&eligible.state!=EconomicUseState::NoPositiveCandidate)||sourceCeiling<=now.monotonicMs){
             resetConfirmation();view.action=A::Pause;return false;}
         view.resultSequence=resultSequence;view.validUntilMonoMs=(std::min)(sourceCeiling,eligible.validUntilMonoMs);
+        view.sourceValidUntilMonoMs=view.validUntilMonoMs;
         view.validUntilMonoMs=(std::min)(view.validUntilMonoMs,observed->command.deadlineMonoMs);
         if(study->input().nowMonoMs<modeChanged||(postMode&&study->input().nowMonoMs==modeChanged)){
-            view.validUntilMonoMs=0;view.reason=R::PostApplicationStudy;resetConfirmation();return false;}
+            view.validUntilMonoMs=view.sourceValidUntilMonoMs=0;view.reason=R::PostApplicationStudy;resetConfirmation();return false;}
         return true;
     }
     void fallback(R reason){view.reason=reason;
@@ -177,6 +178,7 @@ struct EconomicChoiceGuard::Impl {
         view.action=choice.state==C::Resume?A::Resume:A::Switch;view.reason=R::Ready;view.point=choice.point;view.hostWaitMs=choice.hostWaitMs;
         const auto confirmationEnd=policy.maximumConfirmationGapMs>=UINT64_MAX-lastConfirmation?UINT64_MAX:lastConfirmation+policy.maximumConfirmationGapMs+1;
         view.validUntilMonoMs=(std::min)(view.validUntilMonoMs,confirmationEnd);
+        view.sourceValidUntilMonoMs=(std::min)(view.sourceValidUntilMonoMs,confirmationEnd);
     }
 };
 EconomicChoiceGuard::EconomicChoiceGuard(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,EconomicParentBudget *budget)
@@ -227,4 +229,5 @@ bool EconomicChoiceGuard::retire(OptimizationTime now){auto &p=*impl_;
         p.retired=true;p.halt(S::Stopped);return true;
     }catch(...){p.halt(S::Faulted);return false;}}
 const EconomicGuardSnapshot &EconomicChoiceGuard::snapshot()const{return impl_->view;}
+std::shared_ptr<const EconomicStudy> EconomicChoiceGuard::commandStudy()const{return impl_->study;}
 } // namespace om

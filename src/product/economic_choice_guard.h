@@ -46,6 +46,7 @@ struct EconomicGuardSnapshot {
     EconomicGuardReason reason=EconomicGuardReason::Missing;
     EconomicChoiceState arithmetic=EconomicChoiceState::Unavailable;
     uint64_t contextRevision=0,resultSequence=0,workerRevision=0,validUntilMonoMs=0;
+    uint64_t sourceValidUntilMonoMs=0; // original economic/confirmation ceiling, before intersecting the current worker lease
     std::optional<size_t> point;std::optional<unsigned> hostWaitMs;
     unsigned confirmations=0,transitionsInWindow=0;
     bool referenceOnly=true;
@@ -67,5 +68,7 @@ class EconomicChoiceGuard {
     const EconomicGuardSnapshot &snapshot()const;
    private:
     struct Impl;std::unique_ptr<Impl> impl_;
+    std::shared_ptr<const EconomicStudy> commandStudy()const;
+    friend class EconomicCommandOwner;
 };
 } // namespace om
