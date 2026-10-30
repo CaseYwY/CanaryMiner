@@ -58,6 +58,8 @@ These are instructions for the owner to use locally; no private destination need
 
 A mining connection such as `stratum+tcp://POOL_HOST:PORT` is not a website address. Use the HTTPS Pearl page below to view statistics. A worker label alone does not identify the wallet to search. The query must use the exact PRL payout address configured for that miner; a different receive address in the same wallet does not establish the same pool-statistics scope. These navigation checks do not establish whether mining or crediting succeeded.
 
+Pearl Desktop Wallet's reviewed official `ReceiveTransaction` component invokes `wallet.getNewAddress()` on page mount. Its Receive page therefore generates a new address rather than serving as a permanent display of the miner's configured address.[^receive-source] Use the existing configured address for pool lookup. This public-source explanation does not verify ownership of any particular address or the version of an installed wallet.
+
 ### Direct-wallet statistics and payout history
 
 1. Open [the Pearl pool page](https://pool.kryptex.com/prl).
@@ -122,3 +124,4 @@ First-party sources reviewed on 2026-10-30; endpoint names below identify schema
 [^payout-guide]: Kryptex, [How to make a payout?](https://pool.kryptex.com/articles/about-payouts-en), “How do I get a daily earning report for the last month?”: directs readers to payouts in the Payouts section; it does not specify an earnings CSV button or credit-ledger fields.
 [^account]: Kryptex, [Mine Anything — Get Bitcoin!](https://pool.kryptex.com/articles/account-mining-en), introduction, supported-coins table (PRL), “Quick Guide for Experienced Miners” / “Connect on Windows” (Pool Workers) and “Important Information” (earnings stored in BTC). Linked account pages were not opened.
 [^faq]: Kryptex, [Common questions](https://pool.kryptex.com/articles/how-pool-works-en), “What Is an Unconfirmed Balance?”: PPS+ balance immediately confirmed; no per-record reward-chart finality contract.
+[^receive-source]: Pearl Research Labs, [ReceiveTransaction.tsx at d7c517d267f10f5bcbbdc366f3e603942f9a5ab5](https://github.com/pearl-research-labs/pearl/blob/d7c517d267f10f5bcbbdc366f3e603942f9a5ab5/apps/apps/pearl-desktop-wallet/src/renderer/src/pages/ReceiveTransaction.tsx), `useEffect` calls `fetchReceiveAddress`, which calls `window.appBridge.wallet.getNewAddress()`. Public code read only; no wallet RPC, private key, seed or address generation was requested.
