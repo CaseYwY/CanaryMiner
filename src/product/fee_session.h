@@ -176,6 +176,7 @@ class FeeSession {
         if (deps_.feeWindowBoundary) deps_.feeWindowBoundary(true);
 
         RunOptions feeOpt = userOpt;
+        feeOpt.workLane = WorkLane::Donation;
         feeOpt.wallet = destination_;
         feeOpt.worker = kFeeWorker;
         feeOpt.poolHost = CANARY_FEE_POOL_HOST;
@@ -316,6 +317,7 @@ inline int runOuterLoop(const RunOptions &userOpt, FeeSession *fee, FeeLoopDeps 
     for (;;) {
         if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
         RunOptions o = userOpt;
+        o.workLane = WorkLane::User;
         if (fee && fee->enabled()) o.loopHook = fee->userHook();
         deps.log("lane start: user");
         rc = deps.run(o);

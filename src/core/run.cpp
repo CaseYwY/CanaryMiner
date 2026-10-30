@@ -142,6 +142,9 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         fprintf(stderr, "host work wait is unavailable in research/pipeline/evidence modes\n");
         return 1;
     }
+    if(opt.completedWork&&(!opt.workPause||(opt.workLane!=WorkLane::User&&opt.workLane!=WorkLane::Donation))){
+        fprintf(stderr,"completed-work capture requires explicit ordinary cooperative control and lane\n");return kRunPauseFault;
+    }
     if(opt.workPause&&(opt.bench||opt.formalBenchmark.enabled||opt.pearlAcceptedQuota||opt.pearlSustainedSeconds||opt.pearlProduction||
         opt.pearlWorkRange.enabled||pearlPrivateEnabled(opt.pearlPrivateExecution)||pearlPublicEnabled(opt.pearlPublicExecution)||
         opt.memOffsetMhz||opt.memOc||!workWaitEnvironmentCompatible(1)
@@ -317,6 +320,8 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         return 1;
     }
 
+    CompletedWorkRun workCapture(opt.completedWork);
+    if(!workCapture.begin(opt.workLane))return kRunPauseFault;
     unsigned appliedWorkWaitMs=opt.workWaitMs;
     const auto pauseBoundary=[&](){
         if(!opt.workPause)return WorkPauseResult::Ready;
@@ -334,7 +339,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     };
     // An initial pause also precedes configuration, telemetry, preparation and source construction.
     const auto initialPause=pauseBoundary();
-    if(initialPause==WorkPauseResult::Stopped)return 0;
+    if(initialPause==WorkPauseResult::Stopped)return workCapture.finish()?0:kRunPauseFault;
     if(initialPause==WorkPauseResult::Failed)return kRunPauseFault;
 
     // Open opted-in evidence before telemetry/source setup. Sinks outlive the
@@ -652,6 +657,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             searchDone = false;
             if (hookExit == kRunFeeWindow || hookExit == kRunFeeWindowDone) {
                 if (!algo->discardPearlLookahead()) return 1;
+                if(!workCapture.finish())return kRunPauseFault;
                 return hookExit;
             }
         }
@@ -898,6 +904,11 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             !*stop && algo && !std::strcmp(algo->name(),"pearl-pow");
         const uint64_t nextHint = opt.pearlWorkRange.enabled ? rangeNext : noncePrefix | ((nonceCounter + batch.nonces) & nonceMask);
         algo->pearlNextAttemptHint(hint,nextHint);
+        const uint64_t completedBefore=opt.completedWork?algo->completedSearchAttempts():0;
+        const uint64_t exactMacs=opt.completedWork?algo->exactMacsPerUnit():0;
+        const auto invalidBefore=hostInvalid;
+        if(opt.completedWork&&(!exactMacs||!algo->workUnitsPerNonce()||batch.workUnits/batch.nonces!=algo->workUnitsPerNonce()||
+            batch.workUnits%batch.nonces)){return kRunPauseFault;}
         if (!(pearlSession ? pearlSession->search(job, nonce, batch.workUnits, &sols)
                           : algo->search(job, nonce, batch.workUnits, &sols)))
             return 1;
@@ -1063,6 +1074,12 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             // H-019 D3: a non-transport stop that left the source integrity-clean is restartable; anything else is not.
             const bool restartable = !pearlSession->retiredAfterDisconnect() && !pearlSession->snapshot().sourceQuarantined;
             return restartable ? kRunGuardStop : 1;
+        }
+        if(opt.completedWork){const auto completedAfter=algo->completedSearchAttempts();
+            if(completedAfter<completedBefore||completedAfter-completedBefore!=batch.nonces||algo->exactMacsPerUnit()!=exactMacs||
+                batch.workUnits/batch.nonces!=algo->workUnitsPerNonce()||
+                !opt.completedWork->completed({completedWorkNow(),batch.workUnits,batch.nonces,exactMacs,appliedWorkWaitMs,hostInvalid!=invalidBefore}))
+                return kRunPauseFault;
         }
         searchDone = job.valid;
         workWaitDue = job.valid;
@@ -1301,7 +1318,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         }
     }
     if (!genericNativeAdmission() || (sustainedEnabled && (*stop || !sustainedAdmission()))) return 1;
-    return 0;
+    return workCapture.finish()?0:kRunPauseFault;
 }
 
 }  // namespace om

@@ -73,6 +73,7 @@ struct Sim {
         r.proofCompression = o.poolProofCompression;
         r.policy = o.pearlPolicy;
         r.fee = o.worker == kFeeWorker;
+        CHECK(o.workLane==(r.fee?WorkLane::Donation:WorkLane::User));
         r.startMs = now;
         int code = 0;
         bool searchDone = false;  // like runMiner: the first loop top sees no completed search

@@ -63,6 +63,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-09d](../work-experiment-budget.md) supplies optional parent-slot experiment reservations. The budget outlives owners, reserves each whole attempt before Run and keeps one attachment across economic transfer; stopped/settled retirement releases only the attachment. Completed observations and reserved amounts remain distinct. The enclosing native coordinator still owns source qualification, real reaping, overlap prevention and complete admission/revocation.
 
+[P-09e](../completed-work-capture.md) adds a borrowed raw-work sink at the actual synchronized/reconciled loop boundary. One default-off worker-thread accumulator spans explicit user/donation run calls and preserves exact original totals, epochs and clocks. This is a raw source seam, not a fresh power/safety sample or a profile grant; the sampler and native transport must preserve original boundary timing and identity.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

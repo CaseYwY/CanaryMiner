@@ -2358,6 +2358,10 @@ class PearlPow : public Algorithm {
 
     uint64_t workUnitsPerNonce() const override { return tiles(); }
 
+    uint64_t exactMacsPerUnit() const noexcept override {
+        return uint64_t{kTileSide} * uint64_t{kTileSide} * uint64_t{kK};
+    }
+
     uint64_t completedSearchAttempts() const override {
         return completedAttempts_;
     }

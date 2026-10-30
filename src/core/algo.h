@@ -206,6 +206,9 @@ class Algorithm {
      * in TH/s means multiplying by exactly this and nothing else. */
     virtual double macsPerUnit() const { return 0; }
 
+    // Exact host accounting capability after prepare. Zero means unsupported; never recover an integer from a display double.
+    virtual uint64_t exactMacsPerUnit() const noexcept { return 0; }
+
     virtual void setPrefetch(int mode) { (void)mode; }
 
     /** True when the last prepare() was served from a prefetched buffer. */

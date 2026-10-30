@@ -17,6 +17,7 @@
 #include "algo.h"
 #include "host_work_wait.h"
 #include "work_pause.h"
+#include "completed_work.h"
 #include "pearl_private_execution.h"
 #include "pearl_authorization.h"
 #include "pearl_work_range.h"
@@ -238,6 +239,8 @@ struct RunOptions {
     RunObserver *observer = nullptr;  // optional; never owned
     RunLoopHook *loopHook = nullptr;  // optional; never owned. Pool runs only; used by the fee scheduler.
     RunPauseControl *workPause = nullptr; // optional borrowed memory-only control; ordinary runs, never implicit activation
+    CompletedWorkSink *completedWork = nullptr; // optional raw source, same worker lifetime across sequential fee/user runs
+    WorkLane workLane = WorkLane::User; // fee-session wiring sets Donation explicitly; never inferred from wallet/account
     uint64_t batch = 1ULL << 22;
     unsigned workWaitMs = 0;  // host wait after a whole reconciled batch; zero preserves the original schedule
     // Default-off completion qualification. Captured from the exact environment

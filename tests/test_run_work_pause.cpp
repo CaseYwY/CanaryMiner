@@ -26,6 +26,7 @@ struct Rig {
     WorkerControlGate *gate=nullptr;uint64_t *gateClock=nullptr;unsigned gateMode=0;
     WorkerControlClient *nativeClient=nullptr;
     unsigned searches=0,submits=0,drains=0,resumes=0,fetches=0,version=1;
+    uint64_t completedAttempts=0;
     std::vector<std::string> events;
     Control control{this};
 };
@@ -65,8 +66,10 @@ struct Algo:Algorithm {
         if(active->gate&&active->gateMode==6)active->waitOrdering=active->waitOrdering&&active->gate->snapshot().receipt->kind==WorkerReceiptKind::WaitApplied;}
     size_t memoryBytes(const Job &)const override{return 0;}
     bool prepare(const Job &j)override{active->events.push_back("prepare"+std::to_string(j.epoch));if(active->pauseInPrepare&&j.epoch==1)active->requested=true;return true;}
-    bool search(const Job &j,uint64_t nonce,uint64_t,std::vector<Solution> *out)override{
-        auto &r=*active;++r.searches;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
+    uint64_t exactMacsPerUnit()const noexcept override{return 524288;}
+    uint64_t completedSearchAttempts()const override{return active->completedAttempts;}
+    bool search(const Job &j,uint64_t nonce,uint64_t count,std::vector<Solution> *out)override{
+        auto &r=*active;++r.searches;r.completedAttempts+=count;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
         if(r.nativeClient){std::this_thread::sleep_for(std::chrono::milliseconds(5));if(r.searches>=1000)r.stop=1;return true;}
         if(r.gate){if(r.gateMode==6){const auto view=r.gate->snapshot();r.waitOrdering=r.waitOrdering&&view.receipt&&view.receipt->kind==WorkerReceiptKind::WaitApplied;
                 if(view.receipt&&view.receipt->command.hostWaitMs)r.appliedWaits.push_back(*view.receipt->command.hostWaitMs);
@@ -93,6 +96,15 @@ struct GateHook:Hook {
         Hook::pauseChanged(paused);
         if(paused&&active->gateMode==0)*active->gateClock=2000;
     }
+};
+struct WorkSink:CompletedWorkSink {
+    bool began=false,ended=false,ordered=true;std::vector<unsigned> waits;
+    bool begin(WorkLane lane,CompletedWorkTime)noexcept override{began=lane==WorkLane::User;return began;}
+    bool completed(const CompletedWorkBatch &b)noexcept override{
+        ordered=ordered&&active->searches==active->submits&&active->events.back()=="submit"&&b.workUnits==1&&b.attempts==1&&b.macsPerUnit==524288;
+        waits.push_back(b.appliedHostWaitMs);return true;
+    }
+    bool end(bool clean,CompletedWorkTime)noexcept override{ended=clean;return clean;}
 };
 }
 namespace om {JobSource *workPauseTestSource(){active->sourceMade=true;return new Source;}}
@@ -153,7 +165,7 @@ int main(int argc,char **argv){
         if(mode==3)CHECK(event(r,"fetch2")<event(r,"search2"));
     }
     {Rig r;active=&r;WorkerControlGate gate(binding(),[]{return 1000;});r.gate=&gate;r.gateMode=6;
-        Algo algo;Hook hook;auto o=options(r);o.workPause=&gate;o.loopHook=&hook;std::atomic<bool> sent{false};
+        Algo algo;Hook hook;WorkSink work;auto o=options(r);o.workPause=&gate;o.loopHook=&hook;o.completedWork=&work;std::atomic<bool> sent{false};
         CHECK(gate.receive({binding(),1,1000,2000,WorkerDirective::Pause})==WorkerCommandResult::Accepted);
         std::thread sender([&]{const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(3);
             while(std::chrono::steady_clock::now()<until){const auto view=gate.snapshot();if(view.receipt&&view.receipt->kind==WorkerReceiptKind::Paused){
@@ -161,6 +173,7 @@ int main(int argc,char **argv){
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));}gate.fail();});
         const auto result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);sender.join();
         CHECK(sent&&result==0&&r.searches==2&&r.submits==2&&!r.enabledHint);
-        CHECK(r.waitOrdering&&r.appliedWaits==std::vector<unsigned>({10,0}));}
+        CHECK(r.waitOrdering&&r.appliedWaits==std::vector<unsigned>({10,0}));
+        CHECK(work.began&&work.ended&&work.ordered&&work.waits==r.appliedWaits);}
     return finishTests("shared run-loop cooperative pause");
 }
