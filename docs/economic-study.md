@@ -2,6 +2,8 @@
 
 M-OPTIMIZER/M-PROFILES; R-OPT-001/003, R-TAR-005, R-PRO-001/002, R-SAFE-001/002 and R-PRIV-002; T-OPTIMIZER/T-PROFILES/T-PRIVACY; D-60. `EconomicStudy` retains immutable inputs and exact candidate arithmetic. It is disabled by default and admits only qualified **synthetic fixtures**. It supplies no scheduler, mining permission, telemetry, network access, persistence or ordinary UI/runtime activation.
 
+[P-10f](economic-choice.md) adds a subsequent reference-only resume/switch-margin comparison over these immutable scores. Original-result freshness, actual worker receipt binding and temporal hysteresis remain separate ownership duties.
+
 ## Exact measured record and attribution
 
 One study compares the ordered points of one audited [work profile](work-profile.md). Its current full plan must still match; clock reversal, expired evidence, drift, faults, missing/unsafe safety telemetry and active/unknown games refuse a study. This is a normal-work model; it cannot establish coexistence permission.

@@ -139,6 +139,8 @@ Owns bounded measurement plans, profile eligibility/fingerprints, drift detectio
 
 [P-03h/P-10e](../worker-wait.md) extends the actual worker boundary with optional 0–1000-ms wait installation and original WaitApplied receipts. The CPU computation and worker protocol remain distinct owners: no study automatically issues a command, and command Accepted does not establish application. Selector/measurement integration must bind the exact decision, complete plan and original worker receipt before using the boundary time.
 
+[P-10f](../economic-choice.md) supplies pure exact resume/switch-margin arithmetic over the immutable study and an explicitly asserted current mode. It produces reference-only Hold/Resume/Switch or reasoned pause/unavailability. This does not validate the asserted application or replace result/receipt lifetime ownership, temporal hysteresis or switch budgets.
+
 [P-10b](../optimization-schedule.md) adds a noncopyable single-owner request clock borrowing explicit session intent. Its three bounded lanes retain unresolved expired tickets until settlement; stop/clock/Unreaped faults revoke without inventing reaping. The scheduler neither executes requests nor publishes financial/mining authority.
 
 Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budgets and pause/resume decisions. Normal/game candidate sets are separate. It consumes fresh inputs and uncertainty; it cannot turn an unverified model into a guaranteed profit statement.

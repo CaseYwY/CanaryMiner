@@ -112,6 +112,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-03h/P-10e](../worker-wait.md) supplies actual boundary-applied 0–1000-ms host waits through optional v2 worker commands. Accepted is distinct from WaitApplied, the original lease is not renewed, and controlled Run cannot silently downgrade to v1. R-PRO-003/R-OPT-003/R-SAFE-001/002 remain partial pending decision/profile/context-to-receipt binding, candidate hysteresis/budgets, qualified safety/measurement/economics and ordinary activation.
 
+[P-10f](../economic-choice.md) adds exact reference-choice resume/absolute/fractional margins over immutable real-time net scores. Unknown application is unavailable; excluded/nonpositive incumbents pause, and ties hold the incumbent. R-OPT-001/003 remain partial pending temporal confirmation/cooldown/budgets, receipt/context/freshness ownership, real-source qualification and activation.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.
