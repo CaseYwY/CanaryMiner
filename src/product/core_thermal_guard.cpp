@@ -14,9 +14,12 @@ bool aligned(GameGuardTime a,GameGuardTime b){
 bool validCoreThermalPolicy(const CoreThermalPolicy &p){
     if(p.devices.empty()||p.devices.size()>safetyTelemetryDeviceLimit||p.maximumAgeMs<100||p.maximumAgeMs>5000||p.maximumGapMs<100||p.maximumGapMs>p.maximumAgeMs||
         p.coolingMs<100||p.coolingMs>600000||p.minimumCoolSamples<2||p.minimumCoolSamples>10000)return false;
-    SafetyTelemetryRequest request{true,1,1,{1,1},25,{}};
+    SafetyTelemetryRequest request{true,1,1,{1,1},25,{},p.profile};
     for(const auto &device:p.devices){
         if(device.pauseAtC<=-273||device.pauseAtC>250||device.resumeAtOrBelowC< -273||device.resumeAtOrBelowC>=device.pauseAtC)return false;
+        if(p.profile==SafetyTelemetryProfile::ExtendedFields){
+            if(device.memoryPauseAtC<=-273||device.memoryPauseAtC>250||device.memoryResumeAtOrBelowC< -273||device.memoryResumeAtOrBelowC>=device.memoryPauseAtC)return false;
+        }else if(device.memoryPauseAtC||device.memoryResumeAtOrBelowC)return false; // never silently ignore requested memory protection
         request.devices.push_back(device.uuid);
     }
     return validSafetyTelemetryRequest(request);
@@ -52,7 +55,7 @@ const CoreThermalSnapshot &CoreThermalGuard::update(GameGuardTime now,const Safe
         return view_;
     }
     const auto &r=*source.request;std::string request,receipt;
-    if(!encodeSafetyTelemetryRequest(r,1,&request)||!r.enabled||r.epoch!=token_.epoch||source.completed!=r.revision||r.devices.size()!=policy_.devices.size()){
+    if(!encodeSafetyTelemetryRequest(r,1,&request)||!r.enabled||r.profile!=policy_.profile||r.epoch!=token_.epoch||source.completed!=r.revision||r.devices.size()!=policy_.devices.size()){
         halt(S::Faulted);return view_;}
     for(size_t i=0;i<r.devices.size();++i)if(r.devices[i]!=policy_.devices[i].uuid){halt(S::Faulted);return view_;}
     if(!aligned(anchor_,r.issued)||!ordered(r.issued,now)){halt(S::ClockFault);return view_;}
@@ -65,7 +68,7 @@ const CoreThermalSnapshot &CoreThermalGuard::update(GameGuardTime now,const Safe
     const bool fresh=!previousRequest_||r.revision!=previousRequest_->revision;
     const bool contiguous=previousRequest_&&previousRequest_->revision!=UINT64_MAX&&r.revision==previousRequest_->revision+1;
     if(previousRequest_&&(r.revision<previousRequest_->revision||(!fresh&&receipt!=previousReceipt_)||
-        r.collectionBudgetMs!=previousRequest_->collectionBudgetMs)){halt(S::Faulted);return view_;}
+        r.collectionBudgetMs!=previousRequest_->collectionBudgetMs||r.profile!=previousRequest_->profile)){halt(S::Faulted);return view_;}
     if(fresh&&previousRequest_&&(!ordered(previousRequest_->issued,r.issued)||r.issued.monotonicMs==previousRequest_->issued.monotonicMs)){
         halt(S::ClockFault);return view_;}
     if(fresh&&previousFinished_&&!ordered(*previousFinished_,r.issued)){halt(S::ClockFault);return view_;}
@@ -87,19 +90,26 @@ const CoreThermalSnapshot &CoreThermalGuard::update(GameGuardTime now,const Safe
     const auto until=sourceDeadline_;
     if(fresh&&previousGood_&&(!ordered(previousGood_->finished,reply.began)||reply.began.monotonicMs==previousGood_->began.monotonicMs)){
         halt(S::ClockFault);return view_;}
-    if(capabilities_.empty())for(const auto &reading:reply.readings)capabilities_.push_back(reading.supportedClockEvents);
+    if(capabilities_.empty())for(const auto &reading:reply.readings){capabilities_.push_back(reading.supportedClockEvents);fieldCapabilities_.push_back(reading.fields);}
     bool hot=false,cool=true,unsupported=false;
     for(size_t i=0;i<reply.readings.size();++i){const auto &reading=reply.readings[i];
         if(reading.supportedClockEvents!=capabilities_[i]){halt(S::Faulted);return view_;}
         unsupported=unsupported||(reading.supportedClockEvents&coreThermalHoldEvents)!=coreThermalHoldEvents||(reading.activeClockEvents&~coreThermalKnownEvents);
         hot=hot||reading.temperatureC>=policy_.devices[i].pauseAtC||(reading.activeClockEvents&coreThermalHoldEvents);
         cool=cool&&reading.temperatureC<=policy_.devices[i].resumeAtOrBelowC;
+        if(policy_.profile==SafetyTelemetryProfile::ExtendedFields){
+            for(size_t j=0;j<reading.fields.size();++j){const auto &before=fieldCapabilities_[i][j],&after=reading.fields[j];
+                if(before.valueType!=after.valueType||(j>=1&&j<=4&&before.value!=after.value)){halt(S::Faulted);return view_;}}
+            const auto memory=reading.fields[0].value;
+            hot=hot||memory>=policy_.devices[i].memoryPauseAtC;cool=cool&&memory<=policy_.devices[i].memoryResumeAtOrBelowC;
+        }
     }
     if(unsupported){hold(S::Unsupported);return view_;}
     if(hot){hold(S::Cooling);previousGood_=reply;return view_;}
     if(fresh&&previousGood_&&(!contiguous||reply.began.monotonicMs-previousGood_->began.monotonicMs>policy_.maximumGapMs||
         static_cast<uint64_t>(reply.began.utcMs-previousGood_->began.utcMs)>policy_.maximumGapMs))hold(S::Cooling);
-    if(admitted_){view_.state=S::CoreWithinLimits;view_.validUntilMonoMs=until;previousGood_=reply;return view_;}
+    const auto passing=policy_.profile==SafetyTelemetryProfile::ExtendedFields?S::ExtendedWithinLimits:S::CoreWithinLimits;
+    if(admitted_){view_.state=passing;view_.validUntilMonoMs=until;previousGood_=reply;return view_;}
     if(!cool){hold(S::Cooling);previousGood_=reply;return view_;}
     if(fresh){
         if(!view_.coolingSince){view_.coolingSince=reply.finished;view_.coolSamples=1;}
@@ -108,6 +118,6 @@ const CoreThermalSnapshot &CoreThermalGuard::update(GameGuardTime now,const Safe
             reply.began.monotonicMs-view_.coolingSince->monotonicMs>=policy_.coolingMs&&
             static_cast<uint64_t>(reply.began.utcMs-view_.coolingSince->utcMs)>=policy_.coolingMs)admitted_=true;
     }
-    view_.state=admitted_?S::CoreWithinLimits:S::Cooling;view_.validUntilMonoMs=admitted_?until:0;previousGood_=reply;return view_;
+    view_.state=admitted_?passing:S::Cooling;view_.validUntilMonoMs=admitted_?until:0;previousGood_=reply;return view_;
 }
 } // namespace om

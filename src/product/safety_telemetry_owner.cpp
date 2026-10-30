@@ -27,7 +27,7 @@ struct SafetyTelemetryOwner::Impl {
             {std::unique_lock<std::mutex> lock(mutex);if(stopped)return;const auto now=clock();if(!time(now)){publish();return;}
                 if(now.monotonicMs<next){wake.wait_for(lock,std::chrono::milliseconds(25));continue;}
                 if(revision==UINT64_MAX){halt(S::Faulted);publish();return;}
-                request={true,epoch,++revision,now,policy.collectionBudgetMs,devices};current.pending=true;publish();}
+                request={true,epoch,++revision,now,policy.collectionBudgetMs,devices,policy.profile};current.pending=true;publish();}
 #if defined(CANARY_SAFETY_TELEMETRY_OWNER_TESTING)
             const auto result=safetyTelemetryOwnerTestSample(request,cancel,policy.helperTimeoutMs);
 #else
@@ -58,7 +58,7 @@ SafetyTelemetryOwner::~SafetyTelemetryOwner(){stop();}
 bool SafetyTelemetryOwner::start(uint64_t epoch){
     auto &p=*impl_;std::lock_guard<std::mutex> life(p.lifecycle);std::lock_guard<std::mutex> lock(p.mutex);if(p.attempted)return false;p.attempted=true;
     try{if(!p.policy.enabled){p.current.state=S::Disabled;p.publish();return false;}
-        p.anchor=p.last=p.clock();SafetyTelemetryRequest r{true,epoch,1,p.last,p.policy.collectionBudgetMs,p.devices};
+        p.anchor=p.last=p.clock();SafetyTelemetryRequest r{true,epoch,1,p.last,p.policy.collectionBudgetMs,p.devices,p.policy.profile};
         if(!validSafetyTelemetryRequest(r)||!localTaskPath(p.helper)||p.policy.pollMs<100||p.policy.pollMs>10000||p.policy.helperTimeoutMs<50||
             p.policy.helperTimeoutMs>2000||p.policy.helperTimeoutMs<p.policy.collectionBudgetMs){p.halt(S::Faulted);p.publish();return false;}
         p.epoch=epoch;p.stopped=false;p.current.state=S::Waiting;p.publish();p.thread=std::thread([&p]{p.run();});return true;

@@ -1,5 +1,6 @@
 // Pure wire and real owned CPU helper tests. No driver, GPU, game or production miner.
 #include "product/safety_telemetry_owner.h"
+#include "product/hash.h"
 #include "product_test_util.h"
 #include <thread>
 using namespace om;
@@ -46,6 +47,49 @@ void codec(){
     CHECK(encodeSafetyTelemetryReply(r,reply,&wire)&&decodeSafetyTelemetryReply(r,wire,&decoded)&&decoded.readings.size()==64);
     std::swap(r.devices[0],r.devices[1]);CHECK(!decodeSafetyTelemetryReply(r,wire,&decoded));
 }
+void extendedCodec(){
+    auto r=request();r.issued={1793145600000LL,1000};r.profile=SafetyTelemetryProfile::ExtendedFields;
+    SafetyTelemetryReply reply{S::Ok,{r.issued.utcMs+1,1001},{r.issued.utcMs+11,1011},{{40,0,511}}},decoded;
+    const auto stamp=reply.began.utcMs*1000;reply.readings[0].fields={{82,1,stamp,1,50},{193,5,stamp,0,-10},{194,4,stamp,0,0},
+        {195,3,stamp,500000,2},{196,2,reply.finished.utcMs*1000+999,0,3},{230,6,stamp,0,0}};
+    std::string wire;SafetyTelemetryRequest copy;uint64_t parent=0;
+    CHECK(encodeSafetyTelemetryRequest(r,42,&wire)&&wire.find("CMSTQ2\n")==0&&decodeSafetyTelemetryRequest(wire,&copy,&parent)&&copy.profile==r.profile);
+    CHECK(encodeSafetyTelemetryReply(r,reply,&wire)&&wire.find("CMSTA2\n")==0&&decodeSafetyTelemetryReply(r,wire,&decoded));
+    CHECK(decoded.readings[0].fields[1].value==-10&&decoded.readings[0].fields[4].timestampUsec==reply.finished.utcMs*1000+999);
+    CHECK(wire.find("82\n1\n1793145600001000\n1\n50\n193\n5\n1793145600001000\n0\n-10\n")!=std::string::npos);
+    for(const auto &change:std::vector<std::function<void(SafetyTelemetryReply &)>>{
+        [](auto &v){v.readings[0].fields.clear();},[](auto &v){v.readings[0].fields.pop_back();},[](auto &v){v.readings[0].fields.push_back(v.readings[0].fields[0]);},
+        [](auto &v){std::swap(v.readings[0].fields[0],v.readings[0].fields[1]);},[](auto &v){++v.readings[0].fields[0].id;},
+        [](auto &v){v.readings[0].fields[0].valueType=0;},[](auto &v){v.readings[0].fields[0].valueType=7;},[](auto &v){v.readings[0].fields[0].value=-1;},
+        [](auto &v){v.readings[0].fields[0].value=251;},[](auto &v){v.readings[0].fields[1].value=INT64_MAX;},
+        [](auto &v){v.readings[0].fields[2].valueType=1;v.readings[0].fields[2].value=static_cast<int64_t>(UINT32_MAX)+1;},
+        [](auto &v){v.readings[0].fields[2].valueType=6;v.readings[0].fields[2].value=65536;},
+        [](auto &v){v.readings[0].fields[3].value=-1;},[](auto &v){v.readings[0].fields[4].value=-1;},
+        [](auto &v){--v.readings[0].fields[0].timestampUsec;},[](auto &v){++v.readings[0].fields[4].timestampUsec;},
+        [](auto &v){v.readings[0].fields[0].latencyUsec=-1;},[](auto &v){v.readings[0].fields[0].latencyUsec=500001;},
+        [](auto &v){v.readings[0].fields[5].value=1;},[](auto &v){v.status=S::Unsupported;}}){
+        auto bad=reply;change(bad);CHECK(!encodeSafetyTelemetryReply(r,bad,&wire));}
+    CHECK(encodeSafetyTelemetryReply(r,reply,&wire));
+    for(const char *token:{"-0","+0","00","0.0","9223372036854775808","-9223372036854775809"}){
+        auto bad=wire;const auto at=bad.find("\n-10\n");bad.replace(at+1,3,token);CHECK(!decodeSafetyTelemetryReply(r,bad,&decoded));}
+    auto legacy=r;legacy.profile=SafetyTelemetryProfile::CoreEvents;CHECK(!decodeSafetyTelemetryReply(legacy,wire,&decoded)&&!encodeSafetyTelemetryReply(legacy,reply,&wire));
+    CHECK(encodeSafetyTelemetryReply(r,reply,&wire));auto bad=wire;bad[5]='1';CHECK(!decodeSafetyTelemetryReply(r,bad,&decoded));
+    bad=wire;bad.replace(7,64,sha256Hex([&]{std::string old;encodeSafetyTelemetryRequest(legacy,1,&old);return old;}()));
+    CHECK(!decodeSafetyTelemetryReply(r,bad,&decoded)); // a v1 request checksum cannot be transplanted into a v2 response
+    bool truncated=false;for(size_t i=0;i<wire.size();++i)truncated=decodeSafetyTelemetryReply(r,wire.substr(0,i),&decoded)||truncated;
+    CHECK(!truncated&&!decodeSafetyTelemetryReply(r,wire+"0\n",&decoded)&&!decodeSafetyTelemetryReply(r,std::string(safetyTelemetryExtendedWireLimit+1,'x'),&decoded));
+    auto invalid=r;invalid.profile=static_cast<SafetyTelemetryProfile>(-1);CHECK(!validSafetyTelemetryRequest(invalid));
+    for(auto status:{S::Unavailable,S::Unsupported,S::DeviceFault,S::Clock,S::Invalid}){auto failure=reply;failure.status=status;failure.readings.clear();
+        CHECK(encodeSafetyTelemetryReply(r,failure,&wire)&&decodeSafetyTelemetryReply(r,wire,&decoded)&&decoded.readings.empty());}
+    r.issued={253402300798000LL,UINT64_MAX-2000};reply.began=r.issued;reply.finished={253402300798500LL,UINT64_MAX-1500};
+    auto reading=reply.readings[0];reading.activeClockEvents=reading.supportedClockEvents=UINT64_MAX;
+    for(auto &f:reading.fields){f.valueType=4;f.timestampUsec=reply.finished.utcMs*1000+999;f.latencyUsec=500000;
+        f.value=f.id==82?250:f.id==230?0:INT64_MIN;}
+    r.devices.clear();reply.readings.clear();
+    for(unsigned i=1;i<=64;++i){char suffix[13];std::snprintf(suffix,sizeof(suffix),"%012x",i);r.devices.push_back(std::string("GPU-00112233-4455-6677-8899-")+suffix);reply.readings.push_back(reading);}
+    CHECK(encodeSafetyTelemetryReply(r,reply,&wire)&&wire.size()>safetyTelemetryWireLimit&&wire.size()<safetyTelemetryExtendedWireLimit);
+    CHECK(decodeSafetyTelemetryReply(r,wire,&decoded)&&decoded.readings.size()==64&&decoded.readings.back().fields[4].value==INT64_MIN);
+}
 void processes(const std::filesystem::path &fixture,const std::filesystem::path &native){
     std::atomic<bool> cancel{false};SafetyTelemetryClient client(fixture);
     for(char mode:{'1','2','6','7','8','9'}){auto r=request(mode);const auto got=client.sample(r,cancel,1000);CHECK(got.transport==T::Ok&&got.reply);
@@ -65,6 +109,10 @@ void processes(const std::filesystem::path &fixture,const std::filesystem::path 
     const auto off=helper.run(wire,cancel,1000);SafetyTelemetryReply out;
     CHECK(off.status==T::Ok&&decodeSafetyTelemetryReply(r,off.response,&out)&&out.status==S::Disabled);
     CHECK(helper.run("malformed\n",cancel,1000).status==T::Unavailable);
+    r=request();r.profile=SafetyTelemetryProfile::ExtendedFields;const auto extended=client.sample(r,cancel,1000);
+    CHECK(extended.transport==T::Ok&&extended.reply&&extended.reply->status==S::Ok&&extended.reply->readings[0].fields.size()==6);
+    r.enabled=false;CHECK(encodeSafetyTelemetryRequest(r,localTaskProcessId(),&wire));const auto extendedOff=helper.run(wire,cancel,1000);
+    CHECK(extendedOff.status==T::Ok&&decodeSafetyTelemetryReply(r,extendedOff.response,&out)&&out.status==S::Disabled);
 }
 void owners(const std::filesystem::path &fixture){
     SafetyTelemetryPolicy policy;policy.enabled=true;policy.pollMs=100;
@@ -84,11 +132,16 @@ void owners(const std::filesystem::path &fixture){
         o.requestStop();CHECK(o.snapshot()->state==O::Stopped&&!o.snapshot()->reply);o.stop();CHECK(safetyTelemetryTime().monotonicMs-began.monotonicMs<1500&&!o.start(8));}
     {std::atomic<bool> reverse{false};SafetyTelemetryOwner o(fixture,{device()},policy,[&]{auto t=safetyTelemetryTime();if(reverse)t.utcMs-=10000;return t;});
         CHECK(o.start(7)&&wait([&]{return o.snapshot()->completed>=1;}));reverse=true;CHECK(wait([&]{return o.snapshot()->state==O::ClockFault;}));CHECK(!o.snapshot()->reply&&!o.start(8));}
+    {auto p=policy;p.profile=SafetyTelemetryProfile::ExtendedFields;SafetyTelemetryOwner o(fixture,{device()},p);p.profile=SafetyTelemetryProfile::CoreEvents;
+        CHECK(o.start(7)&&wait([&]{return o.snapshot()->completed>=2;}));const auto s=o.snapshot();
+        CHECK(s->state==O::Ready&&s->request->profile==SafetyTelemetryProfile::ExtendedFields&&s->reply->readings[0].fields.size()==6);
+        o.requestStop();CHECK(!o.snapshot()->reply&&!o.start(8));}
+    {auto p=policy;p.profile=static_cast<SafetyTelemetryProfile>(2);SafetyTelemetryOwner o(fixture,{device()},p);CHECK(!o.start(7)&&o.snapshot()->state==O::Faulted);}
 }
 }
 int main(int argc,char **argv){
     if(argc==3&&std::string(argv[2])=="parent"){auto r=request('d');SafetyTelemetryClient client(std::filesystem::absolute(argv[1]));std::atomic<bool> cancel{false};
         client.sample(r,cancel,2000);return 0;}
     if(argc!=3)return 2;
-    codec();processes(std::filesystem::absolute(argv[1]),std::filesystem::absolute(argv[2]));owners(std::filesystem::absolute(argv[1]));return finishTests("isolated safety telemetry");
+    codec();extendedCodec();processes(std::filesystem::absolute(argv[1]),std::filesystem::absolute(argv[2]));owners(std::filesystem::absolute(argv[1]));return finishTests("isolated safety telemetry");
 }

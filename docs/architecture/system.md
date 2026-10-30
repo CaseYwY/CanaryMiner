@@ -47,6 +47,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-03f/P-11l](../supervisor-sampling.md) gives the ordinary supervisor one fixed background display reader for local HTTP/JSON and display NVML. Its single in-flight-or-result batch carries frozen worker generations and original clocks; the control loop only consumes in-memory results. Stop cancels publication before worker drain, and native cleanup joins afterward. Ordered original-time energy handoff defers capture clock advancement while a batch is outstanding. This display reader cannot supply complete safety evidence.
 
+[P-03g/P-11m](../safety-fields.md) extends the isolated safety owner with a frozen core-only/extended profile. The v2 profile requires six individually checked native fields and preserves original microsecond time/type/value; any missing result withdraws the entire batch. A pure extended limiter applies separately declared core/memory hysteresis across the complete selected set and freezes field capabilities. It supplies no WorkerSafetyEvidence adapter or ordinary fleet activation.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

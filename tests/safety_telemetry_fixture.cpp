@@ -20,7 +20,10 @@ int main(int argc,char **argv){
     if(mode=='9')out.status=SafetyTelemetryStatus::Clock;
     if(mode=='a'&&r.revision>=2)out.status=SafetyTelemetryStatus::Unavailable;
     if(!r.enabled)out.status=SafetyTelemetryStatus::Disabled;
-    if(out.status==SafetyTelemetryStatus::Ok)for(size_t i=0;i<r.devices.size();++i)out.readings.push_back({40+static_cast<int>(i),0,511});
+    if(out.status==SafetyTelemetryStatus::Ok)for(size_t i=0;i<r.devices.size();++i){SafetyTelemetryReading reading{40+static_cast<int>(i),0,511};
+        if(r.profile==SafetyTelemetryProfile::ExtendedFields)for(auto id:safetyTelemetryFieldIds)
+            reading.fields.push_back({id,1,out.began.utcMs*1000,0,id==230?0:50});
+        out.readings.push_back(std::move(reading));}
     if(mode=='c')++r.revision;
     if(!encodeSafetyTelemetryReply(r,out,&wire))return 4;
     return writeLocalTaskOutput(wire)?0:5;

@@ -4,6 +4,8 @@ M-SUPERVISOR/M-GAME; R-SAFE-001/002/004, R-GAME-004 and R-PRIV-002; T-INTENT/T-G
 
 This slice provides a default-off background owner and a parent-bound read-only NVML helper for **GPU-core temperature and current/supported clock-event masks**. These raw observations do not constitute complete critical-safety evidence, `GameSafety`, a worker Run lease or permission to mine. Ordinary startup still refuses non-Off game requests before discovery under [P-11h](game-settings.md).
 
+[P-03g/P-11m](safety-fields.md) subsequently adds an explicitly selected v2 extended profile with required memory/T.Limit/recovery fields, preserved per-field clocks/types and explicit memory hysteresis. The v1 core-only format and default remain as described here; neither profile grants complete safety authority.
+
 ## Private request and batch contract
 
 `SafetyTelemetryRequest` freezes an enabled flag, nonzero epoch/revision, original UTC/monotonic issue time, collection budget and ordered selected device set. It accepts 1..64 unique canonical lowercase full `GPU-` UUIDs, excluding the all-zero identity. It does not enumerate devices or fall back to an index. Device identities remain inside inherited local IPC and memory; no public stats, logging, file persistence or network output is added.

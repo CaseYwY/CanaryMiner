@@ -9,10 +9,15 @@ constexpr int64_t utc=1793145600000LL;constexpr uint64_t mono=10000;
 const std::string id1="GPU-00112233-4455-6677-8899-aabbccddee01",id2="GPU-00112233-4455-6677-8899-aabbccddee02";
 GameGuardTime at(uint64_t offset){return {utc+static_cast<int64_t>(offset),mono+offset};}
 CoreThermalPolicy policy(){CoreThermalPolicy p;p.enabled=true;p.maximumAgeMs=p.maximumGapMs=1000;p.coolingMs=500;p.devices={{id1,80,65}};return p;}
+CoreThermalPolicy extendedPolicy(){auto p=policy();p.profile=SafetyTelemetryProfile::ExtendedFields;p.devices[0].memoryPauseAtC=90;p.devices[0].memoryResumeAtOrBelowC=70;return p;}
 SafetyTelemetrySnapshot sample(uint64_t revision,uint64_t offset,int degrees=40){
     SafetyTelemetrySnapshot s;s.state=O::Ready;s.transport=T::Ok;s.status=R::Ok;s.completed=revision;
     s.request=SafetyTelemetryRequest{true,1,revision,at(offset),500,{id1}};
     s.reply=SafetyTelemetryReply{R::Ok,at(offset+1),at(offset+11),{{degrees,0,511}}};return s;
+}
+SafetyTelemetrySnapshot extendedSample(uint64_t revision,uint64_t offset,int memory=50,int core=40){
+    auto s=sample(revision,offset,core);s.request->profile=SafetyTelemetryProfile::ExtendedFields;const auto stamp=s.reply->began.utcMs*1000;
+    s.reply->readings[0].fields={{82,5,stamp,0,memory},{193,5,stamp,0,-10},{194,5,stamp,0,0},{195,5,stamp,0,2},{196,5,stamp,0,3},{230,1,stamp,0,0}};return s;
 }
 struct Fixture {
     SessionIntent intent;SessionToken token=intent.explicitStart();CoreThermalGuard guard;
@@ -83,6 +88,9 @@ void capabilities(){
         CHECK(f.feed(sample(4,900),920).state==S::Faulted);}
 }
 void bindingAndStop(){
+    {Fixture f(extendedPolicy());CHECK(f.feed(extendedSample(1,0),20).state==S::Cooling);
+        CHECK(f.feed(sample(2,510),530).state==S::Faulted); // a later core-only profile cannot silently downgrade a frozen source
+        CHECK(f.feed(sample(3,700),720).state==S::Faulted);}
     for(const auto &change:std::vector<std::function<void(SafetyTelemetrySnapshot &)>>{
         [](auto &s){s.request->epoch=2;},[](auto &s){s.request->devices[0]=id2;},[](auto &s){s.request->collectionBudgetMs=499;},
         [](auto &s){s.request->enabled=false;},[](auto &s){s.reply->readings.clear();},[](auto &s){s.completed=99;},
@@ -120,19 +128,68 @@ void clocks(){
         CHECK(guard.start(base));auto s=sample(1,0);s.request->issued.monotonicMs=UINT64_MAX-100;s.reply->began.monotonicMs=UINT64_MAX-99;s.reply->finished.monotonicMs=UINT64_MAX-89;
         auto now=at(20);now.monotonicMs=UINT64_MAX-80;CHECK(guard.update(now,s).state==S::ClockFault);}
 }
+void extendedThermal(){
+    CHECK(validCoreThermalPolicy(extendedPolicy()));
+    for(const auto &change:std::vector<std::function<void(CoreThermalPolicy &)>>{
+        [](auto &p){p.devices[0].memoryPauseAtC=0;p.devices[0].memoryResumeAtOrBelowC=0;},
+        [](auto &p){p.devices[0].memoryPauseAtC=251;},[](auto &p){p.devices[0].memoryResumeAtOrBelowC=90;},
+        [](auto &p){p.devices[0].memoryResumeAtOrBelowC=-274;},[](auto &p){p.profile=SafetyTelemetryProfile::CoreEvents;},
+        [](auto &p){p.profile=static_cast<SafetyTelemetryProfile>(2);}}){auto p=extendedPolicy();change(p);CHECK(!validCoreThermalPolicy(p));}
+    {Fixture f;CHECK(f.feed(extendedSample(1,0),20).state==S::Faulted);}
+    {Fixture f(extendedPolicy());CHECK(f.feed(sample(1,0),20).state==S::Faulted);}
+    {Fixture f(extendedPolicy());CHECK(f.feed(extendedSample(1,0,71),20).coolSamples==0);
+        CHECK(f.feed(extendedSample(2,200,70),220).coolSamples==1);
+        CHECK(f.feed(extendedSample(3,710,70),730).state==S::ExtendedWithinLimits);
+        CHECK(f.feed(extendedSample(4,900,89),920).state==S::ExtendedWithinLimits);
+        CHECK(f.feed(extendedSample(5,1100,90),1120).state==S::Cooling&&f.guard.snapshot().validUntilMonoMs==0);
+        CHECK(f.feed(extendedSample(6,1300,70),1320).coolSamples==1);
+        CHECK(f.feed(extendedSample(7,1810,70),1830).state==S::ExtendedWithinLimits);}
+    {Fixture f(extendedPolicy());CHECK(f.feed(extendedSample(1,0,50,66),20).coolSamples==0);
+        CHECK(f.feed(extendedSample(2,200,70,65),220).coolSamples==1);
+        CHECK(f.feed(extendedSample(3,710,70,65),730).state==S::ExtendedWithinLimits);
+        CHECK(f.feed(extendedSample(4,900,50,80),920).state==S::Cooling);}
+    for(size_t index=0;index<6;++index){Fixture f(extendedPolicy());CHECK(f.feed(extendedSample(1,0),20).coolSamples==1);
+        auto changed=extendedSample(2,510);changed.reply->readings[0].fields[index].valueType=4;
+        CHECK(f.feed(changed,530).state==S::Faulted&&f.guard.snapshot().validUntilMonoMs==0);}
+    for(size_t index=1;index<=4;++index){Fixture f(extendedPolicy());CHECK(f.feed(extendedSample(1,0),20).coolSamples==1);
+        auto changed=extendedSample(2,510);++changed.reply->readings[0].fields[index].value;
+        CHECK(f.feed(changed,530).state==S::Faulted);CHECK(f.feed(extendedSample(3,700),720).state==S::Faulted);}
+    for(const auto &change:std::vector<std::function<void(SafetyTelemetrySnapshot &)>>{
+        [](auto &s){s.reply->readings[0].fields.pop_back();},[](auto &s){s.reply->readings[0].fields[5].value=1;},
+        [](auto &s){--s.reply->readings[0].fields[0].timestampUsec;}}){Fixture f(extendedPolicy());auto s=extendedSample(1,0);change(s);
+        CHECK(f.feed(s,20).state==S::Faulted&&f.guard.snapshot().validUntilMonoMs==0);}
+    {Fixture f(extendedPolicy());CHECK(f.feed(extendedSample(1,0),20).coolSamples==1);const auto s=extendedSample(2,510);
+        CHECK(f.feed(s,530).state==S::ExtendedWithinLimits);auto now=at(700);now.utcMs+=100;
+        CHECK(f.guard.update(now,s).validUntilMonoMs==mono+1411);CHECK(f.feed(s,900).validUntilMonoMs==mono+1411);
+        CHECK(f.feed(s,1411).state==S::Unavailable);CHECK(f.feed(extendedSample(3,1500),1520).coolSamples==1);
+        f.intent.stop();CHECK(f.feed(extendedSample(4,2010),2030).state==S::Stopped);}
+    {auto p=extendedPolicy();p.devices.push_back({id2,80,65,85,60});Fixture f(p);
+        auto s=extendedSample(1,0);s.request->devices.push_back(id2);s.reply->readings.push_back(s.reply->readings[0]);s.reply->readings[1].fields[0].value=61;
+        CHECK(f.feed(s,20).coolSamples==0);
+        s=extendedSample(2,200);s.request->devices.push_back(id2);s.reply->readings.push_back(s.reply->readings[0]);
+        CHECK(f.feed(s,220).coolSamples==1);
+        s=extendedSample(3,710);s.request->devices.push_back(id2);s.reply->readings.push_back(s.reply->readings[0]);
+        CHECK(f.feed(s,730).state==S::ExtendedWithinLimits);
+        s=extendedSample(4,900);s.request->devices.push_back(id2);s.reply->readings.push_back(s.reply->readings[0]);s.reply->readings[1].fields[0].value=85;
+        CHECK(f.feed(s,920).state==S::Cooling);}
+}
 void nativeOwner(const std::filesystem::path &fixture){
-    SessionIntent intent;const auto token=intent.explicitStart();auto p=policy();p.maximumAgeMs=p.maximumGapMs=2000;p.coolingMs=100;
+    for(auto profile:{SafetyTelemetryProfile::CoreEvents,SafetyTelemetryProfile::ExtendedFields}){
+    const auto passing=profile==SafetyTelemetryProfile::CoreEvents?S::CoreWithinLimits:S::ExtendedWithinLimits;
+    SessionIntent intent;const auto token=intent.explicitStart();auto p=profile==SafetyTelemetryProfile::CoreEvents?policy():extendedPolicy();p.maximumAgeMs=p.maximumGapMs=2000;p.coolingMs=100;
     CoreThermalGuard guard(p,intent,token);SafetyTelemetryPolicy collection;collection.enabled=true;collection.pollMs=100;
+    collection.profile=profile;
     SafetyTelemetryOwner owner(fixture,{id1},collection);CHECK(guard.start(safetyTelemetryTime())&&owner.start(token.epoch));
     const auto deadline=safetyTelemetryTime().monotonicMs+4000;
     do{const auto observed=owner.snapshot();guard.update(safetyTelemetryTime(),*observed);
-        if(guard.snapshot().state==S::CoreWithinLimits)break;
+        if(guard.snapshot().state==passing)break;
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }while(safetyTelemetryTime().monotonicMs<deadline);
-    const auto accepted=guard.snapshot();CHECK(accepted.state==S::CoreWithinLimits&&accepted.sourceRevision>=2&&accepted.observed&&accepted.validUntilMonoMs>safetyTelemetryTime().monotonicMs);
+    const auto accepted=guard.snapshot();CHECK(accepted.state==passing&&accepted.sourceRevision>=2&&accepted.observed&&accepted.validUntilMonoMs>safetyTelemetryTime().monotonicMs);
     owner.requestStop();CHECK(guard.update(safetyTelemetryTime(),*owner.snapshot()).state==S::Faulted&&guard.snapshot().validUntilMonoMs==0);
     owner.stop();CHECK(!owner.start(token.epoch)&&!guard.start(safetyTelemetryTime()));
+    }
 }
 }
 int main(int argc,char **argv){if(argc!=2)return 2;
-    policies();cooling();capabilities();bindingAndStop();clocks();nativeOwner(std::filesystem::absolute(argv[1]));return finishTests("core thermal hysteresis");}
+    policies();cooling();capabilities();bindingAndStop();clocks();extendedThermal();nativeOwner(std::filesystem::absolute(argv[1]));return finishTests("core thermal hysteresis");}

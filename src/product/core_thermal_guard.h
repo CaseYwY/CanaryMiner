@@ -1,4 +1,4 @@
-// Pure selected-device core-temperature limiter. Passing it is not complete safety or mining authority.
+// Pure selected-device thermal limiter. Either passing profile is NOT complete safety or mining authority.
 #pragma once
 #include "safety_telemetry_owner.h"
 namespace om {
@@ -8,13 +8,15 @@ constexpr uint64_t coreThermalKnownEvents=0x1ff,coreThermalHoldEvents=0xe8;
 struct CoreThermalLimit {
     std::string uuid;
     int pauseAtC=0,resumeAtOrBelowC=0; // mandatory explicit hysteresis pair; equal defaults are invalid
+    int memoryPauseAtC=0,memoryResumeAtOrBelowC=0; // mandatory only for the explicitly selected extended profile
 };
 struct CoreThermalPolicy {
     bool enabled=false;
     unsigned maximumAgeMs=2000,maximumGapMs=2000,coolingMs=30000,minimumCoolSamples=2;
     std::vector<CoreThermalLimit> devices; // frozen ordered full UUIDs; no model-wide temperature default
+    SafetyTelemetryProfile profile=SafetyTelemetryProfile::CoreEvents;
 };
-enum class CoreThermalState { Dormant, Disabled, Unavailable, Unsupported, Cooling, CoreWithinLimits, InvalidPolicy, ClockFault, Faulted, Stopped };
+enum class CoreThermalState { Dormant, Disabled, Unavailable, Unsupported, Cooling, CoreWithinLimits, InvalidPolicy, ClockFault, Faulted, Stopped, ExtendedWithinLimits };
 struct CoreThermalSnapshot {
     CoreThermalState state=CoreThermalState::Dormant;
     bool sourceUnreaped=false;
@@ -40,6 +42,7 @@ class CoreThermalGuard {
     std::optional<SafetyTelemetryRequest> previousRequest_;
     std::optional<SafetyTelemetryReply> previousGood_;
     std::vector<uint64_t> capabilities_;std::string previousReceipt_;
+    std::vector<std::vector<SafetyTelemetryField>> fieldCapabilities_; // original integral types and raw T.Limits, not manufactured defaults
     void hold(CoreThermalState);
     void halt(CoreThermalState);
     bool time(GameGuardTime);

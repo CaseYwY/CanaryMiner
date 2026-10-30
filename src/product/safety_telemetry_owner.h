@@ -3,7 +3,8 @@
 #include "safety_telemetry.h"
 namespace om {
 enum class SafetyTelemetryOwnerState { Dormant, Disabled, Waiting, Ready, Stopped, ClockFault, Faulted };
-struct SafetyTelemetryPolicy {bool enabled=false;unsigned pollMs=500,helperTimeoutMs=1000,collectionBudgetMs=500;};
+struct SafetyTelemetryPolicy {bool enabled=false;unsigned pollMs=500,helperTimeoutMs=1000,collectionBudgetMs=500;
+    SafetyTelemetryProfile profile=SafetyTelemetryProfile::CoreEvents;};
 struct SafetyTelemetrySnapshot {
     SafetyTelemetryOwnerState state=SafetyTelemetryOwnerState::Dormant;
     LocalTaskStatus transport=LocalTaskStatus::Unavailable;

@@ -4,6 +4,8 @@ M-SUPERVISOR/M-GAME; R-SAFE-001/002, R-GAME-004 and R-PRIV-002; T-INTENT/T-GAME;
 
 `CoreThermalGuard` is a pure, default-off, selected-device limiter over [isolated raw telemetry](safety-telemetry.md). It requires an existing explicit `SessionIntent` token and starts at most once. It neither starts a collector/worker nor changes GPU settings. **CoreWithinLimits is only this limiter's result, not complete `GameSafety`, physical qualification or mining authority.**
 
+[P-03g/P-11m](safety-fields.md) extends this existing class with an explicit extended profile, separate per-device memory limits, fixed field capabilities and a distinct `ExtendedWithinLimits` result. The following describes the original core-only profile. Extended results likewise confer no complete safety or mining authority.
+
 ## Explicit frozen policy
 
 Every selected device needs its exact full UUID and two explicitly supplied integral-Celsius thresholds: `pauseAtC` and the strictly lower `resumeAtOrBelowC`. Equal default values are invalid; there is no shipped model-wide operating temperature. The -273..250 C representability bounds are inherited from the raw format, not recommended operating limits. Actual device-specific threshold sourcing/review and complete critical-safety qualification remain prerequisites for production admission.

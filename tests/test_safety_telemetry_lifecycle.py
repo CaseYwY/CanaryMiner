@@ -34,9 +34,10 @@ def main():
             parent.stderr.close()
     for artifact in (native, library, core):
         data = artifact.read_bytes()
-        for name in (b'safetyTelemetryTestSymbol', b'safetyTelemetryOwnerTestSample', b'fixture-safety-ready', b'nvmlDeviceSet', b'nvmlDeviceGetHandleByIndex', b'cudaGetDevice'):
+        for name in (b'safetyTelemetryTestSymbol', b'safetyTelemetryOwnerTestSample', b'fixture-safety-ready', b'nvmlDeviceSet', b'nvmlDeviceGetHandleByIndex', b'cudaGetDevice',
+                     b'nvmlDeviceReset', b'nvmlDeviceRemoveGpu', b'nvmlDeviceDiscoverGpus'):
             assert name not in data
-    print('safety telemetry lifecycle: 21 parent-death and native-artifact checks passed')
+    print('safety telemetry lifecycle: 30 parent-death and native-artifact checks passed')
 
 
 if __name__ == '__main__':
