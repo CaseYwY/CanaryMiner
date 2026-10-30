@@ -154,6 +154,8 @@ Test priority of user stop, latched fault, thermal/telemetry limits, game constr
 
 Executed P-03a [intent/launcher evidence](../session-intent.md) covers explicit-start tokens, actual fake-worker supervisor exits and copied native launchers. Game/economic arbitration is still a pure contract, not runtime telemetry or game qualification.
 
+[P-03d/P-11i](../safety-telemetry.md) tests strict raw batch IPC, complete selected-set/time/revision binding, TemperatureV1 ABI inputs, all used native return-code paths, pre/post UUID identity, missing and unknown fields, cleanup errors and original failed-clock intervals. Owned CPU helpers test timeout/cancellation and adopted-parent death; a separately compiled late-result seam checks Unreaped after stop. Production core/native/helper artifact checks exclude fixture seams and mutating/index-discovery APIs. Enabled sampling is synthetic; real helper tests are disabled/malformed only. This is not physical temperature accuracy, complete safety/cooling, genuine unreapable-kernel or fleet/runtime qualification.
+
 ## T-I18N
 
 Test all declared locales/key coverage, placeholders/plurals, review/fallback status, UTF-8/grapheme/combining/wide/RTL snapshots, numeric/date/currency formatting and invariant flags/JSON/protocol/event codes. Changing language must not change tariff, timezone, currency, device or prices.

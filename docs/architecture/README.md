@@ -4,7 +4,7 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-11h.** [Native game defaults](../game-settings.md) add independent mode/target/scope/timing review and saving, with frozen current-session values. Ordinary parents refuse non-Off requests before device discovery until qualified safety/fleet binding exists. The [P-11g lifetime bridge](../game-worker-session.md) remains available through an optional supervisor factory. Physical GPU/game acceptance remains open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
+**Latest bounded slice: P-03d/P-11i.** [Isolated raw safety telemetry](../safety-telemetry.md) adds a default-off selected-device owner and read-only NVML helper, with full-batch validity, original clocks and retained stop/Unreaped state. Raw temperature/event masks do not grant safety or mining authority. [Native game defaults](../game-settings.md) still refuse non-Off ordinary startup until qualified safety/fleet binding exists. Physical GPU/game acceptance remains open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 
