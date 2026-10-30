@@ -160,6 +160,8 @@ Executed P-03a [intent/launcher evidence](../session-intent.md) covers explicit-
 
 [P-11k](../evidence-deadlines.md) includes a red/green actual-runtime regression with one fixed detector receipt, fixed caller upper bound and a controlled converging clock pair. The constant-skew control passes before the fix. Shared arithmetic checks cover exact expiry, renumbered originals, mutations, overflow, independent source bounds and a forward-clock grid; full owned-worker/runtime/detector/guard regressions preserve lifetime behavior. These do not qualify physical scheduler latency or a real profit/safety source.
 
+[P-03f/P-11l](../supervisor-sampling.md) checks one-flight/result capacity, frozen incarnation vectors, original receipt times, canceled late completion, no second-device read after stop, throwing/null factories and background-only reader destruction. Owned loopback HTTP exercises the actual native reader with driver loading disabled. The actual supervisor must continue control ticks while a CPU reader is held, revoke before releasing it, and deliver two-device original power observations without capture submit/tick rollback. This is not a genuine driver/kernel-stall or hard process-exit deadline test.
+
 ## T-I18N
 
 Test all declared locales/key coverage, placeholders/plurals, review/fallback status, UTF-8/grapheme/combining/wide/RTL snapshots, numeric/date/currency formatting and invariant flags/JSON/protocol/event codes. Changing language must not change tariff, timezone, currency, device or prices.

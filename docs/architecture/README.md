@@ -4,7 +4,7 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-11k.** [Cached evidence expiry](../evidence-deadlines.md) now retains the earliest original detection/profit/safety deadline across clock-skew changes and renumbered cached observations. This follows [P-03e/P-11j's explicit core-temperature/cooling limiter](../core-thermal-guard.md) and [isolated raw telemetry](../safety-telemetry.md). Complete safety qualification, ordinary non-Off activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
+**Latest bounded slice: P-03f/P-11l.** [Background display sampling](../supervisor-sampling.md) removes supervisor HTTP/JSON/NVML work from the control loop, with one ordered generation-bound batch, original-time energy handoff and stop-before-join ownership. [Cached evidence expiry](../evidence-deadlines.md) retains its independent source ceilings. Complete safety qualification, hard driver-stall exit, ordinary non-Off activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 

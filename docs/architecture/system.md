@@ -45,6 +45,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-11k](../evidence-deadlines.md) supplies independent earliest-ceiling retention for the game runtime's detection/profit and the worker session's safety evidence. Revision increments without a new original time cannot renew expiry. This closes a decreasing-clock-skew hole in the earlier lease arithmetic; source/session validation and native qualification remain separate boundaries.
 
+[P-03f/P-11l](../supervisor-sampling.md) gives the ordinary supervisor one fixed background display reader for local HTTP/JSON and display NVML. Its single in-flight-or-result batch carries frozen worker generations and original clocks; the control loop only consumes in-memory results. Stop cancels publication before worker drain, and native cleanup joins afterward. Ordered original-time energy handoff defers capture clock advancement while a batch is outstanding. This display reader cannot supply complete safety evidence.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

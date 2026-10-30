@@ -61,6 +61,7 @@
 #include "accepted_history.h"
 #include "stats.h"
 #include "stats_server.h"
+#include "supervisor_sampling.h"
 
 namespace om {
 
@@ -399,6 +400,7 @@ struct SupervisorOptions {
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
     WorkerFleetFactory workerFleetFactory; // default empty; one fixed lifetime, never reconstructed on a worker retry
     WorkerFleetEvidenceSource workerFleetEvidence; // trusted memory-only source; missing evidence holds every controlled worker
+    DisplaySampleFactory displaySampleFactory; // empty uses native display reader; constructed/read/destroyed only in the background
     std::string gamePreferencesPath;
     GameSettingsContext gameContext; // frozen effective settings, not inferred from later saved preferences
 };
@@ -412,6 +414,7 @@ struct WorkerView {
     std::string detail;
     bool telValid = false;
     GpuTelemetry tel;
+    DisplaySampleTime telObserved;
     // Shares from this GPU's earlier worker runs (before a restart), so session totals never go backwards.
     StatsOutcomes carried, carriedFee;
     unsigned restarts = 0;     // how many times this GPU's worker was restarted
@@ -538,7 +541,7 @@ inline DashModel dashboardModel(const SupervisorOptions &opt, const std::vector<
     return m;
 }
 
-/** Runs the supervised workers until they all stop. Single-threaded except the per-child line readers. */
+/** Owns worker control/views; line readers and display HTTP/NVML run on separate lifetime threads. */
 class Supervisor {
    public:
     explicit Supervisor(SupervisorOptions opt) : opt_(std::move(opt)) {
@@ -584,7 +587,6 @@ class Supervisor {
             std::unique_ptr<Worker> w(new Worker());
             w->view.seed = opt_.seeds[i];
             w->port = opt_.workerPortBase + static_cast<int>(i);
-            w->nvmlOk = w->nvml.openByUuid(opt_.seeds[i].uuid);
             workers_.push_back(std::move(w));
         }
         if(!opt_.electricityPreferencesPath.empty()) {
@@ -641,6 +643,10 @@ class Supervisor {
             for (const std::string &event : events) addEvent(event);
         }
         for (size_t i = 0; i < workers_.size(); ++i) startWorker(i, t0);
+        if(intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)&&!workers_.empty()){
+            std::vector<DisplaySampleTarget> targets;for(const auto &w:workers_)targets.push_back({w->view.seed.uuid,w->port});
+            if(!sampling_.start(std::move(targets),opt_.displaySampleFactory))addEvent("Background display sampling unavailable.");
+        }
 
         StatsServer server;
         if (opt_.apiEnabled) {
@@ -657,7 +663,8 @@ class Supervisor {
         }
         KeyReader keys;
         bool stopping = false, forced = false, quit = false, controlFault = false;
-        uint64_t stopDeadline = 0, nextSummary = 0;
+        uint64_t stopDeadline = 0, nextSummary = 0, nextSample = 0;
+        bool samplingFaultReported=false;
         for (;;) {
             const uint64_t now = supervisorNowMs();
             if (tty) {
@@ -741,13 +748,18 @@ class Supervisor {
                 }
             }
             bool alive = false, pending = false;
+            const auto sampled=stopping?std::shared_ptr<const DisplaySampleBatch>{}:sampling_.take();
+            if(sampled)nextSample=now+(tty?500:250);
+            std::vector<uint64_t> sampleGenerations(workers_.size());
             for (size_t i = 0; i < workers_.size(); ++i) {
                 Worker &w = *workers_[i];
+                if(w.view.telValid&&!displaySampleInterval(w.view.telObserved,displaySampleTime(),2000))w.view.telValid=false;
                 if(fleet_){
                     const auto control=fleet_->snapshot(static_cast<unsigned>(i));
                     if(control.ownershipUnresolved)controlFault=true;
                     if(control.requested&&!control.done){alive=true;
-                        if(!stopping&&now>=w.nextSampleAt){sample(i);w.nextSampleAt=now+(tty?500:250);}
+                        if(!stopping){sampleGenerations[i]=w.historyGeneration;
+                            if(sampled&&sampled->generations[i]==w.historyGeneration)sample(i,sampled->readings[i]);}
                         if(control.pauseRequested){w.view.state=control.paused?"Paused":"Pausing";w.view.detail=control.paused?"controlled work boundary held":"waiting for drained work boundary";w.view.lastRateMs=0;}
                     }else if(control.done&&!w.controlledExitHandled){w.controlledExitHandled=true;
                         int code=control.exitCode;
@@ -755,14 +767,13 @@ class Supervisor {
                         forced=forced||code==kExitShutdownForced;
                         onExit(i,code,now,stopping||stopRequested);}
                 }else if (w.proc && w.proc->started() && !w.proc->finished()) {
-                    if (now >= w.nextSampleAt) {
-                        sample(i);
-                        w.nextSampleAt = now + (tty ? 500 : 250);
-                    }
+                    if(!stopping){sampleGenerations[i]=w.historyGeneration;
+                        if(sampled&&sampled->generations[i]==w.historyGeneration)sample(i,sampled->readings[i]);}
                     int code = 0;
                     if (w.proc->exited(&code)) {
                         w.proc->joinReader();
                         onExit(i, code, now, stopping || stopRequested);
+                        sampleGenerations[i]=0;
                     } else {
                         alive = true;
                     }
@@ -771,7 +782,9 @@ class Supervisor {
             }
             if(energyCapture_&&intent_.permits(sessionToken_)){
                 const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                energyCapture_->tick(utc,supervisorNowMs());
+                // A single ordered batch must be consumed before advancing the capture delivery clock.
+                // Otherwise delayed original power timestamps would look like a clock rollback. Never restamp them.
+                if(!sampling_.pending())energyCapture_->tick(utc,supervisorNowMs());
                 settings_.updateEnergyReview();
                 settings_.updateEnergyAuthorization();
                 settings_.updateBillingReview();
@@ -789,6 +802,13 @@ class Supervisor {
                 addEvent("no GPU is mining: stopping");
                 break;
             }
+            if(!stopping&&intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)){
+                if(sampling_.faulted()&&!samplingFaultReported){samplingFaultReported=true;
+                    if(energyCapture_)energyCapture_->markGap(sessionToken_.epoch);
+                    for(auto &w:workers_){w->view.telValid=false;w->view.lastRateMs=0;}
+                    addEvent("Background display sampling stopped; prior observations retain their original age.");}
+                if(now>=nextSample&&!sampling_.pending())sampling_.request(sampleGenerations);
+            }
             publish(now, t0, stopping ? "draining" : "running");
             frame(now, t0, tty);
             if (!tty && now >= nextSummary) {
@@ -802,6 +822,7 @@ class Supervisor {
         if(energyCapture_)energyCapture_->requestStop();
         if(forecast_)forecast_->requestStop();
         if(fleet_)fleet_->requestStop();
+        sampling_.requestStop();
         for (auto &w : workers_) {
             if (!w->proc) continue;
             int code = 0;
@@ -828,7 +849,7 @@ class Supervisor {
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
         server.stop();
-        for (auto &w : workers_) w->nvml.close();
+        sampling_.stop(); // native reader teardown joins only after worker control/ordinary drains
         bool failed = false;
         for (auto &w : workers_) failed = failed || w->view.state == "Error";
         const std::string summary = "stopped: " + std::to_string(workers_.size()) + " GPU(s), session " +
@@ -845,13 +866,10 @@ class Supervisor {
         int port = 0;
         std::unique_ptr<ChildProcess> proc;
         GuardRestartBudget budget;
-        Nvml nvml;
-        bool nvmlOk = false;
         bool restartPending = false;
         bool stopping = false;
         bool controlledExitHandled=false;
         uint64_t restartAt = 0;
-        uint64_t nextSampleAt = 0;
         uint64_t nextEnergyAt = 0;
         uint64_t historyGeneration = 0;
         uint64_t historyCounter = 0;
@@ -892,6 +910,7 @@ class Supervisor {
     std::unique_ptr<AcceptedHistory> history_;
     SessionIntent intent_;
     SessionToken sessionToken_;
+    SupervisorSampling sampling_; // declared before fleet_: exceptional destruction revokes workers before joining display I/O
     std::unique_ptr<WorkerFleet> fleet_; // destroyed before its borrowed intent; retained across child restarts/settings
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
 
@@ -915,6 +934,7 @@ class Supervisor {
         if (!intent_.permits(sessionToken_)) return;
         Worker &w = *workers_[i];
         w.restartPending = false;
+        w.view.telValid=false;w.view.lastRateMs=0;
         ++w.historyGeneration;
         w.historySeen = w.historyOutage = false;
         w.historyLastUtc = static_cast<int64_t>(time(nullptr));
@@ -950,6 +970,7 @@ class Supervisor {
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
         if(fleet_)fleet_->requestStop();
+        sampling_.requestStop();
         settings_.stopBillingReview();
         if(forecast_)forecast_->requestStop();
         if(energy_)energy_->requestStop();
@@ -1006,55 +1027,56 @@ class Supervisor {
         addEvent(workerLabel(w) + ": " + w.view.detail + "; restart in 10 s (restart " + std::to_string(w.restarts) + ")");
     }
 
-    /** Polls the worker's stats endpoint and NVML, and records the events its counters imply. */
-    void sample(size_t i) {
+    /** Applies one original, generation-matched background observation; no HTTP or driver calls. */
+    void sample(size_t i,const DisplaySampleReading &reading) {
         Worker &w = *workers_[i];
         bool historySample = false;
-        int status = 0;
-        std::string body, err;
-        if (httpGetLocal("127.0.0.1", w.port, "/api/v1/stats", &status, &body, &err, 1) && status == 200) {
-            JsonValue root;
-            StatsSnapshot snap;
-            if (parseJsonStrict(body, &root, &err) && statsFromJson(root, &snap, &err)) {
-                uint64_t count = 0;
-                if (history_ && acceptedHistoryCounter(root, &count)) {
-                    historySample = true;
-                    const auto utc = static_cast<int64_t>(time(nullptr));
-                    if (!w.historySeen || w.historyOutage || count != w.historyCounter)
-                        history_->observe(static_cast<unsigned>(i), w.historyGeneration, count, utc);
-                    w.historyCounter = count;
-                    w.historySeen = true;
-                    w.historyOutage = false;
-                    w.historyLastUtc = utc;
-                }
-                observe(w, snap);
-                w.view.stats = snap;
-                w.view.haveStats = true;
-                w.view.lastSampleMs = supervisorNowMs();
+        const auto now=displaySampleTime();
+        if(reading.stats&&displaySampleOrdered(reading.statsObserved,now)){
+            const auto &snap=*reading.stats;
+            if (history_ && reading.accepted) {
+                const auto count=*reading.accepted;
+                historySample = true;
+                const auto utc = reading.statsObserved.utcMs/1000;
+                if (!w.historySeen || w.historyOutage || count != w.historyCounter)
+                    history_->observe(static_cast<unsigned>(i), w.historyGeneration, count, utc);
+                w.historyCounter = count;
+                w.historySeen = true;
+                w.historyOutage = false;
+                w.historyLastUtc = utc;
             }
+            observe(w, snap);
+            w.view.stats = snap;
+            w.view.haveStats = true;
+            w.view.lastSampleMs = reading.statsObserved.monotonicMs;
         }
         if (history_ && !historySample && w.historySeen && !w.historyOutage) {
             history_->markGap(static_cast<unsigned>(i), w.historyLastUtc);
             w.historyOutage = true;
         }
-        if (w.nvmlOk) {
-            w.view.tel = w.nvml.sample();
-            w.view.telValid = w.view.tel.valid;
-        }
-        if((energy_||energyCapture_) && intent_.permits(sessionToken_)) {
-            const auto mono=supervisorNowMs();
-            const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        const bool powerTime=displaySampleOrdered(reading.powerBegan,reading.powerFinished)&&displaySampleOrdered(reading.powerFinished,now);
+        const bool powerValid=powerTime&&displaySampleInterval(reading.powerBegan,reading.powerFinished,1000)&&reading.telemetry.valid&&
+            gpuUuidEqual(w.view.seed.uuid,reading.telemetry.deviceUuid);
+        w.view.tel=reading.telemetry;
+        w.view.telObserved=reading.powerBegan;
+        w.view.telValid=powerValid&&displaySampleInterval(reading.powerBegan,now,2000);
+        if((energy_||energyCapture_) && intent_.permits(sessionToken_) && powerTime) {
+            const auto mono=reading.powerBegan.monotonicMs;
+            const auto utc=reading.powerBegan.utcMs;
             SessionPowerInput input;input.channel=static_cast<unsigned>(i);input.monotonicMs=mono;input.utcMs=utc>0?static_cast<uint64_t>(utc):0;
-            if(w.nvmlOk&&w.view.telValid&&w.view.tel.powerValid)input.milliwatts=w.view.tel.powerMilliwatts;
+            if(powerValid&&reading.telemetry.powerValid)input.milliwatts=reading.telemetry.powerMilliwatts;
             if(energyCapture_)energyCapture_->submit(sessionToken_.epoch,input);
-            if(energy_&&mono>=w.nextEnergyAt) {
+            if(energy_&&(!input.milliwatts||mono>=w.nextEnergyAt)) {
                 w.nextEnergyAt=mono+electricityEffective_.recordIntervalMs;
                 energy_->submit(sessionToken_.epoch,input);
             }
+        }else if(!powerTime){
+            if(energyCapture_)energyCapture_->markGap(sessionToken_.epoch);
+            if(energy_)energy_->requestStop(); // invalid original clocks cannot be replaced with delivery time
         }
-        if (w.view.haveStats) {
+        if (reading.stats&&w.view.lastSampleMs==reading.statsObserved.monotonicMs) {
             const bool donating = w.view.stats.fee.state == "donation";
-            const uint64_t t = supervisorNowMs();
+            const uint64_t t = reading.statsObserved.monotonicMs;
             const bool producing = w.view.stats.poolState == "mining";
             // Kernel warm-up reports a zero rate while the pool is already connected: those samples do not count.
             if (producing && w.view.lastRateMs && t > w.view.lastRateMs && !w.view.stats.devices.empty() &&
@@ -1066,7 +1088,7 @@ class Supervisor {
             w.view.lastRateMs = producing ? t : 0;
             w.view.state = donating ? "Donation" : (w.view.stats.poolState == "mining" ? "Mining" : "Connecting");
             w.view.detail = "pci " + w.view.seed.pciBus + "  pool " + w.view.stats.poolState;
-        }
+        }else w.view.lastRateMs=0;
     }
 
     void observe(Worker &w, const StatsSnapshot &snap) {

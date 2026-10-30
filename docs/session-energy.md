@@ -66,7 +66,7 @@ The displayed queue drop/discard counter is not a complete loss audit: an in-fli
 
 Energy totals are **session memory only**, not 24h/7d/30d/all-time history, a persistent billing/reset ledger or a recovery source. Process exit discards the model without claiming unobserved tails were saved. Existing accepted/credit stores and UI/runtime/market schemas do not migrate. Rollback ignores the new electricity file; preserve historical stores and use the explicit off/CLI override where desired, not deletion as repair. Private rates, labels, raw readings and configuration remain local and ignored by Git.
 
-The pre-existing native NVML calls in the supervisor can still block in the driver; this batch does not qualify driver-call isolation, actual hardware sensor semantics, long-run accuracy or a hard user-stop deadline under OS/driver failure. No installed miner, device settings, kernel/proof mathematics or pool protocol bytes are deliberately changed; full native CUDA/SASS/packaging qualification remains required.
+[P-03f/P-11l](supervisor-sampling.md) subsequently moves the supervisor's display NVML calls to an owned background thread and delivers ordered original-time power observations. Missing power bypasses interval decimation to break continuity. Driver calls can still block the sampler's post-drain join; this does not qualify physical sensor semantics, long-run accuracy or a hard process-exit deadline under OS/driver failure. Full native CUDA/SASS/packaging qualification remains required.
 
 ## Validation and remaining work
 
