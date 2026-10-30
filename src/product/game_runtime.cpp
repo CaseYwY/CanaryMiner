@@ -1,14 +1,6 @@
 #include "game_runtime.h"
 #include <algorithm>
 namespace om {
-namespace {
-uint64_t evidenceDeadline(GameGuardTime now,GameGuardTime observed,uint64_t age){
-    if(observed.utcMs<0||observed.utcMs>now.utcMs||observed.monotonicMs>now.monotonicMs)return 0;
-    const auto elapsed=(std::max)(static_cast<uint64_t>(now.utcMs-observed.utcMs),now.monotonicMs-observed.monotonicMs);
-    if(elapsed>=age||now.monotonicMs>UINT64_MAX-(age-elapsed))return 0;
-    return now.monotonicMs+age-elapsed;
-}
-}
 GameRuntime::GameRuntime(std::filesystem::path helper,GameProcessTarget target,GameDetectionPolicy detection,GameGuardPolicy policy,
     GameProfitBinding binding,const SessionIntent &intent,SessionToken token)
     :intent_(intent),token_(token),target_(std::move(target)),detectionPolicy_(detection),policy_(policy),bindingValid_(binding.gameKey==target_.gameKey),
@@ -47,12 +39,14 @@ const GameGuardSnapshot &GameRuntime::tick(GameGuardTime now,const GameSafety &s
     else if(result.state==GameGuardState::Faulted||result.state==GameGuardState::ClockFault){state_=GameRuntimeState::Faulted;detector_.requestStop();}
     else if(result.state==GameGuardState::Off)runUntil_=UINT64_MAX;
     else if(source&&(result.state==GameGuardState::NormalEligible||result.state==GameGuardState::CoexistEligible)){
-        runUntil_=evidenceDeadline(now,source->detection.observed,policy_.maximumDetectionGapMs);
+        runUntil_=detectionDeadline_.clip(source->detection.revision,now,source->detection.observed,policy_.maximumDetectionGapMs);
         if(result.state==GameGuardState::CoexistEligible&&policy_.tenMinuteProfitRule){
             if(!result.coexistBeginMonoMs||*result.coexistBeginMonoMs>UINT64_MAX-gameProfitWindowMs)runUntil_=0;
             else if(!result.profitCheckDue)runUntil_=(std::min)(runUntil_,*result.coexistBeginMonoMs+gameProfitWindowMs);
             else if(!result.lastProfit)runUntil_=0;
-            else{const auto &p=result.lastProfit->input();runUntil_=(std::min)(runUntil_,evidenceDeadline(now,{p.endUtcMs,p.endMonoMs},policy_.maximumProfitAgeMs));}
+            else{const auto &p=result.lastProfit->input();
+                if(profitEpisode_!=p.binding.episodeKey){profitEpisode_=p.binding.episodeKey;profitDeadline_=EvidenceDeadline{};}
+                runUntil_=(std::min)(runUntil_,profitDeadline_.clip(p.revision,now,{p.endUtcMs,p.endMonoMs},policy_.maximumProfitAgeMs));}
         }
     }
     return guard_.snapshot();

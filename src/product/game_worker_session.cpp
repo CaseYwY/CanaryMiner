@@ -31,6 +31,7 @@ struct GameWorkerSession::Impl {
     bool attempted=false,clockStarted=false;GameGuardTime anchor,last;
     WorkerFleetState state=WorkerFleetState::Dormant;std::vector<Slot> slots;
     std::optional<WorkerSafetyEvidence> safety;
+    EvidenceDeadline safetyValidity;
     Impl(std::filesystem::path identity,std::filesystem::path detector,GameProcessTarget target,GameDetectionPolicy detection,
         GameGuardPolicy p,GameProfitBinding b,GameWorkerPolicy w,const SessionIntent &i,SessionToken t)
         :intent(i),token(t),policy(w),game(std::move(detector),std::move(target),detection,p,std::move(b),i,t),identities(std::move(identity)){}
@@ -61,9 +62,7 @@ struct GameWorkerSession::Impl {
             if((e.revision==safety->revision&&!sameSafety(e,*safety))||e.observed.utcMs<safety->observed.utcMs||e.observed.monotonicMs<safety->observed.monotonicMs){halt(WorkerFleetState::Faulted);return 0;}
         }
         safety=e;
-        const auto age=(std::max)(static_cast<uint64_t>(now.utcMs-e.observed.utcMs),now.monotonicMs-e.observed.monotonicMs);
-        if(age>=policy.maximumSafetyAgeMs||now.monotonicMs>UINT64_MAX-(policy.maximumSafetyAgeMs-age))return 0;
-        return now.monotonicMs+policy.maximumSafetyAgeMs-age;
+        return safetyValidity.clip(e.revision,now,e.observed,policy.maximumSafetyAgeMs);
     }
     void startSlot(unsigned index,GameGuardTime now){
         auto &slot=slots[index];if(nextKey>=keys.size()){halt(WorkerFleetState::Faulted);return;}

@@ -4,7 +4,7 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-03e/P-11j.** [Explicit core-temperature limits and cooling](../core-thermal-guard.md) consume the [isolated raw telemetry](../safety-telemetry.md) with fixed per-device threshold pairs, required event capabilities, fresh consecutive-sample recovery and non-extending original deadlines. CoreWithinLimits does not grant complete safety or mining authority. [Native game defaults](../game-settings.md) still refuse non-Off ordinary startup until qualified safety/fleet binding exists. Physical GPU/game acceptance remains open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
+**Latest bounded slice: P-11k.** [Cached evidence expiry](../evidence-deadlines.md) now retains the earliest original detection/profit/safety deadline across clock-skew changes and renumbered cached observations. This follows [P-03e/P-11j's explicit core-temperature/cooling limiter](../core-thermal-guard.md) and [isolated raw telemetry](../safety-telemetry.md). Complete safety qualification, ordinary non-Off activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 

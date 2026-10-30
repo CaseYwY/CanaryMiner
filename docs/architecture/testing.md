@@ -158,6 +158,8 @@ Executed P-03a [intent/launcher evidence](../session-intent.md) covers explicit-
 
 [P-03e/P-11j](../core-thermal-guard.md) tests mandatory threshold pairs, full-device aggregation, required/unknown event masks, initial and post-hold hysteresis, distinct-sample cooling, gap/timeout/missing reset, stale/substituted/rollback receipts, capability drift, original age/exclusive deadlines, skew reduction without deadline extension, failed-batch overlap and stop/new-token non-revival. An actual telemetry owner plus owned synthetic helper exercises snapshot handoff and source-stop revocation. This does not qualify physical operating thresholds or complete fleet safety.
 
+[P-11k](../evidence-deadlines.md) includes a red/green actual-runtime regression with one fixed detector receipt, fixed caller upper bound and a controlled converging clock pair. The constant-skew control passes before the fix. Shared arithmetic checks cover exact expiry, renumbered originals, mutations, overflow, independent source bounds and a forward-clock grid; full owned-worker/runtime/detector/guard regressions preserve lifetime behavior. These do not qualify physical scheduler latency or a real profit/safety source.
+
 ## T-I18N
 
 Test all declared locales/key coverage, placeholders/plurals, review/fallback status, UTF-8/grapheme/combining/wide/RTL snapshots, numeric/date/currency formatting and invariant flags/JSON/protocol/event codes. Changing language must not change tariff, timezone, currency, device or prices.

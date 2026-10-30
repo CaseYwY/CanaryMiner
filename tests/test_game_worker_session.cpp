@@ -157,6 +157,22 @@ void deadlines(){
         CHECK(runtime.runDeadline(now,now.monotonicMs+2000)==now.monotonicMs+remaining);
         sleep(410);now=gameDetectionTime();runtime.tick(now,{true,true,false});CHECK(runtime.runDeadline(now,now.monotonicMs+2000)==0);}
 }
+void cachedDeadline(bool skew=true){
+    SessionIntent intent;const auto token=intent.explicitStart();auto detection=detectionPolicy();detection.pollMs=3000;
+    auto policy=gamePolicy(GameIntent::Pause);policy.maximumDetectionGapMs=1000;
+    GameRuntime runtime(detector,target("fixture-absent"),detection,policy,binding(),intent,token);
+    CHECK(runtime.start(gameDetectionTime()));GameGuardTime now;const auto end=workerControlNowMs()+2000;
+    do{now=gameDetectionTime();runtime.tick(now,{true,true,false});if(runtime.snapshot().state==GameGuardState::NormalEligible)break;sleep();}while(workerControlNowMs()<end);
+    CHECK(runtime.snapshot().state==GameGuardState::NormalEligible);const auto revision=runtime.detection()->detection.revision;
+    const auto upper=now.monotonicMs+3000;
+    auto skewed=now;skewed.utcMs+=skew?200:10;skewed.monotonicMs+=10;runtime.tick(skewed,{true,true,false});
+    const auto clipped=runtime.runDeadline(skewed,upper);CHECK(clipped>skewed.monotonicMs);
+    auto converged=skewed;converged.utcMs+=skew?10:100;converged.monotonicMs+=100;runtime.tick(converged,{true,true,false});
+    CHECK(runtime.detection()->detection.revision==revision);
+    CHECK_MSG("cached detection deadline cannot grow when clock skew decreases",runtime.runDeadline(converged,upper)<=clipped);
+    auto expired=converged;expired.monotonicMs=clipped+1;expired.utcMs+=static_cast<int64_t>(expired.monotonicMs-converged.monotonicMs);
+    runtime.tick(expired,{true,true,false});CHECK_MSG("a previously expired cached deadline cannot revive",runtime.runDeadline(expired,upper)==0);
+}
 void supervisor(){
     {volatile sig_atomic_t stop=1;unsigned calls=0;SupervisorOptions o;o.stop=&stop;o.workerFleetFactory=[&](const SessionIntent &,SessionToken)->std::unique_ptr<WorkerFleet>{++calls;return {};};
         Supervisor s(std::move(o));CHECK(s.run()==0&&calls==0);}
@@ -212,9 +228,11 @@ int main(int argc,char **argv){
     if(argc!=3&&argc!=4)return 2;
     identity=std::filesystem::absolute(std::filesystem::u8path(argv[1]));detector=std::filesystem::absolute(std::filesystem::u8path(argv[2]));exe=std::filesystem::u8path(selfExecutablePath());
     if(!platformInit())return 3;
-    if(argc==4&&std::string(argv[3])=="cases")exitCases();
+    if(argc==4&&std::string(argv[3])=="cached-deadline")cachedDeadline();
+    else if(argc==4&&std::string(argv[3])=="cached-deadline-control")cachedDeadline(false);
+    else if(argc==4&&std::string(argv[3])=="cases")exitCases();
     else if(argc==4&&std::string(argv[3])=="supervisor"){supervisor();supervisorRefusals();}
-    else{deadlines();lifecycle();gameAndRestarts();exitCases();supervisor();supervisorRefusals();}
+    else{cachedDeadline();deadlines();lifecycle();gameAndRestarts();exitCases();supervisor();supervisorRefusals();}
     platformShutdown();
     return finishTests("game-owned worker session and supervisor");
 }

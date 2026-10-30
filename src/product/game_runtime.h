@@ -1,5 +1,6 @@
 // Single-control-thread lifetime binding of one detector to one episode guard. No miner/worker actuator.
 #pragma once
+#include "evidence_deadline.h"
 #include "game_detection_owner.h"
 namespace om {
 enum class GameRuntimeState { Dormant, Off, Active, Stopped, Faulted };
@@ -26,6 +27,7 @@ class GameRuntime {
     bool bindingValid_=false,attempted_=false;
     GameRuntimeState state_=GameRuntimeState::Dormant;
     GameGuardTime lastTick_;uint64_t runUntil_=0;
+    EvidenceDeadline detectionDeadline_,profitDeadline_;std::string profitEpisode_;
     GameSessionGuard guard_;
     GameDetectionOwner detector_; // fixed lifetime: no replacement/reset setter
     void fault(GameGuardTime now);
