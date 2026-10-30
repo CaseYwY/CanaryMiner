@@ -60,6 +60,8 @@ struct Sim {
     std::vector<std::string> log;
     std::vector<FeeStatus> published;
     int hookCallsAfterStopCode = 0;
+    uint64_t pauseMs=0,pauseAfterIterations=0;
+    bool pauseFee=true,didPause=false,stopInPause=false,faultInPause=false;
 
     int run(const RunOptions &o) {
         RunRecord r;
@@ -81,6 +83,13 @@ struct Sim {
             if (o.loopHook) {
                 const int c = o.loopHook->atLoopTop(searchDone);
                 if (c) { code = c; break; }
+            }
+            if(pauseMs&&!didPause&&r.fee==pauseFee&&feeIterations==pauseAfterIterations){
+                didPause=true;if(o.loopHook)o.loopHook->pauseChanged(true);
+                now+=pauseMs;
+                if(stopInPause){stop=true;code=0;break;}
+                if(faultInPause){code=kRunPauseFault;break;}
+                if(o.loopHook)o.loopHook->pauseChanged(false);
             }
             if (r.fee && feeBehaviour == FeeBehaviour::NoWork) { now += kSec; searchDone = false; continue; }
             if (!r.fee && userBehaviour == UserBehaviour::Idle) { now += kSec; searchDone = false; continue; }
@@ -175,6 +184,8 @@ int main() {
         deps.run = [&](const RunOptions &) { ++runs; sim.stop = true; return 1; };
         CHECK(runOuterLoop(userOptions(), nullptr, deps, &budget, 0, 8) == 0);
         CHECK(runs == 1 && sim.sleptMs == 0);
+        sim.stop=false;runs=0;deps.run=[&](const RunOptions &){++runs;return kRunPauseFault;};
+        CHECK(runOuterLoop(userOptions(),nullptr,deps,&budget,0,8)==8&&runs==1&&sim.sleptMs==0&&budget.usedInWindow(sim.now)==0);
     }
     // Production schedule is the default; the accelerated schedule is opt-in at build time only.
 #ifndef CANARY_FEE_TEST_POLICY
@@ -410,6 +421,28 @@ int main() {
         CHECK(rig.session->scheduler().state().userMs == 0 && rig.session->scheduler().state().feeMs == 0);
         CHECK(feeRuns(rig.sim) == 0);
     }
+
+    // Pause both before first fee work and mid-window. Real pause time never earns donation or consumes its no-work timeout.
+    for(uint64_t after:{0ull,20ull}){
+        Rig rig(10*kMin,"fee-cooperative-pause");rig.sim.pauseMs=5*kMin;rig.sim.pauseAfterIterations=after;rig.sim.stopAtMs=17*kMin;
+        CHECK(rig.go()==0&&rig.sim.didPause);
+        CHECK(rig.session->windowsCompleted()==1&&rig.session->poolFailures()==0&&rig.session->scheduler().state().feeMs==kMin);
+        CHECK(feeRuns(rig.sim)==1&&feeRunMs(rig.sim)>=6*kMin&&feeRunMs(rig.sim)<=6*kMin+2*kSec&&rig.budget.usedInWindow(rig.sim.now)==0);
+    }
+    {Rig rig(30*kMin,"user-cooperative-pause");auto *hook=rig.session->userHook();hook->atLoopTop(false);
+        rig.sim.now=1000;hook->atLoopTop(true);rig.sim.now=2000;hook->atLoopTop(true);const auto before=rig.session->scheduler().state();
+        hook->pauseChanged(true);hook->pauseChanged(true);rig.sim.now+=5*kMin;hook->pauseChanged(false);hook->pauseChanged(false);
+        CHECK(rig.session->scheduler().state()==before);rig.sim.now+=1000;hook->atLoopTop(true);
+        CHECK(rig.session->scheduler().state().userMs==before.userMs+1000);}
+    {Rig rig(10*kMin,"fee-pause-watchdog");rig.sim.feeBehaviour=FeeBehaviour::NoWork;rig.sim.pauseMs=5*kMin;rig.sim.stopAtMs=18*kMin;
+        CHECK(rig.go()==0&&rig.sim.didPause&&rig.session->poolFailures()==1&&rig.session->windowsCompleted()==0);
+        CHECK(feeRunMs(rig.sim)>=6*kMin&&feeRunMs(rig.sim)<=6*kMin+2*kSec&&rig.session->scheduler().state().feeMs==0);}
+    for(bool fault:{false,true}){Rig rig(10*kMin,"fee-pause-terminal");rig.sim.pauseMs=5*kMin;rig.sim.pauseAfterIterations=20;rig.sim.stopAtMs=18*kMin;
+        rig.sim.stopInPause=!fault;rig.sim.faultInPause=fault;
+        CHECK(rig.go()==(fault?1:0)&&rig.sim.didPause&&rig.session->poolFailures()==0&&rig.session->windowsCompleted()==0);
+        CHECK(rig.sim.runs.size()==2&&rig.session->scheduler().state().feeMs==19*kSec&&rig.budget.usedInWindow(rig.sim.now)==0);}
+    {Rig rig(10*kMin,"user-pause-terminal");rig.sim.pauseFee=false;rig.sim.pauseMs=5*kMin;rig.sim.faultInPause=true;
+        CHECK(rig.go()==1&&rig.sim.runs.size()==1&&rig.session->poolFailures()==0&&rig.budget.usedInWindow(rig.sim.now)==0);}
 
     // ---- stats separation: fee shares never reach the device or total outcomes; user counters accumulate across user runs only
     {

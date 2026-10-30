@@ -16,6 +16,7 @@
 
 #include "algo.h"
 #include "host_work_wait.h"
+#include "work_pause.h"
 #include "pearl_private_execution.h"
 #include "pearl_authorization.h"
 #include "pearl_work_range.h"
@@ -48,6 +49,8 @@ class RunLoopHook {
    public:
     virtual ~RunLoopHook() = default;
     virtual int atLoopTop(bool searchCompleted) = 0;
+    // Called only around a drained cooperative pause. Freeze productive accounting and exclude this interval from watchdogs.
+    virtual void pauseChanged(bool paused) { (void)paused; }
 };
 
 inline uint64_t saturatingCounterAdd(uint64_t a, uint64_t b) {
@@ -234,6 +237,7 @@ inline bool pearlLoginByAccount(const RunOptions &opt);
 struct RunOptions {
     RunObserver *observer = nullptr;  // optional; never owned
     RunLoopHook *loopHook = nullptr;  // optional; never owned. Pool runs only; used by the fee scheduler.
+    RunPauseControl *workPause = nullptr; // optional borrowed memory-only control; ordinary runs, never implicit activation
     uint64_t batch = 1ULL << 22;
     unsigned workWaitMs = 0;  // host wait after a whole reconciled batch; zero preserves the original schedule
     // Default-off completion qualification. Captured from the exact environment
@@ -487,7 +491,7 @@ inline bool canonicalFormalBenchmarkRunOptions(const RunOptions &opt,
                static_cast<int>(kPearlFormalBenchmarkReportSeconds) &&
            opt.benchEpoch == kPearlBenchmarkEpoch &&
            opt.benchEpochSeconds == 0 && opt.memOffsetMhz == 0 && opt.workWaitMs == 0 &&
-           !opt.memOc;
+           !opt.memOc && !opt.workPause;
 }
 
 /**
@@ -522,6 +526,8 @@ constexpr int kRunGuardStop = 8;
 constexpr int kRunFeeWindow = 9;
 /** The fee run's hook ended its window at a loop top. */
 constexpr int kRunFeeWindowDone = 10;
+/** Cooperative control failed. The product latches this without a guard restart or fee-pool failure. */
+constexpr int kRunPauseFault = 11;
 int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
              double gpuMemGB, const char *archLabel, volatile sig_atomic_t *stop,
              const char *gpuUuid = nullptr, unsigned telemetryDeviceIndex = 0);

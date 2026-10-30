@@ -132,6 +132,8 @@ Test best eligible estimated net per elapsed time, no-data/nonpositive pause, al
 
 [P-11c](../game-runtime.md) checks the owning runtime's startup/Off clock rejection, frozen inputs, fresh-only exit, stale/unknown observations, qualification refusal, terminal source/guard faults and stopped old-epoch behavior. In-flight helper cancellation and current ownership are checked after revocation/join; the existing exact ten-minute guard suite remains a regression. These tests do not inject a genuine Unreaped kernel stall or activate a miner/game.
 
+[P-11d](../work-pause.md) checks the actual shared loop using a compile-isolated CPU/in-memory-source fixture, plus the ordinary source's early-pause/admission path under aborting device/network wrappers on Linux. Ordering, fresh resume, fetch/prepare races, bounded pause polling, null-control behavior and drain/clock/stop failure are covered. Fee simulations preserve productive time, remaining watchdog age, obligation and no-restart fault behavior. Artifact checks exclude the test seam from ordinary objects; CPU evidence does not qualify GPU timing or game experience.
+
 Test off/pause/coexist, launcher/game/manual triggers, debounce/detection failure, no permission/no FPS/no valid baseline safe fallback, actual matched scene metrics, experience limits/VRAM/thermal headroom and bounded authorized testing. Test qualified auto-entry/exit restoration, economic pause/recovery and user stop not reviving. No injection/anti-cheat bypass/focus stealing/game killing; generic launcher tests do not count as gameplay evidence.
 
 ## T-TLS

@@ -284,6 +284,22 @@ int main() {
     const auto cuda = PearlRuntimeCapability::CanonicalCudaPoolV1;
     FakeAlgorithm algo;
     volatile sig_atomic_t stop = 1;
+    struct HeldPause final:RunPauseControl {
+        volatile sig_atomic_t *stop;
+        explicit HeldPause(volatile sig_atomic_t *s):stop(s){}
+        bool pauseRequested()const noexcept override{return true;}
+        void pauseBoundary(bool paused)noexcept override{if(paused)*stop=1;}
+    } control(&stop);
+    auto paused=live();paused.workPause=&control;
+    ok &= check(runMiner(&algo,paused,"must-not-probe",0,"test",&stop)==0&&algo.configured==0,"stopped controlled run has no configure/device/source access");
+    stop=0;
+    ok &= check(runMiner(&algo,paused,"must-not-probe",0,"test",&stop)==0&&stop&&algo.configured==0,"initial cooperative pause precedes configure/device/source access");
+    for(const char *name:{"CANARY_PEARL_LOCAL_RETIREMENTS","CANARY_PEARL_NATIVE_EVIDENCE","CANARY_PEARL_INTEGRATED_PIPELINE",
+            "CANARY_PEARL_SHAPE_EXPERIMENT","CANARY_PEARL_ATTEMPT_OVERLAP","CANARY_PEARL_A_ROOT_FUSION","CANARY_PEARL_EXPERIMENT",
+            "CANARY_PEARL_PROFILE_INTERVAL","CANARY_PEARL_ASYNC_SUBMIT"}){
+        SavedEnvironment isolated(name);setenv(name,"1",1);
+        ok &= check(runMiner(&algo,paused,"must-not-probe",0,"test",&stop)==kRunPauseFault&&algo.configured==0,"pause/research refused without fixture/device/source setup");
+    }
     auto rejected = [&](const RunOptions &opt, const char *what) {
         const int before = algo.configured;
         ok &= check(pearlRuntimeAdmissionProblem(opt, algo.name(), algo.capability) != nullptr, what);

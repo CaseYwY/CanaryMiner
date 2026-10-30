@@ -17,6 +17,12 @@
 #include <thread>
 
 namespace om {
+#if defined(CANARY_WORK_PAUSE_TESTING)
+#if CANARY_WORK_PAUSE_TESTING != 1
+#error "CANARY_WORK_PAUSE_TESTING must be exactly 1"
+#endif
+JobSource *workPauseTestSource(); // CPU fixture only; absent from ordinary artifacts
+#endif
 #if defined(CANARY_PEARL_TEST_RUN_SUSTAINED)
 #if CANARY_PEARL_TEST_RUN_SUSTAINED != 1
 #error "CANARY_PEARL_TEST_RUN_SUSTAINED must be exactly 1"
@@ -135,6 +141,15 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
         fprintf(stderr, "host work wait is unavailable in research/pipeline/evidence modes\n");
         return 1;
+    }
+    if(opt.workPause&&(opt.bench||opt.formalBenchmark.enabled||opt.pearlAcceptedQuota||opt.pearlSustainedSeconds||opt.pearlProduction||
+        opt.pearlWorkRange.enabled||pearlPrivateEnabled(opt.pearlPrivateExecution)||pearlPublicEnabled(opt.pearlPublicExecution)||
+        opt.memOffsetMhz||opt.memOc||!workWaitEnvironmentCompatible(1)
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+        ||opt.pearlGuardRetirementSession
+#endif
+        )){
+        fprintf(stderr,"cooperative pause requires an ordinary run without research or hardware-tuning controls\n");return kRunPauseFault;
     }
     // Direct run-loop callers must honor the same profile boundary as the CLI.
     // Removed transports must never fall through to another source family.
@@ -302,6 +317,18 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         return 1;
     }
 
+    const auto pauseBoundary=[&](){
+        if(!opt.workPause)return WorkPauseResult::Ready;
+        return pauseAtWorkBoundary(*opt.workPause,[&]{return *stop!=0;},[&]{return algo->discardPearlLookahead();},
+            [&](bool paused){if(opt.loopHook)opt.loopHook->pauseChanged(paused);},[](){return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());},
+            [](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));});
+    };
+    // An initial pause also precedes configuration, telemetry, preparation and source construction.
+    const auto initialPause=pauseBoundary();
+    if(initialPause==WorkPauseResult::Stopped)return 0;
+    if(initialPause==WorkPauseResult::Failed)return kRunPauseFault;
+
     // Open opted-in evidence before telemetry/source setup. Sinks outlive the
     // borrowed session and never share or overwrite the wire transcript.
     PearlLocalRetirementFile localRetirementFile;
@@ -340,6 +367,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     }
 
     GpuMonitor gpu;
+#if !defined(CANARY_WORK_PAUSE_TESTING)
     if (!gpu.open(telemetryDeviceIndex, gpuUuid ? gpuUuid : "") &&
         gpuUuid && *gpuUuid) {
         fprintf(stderr,
@@ -347,6 +375,9 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
                 "power/clock controls and efficiency reporting are disabled.\n",
                 gpuUuid);
     }
+#else
+    (void)telemetryDeviceIndex;(void)gpuUuid; // test binaries never discover a device
+#endif
 
     // Optional memory transfer-rate offset (unqualified; rejected for qualification runs).
     if (opt.memOffsetMhz != 0) {
@@ -417,6 +448,9 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     std::unique_ptr<JobSource> source;
     uint64_t noncePrefix = 0;
     int nonceBits = 64;
+#if defined(CANARY_WORK_PAUSE_TESTING)
+    source.reset(workPauseTestSource());if(!source)return 1;
+#else
     if (opt.bench) {
         stats.source = "benchmark (no pool/node)";
     } else if (isPearl && !opt.poolHost.empty()) {
@@ -467,6 +501,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         logLine(tty, "error", "no pool configured; pass --pool HOST:PORT --wallet <PRL address>");
         return 1;
     }
+#endif
 
     // Construct after source so borrowed callbacks are unbound before source
     // destruction on every return or exception. Synthetic runs have no source.
@@ -476,6 +511,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     const bool deferredReplies=deferredSetting && !std::strcmp(deferredSetting,"1");
     if(deferredSetting && !deferredReplies)return 1;
 #endif
+#if !defined(CANARY_WORK_PAUSE_TESTING)
     if (isPearl && !opt.bench) {
         auto *pool = dynamic_cast<PearlPoolSource *>(source.get());
         if (!pool) return 1;
@@ -494,6 +530,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             return 1;
         }
     }
+#endif
 
 #ifdef CANARY_PEARL_ASYNC_SUBMIT_EXPERIMENT
     // The single run-loop owner pumps replies at search boundaries. Wait only
@@ -621,6 +658,9 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             if (result != WorkWaitResult::Ready) return 1;
             workWaitDue = false;
         }
+        const auto paused=pauseBoundary(); // previous batch's proofs are reconciled; no fetch/search during the pause
+        if(paused==WorkPauseResult::Stopped)break;
+        if(paused==WorkPauseResult::Failed)return kRunPauseFault;
         // Fetch again AFTER waiting, so a newly arrived job supersedes old work before any new GPU search.
         if (!opt.bench) {
             Job fresh;
@@ -656,6 +696,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             }
         }
         if (!job.valid) { sleepSeconds(1); continue; }
+        if(opt.workPause){if(*stop)break;if(opt.workPause->pauseRequested())continue;} // request arrived while fetching
         if (!genericNativeAdmission() || (executionAccounting && !(publicExecution?pearlPublicJobValid(job,opt.pearlPolicy,opt.pearlPublicExecution):pearlSm120NativeJobValid(job,opt.pearlPolicy))) || (genericNativeEnabled &&
                 !genericNativeBinding.jobValid(job,opt.pearlPolicy))) {
             logLine(tty,"error","generic native evidence requires unchanged admission and mainnet/base/cert3 job"); return 1;
@@ -765,6 +806,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             }
         }
 
+        if(opt.workPause){if(*stop)break;if(opt.workPause->pauseRequested())continue;} // finish preparation, then pause before search
         sols.clear();
         // Never let a launch cross the owned-subspace boundary. The kernel adds
         // the thread index to `nonce` by plain addition, so a batch straddling
@@ -840,7 +882,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         uint64_t rangeNext=0;
         const bool rangeHasNext = !opt.pearlWorkRange.enabled ||
             opt.pearlWorkRange.next(nonceCounter,batch.nonces,&rangeNext);
-        const bool hint = !opt.workWaitMs && rangeHasNext && batch.nonces == 1 && !opt.formalBenchmark.enabled &&
+        const bool hint = !opt.workPause && !opt.workWaitMs && rangeHasNext && batch.nonces == 1 && !opt.formalBenchmark.enabled &&
             !*stop && algo && !std::strcmp(algo->name(),"pearl-pow");
         const uint64_t nextHint = opt.pearlWorkRange.enabled ? rangeNext : noncePrefix | ((nonceCounter + batch.nonces) & nonceMask);
         algo->pearlNextAttemptHint(hint,nextHint);

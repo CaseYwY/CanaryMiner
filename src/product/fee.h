@@ -123,6 +123,7 @@ class FeeScheduler {
 
     const FeeState &state() const { return st_; }
     FeeMode mode() const { return mode_; }
+    bool productive() const { return haveLast_ && lastProductive_; } // accounting state for the interval following the last call
     /** Remaining fee time owed in the current cycle (0 when the window is complete or not due). */
     uint64_t windowRemainingMs() const { return st_.owedMs > st_.feeMs ? st_.owedMs - st_.feeMs : 0; }
     bool changedSinceSave() const { return dirty_; }

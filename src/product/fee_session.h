@@ -135,6 +135,7 @@ class FeeSession {
        public:
         explicit UserHook(FeeSession *s) : s_(s) {}
         int atLoopTop(bool searchCompleted) override { return s_->userTop(searchCompleted); }
+        void pauseChanged(bool paused) override { s_->pauseChanged(paused); }
 
        private:
         FeeSession *s_;
@@ -145,6 +146,7 @@ class FeeSession {
        public:
         explicit WindowHook(FeeSession *s) : s_(s) {}
         int atLoopTop(bool searchCompleted) override { return s_->windowTop(searchCompleted); }
+        void pauseChanged(bool paused) override { s_->pauseChanged(paused); }
 
        private:
         FeeSession *s_;
@@ -153,12 +155,13 @@ class FeeSession {
     RunLoopHook *userHook() { return &userHook_; }
 
     /** The scheduler asked for a window and the user run has returned kRunFeeWindow. Runs the whole window. Returns the fee run's
-     *  exit code only when it was the operator stop (0); otherwise the user run is meant to resume. */
+     *  stop code 0 or terminal kRunPauseFault; otherwise the user run is meant to resume. */
     int runFeeWindow(const RunOptions &userOpt) {
         const uint64_t t0 = deps_.nowMs();
         std::unique_lock<std::recursive_mutex> lock(mu_);
         // Setup, connect and prepare are not productive: stop the clock, keep the window open.
         sched_.advance(t0, false, true, true);
+        paused_ = false;
         windowStartMs_ = t0;
         lastProductiveMs_ = t0;
         firstProductiveMs_ = 0;
@@ -203,6 +206,8 @@ class FeeSession {
         } else if (rc == 0 || (deps_.stopped && deps_.stopped())) {
             result = "interrupted by stop";
             stop = true;
+        } else if (rc == kRunPauseFault) {
+            result = "interrupted by cooperative control fault";
         } else {
             result = "failed (" + (windowFailed_ ? failReason_ : std::string("fee run ended with code ") + std::to_string(rc)) + ")";
             sched_.noteFeePoolFailure(t1);
@@ -218,7 +223,7 @@ class FeeSession {
         deps_.log(line);
         save();
         publish(false);
-        return stop ? 0 : -1;
+        return stop ? 0 : rc == kRunPauseFault ? kRunPauseFault : -1;
     }
 
     /** Called when the user run (or the whole session) ends: keeps the unmet window as debt on disk. */
@@ -244,11 +249,28 @@ class FeeSession {
     uint64_t lastSaveMs_ = 0;
     bool saveFailureLogged_ = false;
     bool inWindow_ = false, windowFailed_ = false;
+    bool paused_ = false, resumeProductive_ = false;
+    uint64_t pauseBeganMs_ = 0;
     std::string failReason_;
     uint64_t windowStartMs_ = 0, lastProductiveMs_ = 0, firstProductiveMs_ = 0, feeMsAtStart_ = 0;
 
     void maybeSave(uint64_t now) {
         if (sched_.changedSinceSave() && now - lastSaveMs_ >= kSaveEveryMs) save();
+    }
+
+    void pauseChanged(bool paused) {
+        std::lock_guard<std::recursive_mutex> lock(mu_);
+        if(paused==paused_)return;
+        const uint64_t now=deps_.nowMs();
+        if(paused){
+            resumeProductive_=sched_.productive();pauseBeganMs_=now;
+            sched_.advance(now,false,true,inWindow_);
+        }else{
+            // Keep the pre-pause no-work age. A game pause neither spends nor resets the fee-pool watchdog.
+            if(inWindow_&&now>=pauseBeganMs_&&lastProductiveMs_<=pauseBeganMs_)lastProductiveMs_+=now-pauseBeganMs_;
+            sched_.advance(now,resumeProductive_,true,inWindow_);
+        }
+        paused_=paused;publish(inWindow_);
     }
 
     int userTop(bool searchCompleted) {
@@ -301,9 +323,12 @@ inline int runOuterLoop(const RunOptions &userOpt, FeeSession *fee, FeeLoopDeps 
         if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
         if (fee && fee->enabled() && rc == kRunFeeWindow) {
             if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
-            if (fee->runFeeWindow(userOpt) == 0) { rc = exitOk; break; }
+            const int result=fee->runFeeWindow(userOpt);
+            if (result == 0) { rc = exitOk; break; }
+            if (result == kRunPauseFault) { rc = exitRuntime; break; }
             continue;
         }
+        if (rc == kRunPauseFault) { rc = exitRuntime; break; }
         if (rc != kRunGuardStop) break;
         if (deps.stopped && deps.stopped()) { rc = exitOk; break; }
         const uint64_t nowMs = deps.nowMs();

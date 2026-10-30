@@ -135,6 +135,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 [P-11c](../game-runtime.md) owns that detector and the episode guard by value for one explicit session token. Original snapshots reach the same guard throughout its lifetime; source/clock faults cancel detection, and stop revokes before join. The live detection-ownership accessor is separate from historical guard evidence. Supervisor admission and cooperative worker actuation remain subsequent integration.
 
+[P-11d](../work-pause.md) supplies a default-null borrowed control in the shared run loop, with drain-before-pause and refresh-after-resume boundaries. User/donation hooks freeze productive accounting and preserve the remaining no-work timeout. Internal control faults terminate the outer loop without restarting or masquerading as fee-pool failure. Native settings and the fenced parent/worker channel remain separate.
+
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
 ### M-TLS
