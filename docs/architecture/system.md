@@ -65,6 +65,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-09e](../completed-work-capture.md) adds a borrowed raw-work sink at the actual synchronized/reconciled loop boundary. One default-off worker-thread accumulator spans explicit user/donation run calls and preserves exact original totals, epochs and clocks. This is a raw source seam, not a fresh power/safety sample or a profile grant; the sampler and native transport must preserve original boundary timing and identity.
 
+[P-09f](../work-power-alignment.md) supplies explicit drained/held/runnable interval observations on that worker thread. Constant-counter intervals end before side effects and wait installation. Raw power alignment preserves both originals and requires the read plus full known sensor-support interval strictly inside the bracket; it supplies no current authority or automatic sample qualification. Native delivery must separately retain sequencing, liveness and original receipt binding.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

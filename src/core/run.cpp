@@ -325,22 +325,27 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     unsigned appliedWorkWaitMs=opt.workWaitMs;
     const auto pauseBoundary=[&](){
         if(!opt.workPause)return WorkPauseResult::Ready;
-        for(;;){const auto paused=pauseAtWorkBoundary(*opt.workPause,[&]{return *stop!=0;},[&]{return algo->discardPearlLookahead();},
+        for(;;){if(!workCapture.boundary(CompletedWorkBoundaryKind::Leaving,appliedWorkWaitMs))return WorkPauseResult::Failed;
+            const auto paused=pauseAtWorkBoundary(*opt.workPause,[&]{return *stop!=0;},[&]{return algo->discardPearlLookahead();},
             [&](bool paused){if(opt.loopHook)opt.loopHook->pauseChanged(paused);},[](){return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());},
-            [](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));});
+            [](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));},[&](bool held){return workCapture.boundary(
+                held?CompletedWorkBoundaryKind::Paused:CompletedWorkBoundaryKind::Leaving,appliedWorkWaitMs);});
             if(paused!=WorkPauseResult::Ready)return paused;
             if(*stop)return WorkPauseResult::Stopped;
+            if(!workCapture.boundary(CompletedWorkBoundaryKind::Leaving,appliedWorkWaitMs))return WorkPauseResult::Failed;
             const auto state=opt.workPause->applyWorkWait(appliedWorkWaitMs);
             if(*stop||state==WorkControlRequest::Stop)return WorkPauseResult::Stopped;
             if(state==WorkControlRequest::Fault||appliedWorkWaitMs>kMaxWorkWaitMs)return WorkPauseResult::Failed;
-            if(state==WorkControlRequest::Run)return WorkPauseResult::Ready;
+            if(state==WorkControlRequest::Run)return workCapture.boundary(CompletedWorkBoundaryKind::Runnable,appliedWorkWaitMs)?
+                WorkPauseResult::Ready:WorkPauseResult::Failed;
         }
     };
     // An initial pause also precedes configuration, telemetry, preparation and source construction.
     const auto initialPause=pauseBoundary();
     if(initialPause==WorkPauseResult::Stopped)return workCapture.finish()?0:kRunPauseFault;
     if(initialPause==WorkPauseResult::Failed)return kRunPauseFault;
+    if(!workCapture.boundary(CompletedWorkBoundaryKind::Leaving,appliedWorkWaitMs))return kRunPauseFault;
 
     // Open opted-in evidence before telemetry/source setup. Sinks outlive the
     // borrowed session and never share or overwrite the wire transcript.
@@ -679,6 +684,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         const auto paused=pauseBoundary(); // previous batch's proofs are reconciled; no fetch/search during the pause
         if(paused==WorkPauseResult::Stopped)break;
         if(paused==WorkPauseResult::Failed)return kRunPauseFault;
+        if(!workCapture.boundary(CompletedWorkBoundaryKind::Leaving,appliedWorkWaitMs))return kRunPauseFault;
         // Fetch again AFTER waiting, so a newly arrived job supersedes old work before any new GPU search.
         if (!opt.bench) {
             Job fresh;

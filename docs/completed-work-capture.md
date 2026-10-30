@@ -34,6 +34,8 @@ The snapshot retains cumulative counters and the last complete batch. Its `obser
 
 No adapter converts these facts into a qualified `WorkProfileSample` yet. Native sample transport, original power/time alignment, complete paused-boundary observations, private device/work/driver identity binding, full safety/game evidence and experiment/fleet admission are still required. `SyntheticFixture` remains the only admitted profile qualification. Raw completed work establishes neither attributable pool earnings nor accepted-share income.
 
+[P-09f](work-power-alignment.md) adds explicit drained/held and runnable-boundary intervals plus conservative original power-support alignment. The batch's historical time remains untouched. Native sample transport, qualified sensor/identity/safety binding and measurement/fleet admission remain separate.
+
 ## Verification
 
 The source tests cover exact beyond-binary64 arithmetic, user/donation separation, immutable originals across lane changes, changed shape/factor refusal, parent-clock continuity, incomplete/exceptional endings, overflow, invalid input, stopped-parent refusal and all 8192 run slots. The actual shared-loop CPU test injects an in-memory source and a backend completion counter, deliberately uses an unrelated display MAC value, and verifies reconciliation order, a final stopped batch, no-hit work, clean fee-switch reuse, missing/short/changed completion, host-invalid work, failed drain, sink refusal and exceptional unwinding.

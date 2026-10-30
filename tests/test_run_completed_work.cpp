@@ -6,7 +6,11 @@
 using namespace om;
 namespace {
 struct Rig;Rig *active=nullptr;
-struct Control:RunPauseControl {bool pauseRequested()const noexcept override{return false;}void pauseBoundary(bool)noexcept override{}};
+struct Control:RunPauseControl {
+    bool requested=false,held=false;
+    bool pauseRequested()const noexcept override{return requested;}
+    void pauseBoundary(bool p)noexcept override{held=p;}
+};
 struct Rig {
     volatile sig_atomic_t stop=0;unsigned searches=0,submitted=0,prepared=0,configured=0;
     bool failSearch=false,throwSearch=false,failPrepare=false,failDrain=false,invalid=false,shortCompletion=false,changedFactor=false,changedUnits=false;
@@ -42,12 +46,22 @@ struct Algo:Algorithm {
     void release()override{}
 };
 struct Sink:CompletedWorkSink {
-    SessionIntent intent;SessionToken token=intent.explicitStart();CompletedWorkCapture capture{{true,8192},intent,token,1};
+    SessionIntent intent;SessionToken token=intent.explicitStart();CompletedWorkCapture capture{{true,8192,std::string(32,'1')},intent,token,1};
     unsigned completeCalls=0;bool refuse=false,ordered=true;
+    unsigned pausedCalls=0;bool resumePause=false,refuseBoundary=false;
+    std::optional<CompletedWorkInterval> originalPause;
     Sink(){CHECK(capture.start(completedWorkNow()));}
     bool begin(WorkLane lane,CompletedWorkTime t)noexcept override{return capture.begin(lane,t);}
     bool completed(const CompletedWorkBatch &b)noexcept override{++completeCalls;ordered=ordered&&active->searches==1&&(!active->withSolution||active->submitted==1||active->invalid);
         return !refuse&&capture.completed(b);}
+    bool boundary(const CompletedWorkBoundary &b)noexcept override{
+        if(refuseBoundary)return false;
+        const bool ok=capture.boundary(b);
+        if(b.kind==CompletedWorkBoundaryKind::Paused){++pausedCalls;ordered=ordered&&active->control.held&&!active->configured&&!active->searches;
+            if(resumePause&&pausedCalls>=3)active->control.requested=false;}
+        if(capture.snapshot().lastInterval&&capture.snapshot().lastInterval->kind==CompletedWorkBoundaryKind::Paused)originalPause=capture.snapshot().lastInterval;
+        return ok;
+    }
     bool end(bool clean,CompletedWorkTime t)noexcept override{return capture.end(clean,t);}
 };
 RunOptions options(Rig &r,Sink &sink){RunOptions o;o.workPause=&r.control;o.completedWork=&sink;o.plain=true;o.batch=6;o.reportSeconds=3600;
@@ -65,6 +79,12 @@ void actualBoundary(){Sink sink;Rig user;auto o=options(user,sink);o.workWaitMs=
     CHECK(run(feeSwitch,o)==kRunFeeWindow&&feeSwitch.searches==1&&sink.capture.snapshot().state==CompletedWorkState::Ready);
     Rig resumed;resumed.withSolution=false;CHECK(run(resumed,options(resumed,sink))==0&&resumed.submitted==0);
     CHECK(sink.capture.snapshot().batches==4&&sink.capture.snapshot().attempts==8&&sink.capture.snapshot().userTmacs.text()=="0.000009437184");
+    {Sink initial;Rig r;r.control.requested=true;initial.resumePause=true;
+        CHECK(run(r,options(r,initial))==0&&initial.ordered&&initial.pausedCalls>=3&&initial.originalPause);
+        if(initial.originalPause){const auto &p=*initial.originalPause;CHECK(p.userTmacs.zero()&&p.donationTmacs.zero()&&p.batches==0&&p.run==1&&
+            p.end.monotonicMs<=initial.capture.snapshot().lastBatch->batch.observed.monotonicMs);}}
+    {Sink refused;Rig r;refused.refuseBoundary=true;CHECK(run(r,options(r,refused))==kRunPauseFault&&!r.configured&&!r.searches&&
+        refused.capture.snapshot().state==CompletedWorkState::Faulted);}
 }
 void failures(){
     for(unsigned mode=0;mode<9;++mode){Sink sink;Rig r;

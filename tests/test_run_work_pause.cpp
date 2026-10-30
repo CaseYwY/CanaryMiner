@@ -23,6 +23,7 @@ struct Rig {
     bool acknowledged=false,stopInPause=false,failDrain=false,pauseInPrepare=false,pauseInFetch=false;
     bool enabledHint=false,configured=false,sourceMade=false,uncontrolled=false,pauseOrdering=true;
     bool waitOrdering=true;std::vector<unsigned> appliedWaits;
+    bool rawBoundaryOpen=false,rawOrdering=true;
     WorkerControlGate *gate=nullptr;uint64_t *gateClock=nullptr;unsigned gateMode=0;
     WorkerControlClient *nativeClient=nullptr;
     unsigned searches=0,submits=0,drains=0,resumes=0,fetches=0,version=1;
@@ -62,14 +63,14 @@ struct Source:JobSource {
 struct Algo:Algorithm {
     const char *name()const override{return "pearl-pow";}
     PearlRuntimeCapability pearlRuntimeCapability()const noexcept override{return PearlRuntimeCapability::CanonicalCudaPoolV1;}
-    void configure(const RunOptions &)override{active->configured=true;active->events.push_back("configure");
+    void configure(const RunOptions &)override{active->rawOrdering=active->rawOrdering&&!active->rawBoundaryOpen;active->configured=true;active->events.push_back("configure");
         if(active->gate&&active->gateMode==6)active->waitOrdering=active->waitOrdering&&active->gate->snapshot().receipt->kind==WorkerReceiptKind::WaitApplied;}
     size_t memoryBytes(const Job &)const override{return 0;}
-    bool prepare(const Job &j)override{active->events.push_back("prepare"+std::to_string(j.epoch));if(active->pauseInPrepare&&j.epoch==1)active->requested=true;return true;}
+    bool prepare(const Job &j)override{active->rawOrdering=active->rawOrdering&&!active->rawBoundaryOpen;active->events.push_back("prepare"+std::to_string(j.epoch));if(active->pauseInPrepare&&j.epoch==1)active->requested=true;return true;}
     uint64_t exactMacsPerUnit()const noexcept override{return 524288;}
     uint64_t completedSearchAttempts()const override{return active->completedAttempts;}
     bool search(const Job &j,uint64_t nonce,uint64_t count,std::vector<Solution> *out)override{
-        auto &r=*active;++r.searches;r.completedAttempts+=count;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
+        auto &r=*active;r.rawOrdering=r.rawOrdering&&!r.rawBoundaryOpen;++r.searches;r.completedAttempts+=count;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
         if(r.nativeClient){std::this_thread::sleep_for(std::chrono::milliseconds(5));if(r.searches>=1000)r.stop=1;return true;}
         if(r.gate){if(r.gateMode==6){const auto view=r.gate->snapshot();r.waitOrdering=r.waitOrdering&&view.receipt&&view.receipt->kind==WorkerReceiptKind::WaitApplied;
                 if(view.receipt&&view.receipt->command.hostWaitMs)r.appliedWaits.push_back(*view.receipt->command.hostWaitMs);
@@ -99,12 +100,17 @@ struct GateHook:Hook {
 };
 struct WorkSink:CompletedWorkSink {
     bool began=false,ended=false,ordered=true;std::vector<unsigned> waits;
+    unsigned paused=0;
     bool begin(WorkLane lane,CompletedWorkTime)noexcept override{began=lane==WorkLane::User;return began;}
     bool completed(const CompletedWorkBatch &b)noexcept override{
         ordered=ordered&&active->searches==active->submits&&active->events.back()=="submit"&&b.workUnits==1&&b.attempts==1&&b.macsPerUnit==524288;
         waits.push_back(b.appliedHostWaitMs);return true;
     }
     bool end(bool clean,CompletedWorkTime)noexcept override{ended=clean;return clean;}
+    bool boundary(const CompletedWorkBoundary &b)noexcept override{
+        if(b.kind==CompletedWorkBoundaryKind::Paused){++paused;ordered=ordered&&active->drains&&active->searches==active->submits;}
+        active->rawBoundaryOpen=b.kind!=CompletedWorkBoundaryKind::Leaving;return true;
+    }
 };
 }
 namespace om {JobSource *workPauseTestSource(){active->sourceMade=true;return new Source;}}
@@ -112,10 +118,10 @@ int main(int argc,char **argv){
     if(argc==6&&std::string(argv[1])=="--channel-fixture"&&std::string(argv[2])=="--worker-control-v1"){
         WorkerChannelHandles handles;WorkerControlClient client;
         if(!parseWorkerChannelHandles(argv[3],argv[4],argv[5],&handles)||!client.adopt(handles))return 90;
-        Rig r;active=&r;r.nativeClient=&client;Algo algo;Hook hook;auto o=options(r);o.workPause=&client;o.loopHook=&hook;
+        Rig r;active=&r;r.nativeClient=&client;Algo algo;Hook hook;WorkSink raw;auto o=options(r);o.workPause=&client;o.loopHook=&hook;o.completedWork=&raw;
         const auto result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);client.stop();
         std::printf("NATIVEFINAL %u %u %u\n",r.searches,r.submits,r.version);std::fflush(stdout);
-        if(r.searches!=r.submits||r.enabledHint)return 91;
+        if(r.searches!=r.submits||r.enabledHint||!r.rawOrdering||!raw.ordered||!raw.began||(!raw.ended&&result!=kRunPauseFault))return 91;
         return result==kRunPauseFault?8:result;
     }
     for(unsigned mode=0;mode<9;++mode){Rig r;active=&r;Algo algo;Hook hook;auto o=options(r);o.loopHook=&hook;
@@ -174,6 +180,7 @@ int main(int argc,char **argv){
         const auto result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);sender.join();
         CHECK(sent&&result==0&&r.searches==2&&r.submits==2&&!r.enabledHint);
         CHECK(r.waitOrdering&&r.appliedWaits==std::vector<unsigned>({10,0}));
-        CHECK(work.began&&work.ended&&work.ordered&&work.waits==r.appliedWaits);}
+        CHECK(work.began&&work.ended&&work.ordered&&work.waits==r.appliedWaits);
+        CHECK(work.paused>0&&r.rawOrdering);}
     return finishTests("shared run-loop cooperative pause");
 }
