@@ -34,6 +34,8 @@ This arithmetic does not count elapsed confirmation time, independent observatio
 
 ## Verification
 
+[P-10g](economic-choice-guard.md) subsequently supplies a fixed-worker reference owner for temporal confirmation, receipt-time cooldown and bounded transitions. Full decision-to-command binding and parent budgets across worker replacement remain separate.
+
 The focused unit suite covers independent thresholds, exact equality/one-unit-above boundaries at 18 fractional digits, incumbent ties, zero versus missing, no eligible candidates, invalid current modes/parameters, positive alternatives to a nonpositive incumbent and fail-closed arithmetic capacity. A separate Python `Fraction` model derives work rates and GPU-board cost rates independently, then checks state, point and wait for 384 varied synthetic cases, including all seven non-error outcomes.
 
 Windows command after building the named test/probe targets:

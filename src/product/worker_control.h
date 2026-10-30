@@ -83,6 +83,7 @@ class WorkerControlIssuer {
     WorkerControlIssuer(const WorkerControlIssuer &)=delete;
     WorkerControlIssuer &operator=(const WorkerControlIssuer &)=delete;
     bool start(uint64_t nowMonoMs);
+    bool boundTo(const SessionIntent &intent,SessionToken token)const{return &intent_==&intent&&token.epoch&&token_.epoch==token.epoch;}
     std::optional<WorkerCommand> issue(WorkerDirective,uint64_t nowMonoMs,uint64_t leaseMs,std::optional<unsigned> hostWaitMs=std::nullopt);
     WorkerReceiptResult acknowledge(const WorkerReceipt &,uint64_t nowMonoMs);
     WorkerControlIssuerSnapshot snapshot(uint64_t nowMonoMs);

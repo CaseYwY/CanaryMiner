@@ -12,6 +12,8 @@ enum class EconomicSubmission { Accepted, Busy, WrongTicket, WrongContext, Inval
 struct EconomicEvaluationSnapshot {
     EconomicEvaluationState state=EconomicEvaluationState::Dormant;
     uint64_t contextRevision=0,resultSequence=0;
+    // Metadata for the previous immutable result during a safe replacement; cleared on any cancellation/revocation.
+    uint64_t retainedResultSequence=0,retainedValidUntilMonoMs=0;
     bool pending=false,cancellationRequested=false;
     EconomicStatus computation=EconomicStatus::Unavailable;
     EconomicUseSnapshot use;
@@ -26,6 +28,7 @@ class EconomicEvaluationOwner {
     EconomicEvaluationOwner(const EconomicEvaluationOwner &)=delete;
     EconomicEvaluationOwner &operator=(const EconomicEvaluationOwner &)=delete;
     bool start(OptimizationTime);
+    bool boundTo(const SessionIntent &,SessionToken)const; // exact borrowed parent object and explicit epoch
     // Revision must advance for ANY changed scoring input/source/configuration, not just work-plan edits.
     // Returned Market/RetestReview tickets require separate permitted owners; no request is executed by poll.
     OptimizationSchedulePoll poll(OptimizationTime,uint64_t contextRevision,const WorkProfilePlan &,const WorkProfileConditions &);

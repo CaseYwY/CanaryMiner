@@ -24,6 +24,8 @@ New submission first withdraws the previous reference. After computation actuall
 
 Source/current-configuration revision notifications are an explicit integration obligation. A caller failing to report a changed input is not certified by this interface. Native runtime source binding and complete safety qualification remain prerequisites for actuation.
 
+[P-10g](economic-choice-guard.md) adds an exact-parent `boundTo` check and previous-result retention metadata for a same-context replacement: only the prior sequence and its earliest admitted ceiling are exposed while the replacement is pending. Current `study` publication still withdraws at submit. A separately validating guard may retain only its already-held matching immutable result; cancellation/revocation/completion/stop clears this metadata. It is not a source of new study publication or mining permission. Evaluation-local projection of the future flat-cost horizon from unchanged declared assumptions is distinct from a changed actual tariff/opening source, which must advance context.
+
 ## Cancellation, retry and stop
 
 Operation expiry requests atomic cancellation but retains the slot until actual completion. Even a computation that ignores cancellation and returns a successful study is discarded after timeout, context change, bad conditions or stop. `completeExternal` cannot forge reaping of that owned calculation. Once its real completion settles the original ticket, the schedule applies its existing bounded retry/no-catch-up policy: at most three additional attempts, then the next regular cycle. RetestReview is never automatically retried as a physical experiment.

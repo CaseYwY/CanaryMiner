@@ -141,6 +141,8 @@ Owns bounded measurement plans, profile eligibility/fingerprints, drift detectio
 
 [P-10f](../economic-choice.md) supplies pure exact resume/switch-margin arithmetic over the immutable study and an explicitly asserted current mode. It produces reference-only Hold/Resume/Switch or reasoned pause/unavailability. This does not validate the asserted application or replace result/receipt lifetime ownership, temporal hysteresis or switch budgets.
 
+[P-10g](../economic-choice-guard.md) composes those references with one actual evaluator and one issuer, checking identical borrowed parent identity and initial revision-1 Pause. It owns confirmation, original-application cooldown and one-incarnation budget history, while immutable result retention intersects explicit replacement metadata and original deadlines. It never issues a worker command; parent replacement budgets, source notifications and the execution/measurement owners remain separate.
+
 [P-10b](../optimization-schedule.md) adds a noncopyable single-owner request clock borrowing explicit session intent. Its three bounded lanes retain unresolved expired tickets until settlement; stop/clock/Unreaped faults revoke without inventing reaping. The scheduler neither executes requests nor publishes financial/mining authority.
 
 Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budgets and pause/resume decisions. Normal/game candidate sets are separate. It consumes fresh inputs and uncertainty; it cannot turn an unverified model into a guaranteed profit statement.

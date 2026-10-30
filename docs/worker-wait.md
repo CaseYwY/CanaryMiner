@@ -40,4 +40,6 @@ Final Windows focused CTest passes **16/16**. Windows/Linux ordinary and Linux A
 
 ## Remaining integration
 
+[P-10g](economic-choice-guard.md) consumes these original issuer receipts for fixed-worker temporal references. It verifies the exact parent object/token and initial revision-1 Pause, and observes contiguous revisions; it does not issue the commands it observes or carry budgets across worker replacement.
+
 The economic owner still exposes synthetic reference studies. Candidate hysteresis, switching budgets, binding an exact decision/profile/context to this receipt, native optimization controls and qualified measurement/economic inputs remain. A WaitApplied receipt alone cannot select a candidate or authorize mining. It supplies the actual boundary event that future transition/cooldown and measurement owners must use, instead of treating command issue or Accepted as application. Physical GPU/game behavior, long-run timing and release/protocol/SASS gates remain open.

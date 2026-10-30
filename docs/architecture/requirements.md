@@ -114,6 +114,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-10f](../economic-choice.md) adds exact reference-choice resume/absolute/fractional margins over immutable real-time net scores. Unknown application is unavailable; excluded/nonpositive incumbents pause, and ties hold the incumbent. R-OPT-001/003 remain partial pending temporal confirmation/cooldown/budgets, receipt/context/freshness ownership, real-source qualification and activation.
 
+[P-10g](../economic-choice-guard.md) adds fixed-worker temporal references using the actual evaluator/issuer under the identical parent object/token. Original-time confirmation, receipt-time cooldown/budget and explicit retained-result metadata reject stale or delayed substitutions. R-OPT-001/003 and R-SAFE-001/002 remain partial pending complete decision-to-command binding, budgets across replacement workers, native source/configuration controls, qualified inputs and activation.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.

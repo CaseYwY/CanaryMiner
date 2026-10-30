@@ -24,8 +24,9 @@ struct EconomicEvaluationOwner::Impl {
     std::mutex mutex;std::condition_variable wake;std::thread thread;std::atomic<bool> cancel{false};
     bool stopping=false;std::shared_ptr<const Job> queued;std::optional<Result> completed;
     Impl(EconomicEvaluationPolicy p,const SessionIntent &i,SessionToken t):policy(p),intent(i),token(t),schedule(p.schedule,i,t){}
-    void revoke(){if(use)use->requestStop();use.reset();view.study.reset();view.resultSequence=0;view.use={};}
-    void cancelFlight(){if(flight){cancel=true;view.cancellationRequested=true;}}
+    void clearRetained(){view.retainedResultSequence=view.retainedValidUntilMonoMs=0;}
+    void revoke(){if(use)use->requestStop();use.reset();view.study.reset();view.resultSequence=0;view.use={};clearRetained();}
+    void cancelFlight(){clearRetained();if(flight){cancel=true;view.cancellationRequested=true;}}
     void halt(S state){
         attempted=true;view.state=state;revoke();cancelFlight();
         if(state==S::Stopped||schedule.snapshot().state==Q::Running||schedule.snapshot().state==Q::Dormant)schedule.requestStop();
@@ -74,7 +75,7 @@ struct EconomicEvaluationOwner::Impl {
         const auto job=flight;const bool revoked=view.state!=S::Running||cancel||job->revision!=view.contextRevision;
         auto outcome=revoked||result->status==EconomicStatus::Cancelled?O::Cancelled:result->study&&result->status==EconomicStatus::Ok?O::Complete:O::Rejected;
         const auto admission=schedule.complete(job->ticket,outcome,now);
-        flight.reset();view.pending=false;view.cancellationRequested=false;view.computation=result->status;sync();
+        flight.reset();view.pending=false;view.cancellationRequested=false;view.computation=result->status;clearRetained();sync();
         if(admission==C::WrongTicket){halt(S::Faulted);return;}
         if(revoked||admission!=C::Accepted||outcome!=O::Complete||view.state!=S::Running)return;
         // The result was produced from this owned immutable job; still check its original epoch/time at handoff.
@@ -128,7 +129,9 @@ EconomicSubmission EconomicEvaluationOwner::submit(const OptimizationTicket &tic
             workProfilePlanFingerprint(input.currentPlan)!=p.planKey||!conditionsEqual(input.conditions,p.conditions)||!safe(p.conditions)||
             input.candidates.size()>32||(input.pearl&&input.pearl->minutes.size()>1000)||(input.fx&&input.fx->minutes.size()>1000))return A::Invalid;
         auto job=std::make_shared<const Impl::Job>(Impl::Job{ticket,revision,std::move(input)});
-        p.revoke();p.cancel=false;p.flight=job;p.view.pending=true;p.view.cancellationRequested=false;p.view.computation=EconomicStatus::Unavailable;
+        const auto previous=p.view.resultSequence,ceiling=p.view.use.validUntilMonoMs;
+        p.revoke();p.view.retainedResultSequence=previous;p.view.retainedValidUntilMonoMs=previous?ceiling:0;
+        p.cancel=false;p.flight=job;p.view.pending=true;p.view.cancellationRequested=false;p.view.computation=EconomicStatus::Unavailable;
         {std::lock_guard<std::mutex> lock(p.mutex);p.queued=std::move(job);}p.wake.notify_one();return A::Accepted;
     }catch(...){p.halt(S::Faulted);return A::Inactive;}
 }
@@ -147,5 +150,6 @@ void EconomicEvaluationOwner::stop(){auto &p=*impl_;requestStop();if(p.thread.jo
     {std::lock_guard<std::mutex> lock(p.mutex);p.queued.reset();p.completed.reset();}p.view.pending=false;p.view.cancellationRequested=false;
 }
 const EconomicEvaluationSnapshot &EconomicEvaluationOwner::snapshot()const{return impl_->view;}
+bool EconomicEvaluationOwner::boundTo(const SessionIntent &intent,SessionToken token)const{return &impl_->intent==&intent&&token.epoch&&impl_->token.epoch==token.epoch;}
 const OptimizationScheduleSnapshot &EconomicEvaluationOwner::schedule()const{return impl_->schedule.snapshot();}
 } // namespace om
