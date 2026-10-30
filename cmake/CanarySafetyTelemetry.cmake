@@ -1,7 +1,8 @@
 # Isolated readonly raw safety observations; ordinary startup does not construct this owner/helper.
 add_library(canary_safety_telemetry STATIC
   "${CMAKE_SOURCE_DIR}/src/product/safety_telemetry.cpp"
-  "${CMAKE_SOURCE_DIR}/src/product/safety_telemetry_owner.cpp")
+  "${CMAKE_SOURCE_DIR}/src/product/safety_telemetry_owner.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/core_thermal_guard.cpp")
 target_compile_features(canary_safety_telemetry PUBLIC cxx_std_17)
 target_include_directories(canary_safety_telemetry PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(canary_safety_telemetry PRIVATE canary_local_tasks Threads::Threads)

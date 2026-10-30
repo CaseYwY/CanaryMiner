@@ -156,6 +156,8 @@ Executed P-03a [intent/launcher evidence](../session-intent.md) covers explicit-
 
 [P-03d/P-11i](../safety-telemetry.md) tests strict raw batch IPC, complete selected-set/time/revision binding, TemperatureV1 ABI inputs, all used native return-code paths, pre/post UUID identity, missing and unknown fields, cleanup errors and original failed-clock intervals. Owned CPU helpers test timeout/cancellation and adopted-parent death; a separately compiled late-result seam checks Unreaped after stop. Production core/native/helper artifact checks exclude fixture seams and mutating/index-discovery APIs. Enabled sampling is synthetic; real helper tests are disabled/malformed only. This is not physical temperature accuracy, complete safety/cooling, genuine unreapable-kernel or fleet/runtime qualification.
 
+[P-03e/P-11j](../core-thermal-guard.md) tests mandatory threshold pairs, full-device aggregation, required/unknown event masks, initial and post-hold hysteresis, distinct-sample cooling, gap/timeout/missing reset, stale/substituted/rollback receipts, capability drift, original age/exclusive deadlines, skew reduction without deadline extension, failed-batch overlap and stop/new-token non-revival. An actual telemetry owner plus owned synthetic helper exercises snapshot handoff and source-stop revocation. This does not qualify physical operating thresholds or complete fleet safety.
+
 ## T-I18N
 
 Test all declared locales/key coverage, placeholders/plurals, review/fallback status, UTF-8/grapheme/combining/wide/RTL snapshots, numeric/date/currency formatting and invariant flags/JSON/protocol/event codes. Changing language must not change tariff, timezone, currency, device or prices.

@@ -41,6 +41,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.
 
+[P-03e/P-11j](../core-thermal-guard.md) adds a pure one-session core-temperature limiter over those snapshots. Explicit frozen threshold pairs, required event masks, full ordered device identity and fresh consecutive cooling govern a separately expiring CoreWithinLimits result. Repeated receipts cannot extend its deadline; source stop/rollback/capability changes latch. Complete critical-safety evidence, actual threshold/source qualification and the native fleet bridge remain separate.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.
