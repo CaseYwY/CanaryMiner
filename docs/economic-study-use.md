@@ -34,6 +34,8 @@ Missing/unsafe thermal telemetry, fault, unknown/active game, measured drift, ch
 
 An eligible snapshot exposes only the study's original best measured point and its complete-batch wait setting; the exact score remains in the immutable study. It does not mark a requested or actually applied worker setting. Live result-ticket admission, selection hysteresis/cooldown/switch budgets, actual transition accounting, worker acknowledgements, native controls and qualified financial/safety sources remain separate work.
 
+[P-10d](economic-evaluation-owner.md) subsequently supplies one owned CPU evaluator with exact schedule-ticket and explicit current-context admission. It invokes this gate on the control thread after actual completion; selection hysteresis, native source binding and worker actuation remain separate.
+
 ## Verification
 
 Focused tests construct genuine immutable studies using the existing synthetic fixture builder. They independently tighten each expiry source, check losing/excluded candidates, exact expiry, late first use, skew reduction, plan/condition revocation, terminal stop, token changes, monotonic overflow and nonpositive/empty distinctions. Existing exact-study/Fraction-oracle, work-profile and independent-request-clock tests remain regressions.

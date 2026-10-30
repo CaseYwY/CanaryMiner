@@ -108,6 +108,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-10c](../economic-study-use.md) adds a one-result/explicit-parent validity latch over the immutable study. Current full-plan/conditions, original earliest dependency expiry and non-extending dual-clock ceilings prevent stale reference eligibility, including delayed first use. Nonpositive/empty complete candidate results remain distinct from missing input. R-OPT-001/003 and R-SAFE-001/002 remain partial: live ticket/configuration-change admission, hysteresis/runtime actuation and qualified real sources are not supplied.
 
+[P-10d](../economic-evaluation-owner.md) connects the request clocks and validity gate through one owned CPU evaluator. Exact tickets, explicit current-context revisions, original evaluation clocks and actual completion fence admission; timeout/stop cannot replace a still-owned calculation or revive its result. R-OPT-001/002/003 and R-SAFE-001/002 remain partial pending native source-change notifications, selection hysteresis/applied-setting ownership, qualified financial/safety inputs and ordinary runtime activation.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.

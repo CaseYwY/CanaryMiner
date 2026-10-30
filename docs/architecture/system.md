@@ -135,6 +135,8 @@ Owns bounded measurement plans, profile eligibility/fingerprints, drift detectio
 
 [P-10c](../economic-study-use.md) retains one such study under the explicit parent token and current full-plan/condition checks. All original dependency expiry intersects one non-extending exclusive monotonic ceiling, including UTC-only bounds mapped at evaluation rather than first consumption. Failures/stop latch and clear the selected reference point. This pure gate does not accept asynchronous result tickets or actuate a worker; the owning runtime's frozen configuration/source revisions remain a separate boundary.
 
+[P-10d](../economic-evaluation-owner.md) owns the three-lane scheduler and one fixed CPU calculation thread. The control thread alone reads SessionIntent, validates current context/conditions and admits the exact returned job through schedule completion and EconomicStudyUse. A single mailbox retains queued/running/completed ownership; cancellation/expiry never proves completion. Market/retest execution stays with separately permitted owners, and their pending tickets survive evaluator stop. No ordinary supervisor factory or mining actuator is activated.
+
 [P-10b](../optimization-schedule.md) adds a noncopyable single-owner request clock borrowing explicit session intent. Its three bounded lanes retain unresolved expired tickets until settlement; stop/clock/Unreaped faults revoke without inventing reaping. The scheduler neither executes requests nor publishes financial/mining authority.
 
 Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budgets and pause/resume decisions. Normal/game candidate sets are separate. It consumes fresh inputs and uncertainty; it cannot turn an unverified model into a guaranteed profit statement.
