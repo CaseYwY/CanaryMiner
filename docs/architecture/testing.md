@@ -120,6 +120,8 @@ P-03b [host-wait evidence](../work-wait.md) covers deterministic wait clocks, CL
 
 [P-10a](../economic-study.md) checks exact ranking by net/real-time, prospective transitions/tests, source/record binding, market/FX completeness/freshness, restricted tariff capabilities, zero/signed inputs and capacity refusal. A deterministic independent Fraction oracle checks every candidate value and ordering across varied dimensions; these are synthetic offline studies, not live optimizer qualification.
 
+[P-10c](../economic-study-use.md) constructs actual immutable synthetic studies and independently bounds result, both market clocks, work profile, reward, every permitted transition, tariff FX and scenario expiry. Late first use, decreasing skew, exclusive deadlines, invalid/changed plans, current condition failures, stopped old tokens and nonpositive/empty results are exercised. The exact-study oracle and existing profile/scheduler suites remain regressions; no live financial source or mining actuator is involved.
+
 [P-10b](../optimization-schedule.md) checks independent request clocks, ticket identity, retry limits, exact-deadline cancellation, unresolved-slot retention, no catch-up, retest reminders, cumulative clock faults/overflow, Unreaped and stop/new-epoch precedence. This pure clock state machine does not establish cancellation or reaping of actual tasks.
 
 Test best eligible estimated net per elapsed time, no-data/nonpositive pause, all configured timers independently, source/curve expiry, hysteresis/cooldowns, switch/test costs and stale asynchronous results. Test current prices rather than historical per-credit valuations, joint-meter interactions and separate normal/game candidates. Heuristic margins are not statistical confidence bounds.

@@ -34,6 +34,8 @@ All arithmetic remains bounded exact decimal numerators/denominators. Nontermina
 
 Only a strictly positive score supplies `bestPoint`, labelled **best measured eligible candidate**, never global optimum. A valid study with no positive candidate (including all excluded) has no selection. An unavailable study cannot justify continuing or resuming mining. The immutable record is an offline result, not a live generation/revision-bound handoff; session ownership, ongoing revalidation, stop precedence and hysteresis remain subsequent work.
 
+[P-10c](economic-study-use.md) subsequently adds a one-result explicit-parent validity gate, original dependency expiry and terminal current-plan/condition/stop revalidation. Live ticket admission, selection hysteresis and actuation remain separate.
+
 ## Verification and remaining work
 
 The host suite checks hand-calculated ranking changes between throughput and energy-efficiency preferences, missing/zero/signed cost and income, correlation-preserving price conversion, exact transition and future test costs, record/plan/source identity, safety/game/freshness refusal, maximum window, invalid excluded-input bounds, and arithmetic comparison overflow. An independent Python `Fraction` oracle varies durations, work, power, currencies, prices, horizons, overhead, repeat tests and haircut; it checks all twelve rational outputs and the selected point.

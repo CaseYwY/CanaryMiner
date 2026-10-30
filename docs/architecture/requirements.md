@@ -106,6 +106,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-10a](../economic-study.md) supplies default-off exact fixture studies using whole-record-bound rewards, complete economic price/FX windows and an explicit flat GPU-board cost proxy. Real-time net scores include declared prospective transition/test costs; live scheduling, hysteresis, whole-meter economics and real-source qualification remain open.
 
+[P-10c](../economic-study-use.md) adds a one-result/explicit-parent validity latch over the immutable study. Current full-plan/conditions, original earliest dependency expiry and non-extending dual-clock ceilings prevent stale reference eligibility, including delayed first use. Nonpositive/empty complete candidate results remain distinct from missing input. R-OPT-001/003 and R-SAFE-001/002 remain partial: live ticket/configuration-change admission, hysteresis/runtime actuation and qualified real sources are not supplied.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.
