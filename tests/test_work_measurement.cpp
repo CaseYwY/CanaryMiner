@@ -146,5 +146,30 @@ void zeroAndCapacity(){
         CHECK(admitted);r.send(0,D::Pause);r.applied(0);CHECK(r.poll(0).status==R::Capacity&&!r.owner->snapshot().record);}
     {Rig r(false);r.policy.maximumSampleGapMs=60000;CHECK(r.start());CHECK(r.poll(5000).status==R::Unsafe&&r.owner->snapshot().revokeRequired);}
 }
+void transitionFlights(){
+    for(bool final:{false,true}){Rig r(false);r.policy.warmupMs=0;r.policy.repetitions=1;
+        if(final)r.policy.hostWaitMs={0};
+        CHECK(r.start());r.send(1,D::Run,0);r.applied(2);CHECK(r.add(5));
+        // Exact ordering, even within one millisecond: this renewal was pending BEFORE the boundary.
+        r.send(25,D::Run,0);CHECK(r.add(25));
+        const auto expected=final?S::Draining:S::AwaitingApplication;
+        CHECK_MSG("original same-wait flight survives the request transition",r.poll(25).state==expected&&!r.owner->snapshot().revokeRequired);
+        if(r.owner->snapshot().revokeRequired)continue;
+        r.applied(26);CHECK(r.poll(26).state==expected);CHECK(r.add(30));
+        CHECK(r.owner->snapshot().completedWindows==1&&!r.owner->snapshot().record);
+        if(final){r.send(31,D::Pause);r.applied(32);CHECK(r.add(35)&&r.owner->snapshot().record);}
+        else{r.send(31,D::Run,10);r.applied(32);CHECK(r.add(35)&&r.owner->snapshot().state==S::Measuring);}
+    }
+    for(bool final:{false,true}){Rig r(false);r.policy.warmupMs=0;r.policy.repetitions=1;
+        if(final)r.policy.hostWaitMs={0};
+        CHECK(r.start());r.send(1,D::Run,0);r.applied(2);CHECK(r.add(5));CHECK(r.add(25));
+        // Same timestamp is not evidence this command preceded the request transition.
+        r.send(25,D::Run,0);CHECK(r.poll(25).status==R::Attribution&&r.owner->snapshot().revokeRequired);
+    }
+    {Rig r;auto skew=at(1);skew.utcMs+=10;r.owner->poll(skew,r.conditions);
+        CHECK(r.owner->snapshot().sourceValidUntilMonoMs==at(40).monotonicMs&&r.owner->snapshot().latestSample->monotonicMs==at().monotonicMs);
+        CHECK(r.poll(20).sourceValidUntilMonoMs==at(40).monotonicMs); // cached source cannot grow when clock disagreement shrinks
+        CHECK(r.add(21)&&r.owner->snapshot().sourceValidUntilMonoMs==at(71).monotonicMs&&r.owner->snapshot().requestRevision==1);}
 }
-int main(){fullRecord();originalWindows();rejectedSources();controlAndStop();budgetsAndAdmission();zeroAndCapacity();return finishTests("receipt-bound work measurement capture");}
+}
+int main(){fullRecord();originalWindows();rejectedSources();controlAndStop();budgetsAndAdmission();zeroAndCapacity();transitionFlights();return finishTests("receipt-bound work measurement capture");}

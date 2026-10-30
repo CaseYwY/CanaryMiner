@@ -4,6 +4,7 @@
 #include "economic_evaluation_owner.h"
 #include "worker_control.h"
 namespace om {
+struct WorkMeasurementRecord;
 struct EconomicGuardPolicy {
     bool enabled=false;
     EconomicChoicePolicy margins;
@@ -53,7 +54,8 @@ struct EconomicGuardSnapshot {
 };
 bool validEconomicGuardPolicy(const EconomicGuardPolicy &);
 // All methods and both borrowed owners belong to one control thread and the SAME intent object/token.
-// Update evaluator context/conditions before check. Start requires revision-1 proven Pause.
+// Update evaluator context/conditions before check. Public start requires revision-1 proven Pause; the command
+// owner's private measured handoff preserves that original admission and sets a separate post-handoff study barrier.
 // The frozen worker/plan cannot be rebound; an optional parent budget survives explicit guard retirement/replacement.
 class EconomicChoiceGuard {
    public:
@@ -69,6 +71,8 @@ class EconomicChoiceGuard {
    private:
     struct Impl;std::unique_ptr<Impl> impl_;
     std::shared_ptr<const EconomicStudy> commandStudy()const;
+    bool startBound(OptimizationTime,const WorkProfilePlan &,const WorkMeasurementRecord *,const WorkerReceipt *);
+    bool startMeasured(OptimizationTime,const WorkProfilePlan &,const WorkMeasurementRecord &,const WorkerReceipt &);
     friend class EconomicCommandOwner;
 };
 } // namespace om

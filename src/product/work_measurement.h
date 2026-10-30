@@ -16,7 +16,8 @@ struct WorkMeasurementSnapshot {
     WorkProfileStatus status=WorkProfileStatus::Invalid;
     bool revokeRequired=false;
     size_t sampleCount=0,completedWindows=0;
-    uint64_t sequence=0,sampleDueMonoMs=0,deadlineMonoMs=0;
+    uint64_t sequence=0,sampleDueMonoMs=0,deadlineMonoMs=0,requestRevision=0,sourceValidUntilMonoMs=0;
+    std::optional<WorkProfileSample> latestSample; // original, never restamped by poll or receipt consumption
     std::optional<unsigned> requestedHostWaitMs; // a requested experiment step, never permission or an issued command
     ElectricityAmount observedEnergy;
     std::shared_ptr<const WorkMeasurementRecord> record; // private immutable original, not source qualification or a built profile

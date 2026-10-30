@@ -1,4 +1,5 @@
 #include "economic_choice_guard.h"
+#include "work_measurement.h"
 #include <algorithm>
 #include <deque>
 namespace om {
@@ -70,6 +71,7 @@ struct EconomicChoiceGuard::Impl {
     std::deque<uint64_t> transitions;
     std::shared_ptr<const EconomicStudy> study;std::unique_ptr<EconomicStudyUse> use;
     uint64_t resultSequence=0,sourceCeiling=0,lastEvaluation=0,blockedSequence=0;
+    std::optional<uint64_t> studyAfter; // explicit handoff barrier, never a restamped application receipt
     std::optional<size_t> confirming;uint64_t firstConfirmation=0,lastConfirmation=0,countedEvaluation=0;bool counted=false;
     EconomicParentBudget *budget=nullptr;bool attached=false,retired=false;
     Impl(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,EconomicParentBudget *parent)
@@ -149,7 +151,7 @@ struct EconomicChoiceGuard::Impl {
         view.resultSequence=resultSequence;view.validUntilMonoMs=(std::min)(sourceCeiling,eligible.validUntilMonoMs);
         view.sourceValidUntilMonoMs=view.validUntilMonoMs;
         view.validUntilMonoMs=(std::min)(view.validUntilMonoMs,observed->command.deadlineMonoMs);
-        if(study->input().nowMonoMs<modeChanged||(postMode&&study->input().nowMonoMs==modeChanged)){
+        if(study->input().nowMonoMs<modeChanged||(postMode&&study->input().nowMonoMs==modeChanged)||(studyAfter&&study->input().nowMonoMs<=*studyAfter)){
             view.validUntilMonoMs=view.sourceValidUntilMonoMs=0;view.reason=R::PostApplicationStudy;resetConfirmation();return false;}
         return true;
     }
@@ -184,7 +186,12 @@ struct EconomicChoiceGuard::Impl {
 EconomicChoiceGuard::EconomicChoiceGuard(EconomicGuardPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,EconomicParentBudget *budget)
     :impl_(new Impl(std::move(p),std::move(b),e,w,i,t,budget)){}
 EconomicChoiceGuard::~EconomicChoiceGuard(){auto &p=*impl_;if(p.budget&&p.attached&&!p.retired)p.budget->impl_->halt(S::Faulted);}
-bool EconomicChoiceGuard::start(OptimizationTime now,const WorkProfilePlan &plan){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+bool EconomicChoiceGuard::start(OptimizationTime now,const WorkProfilePlan &plan){return startBound(now,plan,nullptr,nullptr);}
+bool EconomicChoiceGuard::startMeasured(OptimizationTime now,const WorkProfilePlan &plan,const WorkMeasurementRecord &record,const WorkerReceipt &paused){
+    return startBound(now,plan,&record,&paused);}
+bool EconomicChoiceGuard::startBound(OptimizationTime now,const WorkProfilePlan &plan,const WorkMeasurementRecord *record,const WorkerReceipt *paused){auto &p=*impl_;
+    if(p.attempted)return false;
+    p.attempted=true;
     if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
     try{
@@ -192,13 +199,24 @@ bool EconomicChoiceGuard::start(OptimizationTime now,const WorkProfilePlan &plan
             !p.worker.boundTo(p.intent,p.token)||!p.evaluation.boundTo(p.intent,p.token)||validateWorkProfilePlan(plan)!=WorkProfileStatus::Ok){p.halt(S::Faulted);return false;}
         if(now.utcMs<0||now.utcMs>lastUtc||!now.monotonicMs){p.halt(S::ClockFault);return false;}
         const auto s=p.worker.snapshot(now.monotonicMs);
-        if(s.state!=WorkerControlState::Active||s.pending||!s.settled||s.settled->kind!=WorkerReceiptKind::Paused||s.settled->command.revision!=1||
+        if(s.state!=WorkerControlState::Active||s.pending||!s.settled||s.settled->kind!=WorkerReceiptKind::Paused||(!record&&s.settled->command.revision!=1)||
             !binding(s.settled->command.binding,p.expected)||p.evaluation.snapshot().state!=EconomicEvaluationState::Running){p.halt(S::Faulted);return false;}
-        p.observed=s.settled;p.current.kind=K::Paused;p.modeChanged=s.settled->observedMonoMs;p.view.workerRevision=1;
+        p.anchor=p.last=now;const WorkerReceipt *initial=&*s.settled;
+        if(record){
+            if(!paused||!receipt(*paused,*s.settled)||record->receipts.size()<3||record->receipts.front().command.revision!=1||
+                record->receipts.front().kind!=WorkerReceiptKind::Paused||record->receipts.back().kind!=WorkerReceiptKind::Paused||
+                record->receipts.back().command.revision>s.settled->command.revision||!binding(record->binding,p.expected)||
+                workProfilePlanFingerprint(record->input.plan)!=workProfilePlanFingerprint(plan)||
+                record->admitted.utcMs<0||!record->admitted.monotonicMs||record->completed.utcMs>now.utcMs||record->completed.monotonicMs>now.monotonicMs){p.halt(S::Faulted);return false;}
+            p.anchor={record->admitted.utcMs,record->admitted.monotonicMs};p.studyAfter=now.monotonicMs;p.postMode=true;initial=&record->receipts.front();
+            const auto wall=static_cast<uint64_t>(now.utcMs-p.anchor.utcMs),mono=now.monotonicMs-p.anchor.monotonicMs;
+            if((wall>mono?wall-mono:mono-wall)>2000){p.halt(S::ClockFault);return false;}
+        }
+        p.observed=s.settled;p.current.kind=K::Paused;p.modeChanged=s.settled->observedMonoMs;p.view.workerRevision=s.settled->command.revision;
         p.frozen=plan;p.planKey=workProfilePlanFingerprint(plan);
-        if(p.budget){if(!p.budget->impl_->attach(&p,p.intent,p.token,p.policy,*s.settled,p.planKey,now)){p.halt(p.budget->snapshot().state);return false;}
-            p.attached=true;p.postMode=p.budget->snapshot().incarnations>1;}
-        p.anchor=p.last=now;p.view.state=S::Running;p.countTransitions(now.monotonicMs);return true;
+        if(p.budget){if(!p.budget->impl_->attach(&p,p.intent,p.token,p.policy,*initial,p.planKey,now)){p.halt(p.budget->snapshot().state);return false;}
+            p.attached=true;p.postMode=p.postMode||p.budget->snapshot().incarnations>1;}
+        p.view.state=S::Running;p.countTransitions(now.monotonicMs);return true;
     }catch(...){p.halt(S::Faulted);return false;}
 }
 const EconomicGuardSnapshot &EconomicChoiceGuard::check(OptimizationTime now,uint64_t revision,const WorkProfilePlan &plan,const WorkProfileConditions &conditions){auto &p=*impl_;

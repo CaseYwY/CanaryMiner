@@ -1,4 +1,5 @@
 #include "economic_command_owner.h"
+#include "work_experiment_owner.h"
 #include <algorithm>
 namespace om {
 namespace {
@@ -51,6 +52,20 @@ bool EconomicCommandOwner::start(OptimizationTime now,const WorkProfilePlan &pla
     try{if(!p.clock(now))return false;
         if(p.policy.commandLeaseMs<100||p.policy.commandLeaseMs>workerControlMaxLeaseMs||!p.policy.guard.enabled||!p.guard.start(now,plan)){p.halt(S::Faulted);return false;}
         p.planKey=workProfilePlanFingerprint(plan);p.settled=p.issuer.snapshot(now.monotonicMs).settled;p.view.commandRevision=1;p.view.state=S::Running;return true;
+    }catch(...){p.halt(S::Faulted);return false;}}
+bool EconomicCommandOwner::startAfterMeasurement(OptimizationTime now,const WorkProfilePlan &plan,WorkExperimentOwner &measurement){auto &p=*impl_;
+    if(p.attempted)return false;
+    p.attempted=true;
+    if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
+    if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
+    try{WorkerReceipt paused;
+        const auto record=measurement.release(p.issuer,p.intent,p.token,{now.utcMs,now.monotonicMs},plan,&paused);
+        if(!record){p.halt(S::Faulted);return false;}
+        p.anchor={record->measurement->admitted.utcMs,record->measurement->admitted.monotonicMs};p.last=now;
+        if(!p.clock(now)||p.policy.commandLeaseMs<100||p.policy.commandLeaseMs>workerControlMaxLeaseMs||!p.policy.guard.enabled||
+            !p.guard.startMeasured(now,plan,*record->measurement,paused)){p.halt(S::Faulted);return false;}
+        p.planKey=workProfilePlanFingerprint(plan);p.settled=paused;p.view.commandRevision=paused.command.revision;
+        p.view.measurement=record;p.view.state=S::Running;return true;
     }catch(...){p.halt(S::Faulted);return false;}}
 std::optional<WorkerCommand> EconomicCommandOwner::poll(OptimizationTime now,uint64_t revision,const WorkProfilePlan &plan,const WorkProfileConditions &conditions,uint64_t permission){auto &p=*impl_;
     if(p.view.state!=S::Running)return {};

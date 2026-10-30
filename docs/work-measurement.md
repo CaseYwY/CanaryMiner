@@ -10,6 +10,8 @@ The owner exposes the next requested host wait and sample due time. These are ex
 
 The owner reads the issuer's actual current settlement. Accepted cannot start a measurement window. Each new settled revision must be contiguous, exactly bound to the original worker, and either an expected WaitApplied or a permissible Paused receipt. Missing/skipped/legacy application and unexpected mode changes latch refusal. Same-wait heartbeat receipts preserve the existing warm-up/window. The current native lease must remain Active; capture never extends it.
 
+[P-09c](work-experiment-owner.md) supplies an independent default-off command owner around this capture. Capture preserves the exact renewal already pending before a request transition, allowing only that original to settle across a candidate change/final drain. A new old-wait command issued afterward is refused even at the same timestamp. Latest original sample/request metadata and a non-extending source ceiling support bounded issuance.
+
 ## Original observation stream and automatic windows
 
 Start admits a complete-boundary baseline as sequence 1, bound to the explicit parent generation, nonzero counter epoch and full private identity fingerprint. Subsequent observations have consecutive sequence numbers and retain original UTC/monotonic times, applied wait, power, cumulative completed user/donation TMAC and safety/game fields. Original sample deltas must strictly increase and agree, matching P-09a; no timestamp normalization is performed. Samples must be no older than the maximum gap and cannot predate the latest consumed receipt or claim an unapplied wait. These strict contracts do not certify a native sensor/counter adapter.
@@ -30,7 +32,7 @@ Refusal/stop clears experiment requests, stops further issuer authorization and 
 
 Completion freezes a `WorkMeasurementRecord` with exact private worker binding, original admission/completion clocks, every contiguous settled receipt including initial/final Pause, and the complete `WorkProfileInput` samples/windows. Receipt times are not replaced by sample or consumption times. Stop retains an already completed record as historical evidence, not ongoing eligibility. Private keys/observations are not added to public stats, logs or defaults.
 
-The caller can hand that immutable input to the existing bounded profile audit on an appropriate computation owner. Capture does not label it as a built/qualified profile or run expensive profile construction in the control callback. Source sampling/transport, experiment-to-economic ownership handoff, native controls, persistent private review, real counter/power/drift qualification and physical GPU/game acceptance remain follow-ups.
+The caller can hand that immutable input to the existing bounded profile audit on an appropriate computation owner. Capture does not label it as a built/qualified profile or run expensive profile construction in the control callback. P-09c supplies a one-use same-incarnation experiment-to-economic command handoff. Source sampling/transport, parent retest budgets and fleet admission, native controls, persistent private review, real counter/power/drift qualification and physical GPU/game acceptance remain follow-ups.
 
 ## Verification
 

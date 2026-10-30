@@ -2,6 +2,8 @@
 #pragma once
 #include "economic_choice_guard.h"
 namespace om {
+class WorkExperimentOwner;
+struct WorkExperimentRecord;
 struct EconomicCommandPolicy {bool enabled=false;EconomicGuardPolicy guard;uint64_t commandLeaseMs=5000;};
 enum class EconomicCommandState { Dormant, Disabled, Running, Stopped, ClockFault, Faulted, Retired };
 struct EconomicRunBinding {
@@ -18,6 +20,7 @@ struct EconomicCommandSnapshot {
     uint64_t commandRevision=0;
     std::shared_ptr<const EconomicRunBinding> lastRun; // historical original, never standalone permission
     std::optional<WorkerReceipt> application; // WaitApplied for exactly lastRun, not Accepted
+    std::shared_ptr<const WorkExperimentRecord> measurement; // original one-use experiment handoff, if this incarnation measured first
 };
 // All methods and borrowed objects belong to one control thread. This is the sole issuer/acknowledgement caller
 // after the initial Pause. Poll the evaluator's current context/conditions first. The parent budget outlives this owner.
@@ -29,6 +32,7 @@ class EconomicCommandOwner {
     EconomicCommandOwner(const EconomicCommandOwner &)=delete;
     EconomicCommandOwner &operator=(const EconomicCommandOwner &)=delete;
     bool start(OptimizationTime,const WorkProfilePlan &);
+    bool startAfterMeasurement(OptimizationTime,const WorkProfilePlan &,WorkExperimentOwner &);
     // The permission ceiling is the current complete safety/game bound, not early-Pause delivery headroom.
     // Return each new command once. The enclosing transport must submit it or call transportFailed, and revoke
     // its channel immediately when revokeRequired is true. This object cannot prove channel closure or reaping.
