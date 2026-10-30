@@ -57,6 +57,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-10j](../native-economic-session.md) supplies that optional native coordinator within the existing game fleet: parent-slot evaluator/budget lifetimes enclose per-incarnation command/native process owners. Context and actual current conditions precede evaluation/command polling; failed delivery or terminal ownership revokes the entire fleet. Actual reaping plus settled runtime-error exit precedes retirement and new-generation admission. Ordinary factories remain empty.
 
+[P-09b](../work-measurement.md) captures an explicit original sample stream against the actual issuer, with automatic complete-boundary trial windows and a final-Pause handoff. Its immutable record includes the private binding, all original settled receipts and complete profile input. The enclosing experiment controller must own command/source transport and channel revocation separately; economic issuance cannot overlap measurement authority.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

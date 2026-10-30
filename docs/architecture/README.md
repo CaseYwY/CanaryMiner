@@ -4,7 +4,7 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-10j.** [Native economic sessions](../native-economic-session.md) connect exact economic commands/receipts to actual native delivery, fleet revocation and eligible reaped replacement, retaining per-slot evaluators and budgets across incarnations. Live measurement/native source controls, complete safety/financial qualification, ordinary activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
+**Latest bounded slice: P-09b.** [Receipt-bound measurement capture](../work-measurement.md) binds original sample streams to actual issuer settlements, automatically forms bounded trial windows and retains complete immutable originals after final Pause. [P-10j native economic sessions](../native-economic-session.md) supply actual command delivery/revocation and eligible reaped replacement. Experiment command/source transport, complete safety/financial qualification, ordinary activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 

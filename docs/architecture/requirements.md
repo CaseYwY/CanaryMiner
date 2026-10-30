@@ -104,6 +104,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-09a](../work-profile.md) supplies offline fixture measurement audit, complete identity/plan binding and session-use invalidation. Live sampling, durable/runtime revalidation and real-source qualification remain open.
 
+[P-09b](../work-measurement.md) adds explicit-parent, actual-issuer-bound sample capture, automatic original-boundary windows, elapsed/observed-energy limits and immutable complete receipts/observations after final Pause. R-PRO-001/002/003 remain partial pending experiment command/source ownership, native transport/settings, private persistence and real sensor/work/game qualification.
+
 [P-10a](../economic-study.md) supplies default-off exact fixture studies using whole-record-bound rewards, complete economic price/FX windows and an explicit flat GPU-board cost proxy. Real-time net scores include declared prospective transition/test costs; live scheduling, hysteresis, whole-meter economics and real-source qualification remain open.
 
 [P-10c](../economic-study-use.md) adds a one-result/explicit-parent validity latch over the immutable study. Current full-plan/conditions, original earliest dependency expiry and non-extending dual-clock ceilings prevent stale reference eligibility, including delayed first use. Nonpositive/empty complete candidate results remain distinct from missing input. R-OPT-001/003 and R-SAFE-001/002 remain partial: live ticket/configuration-change admission, hysteresis/runtime actuation and qualified real sources are not supplied.
