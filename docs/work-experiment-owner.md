@@ -2,7 +2,7 @@
 
 M-PROFILES/M-OPTIMIZER/M-SUPERVISOR; R-PRO-001/002/003, R-OPT-001/003 and R-SAFE-001/002; T-PROFILES/T-OPTIMIZER/T-INTENT; D-85.
 
-`WorkExperimentOwner` owns [measurement capture](work-measurement.md) and exclusively issues/acknowledges that experiment's real worker commands. It has an independent default-off policy, freezes the complete profile plan, borrows the exact parent intent/token and issuer, and admits only the actual revision-1 Paused receipt plus the original complete-boundary baseline. All methods belong to one control thread. Ordinary startup and `GameWorkerSession` do not yet construct this owner; source qualification remains SyntheticFixture.
+`WorkExperimentOwner` owns [measurement capture](work-measurement.md) and exclusively issues/acknowledges that experiment's real worker commands. It has an independent default-off policy, freezes the complete profile plan, borrows the exact parent intent/token and issuer, and admits only the actual revision-1 Paused receipt plus the original complete-boundary baseline. All methods belong to one control thread. [P-09g](native-work-experiment-session.md) optionally constructs it in `GameWorkerSession`; ordinary startup remains inactive and source qualification remains SyntheticFixture.
 
 ## Original authority and limits
 
@@ -36,7 +36,7 @@ The economic guard's public `start` still requires revision 1. Its private measu
 
 An independent handoff barrier requires an economic study whose original evaluation time is **strictly later** than the transfer, including same-millisecond ambiguity. It does not restamp an application receipt. The experiment admission clock anchor is retained by the successor; the parent budget keeps its own original anchor. A safe Pause renewal may occur before a qualifying study exists. The profile, reward and price qualification gates still apply to that study.
 
-This implements the single-incarnation measurement-to-economic seam. P-09d adds optional cross-attempt reservations. Live completed-work/power/drift adapters, native sample transport, fleet admission/replacement integration, private review/persistence, ordinary settings/CLI and physical GPU/game qualification remain open.
+This implements the single-incarnation measurement-to-economic seam. P-09d adds optional cross-attempt reservations, and P-09g connects native fleet admission/handoff/reaped replacement. Qualified completed-work/power/drift adapters, native sample transport, private review/persistence, ordinary settings/CLI and physical GPU/game qualification remain open.
 
 ## Verification scope
 

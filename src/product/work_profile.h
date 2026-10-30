@@ -46,6 +46,7 @@ struct WorkProfileInput {
     std::vector<WorkProfileSample> samples; // complete ordered run, including gaps between repeated windows
     std::vector<WorkProfileWindow> windows; // candidate-major, repetition-minor; boundary indices, never interpolated work
 };
+bool sameWorkProfileInput(const WorkProfileInput &,const WorkProfileInput &); // complete originals, not just plan/identity equivalence
 struct WorkProfileRate {
     ExactDecimal completedTmacs;uint64_t elapsedMs=0;
     bool formatPerSecond(unsigned places,std::string *out)const;

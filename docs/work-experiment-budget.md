@@ -2,7 +2,7 @@
 
 M-PROFILES/M-OPTIMIZER/M-SUPERVISOR; R-PRO-001/002/003, R-OPT-001/003 and R-SAFE-001/002; T-PROFILES/T-OPTIMIZER/T-INTENT; D-86.
 
-`WorkExperimentBudget` is a default-off, single-control-thread budget for measurement attempts in one logical parent slot. It freezes its own policy, complete work plan and exact borrowed parent intent/token, and must outlive every attached [experiment owner](work-experiment-owner.md). Ordinary startup and `GameWorkerSession` do not yet construct it. The optional owner argument preserves isolated P-09c use; omitting it supplies no cross-attempt budget.
+`WorkExperimentBudget` is a default-off, single-control-thread budget for measurement attempts in one logical parent slot. It freezes its own policy, complete work plan and exact borrowed parent intent/token, and must outlive every attached [experiment owner](work-experiment-owner.md). [P-09g](native-work-experiment-session.md) optionally constructs it in `GameWorkerSession`; ordinary startup remains inactive. The optional owner argument preserves isolated P-09c use; omitting it supplies no cross-attempt budget.
 
 ## Reserve before Run; never refund
 

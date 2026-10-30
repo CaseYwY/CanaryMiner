@@ -6,6 +6,7 @@
 namespace om {
 namespace {
 OptimizationTime optimizationTime(GameGuardTime t){return {t.utcMs,t.monotonicMs};}
+WorkMeasurementTime measurementTime(GameGuardTime t){return {t.utcMs,t.monotonicMs};}
 bool sameSafety(const WorkerSafetyEvidence &a,const WorkerSafetyEvidence &b){
     return a.epoch==b.epoch&&a.revision==b.revision&&a.observed.utcMs==b.observed.utcMs&&a.observed.monotonicMs==b.observed.monotonicMs&&
         a.safety.telemetryValid==b.safety.telemetryValid&&a.safety.thermalSafe==b.safety.thermalSafe&&a.safety.fault==b.safety.fault;
@@ -14,10 +15,15 @@ bool sameSafety(const WorkerSafetyEvidence &a,const WorkerSafetyEvidence &b){
 struct GameWorkerSession::Impl {
     struct Life {
         const uint64_t generation;
+        const WorkerControlBinding binding;
         WorkerControlIssuer issuer;WorkerProcessOwner owner;
+        std::unique_ptr<WorkExperimentOwner> experiment;bool experimentStarted=false;
+        std::optional<WorkerReceipt> initialPause;
+        struct Sample {uint64_t sequence=0;WorkProfileSample original;};
+        std::optional<Sample> sample;
         std::unique_ptr<EconomicCommandOwner> commands;bool commandStarted=false;
         bool disconnected=false,settledBeforeDisconnect=false;
-        Life(WorkerControlBinding b,const SessionIntent &i,SessionToken t):generation(b.workerGeneration),issuer(std::move(b),i,t){}
+        Life(WorkerControlBinding b,const SessionIntent &i,SessionToken t):generation(b.workerGeneration),binding(b),issuer(std::move(b),i,t){}
     };
     struct Slot {
         std::filesystem::path exe;std::vector<std::string> args;unsigned drain=0;
@@ -26,6 +32,7 @@ struct GameWorkerSession::Impl {
         uint64_t contextRevision=1;bool drift=false;WorkProfileConditions conditions;
         std::unique_ptr<EconomicEvaluationOwner> evaluation;
         std::unique_ptr<EconomicParentBudget> budget; // lives/guards are destroyed before these borrowed parent owners
+        std::unique_ptr<WorkExperimentBudget> experimentBudget;
         std::vector<std::unique_ptr<Life>> lives; // retain retired owners until final join; no join/reconstruction inside tick
     };
     const SessionIntent &intent;SessionToken token;GameWorkerPolicy policy;
@@ -45,9 +52,11 @@ struct GameWorkerSession::Impl {
         attempted=true;state=s;cancel=true;game.requestStop();
         for(auto &slot:slots){slot.view.revoked=true;slot.view.retryable=false;slot.view.paused=false;slot.view.pauseRequested=true;
             if(slot.launchPending){slot.launchPending=false;slot.view.done=true;slot.view.exitCode=s==WorkerFleetState::Faulted?8:0;}
-            for(auto &life:slot.lives){if(life->commands)life->commands->requestStop();life->issuer.requestStop();life->owner.requestStop();}
+            for(auto &life:slot.lives){if(life->experiment)life->experiment->requestStop();if(life->commands)life->commands->requestStop();
+                life->sample.reset();life->issuer.requestStop();life->owner.requestStop();}
             if(slot.evaluation)slot.evaluation->requestStop();
-            if(slot.budget)slot.budget->requestStop();}
+            if(slot.budget)slot.budget->requestStop();
+            if(slot.experimentBudget)slot.experimentBudget->requestStop();}
     }
     bool time(GameGuardTime now){
         if(!intent.permits(token)){halt(WorkerFleetState::Stopped);return false;}
@@ -80,6 +89,8 @@ struct GameWorkerSession::Impl {
         WorkerControlBinding binding{keys[0],keys[nextKey++],token.epoch,slot.view.generation,index};
         auto life=std::make_unique<Life>(binding,intent,token);
         if(slot.evaluation)life->commands=std::make_unique<EconomicCommandOwner>(economics[index].commands,binding,*slot.evaluation,life->issuer,*slot.budget,intent,token);
+        if(slot.experimentBudget)life->experiment=std::make_unique<WorkExperimentOwner>(economics[index].experiment->commands,
+            economics[index].plan,binding,life->issuer,intent,token,slot.experimentBudget.get());
         const bool started=life->issuer.start(now.monotonicMs);
         const auto initial=started?life->issuer.issue(WorkerDirective::Pause,now.monotonicMs,workerControlMaxLeaseMs):std::nullopt;
         slot.lives.push_back(std::move(life));slot.launchPending=false;
@@ -101,24 +112,57 @@ struct GameWorkerSession::Impl {
             const bool settled=life.disconnected?life.settledBeforeDisconnect:issue.state==WorkerControlState::Active&&!issue.pending;
             slot.view.retryable=owner.state==WorkerOwnerState::Exited&&owner.reaped&&owner.exitCode==1&&settled;
             life.issuer.requestStop();
+            if(life.experiment&&!life.commandStarted){life.experiment->transportFailed();halt(WorkerFleetState::Faulted);return;}
             if(life.commands){
                 // Only actual reaping plus settled control at disconnect/exit can release this incarnation's budget attachment.
-                if(slot.view.retryable&&life.commandStarted){if(!life.commands->retire(optimizationTime(now))){halt(WorkerFleetState::Faulted);return;}}
-                else{slot.view.retryable=false;life.commands->requestStop();}}
+                if(slot.view.retryable&&life.commandStarted){if(!life.commands->retire(optimizationTime(now))||
+                    (life.experiment&&!slot.experimentBudget->retire(life.issuer,measurementTime(now)))){halt(WorkerFleetState::Faulted);return;}}
+                else{slot.view.retryable=false;life.commands->requestStop();if(slot.experimentBudget)slot.experimentBudget->requestStop();}}
             return;
         }
         if(owner.state==WorkerOwnerState::Stopping){
+            if(life.experiment&&!life.commandStarted){life.experiment->transportFailed();halt(WorkerFleetState::Faulted);return;}
             if(!life.disconnected){const auto issue=life.issuer.snapshot(now.monotonicMs);life.disconnected=true;
                 life.settledBeforeDisconnect=issue.state==WorkerControlState::Active&&!issue.pending;slot.view.commandPending=issue.pending.has_value();life.issuer.requestStop();}
             slot.view.revoked=true;slot.view.paused=false;slot.view.pauseRequested=true;return;
         }
         if(owner.revoked){halt(WorkerFleetState::Faulted);return;}
         if(owner.receipt&&owner.receipt->observedMonoMs<=now.monotonicMs){const auto accepted=life.commandStarted?
-            life.commands->acknowledge(*owner.receipt,optimizationTime(now)):life.issuer.acknowledge(*owner.receipt,now.monotonicMs);
+            life.commands->acknowledge(*owner.receipt,optimizationTime(now)):life.experimentStarted?
+            life.experiment->acknowledge(*owner.receipt,measurementTime(now),slot.conditions,permittedUntil):life.issuer.acknowledge(*owner.receipt,now.monotonicMs);
             if(accepted==WorkerReceiptResult::Rejected||accepted==WorkerReceiptResult::Terminal){halt(WorkerFleetState::Faulted);return;}}
         const auto issue=life.issuer.snapshot(now.monotonicMs);
         slot.view.commandPending=issue.pending.has_value();
         if(issue.state!=WorkerControlState::Active){halt(WorkerFleetState::Faulted);return;}
+        if(life.experiment&&!life.commandStarted){
+            slot.view.pauseRequested=true;slot.view.paused=life.issuer.paused(now.monotonicMs);
+            if(!life.experimentStarted){
+                if(issue.pending||!issue.settled||owner.state!=WorkerOwnerState::Running)return;
+                if(issue.settled->kind!=WorkerReceiptKind::Paused||issue.settled->command.revision!=1){halt(WorkerFleetState::Faulted);return;}
+                life.initialPause=issue.settled;
+                if(!life.sample)return; // original initial lease bounds baseline admission; never silently renew revision 1
+                auto sample=std::move(*life.sample);life.sample.reset();
+                if(sample.sequence!=1||!life.experiment->start(std::move(sample.original),measurementTime(now),slot.conditions,permittedUntil)){
+                    halt(WorkerFleetState::Faulted);return;}
+                life.experimentStarted=true;
+            }else if(life.sample){auto sample=std::move(*life.sample);life.sample.reset();
+                if(!life.experiment->append(sample.sequence,std::move(sample.original),measurementTime(now),slot.conditions,permittedUntil)){
+                    halt(WorkerFleetState::Faulted);return;}}
+            if(life.experiment->snapshot().state==WorkExperimentState::Holding){
+                if(!life.commands->startAfterMeasurement(optimizationTime(now),economics[index].plan,*life.experiment)){
+                    halt(WorkerFleetState::Faulted);return;}
+                life.commandStarted=true;
+            }else{
+                const auto next=life.experiment->poll(measurementTime(now),slot.conditions,permittedUntil);
+                if(life.experiment->snapshot().revokeRequired){halt(WorkerFleetState::Faulted);return;}
+                if(next){slot.view.commandRevision=next->revision;slot.view.commandDeadlineMonoMs=next->deadlineMonoMs;
+                    if(!life.owner.submit(*next)){life.experiment->transportFailed();halt(WorkerFleetState::Faulted);return;}}
+                const auto current=life.issuer.snapshot(now.monotonicMs);slot.view.commandPending=current.pending.has_value();
+                slot.view.pauseRequested=current.pending?current.pending->directive==WorkerDirective::Pause:
+                    !current.settled||current.settled->command.directive==WorkerDirective::Pause;
+                slot.view.paused=life.issuer.paused(now.monotonicMs);return;
+            }
+        }
         if(life.commands){
             if(!life.commandStarted){
                 slot.view.pauseRequested=true;slot.view.paused=life.issuer.paused(now.monotonicMs);
@@ -175,6 +219,10 @@ bool GameWorkerSession::start(unsigned count,GameGuardTime now){
             slot.budget=std::make_unique<EconomicParentBudget>(EconomicParentBudgetPolicy{true,g.cooldownMs,g.transitionWindowMs,g.maximumTransitions,p.policy.maximumIncarnations},p.intent,p.token);
             slot.evaluation=std::make_unique<EconomicEvaluationOwner>(e.evaluation,p.intent,p.token);
             if(!slot.budget->start(optimizationTime(now))||!slot.evaluation->start(optimizationTime(now))){p.halt(WorkerFleetState::Faulted);return false;}
+            if(e.experiment){if(!validWorkExperimentPolicy(e.experiment->commands)||e.experiment->commands.commandLeaseMs!=p.policy.commandLeaseMs||
+                !e.experiment->budget.enabled){p.halt(WorkerFleetState::Faulted);return false;}
+                slot.experimentBudget=std::make_unique<WorkExperimentBudget>(e.experiment->budget,e.plan,p.intent,p.token);
+                if(!slot.experimentBudget->start(measurementTime(now))){p.halt(WorkerFleetState::Faulted);return false;}}
         }
         if(!p.game.start(now)){p.halt(WorkerFleetState::Faulted);return false;}
         p.state=WorkerFleetState::Starting;
@@ -259,6 +307,13 @@ EconomicSubmission GameWorkerSession::submitEconomic(unsigned index,const Optimi
     if((p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)||index>=p.slots.size()||!p.slots[index].evaluation)return EconomicSubmission::Inactive;
     if(!p.time(now))return EconomicSubmission::Inactive;
     if(revision!=p.slots[index].contextRevision)return EconomicSubmission::WrongContext;
+    const auto &slot=p.slots[index];
+    if(slot.experimentBudget){
+        if(slot.launchPending||slot.lives.empty()||!slot.lives.back()->commandStarted)return EconomicSubmission::Inactive;
+        const auto &record=slot.lives.back()->commands->snapshot().measurement;
+        try{if(!record||!input.profile||!sameWorkProfileInput(record->measurement->input,input.profile->input()))return EconomicSubmission::Invalid;}
+        catch(...){p.halt(WorkerFleetState::Faulted);return EconomicSubmission::Invalid;}
+    }
     const auto result=p.slots[index].evaluation->submit(ticket,revision,std::move(input),optimizationTime(now));
     if(p.slots[index].evaluation->snapshot().state!=EconomicEvaluationState::Running)p.halt(WorkerFleetState::Faulted);
     return result;
@@ -277,6 +332,30 @@ GameEconomicSnapshot GameWorkerSession::economicSnapshot(unsigned index)const{co
     out.evaluation=slot.evaluation->snapshot();out.budget=slot.budget->snapshot();
     if(!slot.launchPending&&!slot.lives.empty()&&slot.lives.back()->generation==slot.view.generation&&slot.lives.back()->commands){
         out.commands=slot.lives.back()->commands->snapshot();out.commandStarted=slot.lives.back()->commandStarted;}
+    return out;
+}
+GameWorkSampleAdmission GameWorkerSession::submitExperimentSample(unsigned index,const WorkerControlBinding &binding,uint64_t sequence,WorkProfileSample sample,GameGuardTime now){
+    auto &p=*impl_;using A=GameWorkSampleAdmission;
+    if(p.state!=WorkerFleetState::Active||index>=p.slots.size()||!p.slots[index].experimentBudget)return A::Inactive;
+    if(!p.time(now))return A::Inactive;
+    auto &slot=p.slots[index];if(binding.workerGeneration!=slot.view.generation)return A::WrongGeneration;
+    if(slot.launchPending||slot.lives.empty()||slot.view.done||slot.view.revoked)return A::NotReady;
+    auto &life=*slot.lives.back();const auto &expected=life.binding;
+    if(binding.epoch!=expected.epoch||binding.slot!=expected.slot||binding.sessionKey!=expected.sessionKey||binding.workerKey!=expected.workerKey)return A::WrongBinding;
+    if(life.commandStarted)return A::Inactive;
+    if(!life.initialPause)return A::NotReady;
+    if(life.sample)return A::Full;
+    const auto previous=life.experimentStarted?life.experiment->measurement().sequence:0;
+    if(previous==UINT64_MAX||!sequence||sequence!=previous+1||sample.fingerprint.size()>64){p.halt(WorkerFleetState::Faulted);return A::Invalid;}
+    try{life.sample=Impl::Life::Sample{sequence,std::move(sample)};return A::Accepted;}
+    catch(...){p.halt(WorkerFleetState::Faulted);return A::Invalid;}
+}
+GameExperimentSnapshot GameWorkerSession::experimentSnapshot(unsigned index)const{const auto &p=*impl_;GameExperimentSnapshot out;
+    if(index>=p.slots.size()||!p.slots[index].experimentBudget)return out;
+    const auto &slot=p.slots[index];out.configured=true;out.workerGeneration=slot.view.generation;out.budget=slot.experimentBudget->snapshot();
+    if(!slot.launchPending&&!slot.lives.empty()&&slot.lives.back()->generation==slot.view.generation){const auto &life=*slot.lives.back();
+        out.binding=life.binding;out.initialPause=life.initialPause;out.started=life.experimentStarted;out.samplePending=life.sample.has_value();
+        out.commands=life.experiment->snapshot();out.measurement=life.experiment->measurement();}
     return out;
 }
 void GameWorkerSession::requestStop(){impl_->halt(WorkerFleetState::Stopped);}

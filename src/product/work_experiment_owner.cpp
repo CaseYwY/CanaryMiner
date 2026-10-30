@@ -61,13 +61,14 @@ struct WorkExperimentOwner::Impl {
 WorkExperimentOwner::WorkExperimentOwner(WorkExperimentPolicy p,WorkProfilePlan f,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,WorkExperimentBudget *budget)
     :impl_(new Impl(p,std::move(f),std::move(b),w,i,t,budget)){}
 WorkExperimentOwner::~WorkExperimentOwner(){if(live(impl_->view.state))requestStop();}
+bool validWorkExperimentPolicy(const WorkExperimentPolicy &p){return p.enabled&&p.commandLeaseMs>=100&&p.commandLeaseMs<=workerControlMaxLeaseMs&&
+    p.renewalMarginMs&&p.renewalMarginMs<=p.commandLeaseMs/2&&p.handoffTimeoutMs&&p.handoffTimeoutMs<=60000;}
 bool WorkExperimentOwner::start(WorkProfileSample sample,WorkMeasurementTime now,const WorkProfileConditions &c,uint64_t permission){auto &p=*impl_;
     if(p.attempted)return false;
     p.attempted=true;
     if(!p.intent.permits(p.token)){p.halt(R::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;p.view.status=R::Disabled;return false;}
-    try{if(p.policy.commandLeaseMs<100||p.policy.commandLeaseMs>workerControlMaxLeaseMs||!p.policy.renewalMarginMs||
-            p.policy.renewalMarginMs>p.policy.commandLeaseMs/2||!p.policy.handoffTimeoutMs||p.policy.handoffTimeoutMs>60000){p.halt(R::Invalid);return false;}
+    try{if(!validWorkExperimentPolicy(p.policy)){p.halt(R::Invalid);return false;}
         p.anchor=p.last=now;p.baseline={sample.utcMs,sample.monotonicMs};
         if(!p.clock(now)||!p.capture.start(std::move(sample),now,c)){p.halt(p.capture.snapshot().status);return false;}
         if(p.budget){const auto status=p.budget->admit(&p,p.issuer,p.intent,p.token,*p.plan,now);if(status!=R::Ok){p.halt(status);return false;}}

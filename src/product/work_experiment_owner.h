@@ -7,6 +7,7 @@ struct WorkExperimentPolicy {
     bool enabled=false;
     uint64_t commandLeaseMs=1000,renewalMarginMs=100,handoffTimeoutMs=5000;
 };
+bool validWorkExperimentPolicy(const WorkExperimentPolicy &);
 enum class WorkExperimentState { Dormant, Disabled, Running, Holding, Transferred, Stopped, Faulted };
 struct WorkExperimentRunBinding {
     WorkerCommand command;

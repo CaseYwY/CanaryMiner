@@ -13,7 +13,7 @@ int child(int argc,char **argv){
     if(argc!=7||std::string(argv[3])!="--worker-control-v1")return 90;
     WorkerChannelHandles handles;if(!parseWorkerChannelHandles(argv[4],argv[5],argv[6],&handles))return 91;
     WorkerControlClient client;if(!client.adopt(handles))return 92;
-    const std::string mode=argv[2];const auto began=workerControlNowMs();uint64_t first=0,printed=0;unsigned installed=999;int code=8;
+    const std::string mode=argv[2];const auto began=workerControlNowMs();uint64_t first=0,printed=0;unsigned installed=999;int code=8;bool measured=false;
     while(workerControlNowMs()-began<15000){const auto state=client.requestState();
         if(state==WorkControlRequest::Stop){code=0;break;}
         if(state==WorkControlRequest::Fault)break;
@@ -22,14 +22,15 @@ int child(int argc,char **argv){
             if(mode!="withheld"&&mode!="exit-pending")client.applyWorkWait(installed);
         }
         const auto view=client.snapshot();
+        if(view.receipt&&view.receipt->kind==K::Paused&&view.receipt->command.revision>1)measured=true;
         if(view.receipt&&view.receipt->command.revision!=printed){printed=view.receipt->command.revision;
             if(view.receipt->command.directive==D::Run){
                 std::puts(view.receipt->kind==K::WaitApplied?"ECONAPPLIED":"ECONACCEPTED");std::fflush(stdout);
-                if(!first)first=workerControlNowMs();
+                if(!first&&(mode!="measured-restart"||measured))first=workerControlNowMs();
             }
         }
         if(first&&workerControlNowMs()-first>=200){
-            if(mode=="exit-pending"||mode=="exit-error"||(mode=="restart-once"&&view.receipt&&view.receipt->command.binding.workerGeneration==1)){code=1;break;}
+            if(mode=="exit-pending"||mode=="exit-error"||((mode=="restart-once"||mode=="measured-restart")&&view.receipt&&view.receipt->command.binding.workerGeneration==1)){code=1;break;}
             if(mode=="exit-clean"){code=0;break;}
             if(mode=="exit-fault"){code=8;break;}
         }
@@ -77,7 +78,9 @@ struct Rig {
     std::optional<OptimizationTicket> ticket(unsigned i=0){std::optional<OptimizationTicket> result;
         CHECK(until([&]{result=session->economicSchedule(i).lanes[1].pending;return result.has_value();}));return result;}
     EconomicInput original(const OptimizationTicket &t,unsigned i=0,const char *price="0.01")const{
-        auto in=input();in.generation=token.epoch;in.nowUtcMs=t.issued.utcMs;in.nowMonoMs=t.issued.monotonicMs;
+        const auto experiment=session->experimentSnapshot(i);
+        auto in=experiment.commands.record?input(buildWorkProfile(experiment.commands.record->measurement->input)):input();
+        in.generation=token.epoch;in.nowUtcMs=t.issued.utcMs;in.nowMonoMs=t.issued.monotonicMs;
         in.conditions=economy(i).conditions;prices(in,price);
         in.electricity.opening.throughUtcMs=t.issued.utcMs+1;
         in.electricity.opening.timeDatabaseVersion=civilAt(in.electricity.plan.clock,t.issued.utcMs+1).databaseVersion;return in;
@@ -93,6 +96,29 @@ struct Rig {
         for(unsigned i=0;i<count;++i)if(!study(i))return false;
         return true;
     }
+    void measurements(unsigned attempts=2){for(auto &p:policies){auto &plan=p.plan;plan.telemetryCadenceMs=10;plan.maximumSampleGapMs=1000;
+        plan.warmupMs=20;plan.measurementMs=50;plan.repetitions=1;plan.maximumElapsedMs=8000;plan.maximumEnergy.numerator=d("10000000");
+        GameExperimentPolicy e;e.commands={true,workers.commandLeaseMs,100,5000};e.budget.enabled=true;e.budget.maximumAttempts=attempts;
+        e.budget.minimumRetestMs=0;e.budget.maximumReservedElapsedMs=16000;e.budget.maximumReservedEnergy.numerator=d("20000000");p.experiment=e;}reset();}
+    GameExperimentSnapshot experiment(unsigned i=0)const{return session->experimentSnapshot(i);}
+    bool baselineReady(){return until([&]{for(unsigned i=0;i<count;++i)if(!experiment(i).initialPause)return false;return true;});}
+    WorkProfileSample sample(GameGuardTime t,unsigned i=0)const{const auto s=experiment(i);WorkProfileSample out;
+        out.generation=token.epoch;out.counterEpoch=s.workerGeneration;out.fingerprint=workProfileFingerprint(policies[i].plan.identity);
+        out.utcMs=t.utcMs;out.monotonicMs=t.monotonicMs;
+        out.appliedHostWaitMs=s.measurement.latestSample?s.measurement.latestSample->appliedHostWaitMs:0;
+        if(s.commands.receipt&&s.commands.receipt->kind==K::WaitApplied)out.appliedHostWaitMs=*s.commands.receipt->command.hostWaitMs;
+        out.completeWorkBoundary=out.safetyTelemetryValid=out.thermalSafe=out.gameStateKnown=true;
+        out.milliwatts=out.appliedHostWaitMs?100000:200000;
+        out.userTmacs=d(std::to_string((t.monotonicMs-anchor)*2));out.donationTmacs=d(std::to_string(t.monotonicMs-anchor));return out;}
+    bool feed(unsigned i=0){const auto s=experiment(i);const auto t=now();
+        if(economy(i).commandStarted||s.commands.pending||s.samplePending||!s.initialPause||
+            (s.measurement.latestSample&&t.monotonicMs-s.measurement.latestSample->monotonicMs<policies[i].plan.telemetryCadenceMs))return true;
+        return session->submitExperimentSample(i,s.binding,s.measurement.sequence+1,sample(t,i),t)==GameWorkSampleAdmission::Accepted;}
+    bool measure(){const auto end=workerControlNowMs()+5000;while(workerControlNowMs()<end){step();bool done=true;
+        if(session->state()!=F::Active)return false;
+        for(unsigned i=0;i<count;++i){done=done&&economy(i).commandStarted;if(!feed(i))return false;}
+        if(done)return true;
+        sleep();}return false;}
 };
 void nativeCommands(){Rig r;CHECK(r.start()&&r.ready());
     CHECK(r.view().paused&&r.view().commandRevision==1&&!r.economy().commands.lastRun);
@@ -186,6 +212,81 @@ void admissionAndTickets(){
         CHECK(r.view().ownershipUnresolved&&r.view().exitCode==8&&!r.launch(0));
     }
 }
+void measuredSession(){using A=GameWorkSampleAdmission;Rig r;r.measurements();CHECK(r.start()&&r.baselineReady());
+    CHECK(!r.economy().commandStarted&&!r.experiment().started&&r.experiment().budget.attempts==0&&r.view().commandRevision==1);
+    const auto t=r.now();const auto original=r.sample(t);const auto binding=r.experiment().binding;
+    auto wrongGeneration=binding;++wrongGeneration.workerGeneration;
+    CHECK(r.session->submitExperimentSample(0,wrongGeneration,1,original,t)==A::WrongGeneration&&r.session->state()==F::Active);
+    for(unsigned part=0;part<4;++part){auto foreign=binding;
+        if(part==0)++foreign.epoch;
+        if(part==1)++foreign.slot;
+        if(part==2)foreign.sessionKey=std::string(32,'f');
+        if(part==3)foreign.workerKey=std::string(32,'f');
+        CHECK(r.session->submitExperimentSample(0,foreign,1,original,t)==A::WrongBinding&&!r.experiment().samplePending&&r.session->state()==F::Active);}
+    CHECK(r.session->submitExperimentSample(0,binding,1,original,t)==A::Accepted&&r.experiment().samplePending);
+    CHECK(r.session->submitExperimentSample(0,binding,1,original,t)==A::Full);
+    sleep();r.step();CHECK(r.experiment().started&&r.experiment().budget.attempts==1&&r.experiment().budget.attached);
+    CHECK(r.experiment().measurement.latestSample&&r.experiment().measurement.latestSample->monotonicMs==original.monotonicMs);
+    const auto first=r.experiment().budget.latest;const auto initialTicket=r.session->economicSchedule(0).lanes[1].pending;
+    if(initialTicket)CHECK(r.session->submitEconomic(0,*initialTicket,1,r.original(*initialTicket),r.now())==EconomicSubmission::Inactive);
+    CHECK(r.measure());const auto snapshot=r.experiment();const auto record=snapshot.commands.record;
+    CHECK(record&&snapshot.commands.state==WorkExperimentState::Transferred&&snapshot.budget.completed&&snapshot.budget.transferred&&snapshot.budget.attached);
+    CHECK(record&&record==r.economy().commands.measurement&&record->measurement->binding.workerKey==binding.workerKey&&
+        record->measurement->input.windows.size()==2&&record->measurement->receipts.front().kind==K::Paused&&record->measurement->receipts.back().kind==K::Paused);
+    CHECK(r.view().paused&&!r.economy().commands.lastRun&&r.economy().budget.attached&&r.economy().budget.transitionsInWindow==0);
+    CHECK(r.session->submitExperimentSample(0,binding,999,r.sample(r.now()),r.now())==A::Inactive);
+    r.discard();const auto ticket=r.ticket();CHECK(ticket.has_value());if(ticket){auto wrong=r.original(*ticket);auto altered=wrong.profile->input();
+        for(auto &s:altered.samples){ExactDecimal sum;s.userTmacs->add(d("1"),&sum);s.userTmacs=sum;}
+        wrong.profile=buildWorkProfile(altered);CHECK(wrong.profile&&workProfilePlanFingerprint(wrong.currentPlan)==workProfilePlanFingerprint(altered.plan));
+        CHECK(r.session->submitEconomic(0,*ticket,1,std::move(wrong),r.now())==EconomicSubmission::Invalid&&!r.economy().evaluation.pending);
+        CHECK(r.session->submitEconomic(0,*ticket,1,r.original(*ticket),r.now())==EconomicSubmission::Accepted);
+        CHECK(r.until([&]{return !r.economy().evaluation.pending&&r.economy().evaluation.resultSequence==ticket->sequence;}));}
+    CHECK(r.running()&&r.economy().budget.transitionsInWindow==1&&r.experiment().budget.latest==first);
+    CHECK(record&&sameWorkProfileInput(record->measurement->input,r.economy().commands.lastRun->study->input().profile->input()));
+    r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.experiment().budget.attached&&r.experiment().budget.attempts==1);
+    CHECK(record==r.experiment().commands.record&&first->elapsedMs==r.policies[0].plan.maximumElapsedMs&&!r.launch(0));
+}
+void measuredReplacement(){using A=GameWorkSampleAdmission;
+    for(unsigned attempts:{1u,2u}){Rig r;r.measurements(attempts);CHECK(r.start("measured-restart")&&r.baselineReady()&&r.measure());
+        const auto before=r.experiment();r.discard();CHECK(r.study()&&r.running()&&r.until([&]{return r.view().done;}));
+        CHECK(r.view().retryable&&r.view().reaped&&r.view().exitCode==1&&!r.experiment().budget.attached&&!r.economy().budget.attached);
+        const auto priorProfile=buildWorkProfile(before.commands.record->measurement->input);
+        CHECK(r.launch(0)&&!r.experiment().initialPause&&!r.experiment().commands.record&&r.experiment().budget.attempts==1);
+        CHECK(r.baselineReady()&&r.experiment().binding.workerGeneration==2&&r.experiment().binding.workerKey!=before.binding.workerKey);
+        CHECK(r.session->submitExperimentSample(0,before.binding,1,r.sample(r.now()),r.now())==A::WrongGeneration&&r.session->state()==F::Active);
+        if(attempts==1){CHECK(r.feed());r.step();CHECK(r.session->state()==F::Faulted&&r.experiment().budget.attempts==1&&
+            r.experiment().budget.reservedElapsedMs==8000&&!r.economy().commandStarted);}
+        else{CHECK(r.measure()&&r.experiment().budget.attempts==2&&r.experiment().budget.reservedElapsedMs==16000&&r.economy().budget.incarnations==2);
+            const auto ticket=r.ticket();if(ticket){auto wrong=r.original(*ticket);wrong.profile=priorProfile;
+                CHECK(r.session->submitEconomic(0,*ticket,1,std::move(wrong),r.now())==EconomicSubmission::Invalid);}
+            CHECK(r.study()&&r.running()&&r.economy().budget.transitionsInWindow==2);
+            CHECK(before.commands.record!=r.experiment().commands.record&&before.budget.latest->number==1&&r.experiment().budget.latest->number==2);}
+        r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable);
+    }
+}
+void measuredWithdrawal(){using A=GameWorkSampleAdmission;
+    for(unsigned mode=0;mode<5;++mode){Rig r(2);r.measurements();CHECK(r.start("withheld")&&r.baselineReady());CHECK(r.feed(0)&&r.feed(1));r.step();
+        CHECK(r.until([&]{return r.lines[0].find("ECONACCEPTED")!=std::string::npos;}));const auto before=r.experiment();
+        CHECK(before.commands.pending&&before.budget.attached&&before.budget.attempts==1&&!before.commands.record);
+        if(mode==0){auto unsafe=r.fresh(r.now());unsafe.safety.safety.thermalSafe=false;r.step(&unsafe);}
+        if(mode==1){CHECK(r.session->setEconomicContext(0,1,true));r.step();}
+        if(mode==2){r.intent.stop();r.step();}
+        if(mode==3)r.session->requestStop();
+        if(mode==4)CHECK(r.session->submitExperimentSample(0,before.binding,99,r.sample(r.now()),r.now())==A::Invalid);
+        CHECK(r.session->state()==(mode==2||mode==3?F::Stopped:F::Faulted));
+        for(unsigned i=0;i<2;++i)CHECK(r.view(i).revoked&&r.experiment(i).commands.revokeRequired&&r.experiment(i).budget.attempts==1&&r.experiment(i).budget.attached);
+        r.session->stop();for(unsigned i=0;i<2;++i)CHECK(r.view(i).reaped&&r.view(i).done&&!r.view(i).retryable&&!r.launch(i));}
+    {Rig r(2);r.measurements();for(auto &p:r.policies)p.plan.measurementMs=500;r.reset();CHECK(r.start("exit-error")&&r.baselineReady());
+        CHECK(!r.measure()&&r.session->state()==F::Faulted);r.session->stop();for(unsigned i=0;i<2;++i)CHECK(r.view(i).reaped&&!r.view(i).retryable&&r.view(i).revoked);}
+    {Rig r;r.measurements();CHECK(r.start()&&r.baselineReady());auto t=r.now();auto s=r.sample(t);s.utcMs-=1001;s.monotonicMs-=1001;
+        CHECK(r.session->submitExperimentSample(0,r.experiment().binding,1,s,t)==A::Accepted);r.step();CHECK(r.session->state()==F::Faulted&&!r.experiment().started&&r.experiment().budget.attempts==0);r.session->stop();}
+    for(unsigned mode=0;mode<4;++mode){Rig r;r.measurements();auto &e=*r.policies[0].experiment;
+        if(mode==0)e.commands.enabled=false;
+        if(mode==1)e.commands.commandLeaseMs=100;
+        if(mode==2)e.budget.enabled=false;
+        if(mode==3)e.budget.maximumReservedEnergy.numerator=d("0");
+        r.reset();CHECK(!r.start()&&r.session->state()==F::Faulted&&!r.view().requested);r.session->stop();}
+}
 }
 int main(int argc,char **argv){if(argc>2&&std::string(argv[1])=="--economic-child")return child(argc,argv);
     if(argc!=3&&argc!=4)return 2;
@@ -195,5 +296,8 @@ int main(int argc,char **argv){if(argc>2&&std::string(argv[1])=="--economic-chil
     if(suite=="all"||suite=="withdrawal")pendingWithdrawal();
     if(suite=="all"||suite=="replacement")replacement();
     if(suite=="all"||suite=="admission")admissionAndTickets();
+    if(suite=="all"||suite=="measurement")measuredSession();
+    if(suite=="all"||suite=="measurement-replacement")measuredReplacement();
+    if(suite=="all"||suite=="measurement-withdrawal")measuredWithdrawal();
     return finishTests("native economic command sessions");
 }

@@ -3,14 +3,28 @@
 #include "worker_fleet.h"
 #include "game_runtime.h"
 #include "economic_command_owner.h"
+#include "work_experiment_owner.h"
+#include "work_experiment_budget.h"
 namespace om {
 struct GameWorkerPolicy {
     unsigned maximumIncarnations=256,commandLeaseMs=1000,maximumSafetyAgeMs=2000;
 };
+struct GameExperimentPolicy {WorkExperimentPolicy commands;WorkExperimentBudgetPolicy budget;};
 struct GameEconomicPolicy {
     EconomicCommandPolicy commands;
     EconomicEvaluationPolicy evaluation;
     WorkProfilePlan plan;
+    std::optional<GameExperimentPolicy> experiment=std::nullopt; // explicit: measure each incarnation before its economic handoff
+};
+enum class GameWorkSampleAdmission { Accepted, NotReady, Full, WrongGeneration, WrongBinding, Inactive, Invalid };
+struct GameExperimentSnapshot {
+    bool configured=false,started=false,samplePending=false;
+    uint64_t workerGeneration=0;
+    WorkerControlBinding binding;
+    std::optional<WorkerReceipt> initialPause;
+    WorkExperimentSnapshot commands;
+    WorkMeasurementSnapshot measurement;
+    WorkExperimentBudgetSnapshot budget;
 };
 struct GameEconomicSnapshot {
     bool configured=false,commandStarted=false;
@@ -41,6 +55,10 @@ class GameWorkerSession final:public WorkerFleet {
     EconomicSubmission submitEconomic(unsigned slot,const OptimizationTicket &,uint64_t revision,EconomicInput,GameGuardTime);
     OptimizationCompletion completeEconomic(unsigned slot,const OptimizationTicket &,OptimizationOutcome,GameGuardTime); // external lanes/unsubmitted evaluation only
     GameEconomicSnapshot economicSnapshot(unsigned slot)const; // private originals; never public stats or logs
+    // Bounded one-sample inbox. Only tick consumes it, after current safety/game and original receipt admission.
+    // Sources remain explicitly synthetic; raw work/power alignment alone cannot supply this API's qualification.
+    GameWorkSampleAdmission submitExperimentSample(unsigned slot,const WorkerControlBinding &,uint64_t sequence,WorkProfileSample,GameGuardTime);
+    GameExperimentSnapshot experimentSnapshot(unsigned slot)const;
     void requestStop()override;
     void stop()override;
    private:

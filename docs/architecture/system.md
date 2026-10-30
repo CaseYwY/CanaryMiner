@@ -67,6 +67,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-09f](../work-power-alignment.md) supplies explicit drained/held/runnable interval observations on that worker thread. Constant-counter intervals end before side effects and wait installation. Raw power alignment preserves both originals and requires the read plus full known sensor-support interval strictly inside the bracket; it supplies no current authority or automatic sample qualification. Native delivery must separately retain sequencing, liveness and original receipt binding.
 
+[P-09g](../native-work-experiment-session.md) connects the optional experiment owner to each native incarnation, with its reservation budget retained by the logical slot. Tick admits current conditions/receipts before a one-sample inbox, then delivers exclusive experiment commands or performs one-use economic transfer. Whole-group revocation and actual reaping/settled retirement preserve both budgets; complete-profile matching prevents old-life sample substitution. The source/transport/ordinary activation layers remain unqualified.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

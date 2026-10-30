@@ -78,6 +78,13 @@ int main(){
         for(unsigned c=0;c<32;++c){sample(c);for(unsigned r=0;r<32;++r){const auto begin=many.samples.size()-1;tick+=100;sample(c);many.windows.push_back({c,r,begin,begin,begin+1});}tick+=100;}
         const auto full=buildWorkProfile(many,&status);CHECK(full&&status==S::Ok&&full->summary().trials.size()==1024&&full->summary().points.size()==32&&full->summary().measuredMs==102400&&full->summary().overheadMs==3100);}
     auto changed=in;changed.plan.key="fixture.edited";changed.samples[0].fingerprint="changed";CHECK(profile->input().plan.key=="fixture.profile"&&profile->input().samples[0].fingerprint==in.samples[0].fingerprint);
+    CHECK(sameWorkProfileInput(in,profile->input())&&!sameWorkProfileInput(in,changed)&&!sameWorkProfileInput({},{}));
+    // Equivalent rates/totals or the same plan cannot substitute for the complete original measured record.
+    {auto shifted=in;for(auto &sample:shifted.samples){sample.utcMs+=1;sample.monotonicMs+=1;}
+        const auto other=buildWorkProfile(shifted);CHECK(other&&other->summary().totalUserTmacs.compare(s.totalUserTmacs)==0&&!sameWorkProfileInput(in,other->input()));}
+    {auto shifted=in;for(auto &sample:shifted.samples){ExactDecimal n;sample.donationTmacs->add(d("1"),&n);sample.donationTmacs=n;}
+        const auto other=buildWorkProfile(shifted);CHECK(other&&other->summary().totalDonationTmacs.compare(s.totalDonationTmacs)==0&&!sameWorkProfileInput(in,other->input()));}
+    {auto zero=in;zero.samples[0].milliwatts=0;auto missing=zero;missing.samples[0].milliwatts.reset();CHECK(!sameWorkProfileInput(zero,missing));}
     auto id=in.plan.identity;const auto fingerprint=workProfileFingerprint(id);id.deviceKey="ab";id.platformKey="c";const auto one=workProfileFingerprint(id);id.deviceKey="a";id.platformKey="bc";CHECK(one!=workProfileFingerprint(id));
     SessionIntent intent;WorkProfileConditions healthy{true,true,true,false,false,false};WorkProfileUse off(profile,intent,{});CHECK(off.check(in.plan,T+1400,healthy)==S::Stopped);
     const auto token=intent.explicitStart();CHECK(off.check(in.plan,T+1400,healthy)==S::Stopped);

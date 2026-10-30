@@ -43,6 +43,20 @@ std::string workProfilePlanFingerprint(const WorkProfilePlan &p){const auto iden
 }
 bool WorkProfileRate::formatPerSecond(unsigned places,std::string *out)const{ExactDecimal n;
     return elapsedMs&&completedTmacs.multiply(integer(1000),&n)&&n.formatRatio(integer(elapsedMs),places,out);}
+bool sameWorkProfileInput(const WorkProfileInput &a,const WorkProfileInput &b){
+    const auto plan=workProfilePlanFingerprint(a.plan);if(plan.empty())return false;
+    if(a.generation!=b.generation||a.counterEpoch!=b.counterEpoch||a.samples.size()!=b.samples.size()||a.windows.size()!=b.windows.size()||
+        a.samples.size()>8192||a.windows.size()>1024||plan!=workProfilePlanFingerprint(b.plan))return false;
+    const auto same=[](const std::optional<ExactDecimal> &x,const std::optional<ExactDecimal> &y){return x.has_value()==y.has_value()&&(!x||x->compare(*y)==0);};
+    for(size_t i=0;i<a.samples.size();++i){const auto &x=a.samples[i],&y=b.samples[i];
+        if(x.generation!=y.generation||x.counterEpoch!=y.counterEpoch||x.monotonicMs!=y.monotonicMs||x.utcMs!=y.utcMs||x.fingerprint!=y.fingerprint||
+            x.appliedHostWaitMs!=y.appliedHostWaitMs||x.completeWorkBoundary!=y.completeWorkBoundary||x.safetyTelemetryValid!=y.safetyTelemetryValid||
+            x.thermalSafe!=y.thermalSafe||x.gameStateKnown!=y.gameStateKnown||x.gameActive!=y.gameActive||x.fault!=y.fault||x.milliwatts!=y.milliwatts||
+            !same(x.userTmacs,y.userTmacs)||!same(x.donationTmacs,y.donationTmacs))return false;}
+    for(size_t i=0;i<a.windows.size();++i){const auto &x=a.windows[i],&y=b.windows[i];if(x.candidate!=y.candidate||x.repetition!=y.repetition||
+        x.beginSample!=y.beginSample||x.measurementSample!=y.measurementSample||x.endSample!=y.endSample)return false;}
+    return true;
+}
 std::shared_ptr<const WorkProfile> buildWorkProfile(const WorkProfileInput &in,S *status,const std::atomic<bool> *cancel){
     auto fail=[&](S s)->std::shared_ptr<const WorkProfile>{if(status)*status=s;return {};};
     if(cancelled(cancel))return fail(S::Cancelled);

@@ -114,6 +114,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-09f](../work-power-alignment.md) supplies explicit no-work boundary intervals and original power-read/support alignment without restamping work or source time. R-PRO-001/002/003 remain partial: raw interval alignment alone does not qualify a sample, sensor support, safety/drift, native transport or fleet admission.
 
+[P-09g](../native-work-experiment-session.md) connects actual experiment ownership, retained reservations, one-use economic handoff and eligible reaped replacement in the native fleet. Submissions preserve complete originals and economic profiles must match the current capture. R-PRO-001/002/003 and R-OPT-001/003 remain partial pending qualified native sampling/transport, private controls/persistence and physical/production qualification.
+
 [P-10a](../economic-study.md) supplies default-off exact fixture studies using whole-record-bound rewards, complete economic price/FX windows and an explicit flat GPU-board cost proxy. Real-time net scores include declared prospective transition/test costs; live scheduling, hysteresis, whole-meter economics and real-source qualification remain open.
 
 [P-10c](../economic-study-use.md) adds a one-result/explicit-parent validity latch over the immutable study. Current full-plan/conditions, original earliest dependency expiry and non-extending dual-clock ceilings prevent stale reference eligibility, including delayed first use. Nonpositive/empty complete candidate results remain distinct from missing input. R-OPT-001/003 and R-SAFE-001/002 remain partial: live ticket/configuration-change admission, hysteresis/runtime actuation and qualified real sources are not supplied.

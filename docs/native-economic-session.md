@@ -10,6 +10,8 @@ The session starts one `EconomicEvaluationOwner` and one `EconomicParentBudget` 
 
 Each worker incarnation gets its own `EconomicCommandOwner`, borrowing that slot's retained evaluator/budget and actual issuer. Initial Pause is submitted by the existing native process owner. Only after the real Paused receipt settles revision 1 does the command owner start and become the sole subsequent issue/acknowledgement caller. Initial admission does not bypass its guard or restore an old application state.
 
+[P-09g](native-work-experiment-session.md) adds an explicit optional per-slot measurement path: a real bounded experiment first owns commands under the retained experiment budget, then transfers once from final Pause to this economic owner. Economic submissions must match that incarnation's complete captured profile; both budgets retire only after eligible actual reaping and settlement. The original direct-economic path remains available when no experiment policy is supplied.
+
 The slot retains all prior native owners until final joining. The declaration/destruction order keeps the borrowed evaluator and budget alive until every incarnation's command owner/guard is destroyed. A queued replacement exposes no predecessor command/application snapshot as its current state; the parent evaluator and budget remain visible separately.
 
 ## Current conditions and original tickets
