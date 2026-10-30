@@ -131,6 +131,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 [P-11a](../game-session-guard.md) supplies a memory-only episode guard and immutable synthetic ten-minute net windows. Fresh revisioned detection controls exit debounce; nonpositive estimated net locks the episode until confirmed exit. Unknown data, source/time mismatch, safety and explicit stop withhold eligibility. No detector, metrics capture or mining actuator is activated.
 
+[P-11b](../game-detection.md) adds an opt-in isolated native detector and single-use background owner. Exact basename/adapter selection, salted process creation identities and request-bound original scan clocks remain private. Partial/native permission failures are Unknown; cached results cannot renew exit evidence. The ordinary factory and miner actuator remain absent.
+
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
 ### M-TLS
