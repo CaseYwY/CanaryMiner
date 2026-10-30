@@ -122,6 +122,8 @@ R-TAR-001–006 / R-ENG-001 are `PARTIAL`: [P-05a/P-08a](../electricity-core.md)
 
 [P-10i](../economic-command-owner.md) supplies exclusive in-memory issuance from the actual checked decision, with immutable command/study/profile/context originals, original source-clipped leases and exact application receipts. Pending withdrawal revokes; settled withdrawal pauses; newer same-wait proof binds a new command. R-OPT-001/003 and R-SAFE-001/002 remain partial pending actual native transport/reaping/restart integration, qualified source admission, native controls and ordinary activation.
 
+[P-10j](../native-economic-session.md) connects these commands to actual native delivery/revocation and reaped eligible replacement, retaining parent-slot evaluation and transition budgets. R-OPT-001/003 and R-SAFE-001/002 remain partial pending live measurement, qualified source/safety admission, native controls, ordinary activation and physical timing acceptance.
+
 [P-10b](../optimization-schedule.md) supplies separate market/evaluation/retest-review request clocks with exact session tickets, finite retries, unsettled timeout retention and terminal stop/clock/Unreaped handling. Actual task ownership, native controls, result gating and physical qualification remain open.
 
 [P-11a](../game-session-guard.md) adds the user-requested ten-minute episode profit lock, complete exact synthetic windows, fresh detection/exit debounce and stop-preserving normal eligibility restoration. Process detection, game experience qualification, real economic adapters and a mining actuator remain open.

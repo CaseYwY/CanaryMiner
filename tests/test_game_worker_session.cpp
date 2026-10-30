@@ -87,6 +87,7 @@ int child(int argc,char **argv){
 }
 struct Rig {
     SessionIntent intent;SessionToken token=intent.explicitStart();GameWorkerPolicy policy=workerPolicy();
+    const GameGuardTime clock=gameDetectionTime(); // coherent synthetic safety clocks; explicit skew cases still change UTC separately
     uint64_t revision=0;std::unique_ptr<GameWorkerSession> session;std::string lines;
     Rig(GameIntent mode=GameIntent::Off,const std::string &detected="fixture-absent",unsigned capacity=4,unsigned lease=600,unsigned safetyAge=800){
         policy.maximumIncarnations=capacity;
@@ -94,10 +95,11 @@ struct Rig {
         session=std::make_unique<GameWorkerSession>(identity,detector,target(detected),detectionPolicy(),gamePolicy(mode),binding(),policy,intent,token);
     }
     WorkerFleetEvidence fresh(GameGuardTime now){WorkerFleetEvidence e;e.safety={token.epoch,++revision,now,{true,true,false}};return e;}
+    GameGuardTime now()const{const auto mono=workerControlNowMs();return {clock.utcMs+static_cast<int64_t>(mono-clock.monotonicMs),mono};}
     bool start(const std::string &mode="normal"){
-        const auto now=gameDetectionTime();return session->start(1,now)&&session->launch(0,exe,{"--fleet-child",mode},300,now);
+        const auto time=now();return session->start(1,time)&&session->launch(0,exe,{"--fleet-child",mode},300,time);
     }
-    void step(const WorkerFleetEvidence *frozen=nullptr){const auto now=gameDetectionTime();session->tick(now,frozen?*frozen:fresh(now));
+    void step(const WorkerFleetEvidence *frozen=nullptr){const auto time=now();session->tick(time,frozen?*frozen:fresh(time));
         for(const auto &line:session->takeLines(0))lines+=line+'\n';}
     bool until(const std::function<bool()> &done,const WorkerFleetEvidence *frozen=nullptr,unsigned ms=4000){
         const auto end=workerControlNowMs()+ms;do{step(frozen);if(done())return true;sleep();}while(workerControlNowMs()<end);return false;
@@ -106,7 +108,7 @@ struct Rig {
 };
 void pendingRevoke(){
     {Rig r(GameIntent::Off,"fixture-absent",4,2000,2000);CHECK(r.start("withheld-run"));
-        const auto frozen=r.fresh(gameDetectionTime());
+        const auto frozen=r.fresh(r.now());
         CHECK(r.until([&]{return r.lines.find("PENDINGRUN")!=r.lines.npos;},&frozen));const auto pending=r.view();
         CHECK(pending.commandRevision==2&&!pending.revoked&&pending.commandDeadlineMonoMs>workerControlNowMs()+100);
         auto headroom=frozen.safety.observed;headroom.monotonicMs=pending.commandDeadlineMonoMs-50;
@@ -118,15 +120,17 @@ void pendingRevoke(){
         auto unsafe=r.fresh(headroom);unsafe.safety.safety.thermalSafe=false;r.session->tick(headroom,unsafe);
         CHECK(r.session->state()==WorkerFleetState::Faulted&&r.view().revoked&&r.view().commandRevision==pending.commandRevision);
         r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);}
-    for(unsigned mode=0;mode<8;++mode){Rig r(mode==7?GameIntent::Pause:GameIntent::Off,mode==7?"fixture-enter":"fixture-absent",4,2000,2000);
+    for(unsigned mode=0;mode<8;++mode){Rig r(mode==7?GameIntent::Pause:GameIntent::Off,mode==7?"fixture-enter":"fixture-absent",4,mode==7?1500:2000,2000);
         CHECK(r.start("withheld-run"));CHECK(r.until([&]{return r.lines.find("PENDINGRUN")!=r.lines.npos;}));const auto pending=r.view();
-        CHECK(pending.commandRevision==2&&!pending.revoked&&!pending.paused);
-        auto evidence=r.fresh(gameDetectionTime());
+        CHECK_MSG(("pending fixture "+std::to_string(mode)+" revision "+std::to_string(pending.commandRevision)+
+            " revoked "+std::to_string(pending.revoked)+" paused "+std::to_string(pending.paused)).c_str(),
+            pending.commandRevision==2&&!pending.revoked&&!pending.paused);
+        auto evidence=r.fresh(r.now());
         if(mode==0)evidence.safety.safety.telemetryValid=false;
         if(mode==1)evidence.safety.safety.thermalSafe=false;
         if(mode==2)evidence.safety.safety.fault=true;
         if(mode==3)evidence={};
-        if(mode==4){r.step(&evidence);auto now=gameDetectionTime();now.utcMs+=400;
+        if(mode==4){r.step(&evidence);auto now=r.now();now.utcMs+=400;
             CHECK(now.monotonicMs<pending.commandDeadlineMonoMs&&now.utcMs-evidence.safety.observed.utcMs<r.policy.maximumSafetyAgeMs);
             r.session->tick(now,evidence); // still-positive validity, shortened below the already-issued Run lease
         }else if(mode==6){r.intent.stop();r.step();}
@@ -135,7 +139,7 @@ void pendingRevoke(){
         if(mode==5){CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked);r.session->requestStop();}
         else{const auto expected=mode==6?WorkerFleetState::Stopped:WorkerFleetState::Faulted;
             CHECK_MSG("withdrawn pending Run must revoke before its original lease expires",r.session->state()==expected&&r.view().revoked&&workerControlNowMs()<pending.commandDeadlineMonoMs);
-            r.step();CHECK(r.session->state()==expected&&!r.session->launch(0,exe,{"--fleet-child","withheld-run"},300,gameDetectionTime()));}
+            r.step();CHECK(r.session->state()==expected&&!r.session->launch(0,exe,{"--fleet-child","withheld-run"},300,r.now()));}
         CHECK(r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==pending.commandRevision);
         r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);
     }
@@ -144,7 +148,7 @@ void pendingRevoke(){
         CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked&&r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==1);
         r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);}
 }
-void cachedSafety(){Rig r;CHECK(r.start());auto frozen=r.fresh(gameDetectionTime());
+void cachedSafety(){Rig r;CHECK(r.start());auto frozen=r.fresh(r.now());
     CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;},&frozen));
     CHECK(r.view().commandDeadlineMonoMs<=frozen.safety.observed.monotonicMs+r.policy.maximumSafetyAgeMs);
     const bool paused=r.until([&]{return r.view().paused||r.session->state()==WorkerFleetState::Faulted||r.view().done;},&frozen);
@@ -155,32 +159,32 @@ void cachedSafety(){Rig r;CHECK(r.start());auto frozen=r.fresh(gameDetectionTime
 }
 void lifecycle(){
     {Rig r;r.session->requestStop();CHECK(!r.start()&&r.session->state()==WorkerFleetState::Stopped);}
-    {Rig r;CHECK(r.start());r.session->requestStop();r.session->stop();CHECK(r.view().done&&r.view().revoked&&!r.view().retryable);CHECK(!r.session->launch(0,exe,{"--fleet-child","normal"},300,gameDetectionTime()));}
+    {Rig r;CHECK(r.start());r.session->requestStop();r.session->stop();CHECK(r.view().done&&r.view().revoked&&!r.view().retryable);CHECK(!r.session->launch(0,exe,{"--fleet-child","normal"},300,r.now()));}
     {Rig r;CHECK(r.start());WorkerFleetEvidence missing;
         CHECK(r.until([&]{return r.view().paused;},&missing));CHECK(r.lines.find("FLEETRUN")==r.lines.npos);
-        CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;}));
+        CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos&&!r.view().commandPending;}));
         CHECK(!r.view().pauseRequested&&!r.view().revoked&&r.view().commandRevision>=2);
-        auto cool=r.fresh(gameDetectionTime());cool.safety.safety.thermalSafe=false;
+        auto cool=r.fresh(r.now());cool.safety.safety.thermalSafe=false;
         CHECK(r.until([&]{return r.view().paused;},&cool));CHECK(r.view().pauseRequested&&!r.view().done);
         CHECK(r.until([&]{return !r.view().pauseRequested&&r.view().commandRevision>=4;}));
         r.session->requestStop();CHECK(r.view().revoked);r.session->stop();CHECK(r.view().done&&r.view().reaped&&r.view().exitCode==0);
         const auto keyless=r.lines;CHECK(keyless.find("CMWC1")==keyless.npos&&keyless.find("CMWA1")==keyless.npos);
-        r.intent.stop();r.intent.explicitStart();r.step();CHECK(r.session->state()==WorkerFleetState::Stopped&&!r.session->start(1,gameDetectionTime()));}
+        r.intent.stop();r.intent.explicitStart();r.step();CHECK(r.session->state()==WorkerFleetState::Stopped&&!r.session->start(1,r.now()));}
     cachedSafety();
     {Rig r;CHECK(r.start());CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;}));
         sleep(r.policy.commandLeaseMs+100);CHECK(r.until([&]{return r.view().done;}));
-        CHECK(r.view().revoked&&!r.view().retryable&&r.view().exitCode==8&&!r.session->launch(0,exe,{"--fleet-child","normal"},300,gameDetectionTime()));}
-    {Rig r;CHECK(r.start());auto proof=r.fresh(gameDetectionTime());r.step(&proof);proof.safety.safety.thermalSafe=false;r.step(&proof);
+        CHECK(r.view().revoked&&!r.view().retryable&&r.view().exitCode==8&&!r.session->launch(0,exe,{"--fleet-child","normal"},300,r.now()));}
+    {Rig r;CHECK(r.start());auto proof=r.fresh(r.now());r.step(&proof);proof.safety.safety.thermalSafe=false;r.step(&proof);
         CHECK(r.session->state()==WorkerFleetState::Faulted&&r.view().revoked);r.session->stop();}
     {Rig r;CHECK(r.start());WorkerFleetEvidence missing;CHECK(r.until([&]{return r.view().paused;},&missing));
-        for(unsigned invalid=0;invalid<4;++invalid){auto e=r.fresh(gameDetectionTime());
+        for(unsigned invalid=0;invalid<4;++invalid){auto e=r.fresh(r.now());
             if(invalid==0)++e.safety.epoch;
             else if(invalid==1)e.safety.observed.utcMs+=100000;
             else if(invalid==2)e.safety.observed.monotonicMs+=100000;
             else e.safety.revision=0;
             r.step(&e);CHECK(r.session->state()==WorkerFleetState::Active&&r.view().pauseRequested&&r.lines.find("FLEETRUN")==r.lines.npos);
         }
-        auto proof=r.fresh(gameDetectionTime());r.step(&proof);
+        auto proof=r.fresh(r.now());r.step(&proof);
         ++proof.safety.revision;--proof.safety.observed.utcMs;--proof.safety.observed.monotonicMs;r.step(&proof);
         CHECK(r.session->state()==WorkerFleetState::Faulted&&r.view().revoked);
     }
@@ -198,12 +202,12 @@ void gameAndRestarts(){
     {Rig r(GameIntent::Pause,"fixture-present");CHECK(r.start("exit-paused"));
         CHECK(r.until([&]{return r.view().done;}));const auto episode=r.session->gameSnapshot().episodeKey;
         CHECK(r.view().exitCode==1&&r.view().reaped&&r.view().retryable&&!episode.empty());
-        CHECK(!r.session->launch(0,exe,{"--fleet-child","normal"},300,gameDetectionTime())); // frozen launch settings
-        CHECK(r.session->launch(0,exe,{"--fleet-child","exit-paused"},300,gameDetectionTime()));
+        CHECK(!r.session->launch(0,exe,{"--fleet-child","normal"},300,r.now())); // frozen launch settings
+        CHECK(r.session->launch(0,exe,{"--fleet-child","exit-paused"},300,r.now()));
         CHECK(r.until([&]{return r.view().done&&r.view().generation==2;}));
         CHECK(r.view().retryable&&r.session->gameSnapshot().episodeKey==episode&&r.lines.find("FLEETRUN")==r.lines.npos);}
     {Rig r(GameIntent::Off,"fixture-absent",1);CHECK(r.start("exit-error"));CHECK(r.until([&]{return r.view().done;}));
-        CHECK(r.view().retryable&&r.view().exitCode==1);CHECK(r.session->launch(0,exe,{"--fleet-child","exit-error"},300,gameDetectionTime()));r.step();
+        CHECK(r.view().retryable&&r.view().exitCode==1);CHECK(r.session->launch(0,exe,{"--fleet-child","exit-error"},300,r.now()));r.step();
         CHECK(r.session->state()==WorkerFleetState::Faulted&&r.view().revoked);}
 }
 void exitCases(){
@@ -211,7 +215,7 @@ void exitCases(){
         CHECK(r.view().reaped&&r.view().revoked&&!r.view().retryable);
         CHECK_MSG(mode,r.view().exitCode==(std::string(mode)=="exit-clean"?0:8));}
     {Rig r;CHECK(r.start("exit-error"));CHECK(r.until([&]{return r.view().done&&r.view().reaped;}));
-        CHECK(r.session->launch(0,exe,{"--fleet-child","exit-error"},300,gameDetectionTime()));
+        CHECK(r.session->launch(0,exe,{"--fleet-child","exit-error"},300,r.now()));
         r.session->requestStop();r.session->stop();const auto v=r.view();
         CHECK(v.generation==2&&v.done&&v.revoked&&!v.retryable&&v.exitCode==0);
         CHECK(!v.reaped); // a cancelled queued incarnation must not borrow its predecessor's reaping proof

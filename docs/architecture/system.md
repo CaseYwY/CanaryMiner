@@ -55,6 +55,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-10i](../economic-command-owner.md) owns command issuance/acknowledgement after the initial Pause, using its own checked guard and immutable study. It retains one exact flight and a historical Run/application record, detects bypassed issuer mutations and exposes immediate channel-revocation requirements. The enclosing native owner remains responsible for delivery, drain, reaping and retry admission; ordinary factories do not activate this seam.
 
+[P-10j](../native-economic-session.md) supplies that optional native coordinator within the existing game fleet: parent-slot evaluator/budget lifetimes enclose per-incarnation command/native process owners. Context and actual current conditions precede evaluation/command polling; failed delivery or terminal ownership revokes the entire fleet. Actual reaping plus settled runtime-error exit precedes retirement and new-generation admission. Ordinary factories remain empty.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

@@ -16,7 +16,7 @@ The caller first stops the old issuer, then explicitly calls the old guard's `re
 
 Successful retirement ends that guard permanently but keeps the parent budget Running. Destroying an attached guard without retirement latches the parent budget rather than silently releasing the slot. Explicit parent/guard stop, clock faults and other terminal failures prevent replacement. Destruction after intentional stop preserves Stopped. The parent budget must outlive its guards; retired guards no longer mutate it.
 
-Retirement is **reference bookkeeping**, not proof that a worker process has exited or that GPU work drained. [P-10i](economic-command-owner.md) uses this budget through a decision-bound issuance owner. The enclosing native execution coordinator must still retain the actual process owner, require real reaping/eligible exit, enforce restart policy and prevent process overlap. A stopped issuer alone supplies none of those facts.
+Retirement is **reference bookkeeping**, not proof that a worker process has exited or that GPU work drained. [P-10i](economic-command-owner.md) uses this budget through a decision-bound issuance owner. [P-10j](native-economic-session.md) retains it above actual native process owners and requires observed reaping/eligible exit plus settled control before retirement/replacement. The enclosing supervisor still enforces retry policy. A stopped issuer alone supplies none of those facts.
 
 ## Original-time continuity
 

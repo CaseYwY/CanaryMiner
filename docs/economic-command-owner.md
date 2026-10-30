@@ -26,7 +26,7 @@ If the original Run was just applied and there is no strictly post-application s
 
 ## Transport, retirement and historical facts
 
-The enclosing native owner must submit each returned command or call `transportFailed`, and must immediately revoke/close its channel whenever `revokeRequired` is true. This memory-only object cannot prove delivery, pipe closure, complete-work drain, process death or reaping. It does not execute a process or supply a supervisor factory. Actual native transport/restart integration remains a separate step.
+The enclosing native owner must submit each returned command or call `transportFailed`, and must immediately revoke/close its channel whenever `revokeRequired` is true. This memory-only object cannot prove delivery, pipe closure, complete-work drain, process death or reaping. It does not execute a process or supply a supervisor factory. [P-10j](native-economic-session.md) supplies opt-in native session delivery/revocation and actual reaped-incarnation admission; ordinary factories and qualified source admission remain separate.
 
 Stop and transport/clock/protocol failures latch, revoke issuance and retain unresolved command bookkeeping. A valid late receipt can record its historical application after revocation, returning Terminal, but cannot revive commands, clear the parent stop or authorize retirement/replacement. Changing the explicit parent epoch cannot revive this instance.
 

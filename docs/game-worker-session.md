@@ -24,6 +24,8 @@ Every Run deadline is the minimum of the configured command horizon, remaining s
 
 Pause requests, current drained Paused receipts, Run permission and actual work remain different facts. A new command removes the prior pause proof. Missing profit is not zero profit; the existing ten-minute lock and fresh-only exit rules remain in the same guard. Economic optimization, real reward/price calibration and experience-qualified coexistence are not activated by this bridge.
 
+[P-10j](native-economic-session.md) optionally adds one frozen economic plan/policy per slot, a parent-retained evaluator/budget and incarnation-specific decision-bound command owner. That path takes over issuance after actual initial Pause, delivers through the native owner and admits replacement only after real eligible reaping and exact retirement. Empty economic configuration preserves this original game-only path. Ordinary CLI/source/experience qualification remains separate.
+
 ## Supervisor boundary
 
 The supervisor creates the optional fleet once, before starting workers. A refused factory/start never falls back to an uncontrolled worker. The controlled path requests native workers asynchronously, drains bounded complete lines through the existing redactor and uses admitted actual exit results for retries. It shows Pausing versus proven Paused and stops rate-time accumulation while held. The child donation scheduler and shared-loop pause accounting remain authoritative.

@@ -20,6 +20,7 @@ struct WorkerFleetSnapshot {
     uint64_t generation=0,commandRevision=0,commandDeadlineMonoMs=0;
     bool requested=false,done=false,reaped=false,revoked=true,retryable=false,ownershipUnresolved=false;
     bool pauseRequested=true,paused=false; // Paused requires the current drained receipt, not a command or cached stats
+    bool commandPending=false; // control-thread settlement, independent of child stdout and process exit
     int exitCode=-1;
     GameGuardState game=GameGuardState::Stopped;
 };
