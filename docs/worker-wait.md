@@ -14,6 +14,8 @@ All existing parent/worker private keys, epoch, slot, incarnation, contiguous re
 
 An outstanding command is not overwritten with a later Pause. An enclosing safety owner that must revoke before application/settlement uses the existing stop/channel-revocation path rather than inventing a second outstanding command. Stop never needs a free command slot. Candidate/fleet integration must preserve this ownership rule.
 
+[P-03i/P-11n](pending-run-revocation.md) connects that rule to the actual game worker session: an uncovered pending Run faults/revokes the fleet even if its receipt is withheld or its current source deadline has only shortened.
+
 ## Worker-thread application
 
 `RunPauseControl::applyWorkWait` is a bounded in-memory worker-thread hook. The shared run loop owns one local effective wait for its lifetime, initialized from the frozen run options. Only the reconciled boundary calls this hook. `WorkerControlGate` serializes the command, checks the original lease and refuses application while held, stopped, expired or faulted. It installs the requested value before producing WaitApplied. Repeated boundary calls and duplicate commands preserve the first application time. The native `WorkerControlClient` forwards the hook to that same gate; its I/O thread cannot manufacture application evidence.

@@ -37,7 +37,7 @@ struct GameWorkerSession::Impl {
         :intent(i),token(t),policy(w),game(std::move(detector),std::move(target),detection,p,std::move(b),i,t),identities(std::move(identity)){}
     void halt(WorkerFleetState s){
         attempted=true;state=s;cancel=true;game.requestStop();
-        for(auto &slot:slots){slot.view.revoked=true;slot.view.retryable=false;slot.view.paused=false;
+        for(auto &slot:slots){slot.view.revoked=true;slot.view.retryable=false;slot.view.paused=false;slot.view.pauseRequested=true;
             if(slot.launchPending){slot.launchPending=false;slot.view.done=true;slot.view.exitCode=s==WorkerFleetState::Faulted?8:0;}
             for(auto &life:slot.lives){life->issuer.requestStop();life->owner.requestStop();}}
     }
@@ -74,7 +74,7 @@ struct GameWorkerSession::Impl {
         if(!initial||!slot.lives.back()->owner.start(slot.exe,slot.args,*initial,slot.drain)){halt(WorkerFleetState::Faulted);return;}
         slot.view.revoked=false;slot.view.commandRevision=initial->revision;slot.view.commandDeadlineMonoMs=initial->deadlineMonoMs;
     }
-    void tickSlot(Slot &slot,GameGuardTime now,uint64_t runUntil){
+    void tickSlot(Slot &slot,GameGuardTime now,uint64_t permittedUntil){
         if(slot.lives.empty()||slot.launchPending||slot.view.done)return;
         auto &life=*slot.lives.back();const auto owner=life.owner.snapshot();
         slot.view.game=game.snapshot().state;
@@ -97,14 +97,22 @@ struct GameWorkerSession::Impl {
             if(accepted==WorkerReceiptResult::Rejected||accepted==WorkerReceiptResult::Terminal){halt(WorkerFleetState::Faulted);return;}}
         const auto issue=life.issuer.snapshot(now.monotonicMs);
         if(issue.state!=WorkerControlState::Active){halt(WorkerFleetState::Faulted);return;}
-        const bool pause=!runUntil;slot.view.pauseRequested=pause;slot.view.paused=life.issuer.paused(now.monotonicMs);
-        if(issue.pending||!issue.settled||owner.state!=WorkerOwnerState::Running)return;
+        // Request Pause with bounded delivery headroom, without erasing the actual permission ceiling.
+        const bool pause=!permittedUntil||permittedUntil-now.monotonicMs<=(std::min)(100u,policy.commandLeaseMs/2);
+        slot.view.pauseRequested=pause;slot.view.paused=life.issuer.paused(now.monotonicMs);
+        if(issue.pending){
+            // A pending Run cannot be overwritten by Pause. Revoke the owned channel when its original lease
+            // is no longer covered; waiting for its receipt would leave a withdrawn command usable.
+            if(issue.pending->directive==WorkerDirective::Run&&(!permittedUntil||permittedUntil<issue.pending->deadlineMonoMs))halt(WorkerFleetState::Faulted);
+            return;
+        }
+        if(!issue.settled||owner.state!=WorkerOwnerState::Running)return;
         const auto &previous=issue.settled->command;
         const auto directive=pause?WorkerDirective::Pause:WorkerDirective::Run;
         // Renew before the existing lease expires, but never extend cached source validity by receipt/tick time.
         if(previous.directive==directive&&previous.deadlineMonoMs-now.monotonicMs>policy.commandLeaseMs/2&&
-            (pause||runUntil>=previous.deadlineMonoMs))return;
-        const uint64_t lease=pause?policy.commandLeaseMs:runUntil-now.monotonicMs;
+            (pause||permittedUntil>=previous.deadlineMonoMs))return;
+        const uint64_t lease=pause?policy.commandLeaseMs:permittedUntil-now.monotonicMs;
         const auto next=life.issuer.issue(directive,now.monotonicMs,lease);
         if(!next||!life.owner.submit(*next)){halt(WorkerFleetState::Faulted);return;}
         slot.view.paused=false;slot.view.commandRevision=next->revision;slot.view.commandDeadlineMonoMs=next->deadlineMonoMs;
@@ -158,12 +166,10 @@ void GameWorkerSession::tick(GameGuardTime now,const WorkerFleetEvidence &e){
         }
         if(now.monotonicMs>UINT64_MAX-p.policy.commandLeaseMs){p.halt(WorkerFleetState::Faulted);return;}
         const auto upper=(std::min)(now.monotonicMs+p.policy.commandLeaseMs,safetyUntil);
-        auto runUntil=safe.telemetryValid&&safe.thermalSafe&&!safe.fault?p.game.runDeadline(now,upper):0;
-        // Leave bounded scheduling headroom to deliver Pause before source validity ends. This is not extra lease time.
-        if(runUntil&&runUntil-now.monotonicMs<=(std::min)(100u,p.policy.commandLeaseMs/2))runUntil=0;
+        const auto permittedUntil=safe.telemetryValid&&safe.thermalSafe&&!safe.fault?p.game.runDeadline(now,upper):0;
         for(unsigned i=0;i<p.slots.size()&&p.state==WorkerFleetState::Active;++i){
             if(p.slots[i].launchPending)p.startSlot(i,now);
-            if(p.state==WorkerFleetState::Active)p.tickSlot(p.slots[i],now,runUntil);
+            if(p.state==WorkerFleetState::Active)p.tickSlot(p.slots[i],now,permittedUntil);
         }
     }catch(...){p.halt(WorkerFleetState::Faulted);}
 }

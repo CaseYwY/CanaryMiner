@@ -29,7 +29,7 @@ int main(int argc,char **argv){
     }
     if(mode=="fixture-malformed")return writeLocalTaskOutput("CMGDA1\ngarbage\n")?0:3;
     GameProbeReply p;p.privateScope=r.privateScope.empty()?std::string(32,'a'):r.privateScope;p.began=p.finished=gameDetectionTime();p.status=GameProbeStatus::Ok;
-    if(mode=="fixture-present"||(mode=="fixture-sequence"&&r.revision<=2)){p.matches=1;p.instanceSet=std::string(64,'b');}
+    if(mode=="fixture-present"||(mode=="fixture-sequence"&&r.revision<=2)||(mode=="fixture-enter"&&r.revision>8)){p.matches=1;p.instanceSet=std::string(64,'b');}
     if(mode=="fixture-incomplete")p.status=GameProbeStatus::Incomplete;
     if(mode=="fixture-clock")p.status=GameProbeStatus::Clock;
     if(mode=="fixture-wrong"){++r.revision;}

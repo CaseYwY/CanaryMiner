@@ -49,6 +49,8 @@ Owns explicit session intent, worker generation and lifecycle, safe transitions,
 
 [P-03g/P-11m](../safety-fields.md) extends the isolated safety owner with a frozen core-only/extended profile. The v2 profile requires six individually checked native fields and preserves original microsecond time/type/value; any missing result withdraws the entire batch. A pure extended limiter applies separately declared core/memory hysteresis across the complete selected set and freezes field capabilities. It supplies no WorkerSafetyEvidence adapter or ordinary fleet activation.
 
+[P-03i/P-11n](../pending-run-revocation.md) makes the actual fleet revoke all owned channels when a pending Run is no longer covered by the complete current safety/game deadline. No free command slot or new Pause is required for this terminal revocation; background owners retain actual drain/reap responsibility.
+
 ### M-HISTORY
 
 Owns durable accepted-count observations and rolling queries. Inputs are generation-aware cumulative **user** outcome counters; outputs include counts, storage health, coverage and timestamp basis. It does not infer rewards or mutate pool share counters. A damaged history store cannot justify restarting or retuning a worker.

@@ -4,6 +4,7 @@
 #include "product/game_worker_session.h"
 #include "product/worker_process.h"
 #include "product_test_util.h"
+#include <cerrno>
 #include <thread>
 using namespace om;
 namespace {
@@ -14,12 +15,41 @@ GameProcessTarget target(const std::string &mode){return {"fixture.game",mode,Ga
 GameProfitBinding binding(){GameProfitBinding b;b.gameKey="fixture.game";return b;}
 GameWorkerPolicy workerPolicy(){GameWorkerPolicy p;p.maximumIncarnations=4;p.commandLeaseMs=600;p.maximumSafetyAgeMs=800;return p;}
 std::filesystem::path identity,detector,exe;
+// Real native peer: deliberately withhold one receipt until channel revocation, without ever doing work.
+int withheldReceipt(WorkerChannelHandles handles,bool pause){WorkerControlFramer framer;bool initial=false,run=false;
+    const auto end=workerControlNowMs()+10000;
+    while(workerControlNowMs()<end){char bytes[workerControlChunkLimit];size_t count=0;
+#if defined(_WIN32)
+        DWORD got=0;const bool ok=ReadFile(reinterpret_cast<HANDLE>(static_cast<uintptr_t>(handles.input)),bytes,sizeof(bytes),&got,nullptr)!=0;
+        if(!ok){const auto error=GetLastError();if(error==ERROR_BROKEN_PIPE)return 0;if(error==ERROR_NO_DATA){sleep();continue;}return 96;}
+        count=got;
+#else
+        const auto got=::read(static_cast<int>(handles.input),bytes,sizeof(bytes));
+        if(got<0){if(errno==EAGAIN||errno==EWOULDBLOCK||errno==EINTR){sleep();continue;}return 96;}
+        count=static_cast<size_t>(got);
+#endif
+        if(!count)return 0;
+        if(!framer.feed(std::string_view(bytes,count),[&](std::string_view line){WorkerCommand c;if(!decodeWorkerCommand(line,&c))return false;
+            if(initial){if(run||c.directive!=WorkerDirective::Run)return false;run=true;std::puts("PENDINGRUN");std::fflush(stdout);return true;}
+            if(c.revision!=1||c.directive!=WorkerDirective::Pause)return false;
+            if(pause){initial=true;std::puts("PENDINGPAUSE");std::fflush(stdout);return true;}
+            std::string wire;if(!encodeWorkerReceipt({c,WorkerReceiptKind::Paused,workerControlNowMs()},&wire))return false;
+#if defined(_WIN32)
+            DWORD written=0;if(!WriteFile(reinterpret_cast<HANDLE>(static_cast<uintptr_t>(handles.output)),wire.data(),static_cast<DWORD>(wire.size()),&written,nullptr)||written!=wire.size())return false;
+#else
+            if(::write(static_cast<int>(handles.output),wire.data(),wire.size())!=static_cast<ssize_t>(wire.size()))return false;
+#endif
+            initial=true;return true;}))return 97;
+    }
+    return 8;
+}
 int child(int argc,char **argv){
     const std::string mode=argv[2];WorkerChannelHandles handles;int port=0;bool found=false;
     for(int i=3;i<argc;++i){const std::string a=argv[i];
         if(a=="--api-port"&&i+1<argc)port=std::atoi(argv[i+1]);
         if(a=="--worker-control-v1"&&i+3<argc)found=parseWorkerChannelHandles(argv[i+1],argv[i+2],argv[i+3],&handles);}
     if(!found)return 90;
+    if(mode=="withheld-run"||mode=="withheld-pause")return withheldReceipt(handles,mode=="withheld-pause");
     if(mode=="bad-receipt"||mode=="partial-receipt"){
         const char *text=mode=="bad-receipt"?"bad\n":"CMWA1 partial";
 #if defined(_WIN32)
@@ -58,8 +88,9 @@ int child(int argc,char **argv){
 struct Rig {
     SessionIntent intent;SessionToken token=intent.explicitStart();GameWorkerPolicy policy=workerPolicy();
     uint64_t revision=0;std::unique_ptr<GameWorkerSession> session;std::string lines;
-    Rig(GameIntent mode=GameIntent::Off,const std::string &detected="fixture-absent",unsigned capacity=4){
+    Rig(GameIntent mode=GameIntent::Off,const std::string &detected="fixture-absent",unsigned capacity=4,unsigned lease=600,unsigned safetyAge=800){
         policy.maximumIncarnations=capacity;
+        policy.commandLeaseMs=lease;policy.maximumSafetyAgeMs=safetyAge;
         session=std::make_unique<GameWorkerSession>(identity,detector,target(detected),detectionPolicy(),gamePolicy(mode),binding(),policy,intent,token);
     }
     WorkerFleetEvidence fresh(GameGuardTime now){WorkerFleetEvidence e;e.safety={token.epoch,++revision,now,{true,true,false}};return e;}
@@ -73,6 +104,55 @@ struct Rig {
     }
     WorkerFleetSnapshot view()const{return session->snapshot(0);}
 };
+void pendingRevoke(){
+    {Rig r(GameIntent::Off,"fixture-absent",4,2000,2000);CHECK(r.start("withheld-run"));
+        const auto frozen=r.fresh(gameDetectionTime());
+        CHECK(r.until([&]{return r.lines.find("PENDINGRUN")!=r.lines.npos;},&frozen));const auto pending=r.view();
+        CHECK(pending.commandRevision==2&&!pending.revoked&&pending.commandDeadlineMonoMs>workerControlNowMs()+100);
+        auto headroom=frozen.safety.observed;headroom.monotonicMs=pending.commandDeadlineMonoMs-50;
+        headroom.utcMs+=static_cast<int64_t>(headroom.monotonicMs-frozen.safety.observed.monotonicMs);
+        r.session->tick(headroom,frozen);
+        CHECK_MSG("early Pause headroom must not withdraw a still-covered pending Run",r.session->state()==WorkerFleetState::Active&&!r.view().revoked&&
+            r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==pending.commandRevision);
+        // A genuine withdrawal inside that same headroom still revokes immediately.
+        auto unsafe=r.fresh(headroom);unsafe.safety.safety.thermalSafe=false;r.session->tick(headroom,unsafe);
+        CHECK(r.session->state()==WorkerFleetState::Faulted&&r.view().revoked&&r.view().commandRevision==pending.commandRevision);
+        r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);}
+    for(unsigned mode=0;mode<8;++mode){Rig r(mode==7?GameIntent::Pause:GameIntent::Off,mode==7?"fixture-enter":"fixture-absent",4,2000,2000);
+        CHECK(r.start("withheld-run"));CHECK(r.until([&]{return r.lines.find("PENDINGRUN")!=r.lines.npos;}));const auto pending=r.view();
+        CHECK(pending.commandRevision==2&&!pending.revoked&&!pending.paused);
+        auto evidence=r.fresh(gameDetectionTime());
+        if(mode==0)evidence.safety.safety.telemetryValid=false;
+        if(mode==1)evidence.safety.safety.thermalSafe=false;
+        if(mode==2)evidence.safety.safety.fault=true;
+        if(mode==3)evidence={};
+        if(mode==4){r.step(&evidence);auto now=gameDetectionTime();now.utcMs+=400;
+            CHECK(now.monotonicMs<pending.commandDeadlineMonoMs&&now.utcMs-evidence.safety.observed.utcMs<r.policy.maximumSafetyAgeMs);
+            r.session->tick(now,evidence); // still-positive validity, shortened below the already-issued Run lease
+        }else if(mode==6){r.intent.stop();r.step();}
+        else if(mode==7)CHECK(r.until([&]{return r.session->state()==WorkerFleetState::Faulted;}));
+        else r.step(&evidence);
+        if(mode==5){CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked);r.session->requestStop();}
+        else{const auto expected=mode==6?WorkerFleetState::Stopped:WorkerFleetState::Faulted;
+            CHECK_MSG("withdrawn pending Run must revoke before its original lease expires",r.session->state()==expected&&r.view().revoked&&workerControlNowMs()<pending.commandDeadlineMonoMs);
+            r.step();CHECK(r.session->state()==expected&&!r.session->launch(0,exe,{"--fleet-child","withheld-run"},300,gameDetectionTime()));}
+        CHECK(r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==pending.commandRevision);
+        r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);
+    }
+    {Rig r;CHECK(r.start("withheld-pause"));WorkerFleetEvidence missing;
+        CHECK(r.until([&]{return r.lines.find("PENDINGPAUSE")!=r.lines.npos;},&missing));r.step(&missing);
+        CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked&&r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==1);
+        r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);}
+}
+void cachedSafety(){Rig r;CHECK(r.start());auto frozen=r.fresh(gameDetectionTime());
+    CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;},&frozen));
+    CHECK(r.view().commandDeadlineMonoMs<=frozen.safety.observed.monotonicMs+r.policy.maximumSafetyAgeMs);
+    const bool paused=r.until([&]{return r.view().paused||r.session->state()==WorkerFleetState::Faulted||r.view().done;},&frozen);
+    CHECK(paused&&r.view().paused);CHECK(!r.view().done&&r.session->state()==WorkerFleetState::Active);
+    if(r.session->state()!=WorkerFleetState::Active)return;
+    const auto revision=r.view().commandRevision;
+    CHECK(r.until([&]{return r.view().commandRevision>revision+1;},&frozen));CHECK(r.view().pauseRequested&&!r.view().done);
+}
 void lifecycle(){
     {Rig r;r.session->requestStop();CHECK(!r.start()&&r.session->state()==WorkerFleetState::Stopped);}
     {Rig r;CHECK(r.start());r.session->requestStop();r.session->stop();CHECK(r.view().done&&r.view().revoked&&!r.view().retryable);CHECK(!r.session->launch(0,exe,{"--fleet-child","normal"},300,gameDetectionTime()));}
@@ -86,12 +166,7 @@ void lifecycle(){
         r.session->requestStop();CHECK(r.view().revoked);r.session->stop();CHECK(r.view().done&&r.view().reaped&&r.view().exitCode==0);
         const auto keyless=r.lines;CHECK(keyless.find("CMWC1")==keyless.npos&&keyless.find("CMWA1")==keyless.npos);
         r.intent.stop();r.intent.explicitStart();r.step();CHECK(r.session->state()==WorkerFleetState::Stopped&&!r.session->start(1,gameDetectionTime()));}
-    {Rig r;CHECK(r.start());auto frozen=r.fresh(gameDetectionTime());
-        CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;},&frozen));
-        CHECK(r.view().commandDeadlineMonoMs<=frozen.safety.observed.monotonicMs+r.policy.maximumSafetyAgeMs);
-        CHECK(r.until([&]{return r.view().paused;},&frozen));CHECK(!r.view().done&&r.session->state()==WorkerFleetState::Active);
-        const auto revision=r.view().commandRevision;
-        CHECK(r.until([&]{return r.view().commandRevision>revision+1;},&frozen));CHECK(r.view().pauseRequested&&!r.view().done);}
+    cachedSafety();
     {Rig r;CHECK(r.start());CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;}));
         sleep(r.policy.commandLeaseMs+100);CHECK(r.until([&]{return r.view().done;}));
         CHECK(r.view().revoked&&!r.view().retryable&&r.view().exitCode==8&&!r.session->launch(0,exe,{"--fleet-child","normal"},300,gameDetectionTime()));}
@@ -231,6 +306,8 @@ int main(int argc,char **argv){
     if(argc==4&&std::string(argv[3])=="cached-deadline")cachedDeadline();
     else if(argc==4&&std::string(argv[3])=="cached-deadline-control")cachedDeadline(false);
     else if(argc==4&&std::string(argv[3])=="cases")exitCases();
+    else if(argc==4&&std::string(argv[3])=="pending-revoke")pendingRevoke();
+    else if(argc==4&&std::string(argv[3])=="cached-safety")cachedSafety();
     else if(argc==4&&std::string(argv[3])=="supervisor"){supervisor();supervisorRefusals();}
     else{cachedDeadline();deadlines();lifecycle();gameAndRestarts();exitCases();supervisor();supervisorRefusals();}
     platformShutdown();
