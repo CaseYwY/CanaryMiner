@@ -140,6 +140,8 @@ Test best eligible estimated net per elapsed time, no-data/nonpositive pause, al
 
 [P-11g](../game-worker-session.md) drives the real lifetime controller and actual supervisor over owned CPU workers: source-bound deadlines, initial/drained pause, stale/future/unknown evidence refusal, immutable revisions, native-identity game holds, fresh exit, retained episode across reaped runtime retries, bounded identity exhaustion and stop/non-revival. A partial receipt plus actual process exit is a regression case. Memory-only boundary probes distinguish late unresolved ownership from quit and verify no uncontrolled fallback. These are fixture/control integration checks, not qualified real safety, gameplay, critical-latency or kernel-stall evidence.
 
+[P-11h](../game-settings.md) tests strict private schema/storage, changed-byte and lock refusal, failed-load revocation, six-field contextual editing, independent saves, frozen current values and complete narrow-terminal review. Native CLI stubs abort at device setup to distinguish pre-discovery configuration refusal from Off admission; real POSIX PTYs exercise save/discard/conflict/resize and a running CPU supervisor. These tests neither start a real game nor qualify runtime safety/synchronous-storage deadlines.
+
 Test off/pause/coexist, launcher/game/manual triggers, debounce/detection failure, no permission/no FPS/no valid baseline safe fallback, actual matched scene metrics, experience limits/VRAM/thermal headroom and bounded authorized testing. Test qualified auto-entry/exit restoration, economic pause/recovery and user stop not reviving. No injection/anti-cheat bypass/focus stealing/game killing; generic launcher tests do not count as gameplay evidence.
 
 ## T-TLS

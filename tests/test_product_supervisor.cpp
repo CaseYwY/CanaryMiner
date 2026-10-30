@@ -908,6 +908,8 @@ int main(int argc, char **argv) {
         options.runtimePreferencesPath = (std::filesystem::path(argv[2]) / "runtime-preferences.json").u8string();
         options.manualMarketPreferencesPath = (std::filesystem::path(argv[2]) / "manual-market-preferences.json").u8string();
         options.manualMarketFactory = makeManualMarketProjector;
+        options.gamePreferencesPath = (std::filesystem::path(argv[2]) / "game-preferences.json").u8string();
+        options.gameContext.running=true;options.gameContext.effective=GamePreferences{}; // frozen synthetic running session
         options.noMarket = std::string(argv[1]) == "--manual-no-market-session-test";
         options.electricityPreferencesPath = (std::filesystem::path(argv[2]) / "electricity-preferences.json").u8string();
         options.energyFactory = makeSessionEnergyOwner;

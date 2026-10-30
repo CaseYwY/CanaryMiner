@@ -152,6 +152,16 @@ Contents
   --no-market suppresses this session's display without changing saved values. Inputs are user declarations,
   not live quotes or a one-hour mean. No actual-income, forecast or net-profit rows are enabled.
   The same controls are available without mining: canary-miner settings [--config FILE]
+
+  Games settings (development branch): S -> Games edits separate private defaults:
+  off / pause / coexist, one exact ASCII process basename, explicit Windows-session
+  or Linux-native-UID scope, detection poll, exit debounce and maximum detection age.
+  V/F2 reviews all fields; Enter/F2 saves; Esc cancels/returns. Saved defaults apply
+  only to the next explicit parent start; the current session stays frozen.
+  Qualified native safety/worker binding is not yet available: a non-off request
+  refuses ordinary startup with configuration exit 3 before device discovery.
+  Save Off to permit an ordinary start. Coexistence still needs real qualification.
+  See docs/game-settings.md; keep game-preferences.json and its sidecars private.
   See docs/manual-market.md for validity, clock, storage and qualification limits.
 
   Optional session board energy: S -> Electricity. Collection defaults OFF; display is independent.

@@ -143,6 +143,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 [P-11g](../game-worker-session.md) adds the default-empty supervisor fleet seam and a fixed parent-owned game/identity controller. Async identity provisioning, fresh incarnation keys, source-validity-clipped commands and actual-exit result admission span worker retries without rebuilding the guard. Stop precedes drain/join; late Unreaped remains observable. Native safety providers/settings/CLI activation and isolation of remaining synchronous display/settings operations remain subsequent work.
 
+[P-11h](../game-settings.md) adds a separate private schema-v1 store and pure native Games editor. Six fields map to the existing policies without granting runtime authority; the supervisor receives frozen context independently of editable saved defaults. Ordinary startup loads once and refuses non-Off requests before device discovery until qualified safety/fleet activation exists. The existing synchronous small-file persistence path still requires isolation/physical-stall qualification.
+
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
 ### M-TLS

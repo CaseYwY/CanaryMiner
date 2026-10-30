@@ -2,6 +2,7 @@
 #pragma once
 #include "game_guard.h"
 #include "local_task_process.h"
+#include <algorithm>
 namespace om {
 enum class GameProcessAdapter { WindowsSessionImage, LinuxUidNativeImage };
 struct GameProcessTarget {
@@ -24,7 +25,12 @@ struct GameProbeReply {
     GameGuardTime began,finished; // observation age starts at began, not receipt/finished
 };
 GameGuardTime gameDetectionTime();
-bool validGameProcessTarget(const GameProcessTarget &target);
+inline bool validGameProcessName(const std::string &s){
+    return !s.empty()&&s.size()<=128&&s!="."&&s!=".."&&std::all_of(s.begin(),s.end(),[](char c){
+        return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.';});
+}
+inline bool validGameProcessTarget(const GameProcessTarget &t){return validGameProcessName(t.gameKey)&&validGameProcessName(t.executable)&&
+    (t.adapter==GameProcessAdapter::WindowsSessionImage||t.adapter==GameProcessAdapter::LinuxUidNativeImage);}
 bool validGameProbeRequest(const GameProbeRequest &request);
 bool encodeGameProbeRequest(const GameProbeRequest &,uint64_t parentPid,std::string *wire);
 bool decodeGameProbeRequest(const std::string &wire,GameProbeRequest *,uint64_t *parentPid);

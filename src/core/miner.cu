@@ -131,7 +131,7 @@ int main(int argc, char **argv) {
     GpuTuningPlatform tuningPlatform = currentGpuTuningPlatform();
     if (cli.command == Command::Status) return commandStatus(cfg, cli.ov.json);
     if (cli.command == Command::Settings) {
-        if (cli.help) { printf("canary-miner settings [--config FILE]\nEdit display/runtime defaults without starting mining.\n"); return kExitOk; }
+        if (cli.help) { printf("canary-miner settings [--config FILE]\nEdit display/runtime/game defaults without starting mining.\n"); return kExitOk; }
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
@@ -417,6 +417,7 @@ int main(int argc, char **argv) {
     }
 
     RuntimePreferences runtimeDefaults;
+    GamePreferences gameDefaults;
     RuntimeContext runtimeContext;
     const bool ordinaryRuntime = cli.command == Command::Run && !workerChild && !opt.bench && !opt.formalBenchmark.enabled &&
         !opt.pearlProduction && !opt.pearlAcceptedQuota && !opt.pearlSustainedSeconds &&
@@ -437,6 +438,14 @@ int main(int argc, char **argv) {
         runtimeContext.cliNoHistory = cli.ov.noHistory;
         runtimeContext.effective = effectiveRuntimePreferences(runtimeDefaults, runtimeContext);
         opt.workWaitMs = runtimeContext.effective.workWaitMs;
+        GamePreferencesStore gameStore(std::filesystem::u8path(cfg.stateDir) / "game-preferences.json");
+        if(!gameStore.load(&gameDefaults,&error)){
+            fprintf(stderr,"game preferences unavailable: %s; no mining was started\n",error.c_str());return kExitConfig;
+        }
+        if(gameDefaults.mode!=GameIntent::Off){
+            fprintf(stderr,"configured game mode requires qualified native safety/worker binding, unavailable in this build; select off in Games settings before an ordinary start; no mining was started\n");
+            return kExitConfig;
+        }
     }
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
         fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
@@ -941,6 +950,8 @@ int main(int argc, char **argv) {
             so.historyPath = (std::filesystem::u8path(cfg.stateDir) / "accepted-history.sqlite3").u8string();
         so.runtimePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json").u8string();
         so.runtimeContext = runtimeContext;
+        so.gamePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "game-preferences.json").u8string();
+        so.gameContext.running=true;so.gameContext.effective=gameDefaults;
         so.manualMarketPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "manual-market-preferences.json").u8string();
         so.manualMarketFactory = makeManualMarketProjector;
         so.noMarket = cli.ov.noMarket;

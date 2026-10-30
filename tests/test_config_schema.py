@@ -26,6 +26,9 @@ def validate(value, schema, root, path='$'):
         problems.append('%s: expected %r' % (path, schema['const']))
     if 'enum' in schema and value not in schema['enum']:
         problems.append('%s: %r not in %r' % (path, value, schema['enum']))
+    if 'if' in schema:
+        branch = 'then' if not validate(value, schema['if'], root, path) else 'else'
+        problems += validate(value, schema.get(branch, {}), root, path)
     if 'oneOf' in schema:
         ok = sum(1 for s in schema['oneOf'] if not validate(value, s, root, path))
         if ok != 1:
@@ -47,6 +50,9 @@ def validate(value, schema, root, path='$'):
             return problems
     if isinstance(value, str) and 'pattern' in schema and not re.search(schema['pattern'], value):
         problems.append('%s: does not match %s' % (path, schema['pattern']))
+    if isinstance(value, str):
+        if len(value) < schema.get('minLength', 0) or len(value) > schema.get('maxLength', len(value)):
+            problems.append('%s: invalid string length' % path)
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if 'minimum' in schema and value < schema['minimum']:
             problems.append('%s: below minimum' % path)
@@ -133,6 +139,33 @@ class RuntimePreferencesSchemaTests(unittest.TestCase):
         with open(os.path.join(ROOT, 'src', 'product', 'runtime_preferences.h'), encoding='utf8') as stream:
             writer = stream.read().split('inline std::string runtimePreferencesJson', 1)[1].split('inline bool parseRuntimePreferences', 1)[0]
         self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
+
+
+class GamePreferencesSchemaTests(unittest.TestCase):
+    def test_private_target_mode_and_bounds(self):
+        schema = load('config/game-preferences-v1.schema.json')
+        value = dict(schema_version=1, mode='off', target_executable='', target_scope='windows_session_image',
+                     poll_ms=500, exit_debounce_ms=2000, maximum_detection_age_ms=2000)
+        self.assertEqual(validate(value, schema, schema), [])
+        for mode in ('off', 'pause', 'coexist'):
+            for scope in ('windows_session_image', 'linux_native_uid_image'):
+                self.assertEqual(validate({**value, 'mode': mode, 'target_scope': scope, 'target_executable': 'fixture-game.exe'}, schema, schema), [])
+        for key, item in (('schema_version', 2), ('mode', 'pause'), ('mode', 'unsupported'), ('target_scope', 'auto'),
+                          ('poll_ms', 99), ('poll_ms', 10001), ('exit_debounce_ms', -1), ('exit_debounce_ms', 30001),
+                          ('maximum_detection_age_ms', 99), ('maximum_detection_age_ms', 30001), ('poll_ms', True),
+                          ('target_executable', '.'), ('target_executable', '..'), ('target_executable', '../fixture'),
+                          ('target_executable', 'fixture\n'), ('target_executable', 'fixture*.exe'),
+                          ('target_executable', 'x' * 129), ('target_executable', '\u6e38\u620f'), ('wallet', 'fixture')):
+            with self.subTest(key=key, value=item):
+                self.assertTrue(validate({**value, key: item}, schema, schema))
+        for key in value:
+            self.assertTrue(validate({k: v for k, v in value.items() if k != key}, schema, schema))
+        self.assertEqual(validate({**value, 'poll_ms': 10000, 'exit_debounce_ms': 0, 'maximum_detection_age_ms': 30000,
+                                   'target_executable': 'x' * 128}, schema, schema), [])
+        with open(os.path.join(ROOT, 'src', 'product', 'game_preferences.h'), encoding='utf8') as stream:
+            writer = stream.read().split('inline std::string gamePreferencesJson', 1)[1].split('inline bool parseGamePreferences', 1)[0]
+        self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
+        self.assertEqual(set(schema['required']), set(schema['properties']))
 
 
 class ManualMarketSchemaTests(unittest.TestCase):

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-game-preferences-v1",
+  "title": "Private game defaults; next explicit parent only",
+  "description": "Native input is limited to 4096 bytes, rejects duplicate/unknown fields, and requires unsigned integer tokens. Saving grants no runtime authority. Ordinary startup currently refuses non-off modes until qualified safety and worker binding are available.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "mode", "target_executable", "target_scope", "poll_ms", "exit_debounce_ms", "maximum_detection_age_ms"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "mode": { "type": "string", "enum": ["off", "pause", "coexist"], "default": "off" },
+    "target_executable": {
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^(?!\\.{1,2}$(?![\\s\\S]))[A-Za-z0-9_.-]{0,128}$(?![\\s\\S])",
+      "description": "One exact ASCII basename, not a path, substring or launcher expansion. Empty is allowed only when off. This private value is not a public status field."
+    },
+    "target_scope": {
+      "type": "string",
+      "enum": ["windows_session_image", "linux_native_uid_image"],
+      "description": "Explicit adapter; no cross-platform fallback. Missing-file defaults select the native adapter without scanning."
+    },
+    "poll_ms": { "type": "integer", "minimum": 100, "maximum": 10000, "default": 500 },
+    "exit_debounce_ms": { "type": "integer", "minimum": 0, "maximum": 30000, "default": 2000 },
+    "maximum_detection_age_ms": { "type": "integer", "minimum": 100, "maximum": 30000, "default": 2000 }
+  },
+  "if": { "properties": { "mode": { "enum": ["pause", "coexist"] } } },
+  "then": { "properties": { "target_executable": { "minLength": 1 } } }
+}

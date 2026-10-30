@@ -4,7 +4,7 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-11g.** [Lifetime game-to-worker supervision](../game-worker-session.md) retains one game runtime and parent identity across admitted worker replacements, clips Run leases to original evidence validity and connects an optional supervisor factory. Ordinary CLI/safety activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; the older slice summaries below are historical context.
+**Latest bounded slice: P-11h.** [Native game defaults](../game-settings.md) add independent mode/target/scope/timing review and saving, with frozen current-session values. Ordinary parents refuse non-Off requests before device discovery until qualified safety/fleet binding exists. The [P-11g lifetime bridge](../game-worker-session.md) remains available through an optional supervisor factory. Physical GPU/game acceptance remains open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 

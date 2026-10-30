@@ -399,6 +399,8 @@ struct SupervisorOptions {
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
     WorkerFleetFactory workerFleetFactory; // default empty; one fixed lifetime, never reconstructed on a worker retry
     WorkerFleetEvidenceSource workerFleetEvidence; // trusted memory-only source; missing evidence holds every controlled worker
+    std::string gamePreferencesPath;
+    GameSettingsContext gameContext; // frozen effective settings, not inferred from later saved preferences
 };
 
 /** What the supervisor knows about one worker at one moment. */
@@ -568,6 +570,7 @@ class Supervisor {
             if (!uiStore_->load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
         }
         if (!opt_.runtimePreferencesPath.empty()) runtimeStore_.reset(new RuntimePreferencesStore(std::filesystem::u8path(opt_.runtimePreferencesPath)));
+        if(!opt_.gamePreferencesPath.empty())gameStore_.reset(new GamePreferencesStore(std::filesystem::u8path(opt_.gamePreferencesPath)));
         if (opt_.dashboard && !opt_.manualMarketPreferencesPath.empty()) {
             manualStore_.reset(new ManualMarketStore(std::filesystem::u8path(opt_.manualMarketPreferencesPath)));
             if (!opt_.noMarket) {
@@ -685,8 +688,10 @@ class Supervisor {
                         },static_cast<uint64_t>(time(nullptr)),[this](ElectricityPreferences &p,std::string *error){
                             if(!electricityStore_){if(error)*error="Electricity target unavailable.";return false;}
                             return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),error)&&electricityStore_->save(p,error);
-                        },[this](const JsonValue &p,std::string *error){return tariffStore_&&tariffStore_->save(p,error);});
+                        },[this](const JsonValue &p,std::string *error){return tariffStore_&&tariffStore_->save(p,error);},
+                        [this](const GamePreferences &p,std::string *error){return gameStore_&&gameStore_->save(p,error);});
                         if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
+                        if(result==SettingsResult::OpenGame){auto context=opt_.gameContext;context.running=true;openGameControls(&settings_,gameStore_.get(),context);}
                         if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.running=true; context.cliDisabled=opt_.noMarket; context.effective=manualEffective_; openManualMarketControls(&settings_,manualStore_.get(),context); }
                         if(result==SettingsResult::OpenElectricity){ElectricitySettingsContext context;context.running=true;context.cliNoEnergy=opt_.noEnergy;context.effective=electricityEffective_;context.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;openElectricityControls(&settings_,electricityStore_.get(),context);}
                         if(result==SettingsResult::OpenTariff){
@@ -872,6 +877,7 @@ class Supervisor {
     UiPreferences ui_;
     std::unique_ptr<UiPreferencesStore> uiStore_;
     std::unique_ptr<RuntimePreferencesStore> runtimeStore_;
+    std::unique_ptr<GamePreferencesStore> gameStore_;
     std::unique_ptr<ManualMarketStore> manualStore_;
     ManualMarketPreferences manualEffective_;
     ManualMarketProjector manualProjection_;

@@ -10,6 +10,7 @@
 #include "dashboard.h"
 #include "ui_preferences.h"
 #include "runtime_settings.h"
+#include "game_settings.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -22,7 +23,7 @@
 namespace om {
 
 enum class SettingsPage { Browse, Review, Leave };
-enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket, OpenElectricity, OpenTariff };
+enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket, OpenElectricity, OpenTariff, OpenGame };
 
 class SettingsPanel {
    public:
@@ -35,6 +36,7 @@ class SettingsPanel {
     UiPreferences active, draft;
     std::string message;
     RuntimeSettingsPanel runtime;
+    GameSettingsPanel game;
     ManualMarketSettingsPanel manual;
     ElectricitySettingsPanel electricity;
     TariffSettingsPanel tariff;
@@ -55,6 +57,7 @@ class SettingsPanel {
         reviewOffset = 0;
         message.clear();
         runtime.visible = false;
+        game.visible = false;
         manual.visible = false;
         electricity.visible = false;
         tariff.visible = false;
@@ -70,19 +73,20 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3 || group == 5) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
     void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
     void updateBillingReview(){if(billingReview.visible)billingReview.sync(billingAccess);}
     void stopBillingReview(){billingReview.key(3,billingAccess);}
 
-    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}) {
-        const auto result=routeKey(key,save,runtimeSave,manualSave,nowUtc,electricitySave,tariffSave);
+    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}, const GameSettingsPanel::Save &gameSave = {}) {
+        const auto result=routeKey(key,save,runtimeSave,manualSave,nowUtc,electricitySave,tariffSave,gameSave);
         if(result==SettingsResult::Quit)stopBillingReview();
         return result;
     }
-    SettingsResult routeKey(int key,const Save &save,const RuntimeSettingsPanel::Save &runtimeSave,const ManualMarketSettingsPanel::Save &manualSave,uint64_t nowUtc,const ElectricitySettingsPanel::Save &electricitySave,const TariffSettingsPanel::Save &tariffSave){
+    SettingsResult routeKey(int key,const Save &save,const RuntimeSettingsPanel::Save &runtimeSave,const ManualMarketSettingsPanel::Save &manualSave,uint64_t nowUtc,const ElectricitySettingsPanel::Save &electricitySave,const TariffSettingsPanel::Save &tariffSave,const GameSettingsPanel::Save &gameSave){
+        if(game.visible)return game.key(key,gameSave)==GameSettingsResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(billingReview.visible)return billingReview.key(key,billingAccess)==BillingReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(energyAuthorization.visible){updateEnergyAuthorization();return energyAuthorization.key(key,energyAuthorizationAccess)==EnergyAuthorizationPanelResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if(energyReview.visible){updateEnergyReview();return energyReview.key(key,energyAccess)==EnergyReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;}
@@ -133,6 +137,7 @@ class SettingsPanel {
             if (groupsFocused) groupsFocused = false;
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3) return SettingsResult::OpenManualMarket;
+            else if (group == 5) return SettingsResult::OpenGame;
             else if ((group==2&&field==4)||(group==8&&field==5)) billingReview.open(billingAccess.snapshot?billingAccess.snapshot():nullptr);
             else if ((group==2&&field==3)||(group==8&&field==4)) energyAuthorization.open(energyAuthorizationAccess.snapshot?energyAuthorizationAccess.snapshot():nullptr);
             else if ((group==2&&field==2)||(group==8&&field==3)) energyReview.open(energyAccess.snapshot?energyAccess.snapshot():nullptr);
@@ -163,6 +168,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if(game.visible)return game.render(columns,rows,color);
         if(billingReview.visible)return billingReview.render(columns,rows,color);
         if(energyAuthorization.visible)return energyAuthorization.render(columns,rows,color,energyAuthorizationAccess);
         if(energyReview.visible)return energyReview.render(columns,rows,color);
@@ -284,6 +290,10 @@ class SettingsPanel {
             row(0, "Manual/offline price references [Enter]");
             result.push_back({"Default off; user-declared PRL/USDT and independent FX.", Tone::Plain});
             result.push_back({"No provider polling, 1h series, actual income or optimizer.", Tone::Plain});
+        } else if (group == 5) {
+            row(0,"Game mode / exact target defaults [Enter]");
+            result.push_back({"Configured only; native safety/CLI activation unavailable.",Tone::Plain});
+            result.push_back({"Non-off requests refuse the next ordinary start.",Tone::Plain});
         } else if (group == 2) {
             row(0,"Session board energy / declared flat energy-only rate [Enter]");
             row(1,"Combined tariff / declared whole-meter opening [Enter]");
@@ -344,6 +354,12 @@ inline void openManualMarketControls(SettingsPanel *panel, ManualMarketStore *st
     if (!store->load(&configured,&error)) { panel->message = "Offline-market settings unavailable: "+error; return; }
     panel->manual.open(configured,context);
 }
+inline void openGameControls(SettingsPanel *panel,GamePreferencesStore *store,const GameSettingsContext &context){
+    if(!store){panel->message="Game defaults unavailable: no local target.";return;}
+    GamePreferences value;std::string error;
+    if(!store->load(&value,&error)){panel->message="Game defaults unavailable: "+error;return;}
+    panel->game.open(std::move(value),context);
+}
 inline void openElectricityControls(SettingsPanel *panel,ElectricityPreferencesStore *store,const ElectricitySettingsContext &context) {
     if(!store){panel->message="Electricity settings unavailable: no local target.";return;}
     ElectricityPreferences p;std::string error;
@@ -369,6 +385,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     if(stop&&*stop){if(billingAccess.requestStop)billingAccess.requestStop();return 0;}
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
+    GamePreferencesStore gameStore(std::filesystem::u8path(stateDir) / "game-preferences.json");
     ManualMarketStore manualStore(std::filesystem::u8path(stateDir) / "manual-market-preferences.json");
     ElectricityPreferencesStore electricityStore(std::filesystem::u8path(stateDir) / "electricity-preferences.json");
     TariffDeclarationStore tariffStore(std::filesystem::u8path(stateDir) / "tariff-declaration.json");
@@ -403,11 +420,13 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
                 [&](const RuntimePreferences &p, std::string *e) { return runtimeStore.save(p, e); },
                 [&](ManualMarketPreferences &p, std::string *e) { return confirmManualMarket(&p,static_cast<uint64_t>(time(nullptr)),e) && manualStore.save(p,e); }, static_cast<uint64_t>(time(nullptr)),
                 [&](ElectricityPreferences &p,std::string *e){return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),e)&&electricityStore.save(p,e);},
-                [&](const JsonValue &p,std::string *e){return tariffStore.save(p,e);});
+                [&](const JsonValue &p,std::string *e){return tariffStore.save(p,e);},
+                [&](const GamePreferences &p,std::string *e){return gameStore.save(p,e);});
             if (result == SettingsResult::OpenRuntime) openRuntimeControls(&panel, &runtimeStore, {});
             else if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.cliDisabled=noMarket; openManualMarketControls(&panel,&manualStore,context); }
             else if (result == SettingsResult::OpenElectricity) {ElectricitySettingsContext context;context.cliNoEnergy=noEnergy;openElectricityControls(&panel,&electricityStore,context);}
             else if (result == SettingsResult::OpenTariff) openTariffControls(&panel,&tariffStore);
+            else if (result == SettingsResult::OpenGame) openGameControls(&panel,&gameStore,{});
             else if (result != SettingsResult::None) { panel.visible = false;if(runtime)runtime->requestStop();break; }
         }
         panel.updateCreditReview();

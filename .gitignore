@@ -57,6 +57,7 @@ ui-preferences.json.tmp-*
 ui-preferences.json.v1.bak
 accepted-history.sqlite3*
 runtime-preferences.json*
+game-preferences.json*
 manual-market-preferences.json*
 *.credit-recovery.json*
 electricity-preferences.json*

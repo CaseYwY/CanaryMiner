@@ -7,7 +7,6 @@ namespace {
 constexpr size_t wireLimit=2048;
 constexpr uint64_t lastUtc=253402300799999ULL;
 bool hex(const std::string &s,size_t n){return s.size()==n&&std::all_of(s.begin(),s.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');});}
-bool name(const std::string &s){return !s.empty()&&s.size()<=128&&s!="."&&s!=".."&&std::all_of(s.begin(),s.end(),[](char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.';});}
 bool time(GameGuardTime t){return t.utcMs>0&&static_cast<uint64_t>(t.utcMs)<=lastUtc;}
 bool ordered(GameGuardTime a,GameGuardTime b){return a.utcMs<=b.utcMs&&a.monotonicMs<=b.monotonicMs;}
 struct Reader {
@@ -31,8 +30,6 @@ std::string binding(const GameProbeRequest &r){std::string s;return encodeGamePr
 }
 GameGuardTime gameDetectionTime(){return {std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(),
     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count())};}
-bool validGameProcessTarget(const GameProcessTarget &t){return name(t.gameKey)&&name(t.executable)&&
-    (t.adapter==GameProcessAdapter::WindowsSessionImage||t.adapter==GameProcessAdapter::LinuxUidNativeImage);}
 bool validGameProbeRequest(const GameProbeRequest &r){return r.generation&&r.revision&&validGameProcessTarget(r.target)&&time(r.issued)&&
     (r.privateScope.empty()||hex(r.privateScope,32))&&r.scanBudgetMs>=25&&r.scanBudgetMs<=1000&&r.maxProcesses>=1&&r.maxProcesses<=32768;}
 bool encodeGameProbeRequest(const GameProbeRequest &r,uint64_t pid,std::string *out){
