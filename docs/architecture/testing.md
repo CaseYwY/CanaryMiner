@@ -136,6 +136,8 @@ Test best eligible estimated net per elapsed time, no-data/nonpositive pause, al
 
 [P-11e](../worker-control.md) checks canonical schemas and fragmented bounded streams, complete incarnation/revision/time fencing, single-flight acknowledgement, receipt/quiescence separation, clock/expiry/stop non-revival and concurrent gate observation. Owned native CPU pipe probes cover real fragmented delivery, old Run replay, idle/partial-frame expiry, foreign binding, overflow and EOF. The shared-loop fixture installs the real gate for initial/mid-work pause, fresh resume and terminal refusal. These are not production pipe-lifecycle or GPU/game timing qualification.
 
+[P-11f](../worker-process.md) checks paired channels/background owners, shared-loop subprocess control, original-deadline backpressure, idle IO cancellation, bounded whole-line retention and owned termination. CLI host variants verify initial Pause/stop/expiry before device discovery and refuse unsupported/unowned modes. Parent-death checks use self-owned CPU processes; Linux checks lost reaping ownership and quarantine. CPU/development checks continue while integrated GPU/game acceptance is deferred until implementation is ready.
+
 Test off/pause/coexist, launcher/game/manual triggers, debounce/detection failure, no permission/no FPS/no valid baseline safe fallback, actual matched scene metrics, experience limits/VRAM/thermal headroom and bounded authorized testing. Test qualified auto-entry/exit restoration, economic pause/recovery and user stop not reviving. No injection/anti-cheat bypass/focus stealing/game killing; generic launcher tests do not count as gameplay evidence.
 
 ## T-TLS

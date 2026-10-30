@@ -1,6 +1,7 @@
 // Actual shared run loop, CPU algorithm and bounded in-memory source only. No telemetry, socket, device or Pearl proof qualification.
 #include "core/run.h"
 #include "product/worker_control.h"
+#include "product/worker_process.h"
 #include "product_test_util.h"
 #include <algorithm>
 #include <atomic>
@@ -22,6 +23,7 @@ struct Rig {
     bool acknowledged=false,stopInPause=false,failDrain=false,pauseInPrepare=false,pauseInFetch=false;
     bool enabledHint=false,configured=false,sourceMade=false,uncontrolled=false,pauseOrdering=true;
     WorkerControlGate *gate=nullptr;uint64_t *gateClock=nullptr;unsigned gateMode=0;
+    WorkerControlClient *nativeClient=nullptr;
     unsigned searches=0,submits=0,drains=0,resumes=0,fetches=0,version=1;
     std::vector<std::string> events;
     Control control{this};
@@ -45,6 +47,7 @@ struct Source:JobSource {
     bool fetch(Job *j)override{
         auto &r=*active;
         if(r.gate){const auto view=r.gate->snapshot();if(view.receipt&&view.receipt->command.revision>=4)r.version=2;}
+        if(r.nativeClient){const auto view=r.nativeClient->snapshot();if(view.receipt&&view.receipt->command.revision>=4)r.version=2;}
         ++r.fetches;r.events.push_back("fetch"+std::to_string(r.version));
         j->valid=true;j->epoch=r.version;j->jobId="fixture.job-"+std::to_string(r.version);j->msg[0]=static_cast<uint8_t>(r.version);
         if(r.pauseInFetch&&r.fetches==1)r.requested=true;
@@ -60,6 +63,7 @@ struct Algo:Algorithm {
     bool prepare(const Job &j)override{active->events.push_back("prepare"+std::to_string(j.epoch));if(active->pauseInPrepare&&j.epoch==1)active->requested=true;return true;}
     bool search(const Job &j,uint64_t nonce,uint64_t,std::vector<Solution> *out)override{
         auto &r=*active;++r.searches;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
+        if(r.nativeClient){std::this_thread::sleep_for(std::chrono::milliseconds(5));if(r.searches>=1000)r.stop=1;return true;}
         if(r.gate){if(r.searches==1)r.gate->receive({binding(),3,1000,2000,WorkerDirective::Pause});else r.stop=1;return true;}
         if(r.pauseInPrepare||r.pauseInFetch||r.version==2||(r.uncontrolled&&r.searches==2))r.stop=1;else r.requested=true;
         return true;
@@ -71,7 +75,8 @@ struct Algo:Algorithm {
 };
 struct Hook:RunLoopHook {
     int atLoopTop(bool completed)override{active->events.push_back(completed?"complete":"top");return 0;}
-    void pauseChanged(bool paused)override{active->events.push_back(paused?"idle":"active");}
+    void pauseChanged(bool paused)override{active->events.push_back(paused?"idle":"active");
+        if(active->nativeClient&&paused){std::printf("NATIVEPAUSE %u %u\n",active->searches,active->submits);std::fflush(stdout);}}
 };
 RunOptions options(Rig &r){RunOptions o;o.workPause=&r.control;o.plain=true;o.batch=1;o.reportSeconds=3600;
     o.poolHost="fixture.invalid";o.poolPort=1;o.poolAccount="fixture.account";o.poolProofCompression=true;o.pearlPolicy={PearlNetwork::Mainnet,PearlTargetSemantics::BaseBeforePenalty};return o;}
@@ -84,7 +89,16 @@ struct GateHook:Hook {
 };
 }
 namespace om {JobSource *workPauseTestSource(){active->sourceMade=true;return new Source;}}
-int main(){
+int main(int argc,char **argv){
+    if(argc==6&&std::string(argv[1])=="--channel-fixture"&&std::string(argv[2])=="--worker-control-v1"){
+        WorkerChannelHandles handles;WorkerControlClient client;
+        if(!parseWorkerChannelHandles(argv[3],argv[4],argv[5],&handles)||!client.adopt(handles))return 90;
+        Rig r;active=&r;r.nativeClient=&client;Algo algo;Hook hook;auto o=options(r);o.workPause=&client;o.loopHook=&hook;
+        const auto result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);client.stop();
+        std::printf("NATIVEFINAL %u %u %u\n",r.searches,r.submits,r.version);std::fflush(stdout);
+        if(r.searches!=r.submits||r.enabledHint)return 91;
+        return result==kRunPauseFault?8:result;
+    }
     for(unsigned mode=0;mode<9;++mode){Rig r;active=&r;Algo algo;Hook hook;auto o=options(r);o.loopHook=&hook;
         r.stopInPause=mode==1||mode==4;r.failDrain=mode==2;r.pauseInPrepare=mode==3;r.pauseInFetch=mode==5;r.requested=mode==4||mode==6;
         if(mode==7)o.workWaitMs=5;

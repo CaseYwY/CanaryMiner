@@ -139,6 +139,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 [P-11e](../worker-control.md) adds a strict bounded private protocol, one-flight parent issuer and serialized worker memory gate under frozen session/worker keys, epoch/slot/generation and original command deadlines. Received and Paused receipts stay distinct; expiry/stop cannot revive, and a renewed hold does not alter productive accounting. Production pipe ownership, supervisor/game composition and native settings remain subsequent integration.
 
+[P-11f](../worker-process.md) supplies inherited nonblocking channels separate from logs, one-shot helper-side entropy, single-use process ownership and a background facade. Reaping/quarantine remain distinct from command receipts; startup/IO cancellation never automatically renews or creates mining intent. An opt-in native child binds the client before device discovery; ordinary supervisor/game composition remains next.
+
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
 ### M-TLS

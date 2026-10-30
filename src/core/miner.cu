@@ -35,6 +35,9 @@
 #include "../product/supervisor.h"
 #include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
+#if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
+#include "../product/worker_process.h"
+#endif
 #include <chrono>
 #include <thread>
 
@@ -154,6 +157,11 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
+#if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
+    bool workerControlSeen=false;
+    WorkerChannelHandles workerChannel;
+    std::unique_ptr<WorkerControlClient> workerControl;
+#endif
     bool workWaitSeen = false;
     std::string workerIdText;
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
@@ -299,6 +307,16 @@ int main(int argc, char **argv) {
         }
         else if (a == "--ascii") om::g_asciiOnly = true;
         else if (a == "--no-dashboard") noDashboard = true;
+        else if (a == "--worker-control-v1") {
+#if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
+            if(workerControlSeen||i+3>=cli.rest.size()||!parseWorkerChannelHandles(cli.rest[i+1].c_str(),cli.rest[i+2].c_str(),cli.rest[i+3].c_str(),&workerChannel)){
+                fprintf(stderr,"invalid private worker channel\n");return kExitUsage;
+            }
+            workerControlSeen=true;i+=3;
+#else
+            fprintf(stderr,"private worker control unavailable in this build\n");return kExitUsage;
+#endif
+        }
         else if (a == "--worker-child") workerChild = true;
         else if (a == "--worker-id") workerIdText = next();
         else if (a == "--interval") {
@@ -424,6 +442,16 @@ int main(int argc, char **argv) {
         fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
         return kExitUsage;
     }
+#if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
+    if(workerControlSeen&&(!workerChild||cli.command!=Command::Run||opt.bench||opt.formalBenchmark.enabled||opt.autotune||
+        opt.pearlAcceptedQuota||opt.pearlSustainedSeconds||opt.pearlProduction||opt.pearlWorkRange.enabled||
+        pearlPrivateEnabled(opt.pearlPrivateExecution)||pearlPublicEnabled(opt.pearlPublicExecution)||opt.memOffsetMhz||opt.memOc||
+        cfg.tuning.requested()||!workWaitEnvironmentCompatible(1)
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+        ||!guardControlText.empty()
+#endif
+        )){fprintf(stderr,"private worker control requires an ordinary untuned worker run\n");return kExitUsage;}
+#endif
     if (workerChild) {
         // Each GPU worker keeps its own donation state, shutdown record and log files under gpu-<index>.
         if (workerIdText.empty() || workerIdText.size() > 3 || workerIdText.find_first_not_of("0123456789") != std::string::npos) return 1;
@@ -809,6 +837,18 @@ int main(int argc, char **argv) {
 #ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
     supervised = supervised && opt.pearlGuardRetirementSession == nullptr;
 #endif
+#if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
+    if(workerControlSeen){
+        signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
+        workerControl.reset(new WorkerControlClient);
+        if(!workerControl->adopt(workerChannel)){fprintf(stderr,"private worker parent/channel binding failed\n");return kExitFaultLatched;}
+        // No device/source has been constructed: this is a real empty/drained initial boundary.
+        const auto ready=pauseAtWorkBoundary(*workerControl,[]{return g_stop!=0;},[]{return true;},[](bool){},workerControlNowMs,
+            [](unsigned ms){std::this_thread::sleep_for(std::chrono::milliseconds(ms));});
+        if(ready!=WorkPauseResult::Ready)return ready==WorkPauseResult::Stopped?kExitOk:kExitFaultLatched;
+        opt.workPause=workerControl.get();
+    }
+#endif
     // ---- devices: identity, allowlist, one device per process (nothing has touched a kernel yet)
     DeviceIdentity chosenDevice;
     std::vector<DeviceIdentity> chosenAll;
@@ -945,7 +985,11 @@ int main(int argc, char **argv) {
         return 1;
     }
     cudaSetDevice(deviceIndex);
-    if (workerChild) {
+    if (workerChild
+#if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
+        && !workerControl
+#endif
+        ) {
         // The supervisor asks this worker to stop by closing its stdin: end-of-file sets the same flag as a signal.
         std::thread([] {
             char buf[256];
