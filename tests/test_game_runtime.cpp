@@ -25,6 +25,16 @@ int main(int argc,char **argv){
         CHECK(r.tick(gameDetectionTime(),safe()).state==S::PausedPolicy&&r.snapshot().episodeKey==first->detection.episodeKey);
         unsafe=safe();unsafe.fault=true;CHECK(r.tick(gameDetectionTime(),unsafe).state==S::Faulted&&r.state()==R::Faulted);
         CHECK(r.tick(gameDetectionTime(),safe()).state==S::Faulted&&!r.start(gameDetectionTime()));r.stop();CHECK(r.snapshot().state==S::Stopped);}
+    {GameRuntime r(helper,target(),detection(),policy(),binding(),intent,token);CHECK(r.start(gameDetectionTime()));
+        CHECK(wait([&]{return r.tick(gameDetectionTime(),safe()).state==S::PausedPolicy;}));
+        CHECK(r.requestForceResume());GameGuardTime now=gameDetectionTime();
+        CHECK(r.tick(now,safe()).state==S::ForceResumeEligible&&r.forceResumeActive());
+        CHECK(r.runDeadline(now,now.monotonicMs+1000)>now.monotonicMs);
+        CHECK(r.requestForceResume());CHECK(r.tick(now,safe()).state==S::PausedPolicy&&!r.forceResumeActive());
+        CHECK(r.requestForceResume());CHECK(r.tick(now,safe()).state==S::ForceResumeEligible);
+        auto unsafe=safe();unsafe.telemetryValid=false;
+        CHECK(r.tick(now,unsafe).state==S::Cooling&&!r.forceResumeActive());
+        CHECK(r.tick(now,safe()).state==S::PausedPolicy);r.stop();}
     {GameRuntime r(helper,target("fixture-sequence"),detection(),policy(),binding(),intent,token);CHECK(r.start(gameDetectionTime()));
         CHECK(wait([&]{return r.tick(gameDetectionTime(),safe()).state==S::PausedPolicy;}));
         const auto episode=r.snapshot().episodeKey;

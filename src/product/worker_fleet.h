@@ -23,6 +23,7 @@ struct WorkerFleetSnapshot {
     bool commandPending=false; // control-thread settlement, independent of child stdout and process exit
     int exitCode=-1;
     GameGuardState game=GameGuardState::Stopped;
+    bool forceResumeActive=false,forceResumeAvailable=false; // memory-only operator override; never a persisted permission
 };
 class WorkerFleet {
    public:
@@ -33,6 +34,11 @@ class WorkerFleet {
     virtual WorkerFleetState state()const=0;
     virtual WorkerFleetSnapshot snapshot(unsigned slot)const=0;
     virtual std::vector<std::string> takeLines(unsigned slot)=0; // caller redacts; no control keys in these lines
+    // Optional key action. The default fleet has no game pause to override.
+    virtual bool requestForceResume(){return false;}
+    virtual void cancelForceResume(){}
+    virtual bool forceResumeActive()const{return false;}
+    virtual bool forceResumeAvailable()const{return false;}
     virtual void requestStop()=0;
     virtual void stop()=0;
 };

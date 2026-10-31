@@ -193,7 +193,18 @@ void lifecycle(){
 }
 void gameAndRestarts(){
     {Rig r(GameIntent::Pause,"fixture-present");CHECK(r.start());CHECK(r.until([&]{return r.view().paused&&r.session->gameSnapshot().state==GameGuardState::PausedPolicy;}));
-        CHECK(r.lines.find("FLEETRUN")==r.lines.npos&&!r.session->gameSnapshot().episodeKey.empty());}
+        CHECK(r.lines.find("FLEETRUN")==r.lines.npos&&!r.session->gameSnapshot().episodeKey.empty());
+        CHECK(r.view().forceResumeAvailable&&!r.view().forceResumeActive);
+        CHECK(r.session->requestForceResume());
+        CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;}));
+        CHECK(r.view().forceResumeActive&&r.session->gameSnapshot().state==GameGuardState::ForceResumeEligible);
+        // The forced Run must settle before Pause can replace it; withdrawing a pending Run would revoke
+        // the worker instead of returning to the pause.
+        CHECK(r.until([&]{return !r.view().commandPending;}));
+        CHECK(r.session->requestForceResume());
+        CHECK(r.until([&]{return r.view().paused;}));
+        CHECK(!r.view().forceResumeActive&&r.session->gameSnapshot().state==GameGuardState::PausedPolicy);
+        r.session->stop();}
     {Rig r(GameIntent::Coexist,"fixture-present");CHECK(r.start());CHECK(r.until([&]{return r.view().paused&&r.session->gameSnapshot().state==GameGuardState::NeedsQualification;}));
         CHECK(r.lines.find("FLEETRUN")==r.lines.npos);}
     {Rig r(GameIntent::Pause,"fixture-incomplete");CHECK(r.start());CHECK(r.until([&]{return r.view().paused;}));CHECK(r.lines.find("FLEETRUN")==r.lines.npos);}

@@ -38,7 +38,8 @@ const GameGuardSnapshot &GameRuntime::tick(GameGuardTime now,const GameSafety &s
     if(result.state==GameGuardState::Stopped)requestStop();
     else if(result.state==GameGuardState::Faulted||result.state==GameGuardState::ClockFault){state_=GameRuntimeState::Faulted;detector_.requestStop();}
     else if(result.state==GameGuardState::Off)runUntil_=UINT64_MAX;
-    else if(source&&(result.state==GameGuardState::NormalEligible||result.state==GameGuardState::CoexistEligible)){
+    else if(source&&(result.state==GameGuardState::NormalEligible||result.state==GameGuardState::ForceResumeEligible||
+        result.state==GameGuardState::CoexistEligible)){
         runUntil_=detectionDeadline_.clip(source->detection.revision,now,source->detection.observed,policy_.maximumDetectionGapMs);
         if(result.state==GameGuardState::CoexistEligible&&policy_.tenMinuteProfitRule){
             if(!result.coexistBeginMonoMs||*result.coexistBeginMonoMs>UINT64_MAX-gameProfitWindowMs)runUntil_=0;
@@ -51,6 +52,11 @@ const GameGuardSnapshot &GameRuntime::tick(GameGuardTime now,const GameSafety &s
     }
     return guard_.snapshot();
 }
+bool GameRuntime::requestForceResume(){
+    if(state_!=GameRuntimeState::Active&&state_!=GameRuntimeState::Off)return false;
+    return guard_.requestForceResume();
+}
+void GameRuntime::cancelForceResume(){guard_.cancelForceResume();}
 uint64_t GameRuntime::runDeadline(GameGuardTime now,uint64_t upper)const{
     if(!intent_.permits(token_)||(state_!=GameRuntimeState::Active&&state_!=GameRuntimeState::Off)||
         now.utcMs!=lastTick_.utcMs||now.monotonicMs!=lastTick_.monotonicMs||upper<=now.monotonicMs||runUntil_<=now.monotonicMs)return 0;

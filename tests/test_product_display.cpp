@@ -100,6 +100,14 @@ static void displayTests() {
     view.page = DashPage::Log;
     renderDashboard(model, view);
     CHECK(view.page == DashPage::Main);
+    view.page = DashPage::Main;
+    model.forceResumeAvailable = true;
+    auto force = renderDashboard(model, view);
+    CHECK(has(force, "[R] Force resume") && has(force, "Paused by game or economics."));
+    model.forceResumeActive = true;
+    force = renderDashboard(model, view);
+    CHECK(has(force, "FORCE RESUME ON") && has(force, "[R] Cancel force resume") && has(force, "safety, cooling, fault and stop still win"));
+    model.forceResumeActive = model.forceResumeAvailable = false;
     view.options.detailsEnabled = true;
     view.options.detailsIdentity = view.options.detailsPool = view.options.detailsRestarts = view.options.detailsErrors = false;
     CHECK(handleDashKey(view, 'd'));

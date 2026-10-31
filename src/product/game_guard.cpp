@@ -17,9 +17,17 @@ GameSessionGuard::GameSessionGuard(GameGuardPolicy p,GameProfitBinding b,const S
         validCreditSourceContract(binding_.production)&&binding_.production.scope==CreditScope::Worker;
     view_.state=p.mode==GameIntent::Off?S::Off:S::PausedUnknown;
 }
-void GameSessionGuard::requestStop(){terminal_=true;view_.state=S::Stopped;}
+void GameSessionGuard::requestStop(){terminal_=true;forceArmed_=forceActive_=false;view_.forceResumeActive=false;view_.state=S::Stopped;}
+bool GameSessionGuard::requestForceResume(){
+    if(terminal_)return false;
+    if(forceActive_||forceArmed_){cancelForceResume();return true;}
+    if(!gameForceResumeEligible(view_.state))return false;
+    forceArmed_=true;
+    return true;
+}
+void GameSessionGuard::cancelForceResume(){forceArmed_=forceActive_=false;view_.forceResumeActive=false;}
 bool GameSessionGuard::time(GameGuardTime now){
-    if(!instant(now.utcMs)||(clockStarted_&&(now.utcMs<last_.utcMs||now.monotonicMs<last_.monotonicMs))){terminal_=true;view_.state=S::ClockFault;return false;}
+    if(!instant(now.utcMs)||(clockStarted_&&(now.utcMs<last_.utcMs||now.monotonicMs<last_.monotonicMs))){terminal_=true;cancelForceResume();view_.state=S::ClockFault;return false;}
     if(!clockStarted_){clockStarted_=true;anchor_=now;}
     const auto utc=static_cast<uint64_t>(now.utcMs-anchor_.utcMs),mono=now.monotonicMs-anchor_.monotonicMs;
     if((utc>mono?utc-mono:mono-utc)>2000){terminal_=true;view_.state=S::ClockFault;return false;}
@@ -45,10 +53,22 @@ const GameGuardSnapshot &GameSessionGuard::update(GameGuardTime now,const GameDe
     if(terminal_)return view_;
     if(!time(now))return view_;
     last_=now;
-    if(s.fault){terminal_=true;view_.state=S::Faulted;return view_;}
-    if(policy_.mode==GameIntent::Off){view_.state=S::Off;return view_;}
+    if(s.fault){terminal_=true;cancelForceResume();view_.state=S::Faulted;return view_;}
+    if(policy_.mode==GameIntent::Off){cancelForceResume();view_.state=S::Off;return view_;}
     const bool safe=s.telemetryValid&&s.thermalSafe;
-    auto set=[&](S state)->const GameGuardSnapshot &{view_.state=safe?state:S::Cooling;return view_;};
+    // The pause state is computed first, then the one-shot operator override is applied. A stale,
+    // cooling, faulted, unknown or changed pause clears the override instead of reviving it.
+    auto set=[&](S state)->const GameGuardSnapshot &{
+        if(!safe){cancelForceResume();view_.state=S::Cooling;return view_;}
+        if(forceArmed_){
+            forceArmed_=false;
+            if(gameForceResumeEligible(state))forceActive_=true;
+        }
+        if(forceActive_&&!gameForceResumeEligible(state))forceActive_=false;
+        view_.forceResumeActive=forceActive_;
+        view_.state=forceActive_&&state!=S::ForceResumeEligible?S::ForceResumeEligible:state;
+        return view_;
+    };
     if((d.state!=GamePresence::Unknown&&d.state!=GamePresence::Absent&&d.state!=GamePresence::Present)||d.gameKey!=binding_.gameKey||d.generation!=token_.epoch||!d.revision||!instant(d.observed.utcMs)||d.observed.utcMs>now.utcMs||d.observed.monotonicMs>now.monotonicMs||
         static_cast<uint64_t>(now.utcMs-d.observed.utcMs)>policy_.maximumDetectionGapMs||now.monotonicMs-d.observed.monotonicMs>policy_.maximumDetectionGapMs||
         (d.state==GamePresence::Present?!key(d.episodeKey):!d.episodeKey.empty())||

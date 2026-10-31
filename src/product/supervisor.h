@@ -711,6 +711,15 @@ class Supervisor {
                             quit = true;
                         }
                     } else if (key == 'q' || key == 'Q' || key == 3) quit = true;
+                    else if (key == 'r' || key == 'R') {
+                        if (!stopping && fleet_) {
+                            const bool changed = fleet_->requestForceResume();
+                            addEvent(changed ? "force resume toggled for the current game/economic pause"
+                                             : "force resume unavailable: no known game/economic pause");
+                        } else if (!stopping) {
+                            addEvent("force resume unavailable: no controlled worker fleet");
+                        }
+                    }
                     else if (key == 's' || key == 'S') {
                         std::string error;
                         UiPreferences loaded;
@@ -1156,6 +1165,11 @@ class Supervisor {
             const auto energy=energy_->snapshot();model.energy=energy->view;
             if(model.energy.enabled&&now>=energy->throughMonoMs&&now-energy->throughMonoMs>electricityEffective_.maximumGapMs)
                 model.energy.lines.push_back("No recent energy observation; known totals retained, current tail unavailable.");
+        }
+        if(fleet_) for(size_t i=0;i<workers_.size();++i){
+            const auto control=fleet_->snapshot(static_cast<unsigned>(i));
+            model.forceResumeActive=model.forceResumeActive||control.forceResumeActive;
+            model.forceResumeAvailable=model.forceResumeAvailable||control.forceResumeAvailable;
         }
         return model;
     }

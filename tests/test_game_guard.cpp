@@ -56,7 +56,41 @@ int main(){
         CHECK(pause.update(at(0),detect(0),safe()).state==S::PausedPolicy&&!pause.snapshot().coexistBeginMonoMs);
         CHECK(pause.update(at(1000),detect(1000,GamePresence::Absent),safe()).state==S::PausedUnknown);
         CHECK(pause.update(at(3000),detect(3000,GamePresence::Absent),safe()).state==S::NormalEligible);}
-    {auto p=policy();p.coexistence=ForecastQualification::Unsupported;GameSessionGuard q(p,binding(),intent,token);CHECK(q.update(at(0),detect(0),safe()).state==S::NeedsQualification);}
+    // One explicit press resumes only the known pause; safety, unknown detection and a new reason clear it.
+    {auto p=policy();p.mode=GameIntent::Pause;p.coexistence=ForecastQualification::Unsupported;GameSessionGuard q(p,binding(),intent,token);
+        CHECK(q.update(at(0),detect(0),safe()).state==S::PausedPolicy);
+        CHECK(q.requestForceResume());
+        CHECK(q.update(at(1000),detect(1000),safe()).state==S::ForceResumeEligible&&q.snapshot().forceResumeActive);
+        CHECK(q.update(at(2000),detect(2000),safe()).state==S::ForceResumeEligible);
+        auto unsafe=safe();unsafe.thermalSafe=false;
+        CHECK(q.update(at(3000),detect(3000),unsafe).state==S::Cooling&&!q.snapshot().forceResumeActive);
+        CHECK(q.update(at(4000),detect(4000),safe()).state==S::PausedPolicy);
+        CHECK(q.requestForceResume());
+        CHECK(q.update(at(5000),detect(5000),safe()).state==S::ForceResumeEligible);
+        CHECK(q.update(at(6000),detect(6000,GamePresence::Absent),safe()).state==S::PausedUnknown&&!q.snapshot().forceResumeActive);
+        CHECK(!q.requestForceResume()); // unknown/ambiguous pause cannot be forced
+        CHECK(q.update(at(7000),detect(7000,GamePresence::Unknown),safe()).state==S::PausedUnknown);
+        CHECK(!q.requestForceResume());}
+    {auto p=policy();p.mode=GameIntent::Pause;p.coexistence=ForecastQualification::Unsupported;GameSessionGuard q(p,binding(),intent,token);
+        q.update(at(0),detect(0),safe());q.requestForceResume();q.update(at(1000),detect(1000),safe());
+        CHECK(q.snapshot().forceResumeActive);
+        auto unsafe=safe();unsafe.fault=true;
+        CHECK(q.update(at(2000),detect(2000),unsafe).state==S::Faulted&&!q.snapshot().forceResumeActive);
+        CHECK(!q.requestForceResume());}
+    {auto p=policy();p.coexistence=ForecastQualification::Unsupported;GameSessionGuard q(p,binding(),intent,token);CHECK(q.update(at(0),detect(0),safe()).state==S::NeedsQualification);
+        CHECK(q.requestForceResume());
+        CHECK(q.update(at(1000),detect(1000),safe()).state==S::ForceResumeEligible);
+        CHECK(q.requestForceResume()); // a second press cancels
+        CHECK(q.update(at(2000),detect(2000),safe()).state==S::NeedsQualification&&!q.snapshot().forceResumeActive);}
+    {GameSessionGuard q(policy(),binding(),intent,token);q.update(at(0),detect(0),safe());q.update(at(600000),detect(600000),safe(),negative);
+        CHECK(q.snapshot().state==S::ProfitLocked);
+        CHECK(q.requestForceResume());
+        CHECK(q.update(at(600001),detect(600001),safe()).state==S::ForceResumeEligible&&q.snapshot().forceResumeActive);
+        CHECK(q.update(at(600002),detect(600002,GamePresence::Absent),safe()).state==S::PausedUnknown&&!q.snapshot().forceResumeActive);}
+    {auto p=policy();p.mode=GameIntent::Pause;p.coexistence=ForecastQualification::Unsupported;
+        GameSessionGuard q(p,binding(),intent,token);q.update(at(0),detect(0),safe());q.requestForceResume();CHECK(q.snapshot().forceResumeActive==false);
+        q.update(at(1000),detect(1000),safe());CHECK(q.snapshot().forceResumeActive);q.requestStop();
+        CHECK(q.update(at(2000),detect(2000),safe()).state==S::Stopped&&!q.snapshot().forceResumeActive);}
     for(auto change:std::vector<std::function<void(GameGuardPolicy &)>>{
         [](auto &p){p.mode=static_cast<GameIntent>(99);},[](auto &p){p.exitDebounceMs=30001;},[](auto &p){p.maximumDetectionGapMs=0;},
         [](auto &p){p.maximumDetectionGapMs=30001;},[](auto &p){p.maximumProfitAgeMs=0;},[](auto &p){p.maximumProfitAgeMs=60001;}}){auto p=policy();change(p);GameSessionGuard q(p,binding(),intent,token);CHECK(q.update(at(0),detect(0),safe()).state==S::Faulted);}

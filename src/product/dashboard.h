@@ -88,6 +88,8 @@ struct DashModel {
     PublicMarketView publicMarket;
     EnergyView energy;
     AcceptedHistoryView history;
+    bool forceResumeActive = false;      // memory-only user override is currently overriding a known pause
+    bool forceResumeAvailable = false;   // a known game/economic pause can be overridden with [R]
 };
 
 /** What the terminal shows: the page, the scroll position, and the terminal size and colour. */
@@ -308,6 +310,11 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
     out.push_back(one("mining | PRL | Pool " + (m.poolEndpoint.empty() ? std::string("none") : m.poolEndpoint) + " | Worker " + m.worker));
     // The whole connection line takes the connection's tone, as in the private viewer.
     out.push_back(Line{Seg{"Connection " + m.connection + " | Mining session " + hms(m.sessionSeconds), connectionTone(m.connection)}});
+    if (m.forceResumeActive)
+        out.push_back(Line{Seg{"FORCE RESUME ON", Tone::Red},
+                           Seg{"  game/economic pause overridden; safety, cooling, fault and stop still win", Tone::Plain}});
+    else if (m.forceResumeAvailable)
+        out.push_back(Line{Seg{"Paused by game or economics.", Tone::Amber}, Seg{"  [R] Force resume", Tone::Plain}});
     out.push_back(Line{Seg{"Current ", Tone::Plain}, Seg{fixed(rate, 2) + " TH/s", Tone::Canary},
                        Seg{"    Session average ", Tone::Plain}, Seg{fixed(avg, 2) + " TH/s", Tone::Canary},
                        Seg{"    GPU power ", Tone::Plain},
@@ -540,9 +547,11 @@ inline std::string renderDashboard(const DashModel &input, DashView &view) {
 
     double age = -1;
     for (const DashGpu &g : m.gpus) age = std::max(age, g.sampleAgeS);
+    const std::string forceKey = m.forceResumeActive ? " [R] Cancel force resume"
+                                 : m.forceResumeAvailable ? " [R] Force resume" : "";
     const std::string dataLine = std::string("Data age ") + (age < 0 ? std::string("N/A") : fixed(age, 1) + "s") +
         " | Current: 10s | Average: mining session |" + (view.options.detailsEnabled ? " [D] Details" : "") +
-        (view.options.logEnabled ? " [L] Log" : "") + " [M] Main [Q] Quit [S] Settings" +
+        (view.options.logEnabled ? " [L] Log" : "") + forceKey + " [M] Main [Q] Quit [S] Settings" +
         (view.page == DashPage::Log ? std::string(" | ") + (view.logFrozen ? "Frozen" : view.logScrollHeld ? "Scroll held [F] Follow" : "Following") : "");
     const std::vector<std::string> dataRows = wrapText(dataLine, W);
 

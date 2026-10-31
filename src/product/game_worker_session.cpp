@@ -278,7 +278,9 @@ void GameWorkerSession::tick(GameGuardTime now,const WorkerFleetEvidence &e){
 WorkerFleetState GameWorkerSession::state()const{return impl_->state;}
 WorkerFleetSnapshot GameWorkerSession::snapshot(unsigned index)const{
     const auto &p=*impl_;if(index>=p.slots.size())return {};
-    const auto &slot=p.slots[index];auto view=slot.view;view.game=p.game.snapshot().state;view.ownershipUnresolved=p.unresolved();
+    const auto &slot=p.slots[index];auto view=slot.view;view.game=p.game.snapshot().state;
+    view.forceResumeActive=p.game.forceResumeActive();view.forceResumeAvailable=gameForceResumeEligible(view.game);
+    view.ownershipUnresolved=p.unresolved();
     if(!slot.launchPending&&!slot.lives.empty()&&slot.lives.back()->generation==view.generation){
         const auto current=slot.lives.back()->owner.snapshot();view.reaped=current.reaped;
         view.ownershipUnresolved=view.ownershipUnresolved||current.state==WorkerOwnerState::Unreaped;
@@ -294,6 +296,14 @@ std::vector<std::string> GameWorkerSession::takeLines(unsigned index){
     return p.slots[index].lives.back()->owner.takeLines();
 }
 const GameGuardSnapshot &GameWorkerSession::gameSnapshot()const{return impl_->game.snapshot();}
+bool GameWorkerSession::requestForceResume(){auto &p=*impl_;
+    if(p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)return false;
+    if(!p.intent.permits(p.token)){p.halt(WorkerFleetState::Stopped);return false;}
+    return p.game.requestForceResume();
+}
+void GameWorkerSession::cancelForceResume(){impl_->game.cancelForceResume();}
+bool GameWorkerSession::forceResumeActive()const{return impl_->game.forceResumeActive();}
+bool GameWorkerSession::forceResumeAvailable()const{return gameForceResumeEligible(impl_->game.snapshot().state);}
 bool GameWorkerSession::setEconomicContext(unsigned index,uint64_t revision,bool drift){auto &p=*impl_;
     if((p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)||index>=p.slots.size()||!p.slots[index].evaluation)return false;
     if(!p.intent.permits(p.token)){p.halt(WorkerFleetState::Stopped);return false;}

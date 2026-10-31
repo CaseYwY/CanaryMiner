@@ -42,6 +42,60 @@ int main(int argc, char **argv) {
     CHECK(arbitrateMining(intent, first, limits) == MiningDecision::Cooling);
     limits.faultLatched = true;
     CHECK(arbitrateMining(intent, first, limits) == MiningDecision::FaultLatched);
+    // One explicit override covers only a known game/economic pause, never safety or unknown detection.
+    limits = {};
+    limits.game = GameIntent::Pause;
+    limits.gameDetected = limits.gameDetectionValid = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::PausedGame);
+    limits.forceResume = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::MiningForced);
+    limits.thermalLimited = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::Cooling);
+    limits.thermalLimited = false;
+    limits.faultLatched = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::FaultLatched);
+    limits = {};
+    limits.game = GameIntent::Pause;
+    limits.gameDetectionValid = false;
+    limits.forceResume = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::PausedGame);
+    limits = {};
+    limits.economicsEnabled = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::PausedEconomics);
+    limits.forceResume = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::MiningForced);
+    limits.economicDataValid = limits.positiveEligibleCandidate = true;
+    CHECK(arbitrateMining(intent, first, limits) == MiningDecision::MiningNormal);
+    // The single-use control releases itself when the overridden pause disappears or changes source.
+    ForceResumeControl control;
+    limits = {};
+    limits.game = GameIntent::Pause;
+    limits.gameDetected = limits.gameDetectionValid = true;
+    CHECK(control.press(limits) == ForceResumePress::Activated);
+    limits.forceResume = control.observe(limits);
+    CHECK(limits.forceResume && arbitrateMining(intent, first, limits) == MiningDecision::MiningForced);
+    CHECK(control.press(limits) == ForceResumePress::Cancelled && !control.active());
+    CHECK(control.press(limits) == ForceResumePress::Activated);
+    CHECK(control.observe(limits));
+    limits.gameDetected = false;
+    CHECK(!control.observe(limits) && !control.active());  // game pause cleared
+    limits = {};
+    limits.economicsEnabled = true;
+    CHECK(control.press(limits) == ForceResumePress::Activated);
+    limits.economicDataValid = limits.positiveEligibleCandidate = true;
+    CHECK(!control.observe(limits) && !control.active());  // economic pause cleared
+    limits = {};
+    limits.economicsEnabled = true;
+    CHECK(control.press(limits) == ForceResumePress::Activated);
+    limits.game = GameIntent::Pause;
+    limits.gameDetected = limits.gameDetectionValid = true;
+    CHECK(!control.observe(limits) && !control.active());  // a new pause source needs a new press
+    limits.thermalLimited = true;
+    CHECK(control.press(limits) == ForceResumePress::Ignored);
+    limits = {};
+    limits.game = GameIntent::Pause;
+    limits.gameDetectionValid = false;
+    CHECK(control.press(limits) == ForceResumePress::Ignored);
     intent.stop();
     CHECK(arbitrateMining(intent, first, limits) == MiningDecision::Stopped);
     limits = {};
@@ -61,6 +115,7 @@ int main(int argc, char **argv) {
         limits.economicsEnabled = true;
         limits.economicDataValid = (mask & 64) != 0;
         limits.positiveEligibleCandidate = (mask & 128) != 0;
+        limits.forceResume = true;
         for (auto game : {GameIntent::Off, GameIntent::Pause, GameIntent::Coexist}) {
             limits.game = game;
             CHECK(arbitrateMining(intent, second, limits) == MiningDecision::Stopped);

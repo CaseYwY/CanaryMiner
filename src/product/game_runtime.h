@@ -15,6 +15,11 @@ class GameRuntime {
     const GameGuardSnapshot &tick(GameGuardTime now,const GameSafety &safety,std::shared_ptr<const GameProfitWindow> profit={});
     // Restricts a caller's already bounded deadline to the exact evidence consumed by the immediately preceding tick.
     uint64_t runDeadline(GameGuardTime now,uint64_t upperMonoMs)const;
+    // One explicit operator press over the current known game pause. No persistence; the guard
+    // releases it automatically when that pause or its safety basis changes.
+    bool requestForceResume();
+    void cancelForceResume();
+    bool forceResumeActive()const{return guard_.forceResumeActive();}
     void requestStop(); // revoke guard and detector before joining
     void stop();
     GameRuntimeState state()const{return state_;}

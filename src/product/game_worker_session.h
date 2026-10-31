@@ -59,6 +59,12 @@ class GameWorkerSession final:public WorkerFleet {
     // Sources remain explicitly synthetic; raw work/power alignment alone cannot supply this API's qualification.
     GameWorkSampleAdmission submitExperimentSample(unsigned slot,const WorkerControlBinding &,uint64_t sequence,WorkProfileSample,GameGuardTime);
     GameExperimentSnapshot experimentSnapshot(unsigned slot)const;
+    // One explicit operator press over the current known game pause. Control thread only; the fixed
+    // game runtime owns release and safety precedence. No preference or default is written.
+    bool requestForceResume()override;
+    void cancelForceResume()override;
+    bool forceResumeActive()const override;
+    bool forceResumeAvailable()const override;
     void requestStop()override;
     void stop()override;
    private:

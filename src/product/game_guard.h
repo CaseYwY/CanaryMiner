@@ -18,11 +18,19 @@ struct GameGuardPolicy {
     bool tenMinuteProfitRule=true;
     uint64_t exitDebounceMs=2000,maximumDetectionGapMs=2000,maximumProfitAgeMs=10000;
 };
-enum class GameGuardState { Off, NormalEligible, PausedUnknown, PausedPolicy, NeedsQualification, CoexistEligible, Cooling, ProfitUnavailable, ProfitLocked, Stopped, ClockFault, Faulted };
+enum class GameGuardState { Off, NormalEligible, PausedUnknown, PausedPolicy, NeedsQualification, CoexistEligible, ForceResumeEligible, Cooling, ProfitUnavailable, ProfitLocked, Stopped, ClockFault, Faulted };
+// Only an explicit, known game/economic pause can be forced. Unknown detection, cooling, faults,
+// clock faults and stopped sessions never appear here.
+inline bool gameForceResumeEligible(GameGuardState s){
+    return s==GameGuardState::PausedPolicy||s==GameGuardState::NeedsQualification||
+        s==GameGuardState::ProfitUnavailable||s==GameGuardState::ProfitLocked||
+        s==GameGuardState::ForceResumeEligible;
+}
 struct GameGuardSnapshot {
     GameGuardState state=GameGuardState::Stopped;
     std::string episodeKey;
     bool profitLocked=false,profitCheckDue=false;
+    bool forceResumeActive=false; // memory-only; cleared automatically when the original pause or safety condition changes
     std::optional<uint64_t> coexistBeginMonoMs;
     std::shared_ptr<const GameProfitWindow> lastProfit; // retained evidence is historical when unavailable/locked/stopped
 };
@@ -34,10 +42,16 @@ class GameSessionGuard {
     const GameGuardSnapshot &update(GameGuardTime now,const GameDetection &detection,const GameSafety &safety,
         std::shared_ptr<const GameProfitWindow> profit={});
     void requestStop();
+    // One explicit key press: arms the current eligible pause, or cancels an already active override.
+    // False when there is no eligible pause or the session is terminal.
+    bool requestForceResume();
+    void cancelForceResume();
+    bool forceResumeActive()const{return forceActive_;}
     const GameGuardSnapshot &snapshot()const{return view_;}
    private:
     GameGuardPolicy policy_;GameProfitBinding binding_;const SessionIntent &intent_;SessionToken token_;
     GameGuardSnapshot view_;bool terminal_=false,clockStarted_=false,qualified_=false;
+    bool forceArmed_=false,forceActive_=false;
     GameGuardTime anchor_,last_;
     std::optional<GameDetection> detection_;
     std::optional<uint64_t> absentSince_;
