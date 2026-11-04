@@ -129,6 +129,10 @@ Their explicit no-socket integration fixture uses a separate Python standard-lib
 supplied `cryptography` generator; neither Python nor that peer's libraries are loaded by the miner. Test-only ephemeral
 keys/material are generated into controlled process memory/private scratch, not distributed or installed as trust.
 
+The separate default-off one-shot native TLS inspection helper uses the same OS/OpenSSL facilities and the existing
+native local-task process boundary. Its optional loopback fixture uses Python only as an owned development TLS peer,
+not a miner runtime dependency; no library, certificate/private key or trust-store change is bundled or installed.
+
 ## 8. Optional offline named-time development backend
 
 `CANARY_ENABLE_NAMED_TZDB` is default-off. When enabled, the electricity/civil-time host core links separately supplied

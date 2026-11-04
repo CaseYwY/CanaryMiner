@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 
-def material(mode):
+def material(mode, reference='fixture.test'):
     now = datetime.now(timezone.utc)
     root_key = ec.generate_private_key(ec.SECP256R1())
     key = ec.generate_private_key(ec.SECP256R1())
@@ -23,7 +23,7 @@ def material(mode):
             .add_extension(x509.BasicConstraints(ca=True, path_length=1), True)
             .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), True)
             .add_extension(x509.SubjectKeyIdentifier.from_public_key(root_key.public_key()), False).sign(root_key, hashes.SHA256()))
-    leaf_builder = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'fixture.test')]))
+    leaf_builder = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, reference)]))
             .issuer_name(issuer).public_key(key.public_key()).serial_number(x509.random_serial_number())
             .not_valid_before(now + timedelta(hours=1) if mode == 'future' else now - timedelta(days=3))
             .not_valid_after(now - timedelta(days=1) if mode == 'expired' else now + timedelta(days=3))
@@ -32,7 +32,7 @@ def material(mode):
             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH if mode == 'wrongusage' else ExtendedKeyUsageOID.SERVER_AUTH]), False)
             .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()), False))
     if mode != 'nosan':
-        leaf_builder = leaf_builder.add_extension(x509.SubjectAlternativeName([x509.DNSName('wrong-fixture.test' if mode == 'wrongsan' else 'fixture.test')]), False)
+        leaf_builder = leaf_builder.add_extension(x509.SubjectAlternativeName([x509.DNSName('wrong-fixture.test' if mode == 'wrongsan' else reference)]), False)
     leaf = leaf_builder.sign(root_key, hashes.SHA256())
     builder = (x509.CertificateRevocationListBuilder().issuer_name(issuer).last_update(now - timedelta(days=2))
                .next_update(now - timedelta(hours=1) if mode == 'stale' else now + timedelta(days=2))
@@ -54,6 +54,6 @@ def material(mode):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3):
         raise SystemExit('explicit synthetic case required; output is for a capturing test driver only')
-    print(json.dumps(material(sys.argv[1])))
+    print(json.dumps(material(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else 'fixture.test')))
