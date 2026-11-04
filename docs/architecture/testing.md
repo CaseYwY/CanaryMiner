@@ -238,6 +238,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13l](../settings-messages.md) checks 480 shell texts, exact keys/reviews/placeholders/keyboard tokens, complete typed/painted recovery, bounded opaque arguments, source tones and row transactions. A private generated fixture compares 61440 whole native frames against the fixed predecessor class; actual settings/display/language/CLI/PTY/supervisor regressions protect ordinary English source extraction. No remaining field/subpanel/domain, effective native language, physical terminal or human qualification is inferred.
 
+[P-13m](../ui-field-messages.md) checks 400 Display/Details/Log texts, protected NO_COLOR, exact source spacing/both marks, atomic explicit ms quantities, invariant clock selectors, named roles/tones, complete recovery and transactional invalid/row refusal. The 61440-frame predecessor comparison flips all relevant display/Details/Log options without changing expected bytes. Actual control/store/CLI/PTY/supervisor regressions remain separate from draft/physical-terminal/native activation qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

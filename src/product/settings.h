@@ -14,6 +14,7 @@
 #include "pool_security_settings.h"
 #include "language_settings.h"
 #include "settings_messages.h"
+#include "ui_field_messages.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -246,8 +247,8 @@ class SettingsPanel {
     }
 
    private:
-    static std::string on(bool value) { return value ? "on" : "off"; }
-    static std::string level(unsigned value) { return value == 1 ? "warnings/errors" : value == 2 ? "errors" : "all"; }
+    static std::string on(bool value) { return i18n::uiFieldEnglish(value?i18n::UiFieldMessageKey::On:i18n::UiFieldMessageKey::Off); }
+    static std::string level(unsigned value) { return i18n::uiFieldEnglish(value==1?i18n::UiFieldMessageKey::Warnings:value==2?i18n::UiFieldMessageKey::Errors:i18n::UiFieldMessageKey::All); }
     void change() {
         message.clear();
         if (group == 8) draft.hideWorker = !draft.hideWorker;
@@ -275,19 +276,20 @@ class SettingsPanel {
     }
     std::vector<dash_detail::Seg> fieldsText() const {
         using namespace dash_detail;
+        using FieldKey=i18n::UiFieldMessageKey;
         std::vector<Seg> result;
         auto row = [&](int index, const std::string &text) {
             result.push_back({std::string(!groupsFocused && field == index ? "> " : "  ") + text,
                               !groupsFocused && field == index ? Tone::Canary : Tone::Plain});
         };
-        auto toggle = [&](int index, const char *name, bool value) { row(index, std::string(name) + (value ? " [x]" : " [ ]")); };
+        auto toggle = [&](int index, FieldKey key, bool value) { row(index, i18n::uiFieldEnglish(key,value?"x":" ")); };
         if (group == 0) {
-            row(0, "Display refresh    < " + std::to_string(draft.refreshMs) + " ms >");
-            row(1, std::string("Terminal color     [") + (draft.color ? "x" : " ") + "]");
-            row(2, std::string("Recent events      [") + (draft.showEvents ? "x" : " ") + "]");
+            row(0, i18n::uiFieldEnglish(FieldKey::Refresh,std::to_string(draft.refreshMs)+" ms"));
+            toggle(1,FieldKey::Color,draft.color);
+            toggle(2,FieldKey::Events,draft.showEvents);
             result.push_back({"", Tone::Plain});
-            result.push_back({"Display refresh does not change sampling", Tone::Plain});
-            result.push_back({"or mining intensity. NO_COLOR still wins.", Tone::Plain});
+            result.push_back({i18n::uiFieldEnglish(FieldKey::SamplingNotice), Tone::Plain});
+            result.push_back({i18n::uiFieldEnglish(FieldKey::IntensityNotice), Tone::Plain});
         } else if (group == 8) {
             row(0, std::string("Hide worker label  [") + (draft.hideWorker ? "x" : " ") + "]");
             row(1, "History collection / runtime defaults [Enter]");
@@ -326,22 +328,22 @@ class SettingsPanel {
             result.push_back({"Default off; next explicit session only, no miner restart.",Tone::Plain});
             result.push_back({"Not whole-PC/incremental energy, shared utility bill or net income.",Tone::Plain});
         } else if (group == 9) {
-            toggle(0, "Details page", draft.detailsEnabled);
-            toggle(1, "Device identity", draft.detailsIdentity);
-            toggle(2, "Pool state", draft.detailsPool);
-            toggle(3, "Restart count", draft.detailsRestarts);
-            toggle(4, "Last error", draft.detailsErrors);
-            result.push_back({"Main safety/status remain visible.", Tone::Plain});
+            toggle(0, FieldKey::DetailsPage, draft.detailsEnabled);
+            toggle(1, FieldKey::DeviceIdentity, draft.detailsIdentity);
+            toggle(2, FieldKey::PoolState, draft.detailsPool);
+            toggle(3, FieldKey::Restarts, draft.detailsRestarts);
+            toggle(4, FieldKey::LastError, draft.detailsErrors);
+            result.push_back({i18n::uiFieldEnglish(FieldKey::SafetyNotice), Tone::Plain});
         } else if (group == 10) {
-            toggle(0, "Log page", draft.logEnabled);
-            row(1, "Severity < " + level(draft.logSeverity) + " >");
-            toggle(2, "Include unclassified", draft.logUnclassified);
-            row(3, "Records shown < " + std::to_string(draft.logRows) + " >");
-            toggle(4, "Show observed time", draft.logTimestamps);
-            row(5, std::string("Time format < ") + (draft.logIsoTime ? "ISO UTC" : "UTC HH:MM:SS") + " >");
-            toggle(6, "Follow new output", draft.logFollow);
-            result.push_back({"Raw severity: unclassified", Tone::Plain});
-            result.push_back({"Off freezes this view, not data collection.", Tone::Plain});
+            toggle(0, FieldKey::LogPage, draft.logEnabled);
+            row(1, i18n::uiFieldEnglish(FieldKey::Severity,level(draft.logSeverity)));
+            toggle(2, FieldKey::IncludeUnclassified, draft.logUnclassified);
+            row(3, i18n::uiFieldEnglish(FieldKey::Records,std::to_string(draft.logRows)));
+            toggle(4, FieldKey::ObservedTime, draft.logTimestamps);
+            row(5, i18n::uiFieldEnglish(FieldKey::TimeFormat,draft.logIsoTime?"ISO UTC":"UTC HH:MM:SS"));
+            toggle(6, FieldKey::Follow, draft.logFollow);
+            result.push_back({i18n::uiFieldEnglish(FieldKey::RawSeverity), Tone::Plain});
+            result.push_back({i18n::uiFieldEnglish(FieldKey::FreezeNotice), Tone::Plain});
         } else {
             result.push_back({"Not implemented in this development slice.", Tone::Plain});
             result.push_back({"No actionable switch until its backend", Tone::Plain});

@@ -55,3 +55,6 @@ Windows/Linux/sanitizer/CLI/PTY/privacy evidence belongs to the [execution ledge
 This is the shell domain only. Remaining field/subpanel/dashboard/log/diagnostic extraction, full native typed binding,
 explicit ICU data-owner/deployment, real terminal/font/shaping/accessibility and human review remain unfinished. Native
 English-source extraction supplies no GPU/game/pool/financial/source/release qualification or automatic restart permission.
+
+[P-13m](ui-field-messages.md) subsequently extracts the separate Display/Details/Log field/notice/value domain. The shell's
+thirty keys remain unchanged; remaining action rows, change descriptions and subpanels are not silently counted as covered.
