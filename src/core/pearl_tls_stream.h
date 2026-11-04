@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 namespace om {
+struct PearlTlsPrivateTrustInput;
 enum class PearlTlsState { Dormant, Handshaking, VerifiedOpen, Closed, Failed };
 // VerifiedOpen asserts this backend's chain/time/server-SAN checks, not qualified revocation, process isolation or endpoint support.
 enum class PearlTlsError { None, Disabled, Unavailable, InvalidPolicy, Verification, Protocol, Transport, Clock, Cancelled, Timeout, Capacity };
@@ -14,6 +15,9 @@ struct PearlTlsPolicy {
     std::string serverName; // reference identity, not a URL or a value learned from the peer
     std::string caPem; // empty: system trust; otherwise exclusive explicit in-memory anchors, never an OS-store install
     uint64_t handshakeDeadlineMonoMs=0;
+    // Development-only Windows private material; leaf MUST be empty and actual peer DER is queried after SSPI.
+    // Normal automatic Windows trust never becomes manual merely to simplify a fixture.
+    std::shared_ptr<const PearlTlsPrivateTrustInput> windowsPrivateTrust={};
 };
 class PearlTlsStream {
    public:

@@ -4,6 +4,8 @@
 
 No TLS test connection, pool connection, application protocol exchange, hardware operation, certificate-store write, root installation, user/VM creation, or machine-policy change was performed. Documentation retrieval is not a pool probe. No personal certificates, configuration, device information, or local paths are reproduced here.
 
+Subsequent implementation evidence is separate: [P-12c](../pool-private-trust.md) executes offline native chain/CRL inspection, and [P-12d](../pool-schannel.md) exercises an explicit development-private Schannel stream against a no-socket MemoryBIO peer. Those scoped results do not retroactively qualify every proposed scenario, normal automatic trust, OS-policy equivalence or production behavior in this research note.
+
 ## 1. Decision and relationship to the existing research
 
 Keep [secure-transport-backends.md](secure-transport-backends.md), sections 3 and 4, as the **normal-mode baseline**: outbound `SCH_CREDENTIALS` with `SCH_CRED_AUTO_CRED_VALIDATION | SCH_CRED_NO_DEFAULT_CREDS`, configured reference name supplied to `InitializeSecurityContextW`, and no `SCH_CRED_MANUAL_CRED_VALIDATION`, `ISC_REQ_MANUAL_CRED_VALIDATION`, or `SCH_CRED_NO_SERVERNAME_CHECK`. For the strict revocation contract investigated here, additionally request `SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`; do not set either revocation-ignore credential flag. Automatic validation and suppression of automatic client identity are separate controls.[^credentials][^isc]

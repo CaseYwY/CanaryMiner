@@ -71,6 +71,8 @@ Each row is a testable requirement, not a checklist of already implemented featu
 
 [P-12c](../pool-private-trust.md) adds independently disabled offline Windows private-chain/strict revocation/SSL DNS inspection using explicit memory material. It does not alter normal automatic trust or bind the inspector to a native TLS handshake, supply supported IP verification, qualify whole-operation blocking/egress/isolation or enable custom-CA production behavior. R-TLS-003/004 remain partial.
 
+[P-12d](../pool-schannel.md) binds actual peer DER to that strict development inspector while adding native Schannel records under the shared raw-IO/deadline/output owner. TLS 1.2/1.3 memory fixtures do not qualify normal automatic trust, IP/intermediate/cache/isolation, complete connections, SSL configuration/fallback/donation, Windows actual Stratum or production activation. R-TLS-003/004 remain partial.
+
 P-04 `DONE` is the local **observed-counter** scope in [accepted history](../accepted-history.md), with [host/PTY evidence](../history-validation.md). It is not complete pool history: missed shutdown tails/session gaps are uncertain, exact pool timestamps are unavailable, and clock warnings suppress rolling totals. Financial-credit storage and persisted runtime settings are separate tasks.
 
 R-UI-007 remains `PARTIAL` in implementation scope: [P-03c](../runtime-settings.md) now supplies native runtime defaults, configured/effective/CLI review, explicit next-start activation and external-writer detection for runtime/UI files. Live policy activation and external mining-config review are not implemented. Income-provider research is [capability evidence](../research/market-and-credit-providers.md), not passing actual-income implementation.

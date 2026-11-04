@@ -1,5 +1,6 @@
 // CPU/in-memory native TLS records with ephemeral synthetic certificates. No sockets, stores, pool or GPU.
 #include "core/pearl_tls_stream.h"
+#include "core/pearl_tls_private_trust.h"
 #include "core/pearl_pool.h"
 #include "product_test_util.h"
 #include <functional>
@@ -43,7 +44,7 @@ void unavailable(){
     {QuietWire w;PearlTlsStream c(w,cancel);c.abort();CHECK(c.state()==S::Closed&&!c.begin(policy(),1000)&&!w.writes&&!w.modes);}
     {QuietWire w;{PearlTlsStream c(w,cancel);}CHECK(w.opened&&!w.writes&&!w.reads&&!w.modes);}
     {QuietWire w;PearlTlsStream c(w,cancel);c.abort();CHECK(w.opened);}
-#if !defined(CANARY_POOL_TLS_OPENSSL) || defined(_WIN32)
+#if !defined(CANARY_POOL_TLS_OPENSSL) && !defined(CANARY_POOL_TLS_SCHANNEL)
     {QuietWire w;PearlTlsStream c(w,cancel);CHECK(!c.begin(policy(),1000)&&c.error()==E::Unavailable&&!w.modes&&!w.writes);}
 #endif
 }
@@ -126,6 +127,8 @@ bool connect(PearlTlsStream &c,unsigned cap=8192){
 }
 void native(Material &m){
     std::atomic<bool> cancel{false};
+    {Peer w(m);PearlTlsStream c(w,cancel);auto p=policy();p.caPem=m.anchors;p.windowsPrivateTrust=std::make_shared<PearlTlsPrivateTrustInput>();
+        CHECK(!c.begin(p,1000)&&c.error()==E::Unavailable&&!w.writes&&!w.modes);}
     for(unsigned mode=0;mode<9;++mode){auto leaf=certificate(m.leafKey.get(),m.root.get(),m.rootKey.get(),false,mode<6?mode:0);
         Peer w(m,leaf.get());PearlTlsStream c(w,cancel);auto p=policy();p.caPem=m.anchors;
         if(mode==6)p.caPem.clear();

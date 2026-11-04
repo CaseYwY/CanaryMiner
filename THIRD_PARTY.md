@@ -124,6 +124,11 @@ The separate disabled offline Windows private-trust inspector uses native Crypt3
 synthetic public-DER generator imports separately installed Python `cryptography` only for development fixtures; no
 package/implementation, private key, certificate bundle or OS-store enrollment is distributed or automatically installed.
 
+Default-off native Schannel record steps use the serviced Windows SSPI/Secur32/Crypt32 facilities under platform terms.
+Their explicit no-socket integration fixture uses a separate Python standard-library SSL/OpenSSL peer and separately
+supplied `cryptography` generator; neither Python nor that peer's libraries are loaded by the miner. Test-only ephemeral
+keys/material are generated into controlled process memory/private scratch, not distributed or installed as trust.
+
 ## 8. Optional offline named-time development backend
 
 `CANARY_ENABLE_NAMED_TZDB` is default-off. When enabled, the electricity/civil-time host core links separately supplied
