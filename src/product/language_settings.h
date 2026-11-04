@@ -2,6 +2,7 @@
 #pragma once
 #include "dashboard.h"
 #include "language_preferences.h"
+#include "language_field_messages.h"
 #include <functional>
 namespace om {
 enum class LanguageSettingsResult { None, Close, Quit };
@@ -63,8 +64,8 @@ class LanguageSettingsPanel {
         return result;
     }
    private:
-    static const char *label(unsigned i){static const char *labels[]={"Language ID","Format locale","Digit style","Text order","Direction","Ambiguous cells","Emoji cells","Grouping"};return i<8?labels[i]:"Invalid";}
-    static std::string reviewStatus(const std::string &id){return id=="en"?"English source (not externally certified)":"machine-assisted draft (not human reviewed)";}
+    static std::string label(unsigned i){const auto &keys=i18n::languageFieldKeys();return i18n::languageFieldEnglish(i<keys.size()?keys[i]:i18n::LanguageFieldMessageKey::Invalid);}
+    static std::string reviewStatus(const std::string &id){return i18n::languageFieldEnglish(id=="en"?i18n::LanguageFieldMessageKey::SourceReview:i18n::LanguageFieldMessageKey::DraftReview);}
     static std::string value(const LanguagePreferences &p,unsigned i){switch(i){case 0:return p.language;case 1:return p.formattingLocale;case 2:return presentationDigitsName(p.digits);case 3:return presentationOrderName(p.textOrder);
         case 4:return presentationDirectionName(p.direction);case 5:return std::to_string(p.ambiguousCells);case 6:return std::to_string(p.emojiCells);default:return p.grouping?"on":"off";}}
     void change(int direction){

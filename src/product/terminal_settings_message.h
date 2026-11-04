@@ -5,6 +5,7 @@
 #include "settings_change_messages.h"
 #include "settings_action_messages.h"
 #include "settings_diagnostic_messages.h"
+#include "language_field_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -57,4 +58,13 @@ bool layoutTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMes
 bool wrapTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalLanguageFieldMessageRequest {
+    std::string language="en";
+    i18n::LanguageFieldMessageKey key=i18n::LanguageFieldMessageKey::LanguageId;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

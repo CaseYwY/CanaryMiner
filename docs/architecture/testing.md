@@ -246,6 +246,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13p](../settings-diagnostic-messages.md) checks 272 fixed envelopes, exact English prefix extraction without processing raw originals, independently safe named error/recovery values, opaque formatting tokens and complete layout/paint/row transactions. Seven actual control-opening functions receive null targets and owned malformed synthetic files, preserving originals/preferences without opening subpanels. CLI/PTY and previous root comparisons stay distinct from raw-error scrubbing, production storage and effective language qualification.
 
+[P-13q](../language-field-messages.md) checks 176 literal labels, stable field order and honest source/draft metadata, exact English source, layout/paint/wrap recovery and invalid transactions. Private fixed-predecessor comparison covers 184320 native Language frames and 34560 transitions/resulting frames/serialized requests, with empty save access. Other locale/policy combinations, actual stores/CLI/PTY and physical terminal/native activation remain independent qualifications.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
