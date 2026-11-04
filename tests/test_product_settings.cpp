@@ -159,9 +159,34 @@ static void storeTests() {
     CHECK(std::filesystem::remove(dir));
 }
 
+template<class Store,class Value,class Open>
+static void diagnosticOpenCase(const std::filesystem::path &path,const std::string &missing,const std::string &prefix,const Open &open){
+    SettingsPanel panel;panel.open(UiPreferences{});open(&panel,static_cast<Store *>(nullptr));
+    CHECK(panel.message==missing&&panel.visible&&!panel.dirty());
+    const std::string bytes="{invalid synthetic diagnostic input";
+    {std::ofstream file(path);file<<bytes;}
+    Store store(path);Value value;std::string error;CHECK(!store.load(&value,&error));
+    open(&panel,&store);CHECK(panel.message==prefix+error&&panel.active==UiPreferences{}&&panel.draft==UiPreferences{});
+    CHECK(!panel.runtime.visible&&!panel.game.visible&&!panel.poolSecurity.visible&&!panel.language.visible&&!panel.manual.visible&&!panel.electricity.visible&&!panel.tariff.visible);
+    std::ifstream input(path);const std::string retained((std::istreambuf_iterator<char>(input)),std::istreambuf_iterator<char>());input.close();
+    CHECK(retained==bytes);CHECK(std::filesystem::remove(path));
+}
+static void diagnosticOpenTests(){
+    const auto dir=std::filesystem::path(makeScratchDir("root-diagnostic-open"));const auto path=dir/"synthetic.json";
+    diagnosticOpenCase<RuntimePreferencesStore,RuntimePreferences>(path,"Runtime controls unavailable: no local defaults target configured.","Runtime controls unavailable: ",[](SettingsPanel *p,RuntimePreferencesStore *s){openRuntimeControls(p,s,{});});
+    diagnosticOpenCase<ManualMarketStore,ManualMarketPreferences>(path,"Offline-market settings unavailable: no local target configured.","Offline-market settings unavailable: ",[](SettingsPanel *p,ManualMarketStore *s){openManualMarketControls(p,s,{});});
+    diagnosticOpenCase<GamePreferencesStore,GamePreferences>(path,"Game defaults unavailable: no local target.","Game defaults unavailable: ",[](SettingsPanel *p,GamePreferencesStore *s){openGameControls(p,s,{});});
+    diagnosticOpenCase<PoolSecurityPreferencesStore,PoolSecurityPreferences>(path,"Pool security declarations unavailable: no local target.","Pool security declarations unavailable: ",[](SettingsPanel *p,PoolSecurityPreferencesStore *s){openPoolSecurityControls(p,s,{});});
+    diagnosticOpenCase<LanguagePreferencesStore,LanguagePreferences>(path,"Language requests unavailable: no local target.","Language requests unavailable: ",[](SettingsPanel *p,LanguagePreferencesStore *s){openLanguageControls(p,s,{});});
+    diagnosticOpenCase<ElectricityPreferencesStore,ElectricityPreferences>(path,"Electricity settings unavailable: no local target.","Electricity settings unavailable: ",[](SettingsPanel *p,ElectricityPreferencesStore *s){openElectricityControls(p,s,{});});
+    diagnosticOpenCase<TariffDeclarationStore,JsonValue>(path,"Combined tariff settings unavailable: no local target.","Combined tariff unavailable: ",[](SettingsPanel *p,TariffDeclarationStore *s){openTariffControls(p,s);});
+    CHECK(std::filesystem::is_empty(dir)&&std::filesystem::remove(dir));
+}
+
 int main() {
     decoderTests();
     panelTests();
     storeTests();
+    diagnosticOpenTests();
     return finishTests("product_settings");
 }

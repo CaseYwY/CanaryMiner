@@ -17,6 +17,7 @@
 #include "ui_field_messages.h"
 #include "settings_change_messages.h"
 #include "settings_action_messages.h"
+#include "settings_diagnostic_messages.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -369,48 +370,48 @@ inline void printSettingsFrame(const std::string &text) {
 }
 
 inline void openRuntimeControls(SettingsPanel *panel, RuntimePreferencesStore *store, const RuntimeContext &context) {
-    if (!store) { panel->message = "Runtime controls unavailable: no local defaults target configured."; return; }
+    if (!store) { panel->message = i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::RuntimeNoTarget); return; }
     RuntimePreferences configured;
     std::string error;
-    if (!store->load(&configured, &error)) { panel->message = "Runtime controls unavailable: " + error; return; }
+    if (!store->load(&configured, &error)) { panel->message = i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::RuntimeError) + error; return; }
     panel->runtime.open(configured, context);
     if (panel->group == 8) panel->runtime.field = 1;
 }
 
 inline void openManualMarketControls(SettingsPanel *panel, ManualMarketStore *store, const ManualMarketContext &context) {
-    if (!store) { panel->message = "Offline-market settings unavailable: no local target configured."; return; }
+    if (!store) { panel->message = i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::ManualNoTarget); return; }
     ManualMarketPreferences configured; std::string error;
-    if (!store->load(&configured,&error)) { panel->message = "Offline-market settings unavailable: "+error; return; }
+    if (!store->load(&configured,&error)) { panel->message = i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::ManualError)+error; return; }
     panel->manual.open(configured,context);
 }
 inline void openGameControls(SettingsPanel *panel,GamePreferencesStore *store,const GameSettingsContext &context){
-    if(!store){panel->message="Game defaults unavailable: no local target.";return;}
+    if(!store){panel->message=i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::GameNoTarget);return;}
     GamePreferences value;std::string error;
-    if(!store->load(&value,&error)){panel->message="Game defaults unavailable: "+error;return;}
+    if(!store->load(&value,&error)){panel->message=i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::GameError)+error;return;}
     panel->game.open(std::move(value),context);
 }
 inline void openPoolSecurityControls(SettingsPanel *panel,PoolSecurityPreferencesStore *store,const PoolSecuritySettingsContext &context){
-    if(!store){panel->message="Pool security declarations unavailable: no local target.";return;}
+    if(!store){panel->message=i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::PoolNoTarget);return;}
     PoolSecurityPreferences value;std::string error;
-    if(!store->load(&value,&error)){panel->message="Pool security declarations unavailable: "+error;return;}
+    if(!store->load(&value,&error)){panel->message=i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::PoolError)+error;return;}
     panel->poolSecurity.open(std::move(value),context);
 }
 inline void openLanguageControls(SettingsPanel *panel,LanguagePreferencesStore *store,const LanguageSettingsContext &context){
-    if(!store){panel->message="Language requests unavailable: no local target.";return;}
+    if(!store){panel->message=i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::LanguageNoTarget);return;}
     LanguagePreferences value;std::string error;
-    if(!store->load(&value,&error)){panel->message="Language requests unavailable: "+error;return;}
+    if(!store->load(&value,&error)){panel->message=i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::LanguageError)+error;return;}
     panel->language.open(std::move(value),context);
 }
 inline void openElectricityControls(SettingsPanel *panel,ElectricityPreferencesStore *store,const ElectricitySettingsContext &context) {
-    if(!store){panel->message="Electricity settings unavailable: no local target.";return;}
+    if(!store){panel->message=i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::ElectricityNoTarget);return;}
     ElectricityPreferences p;std::string error;
-    if(!store->load(&p,&error)){panel->message="Electricity settings unavailable: "+error;return;}
+    if(!store->load(&p,&error)){panel->message=i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::ElectricityError)+error;return;}
     panel->electricity.open(p,context);
 }
 inline void openTariffControls(SettingsPanel *panel,TariffDeclarationStore *store){
-    if(!store){panel->message="Combined tariff settings unavailable: no local target.";return;}
+    if(!store){panel->message=i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::TariffNoTarget);return;}
     JsonValue value;std::string error;
-    if(!store->load(&value,&error)){panel->message="Combined tariff unavailable: "+error;return;}
+    if(!store->load(&value,&error)){panel->message=i18n::settingsDiagnosticEnglishPrefix(i18n::SettingsDiagnosticMessageKey::TariffError)+error;return;}
     panel->tariff.open(std::move(value));
 }
 
@@ -420,7 +421,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
 #else
     if (!isatty(STDOUT_FILENO) || !isatty(STDIN_FILENO)) {
 #endif
-        fprintf(stderr, "settings requires an interactive terminal; no mining was started\n");
+        fprintf(stderr, "%s\n", i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::RequiresTerminal).c_str());
         return 2;
     }
     if(stop&&*stop){if(billingAccess.requestStop)billingAccess.requestStop();return 0;}
@@ -450,7 +451,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         else if(runtime&&runtime->start(1,selectedDevices)){
             panel.energyAccess=energyRuntimeReview(*runtime);
             panel.energyAuthorizationAccess=energyRuntimeAuthorization(*runtime);
-        }else{runtime.reset();panel.message="Energy persistence unavailable; check the development helper installation.";}
+        }else{runtime.reset();panel.message=i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::EnergyHelper);}
     }
     printf("\x1b[2J\x1b[?25l");
     while (panel.visible && !(stop && *stop)) {
@@ -486,7 +487,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     }
     panel.stopBillingReview();
     if(runtime){runtime->requestStop();runtime->stop();}
-    printf("\x1b[2J\x1b[H\x1b[?25hSettings closed. No mining was started.\n");
+    printf("\x1b[2J\x1b[H\x1b[?25h%s\n",i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::Closed).c_str());
     return 0;
 }
 

@@ -64,3 +64,6 @@ source/draft and predecessor evidence does not change the historical thirty-key 
 
 [P-13o](settings-action-messages.md) subsequently extracts the thirty-four root action/notice keys. Opening/load/TTY
 diagnostics, subpanels and effective native language remain separate from these completed source domains.
+
+[P-13p](settings-diagnostic-messages.md) subsequently extracts seventeen fixed root diagnostic envelopes while preserving
+independent raw errors. It does not classify/translate/redact raw originals or complete subpanel/effective-native gates.

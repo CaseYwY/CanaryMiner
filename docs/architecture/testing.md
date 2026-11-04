@@ -244,6 +244,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13o](../settings-action-messages.md) checks 544 root action/notice texts, protected keyboard/reference tokens, both invariant checkbox marks, complete fallback/provenance/color/row matrices and transactional refusal. Fixed-predecessor comparison additionally checks 6336 root key transitions/resulting frames with empty backend/save access, not actual stores, backend operations or workers. Earlier whole-frame/review-vector and actual native/CLI/PTY regressions remain separate.
 
+[P-13p](../settings-diagnostic-messages.md) checks 272 fixed envelopes, exact English prefix extraction without processing raw originals, independently safe named error/recovery values, opaque formatting tokens and complete layout/paint/row transactions. Seven actual control-opening functions receive null targets and owned malformed synthetic files, preserving originals/preferences without opening subpanels. CLI/PTY and previous root comparisons stay distinct from raw-error scrubbing, production storage and effective language qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

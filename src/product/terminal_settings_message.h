@@ -4,6 +4,7 @@
 #include "ui_field_messages.h"
 #include "settings_change_messages.h"
 #include "settings_action_messages.h"
+#include "settings_diagnostic_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -46,4 +47,14 @@ bool layoutTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequ
 bool wrapTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalSettingsDiagnosticMessageRequest {
+    std::string language="en";
+    i18n::SettingsDiagnosticMessageKey key=i18n::SettingsDiagnosticMessageKey::RequiresTerminal;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalSettingsDiagnosticMessage(const TerminalSettingsDiagnosticMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om
