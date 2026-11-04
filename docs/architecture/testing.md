@@ -240,6 +240,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13m](../ui-field-messages.md) checks 400 Display/Details/Log texts, protected NO_COLOR, exact source spacing/both marks, atomic explicit ms quantities, invariant clock selectors, named roles/tones, complete recovery and transactional invalid/row refusal. The 61440-frame predecessor comparison flips all relevant display/Details/Log options without changing expected bytes. Actual control/store/CLI/PTY/supervisor regressions remain separate from draft/physical-terminal/native activation qualification.
 
+[P-13n](../settings-change-messages.md) checks 256 whole review templates, exact role/key/review parity, bounded opaque before/after values, nonrecursive braces, atomic numeric/unit spans, order/direction/width/color/row matrices and transactional refusal in all wrappers. Fixed-predecessor comparison additionally checks 786432 complete change vectors (every legal draft versus default and reverse), not every arbitrary pair or physical terminal/native activation qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

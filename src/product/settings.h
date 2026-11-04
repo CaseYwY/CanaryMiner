@@ -15,6 +15,7 @@
 #include "language_settings.h"
 #include "settings_messages.h"
 #include "ui_field_messages.h"
+#include "settings_change_messages.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -163,21 +164,22 @@ class SettingsPanel {
     }
 
     std::vector<std::string> changes() const {
+        using ChangeKey=i18n::SettingsChangeMessageKey;
         std::vector<std::string> result;
-        if (active.refreshMs != draft.refreshMs) result.push_back("Display refresh: " + std::to_string(active.refreshMs) + " -> " + std::to_string(draft.refreshMs) + " ms");
-        if (active.color != draft.color) result.push_back("Terminal color: " + on(active.color) + " -> " + on(draft.color));
-        if (active.showEvents != draft.showEvents) result.push_back("Recent events: " + on(active.showEvents) + " -> " + on(draft.showEvents));
-        if (active.hideWorker != draft.hideWorker) result.push_back("Hide worker label: " + on(active.hideWorker) + " -> " + on(draft.hideWorker));
-        const std::pair<const char *, std::pair<bool, bool>> switches[] = {
-            {"Details page", {active.detailsEnabled, draft.detailsEnabled}}, {"Log page", {active.logEnabled, draft.logEnabled}},
-            {"Details identity", {active.detailsIdentity, draft.detailsIdentity}}, {"Details pool", {active.detailsPool, draft.detailsPool}},
-            {"Details restarts", {active.detailsRestarts, draft.detailsRestarts}}, {"Details errors", {active.detailsErrors, draft.detailsErrors}},
-            {"Unclassified logs", {active.logUnclassified, draft.logUnclassified}}, {"Log timestamps", {active.logTimestamps, draft.logTimestamps}},
-            {"ISO UTC time", {active.logIsoTime, draft.logIsoTime}}, {"Log follow", {active.logFollow, draft.logFollow}}};
+        if (active.refreshMs != draft.refreshMs) result.push_back(i18n::settingsChangeEnglish(ChangeKey::Refresh,std::to_string(active.refreshMs),std::to_string(draft.refreshMs)+" ms"));
+        if (active.color != draft.color) result.push_back(i18n::settingsChangeEnglish(ChangeKey::Color,on(active.color),on(draft.color)));
+        if (active.showEvents != draft.showEvents) result.push_back(i18n::settingsChangeEnglish(ChangeKey::Events,on(active.showEvents),on(draft.showEvents)));
+        if (active.hideWorker != draft.hideWorker) result.push_back(i18n::settingsChangeEnglish(ChangeKey::HideWorker,on(active.hideWorker),on(draft.hideWorker)));
+        const std::pair<ChangeKey, std::pair<bool, bool>> switches[] = {
+            {ChangeKey::DetailsPage, {active.detailsEnabled, draft.detailsEnabled}}, {ChangeKey::LogPage, {active.logEnabled, draft.logEnabled}},
+            {ChangeKey::DetailsIdentity, {active.detailsIdentity, draft.detailsIdentity}}, {ChangeKey::DetailsPool, {active.detailsPool, draft.detailsPool}},
+            {ChangeKey::DetailsRestarts, {active.detailsRestarts, draft.detailsRestarts}}, {ChangeKey::DetailsErrors, {active.detailsErrors, draft.detailsErrors}},
+            {ChangeKey::UnclassifiedLogs, {active.logUnclassified, draft.logUnclassified}}, {ChangeKey::LogTimestamps, {active.logTimestamps, draft.logTimestamps}},
+            {ChangeKey::IsoUtcTime, {active.logIsoTime, draft.logIsoTime}}, {ChangeKey::LogFollow, {active.logFollow, draft.logFollow}}};
         for (const auto &item : switches) if (item.second.first != item.second.second)
-            result.push_back(std::string(item.first) + ": " + on(item.second.first) + " -> " + on(item.second.second));
-        if (active.logSeverity != draft.logSeverity) result.push_back("Log level: " + level(active.logSeverity) + " -> " + level(draft.logSeverity));
-        if (active.logRows != draft.logRows) result.push_back("Log records: " + std::to_string(active.logRows) + " -> " + std::to_string(draft.logRows));
+            result.push_back(i18n::settingsChangeEnglish(item.first,on(item.second.first),on(item.second.second)));
+        if (active.logSeverity != draft.logSeverity) result.push_back(i18n::settingsChangeEnglish(ChangeKey::LogLevel,level(active.logSeverity),level(draft.logSeverity)));
+        if (active.logRows != draft.logRows) result.push_back(i18n::settingsChangeEnglish(ChangeKey::LogRecords,std::to_string(active.logRows),std::to_string(draft.logRows)));
         return result;
     }
 

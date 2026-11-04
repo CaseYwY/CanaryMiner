@@ -58,3 +58,6 @@ English-source extraction supplies no GPU/game/pool/financial/source/release qua
 
 [P-13m](ui-field-messages.md) subsequently extracts the separate Display/Details/Log field/notice/value domain. The shell's
 thirty keys remain unchanged; remaining action rows, change descriptions and subpanels are not silently counted as covered.
+
+[P-13n](settings-change-messages.md) subsequently extracts the sixteen complete root-review change templates. Its own
+source/draft and predecessor evidence does not change the historical thirty-key shell scope or cover root action notices.
