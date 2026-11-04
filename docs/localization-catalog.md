@@ -39,6 +39,10 @@ again with English-only native source binding and separate typed draft rendering
 roles, unchanged native English change vectors and separately typed numeric/unit presentation. Remaining domains and
 effective native/data-owner/terminal/human gates remain open.
 
+[P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
+capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
+control-opening/TTY diagnostics, subpanels or effective typed native activation.
+
 ## Executed test scope
 
 `test_localization` validates all 16 IDs/autonyms/review/RTL metadata and 208 current key translations, exact source/translation placeholder parity, explicit English fallback, output/metadata preservation, no printf/reparse, both exact 4096-byte template boundaries and alias-safe output. An exhaustive generated scalar corpus covers all values through U+10FFFF, plus malformed/truncated byte sequences and control negatives. That exhaustive scalar check still does not prove grapheme/cell/bidi/formatting behavior. Exact platform counts, sanitizer and privacy results are in the [execution ledger](architecture/execution-plan.md).

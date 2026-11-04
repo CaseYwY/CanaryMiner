@@ -37,6 +37,16 @@ bool prepare(const TerminalSettingsChangeMessageRequest &request,TerminalMessage
     for(const auto &pack:i18n::settingsChangeLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
 }
+bool prepare(const TerminalSettingsActionMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments))return false;
+    for(const auto &argument:request.arguments){const auto &span=argument.value.content;
+        if(argument.name=="state"&&(!span.invariant||(span.text!="x"&&span.text!=" ")))return false;
+    }
+    templates.requested=i18n::settingsActionMessage(request.language,request.key);templates.english=i18n::settingsActionMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::settingsActionLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -72,6 +82,18 @@ bool renderTerminalSettingsChangeMessage(const TerminalSettingsChangeMessageRequ
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalSettingsChangeMessage(const TerminalSettingsChangeMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalSettingsActionMessage(const TerminalSettingsActionMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

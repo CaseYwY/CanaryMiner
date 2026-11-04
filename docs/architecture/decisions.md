@@ -144,4 +144,6 @@ Settled product decisions are distinct from unresolved implementation choices. T
 
 | D-112 | Accepted complete root-review change templates with named before/after roles | [P-13n](../settings-change-messages.md) extracts sixteen complete change templates in sixteen packs without changing English native bytes/order or dirty/save/stop semantics. Independent typed rendering retains both role identities and complete atomic numeric/unit values; explicit old native spelling remains compatible. Values never become parsers, stored preferences or dirty-state authority; draft/native/data-owner/terminal/human gates remain explicit. |
 
+| D-113 | Accepted root action/notice source extraction without capability inference | [P-13o](../settings-action-messages.md) adds thirty-four action/notice keys in sixteen packs while ordinary settings remains exact English source. Keyboard/reference tokens and invariant marks stay protected; translated notices do not grant backend, donation, safety, financial, restart or language-activation authority. Existing routes/save/refusal/collection/stop remain unchanged; diagnostic/subpanel/native/data-owner/terminal/human gates remain open. |
+
 Any later change must add its rationale and affected requirements/tests here. Do not erase the previous decision or change a display label to conceal different semantics.

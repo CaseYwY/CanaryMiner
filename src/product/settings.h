@@ -16,6 +16,7 @@
 #include "settings_messages.h"
 #include "ui_field_messages.h"
 #include "settings_change_messages.h"
+#include "settings_action_messages.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -273,12 +274,13 @@ class SettingsPanel {
             } else if (field == 4) draft.logTimestamps = !draft.logTimestamps;
             else if (field == 5) draft.logIsoTime = !draft.logIsoTime;
             else if (field == 6) draft.logFollow = !draft.logFollow;
-            else message = "Raw lines remain unclassified; filtering does not stop pipe draining.";
-        } else message = "Not implemented yet; no switch or mining behaviour was changed.";
+            else message = i18n::settingsActionEnglish(i18n::SettingsActionMessageKey::RawDrain);
+        } else message = i18n::settingsActionEnglish(i18n::SettingsActionMessageKey::NotChanged);
     }
     std::vector<dash_detail::Seg> fieldsText() const {
         using namespace dash_detail;
         using FieldKey=i18n::UiFieldMessageKey;
+        using ActionKey=i18n::SettingsActionMessageKey;
         std::vector<Seg> result;
         auto row = [&](int index, const std::string &text) {
             result.push_back({std::string(!groupsFocused && field == index ? "> " : "  ") + text,
@@ -293,42 +295,42 @@ class SettingsPanel {
             result.push_back({i18n::uiFieldEnglish(FieldKey::SamplingNotice), Tone::Plain});
             result.push_back({i18n::uiFieldEnglish(FieldKey::IntensityNotice), Tone::Plain});
         } else if (group == 8) {
-            row(0, std::string("Hide worker label  [") + (draft.hideWorker ? "x" : " ") + "]");
-            row(1, "History collection / runtime defaults [Enter]");
-            row(2, "Credit recovery / collection status [Enter]");
-            row(3, "Energy history / recovery status [Enter]");
-            row(4, "Energy persistence / authorization [Enter]");
-            row(5, "Billing originals / recovery review [Enter]");
-            result.push_back({"Presentation only, not a diagnostic scrubber.", Tone::Plain});
-            result.push_back({"Logs, API and files are not anonymized by it.", Tone::Plain});
+            row(0, i18n::settingsActionEnglish(ActionKey::HideWorker,draft.hideWorker?"x":" "));
+            row(1, i18n::settingsActionEnglish(ActionKey::HistoryDefaults));
+            row(2, i18n::settingsActionEnglish(ActionKey::CreditStatus));
+            row(3, i18n::settingsActionEnglish(ActionKey::EnergyStatus));
+            row(4, i18n::settingsActionEnglish(ActionKey::EnergyAuthorization));
+            row(5, i18n::settingsActionEnglish(ActionKey::BillingReview));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::PrivacyPresentation), Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::PrivacyNotAnonymized), Tone::Plain});
         } else if (group == 1) {
-            row(0, "Host wait / runtime defaults [Enter]");
-            result.push_back({"Manual controls; automatic selection is not enabled.", Tone::Plain});
-            result.push_back({"Saved defaults apply on the next explicit start only.", Tone::Plain});
+            row(0, i18n::settingsActionEnglish(ActionKey::HostWait));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::ManualControls), Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::NextStart), Tone::Plain});
         } else if (group == 3) {
-            row(0, "Manual/offline price references [Enter]");
-            result.push_back({"Default off; user-declared PRL/USDT and independent FX.", Tone::Plain});
-            result.push_back({"No provider polling, 1h series, actual income or optimizer.", Tone::Plain});
+            row(0, i18n::settingsActionEnglish(ActionKey::ManualReferences));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::DeclaredMarket), Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::NoMarket), Tone::Plain});
         } else if (group == 5) {
-            row(0,"Game mode / exact target defaults [Enter]");
-            result.push_back({"Configured only; native safety/CLI activation unavailable.",Tone::Plain});
-            result.push_back({"Non-off requests refuse the next ordinary start.",Tone::Plain});
+            row(0,i18n::settingsActionEnglish(ActionKey::GameDefaults));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::GameConfigured),Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::GameRefusal),Tone::Plain});
         } else if(group==6){
-            row(0,"TLS / independent plaintext declarations [Enter]");
-            result.push_back({"Strict URLs, per-user-pool consent, separate donation.",Tone::Plain});
-            result.push_back({"No live activation; requested TLS refuses ordinary startup.",Tone::Plain});
+            row(0,i18n::settingsActionEnglish(ActionKey::PoolDeclarations));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::PoolConsent),Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::PoolRefusal),Tone::Plain});
         } else if(group==7){
-            row(0,"Independent language / format requests [Enter]");
-            result.push_back({"Requested IDs, digits and layout save separately.",Tone::Plain});
-            result.push_back({"Effective English/legacy formatting remains active.",Tone::Plain});
+            row(0,i18n::settingsActionEnglish(ActionKey::LanguageRequests));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::LanguageSeparate),Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::LanguageEffective),Tone::Plain});
         } else if (group == 2) {
-            row(0,"Session board energy / declared flat energy-only rate [Enter]");
-            row(1,"Combined tariff / declared whole-meter opening [Enter]");
-            row(2,"Energy history / durable capture recovery [Enter]");
-            row(3,"Energy persistence / authorization [Enter]");
-            row(4,"Billing originals / recovery review [Enter]");
-            result.push_back({"Default off; next explicit session only, no miner restart.",Tone::Plain});
-            result.push_back({"Not whole-PC/incremental energy, shared utility bill or net income.",Tone::Plain});
+            row(0,i18n::settingsActionEnglish(ActionKey::SessionEnergy));
+            row(1,i18n::settingsActionEnglish(ActionKey::CombinedTariff));
+            row(2,i18n::settingsActionEnglish(ActionKey::EnergyRecovery));
+            row(3,i18n::settingsActionEnglish(ActionKey::EnergyAuthorization));
+            row(4,i18n::settingsActionEnglish(ActionKey::BillingReview));
+            result.push_back({i18n::settingsActionEnglish(ActionKey::EnergyNextStart),Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::EnergyNotWhole),Tone::Plain});
         } else if (group == 9) {
             toggle(0, FieldKey::DetailsPage, draft.detailsEnabled);
             toggle(1, FieldKey::DeviceIdentity, draft.detailsIdentity);
@@ -347,10 +349,10 @@ class SettingsPanel {
             result.push_back({i18n::uiFieldEnglish(FieldKey::RawSeverity), Tone::Plain});
             result.push_back({i18n::uiFieldEnglish(FieldKey::FreezeNotice), Tone::Plain});
         } else {
-            result.push_back({"Not implemented in this development slice.", Tone::Plain});
-            result.push_back({"No actionable switch until its backend", Tone::Plain});
-            result.push_back({"and safety checks are implemented.", Tone::Plain});
-            result.push_back({"See docs/feature-roadmap.md.", Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::Unimplemented), Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::NoActionable), Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::SafetyRequired), Tone::Plain});
+            result.push_back({i18n::settingsActionEnglish(ActionKey::Roadmap), Tone::Plain});
         }
         return result;
     }

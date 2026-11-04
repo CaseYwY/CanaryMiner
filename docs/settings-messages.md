@@ -61,3 +61,6 @@ thirty keys remain unchanged; remaining action rows, change descriptions and sub
 
 [P-13n](settings-change-messages.md) subsequently extracts the sixteen complete root-review change templates. Its own
 source/draft and predecessor evidence does not change the historical thirty-key shell scope or cover root action notices.
+
+[P-13o](settings-action-messages.md) subsequently extracts the thirty-four root action/notice keys. Opening/load/TTY
+diagnostics, subpanels and effective native language remain separate from these completed source domains.
