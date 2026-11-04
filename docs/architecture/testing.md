@@ -214,6 +214,8 @@ Executed P-03a [intent/launcher evidence](../session-intent.md) covers explicit-
 
 Test all declared locales/key coverage, placeholders/plurals, review/fallback status, UTF-8/grapheme/combining/wide/RTL snapshots, numeric/date/currency formatting and invariant flags/JSON/protocol/event codes. Changing language must not change tariff, timezone, currency, device or prices.
 
+[P-13a](../localization-catalog.md) checks the 16 exact IDs, current 13-key/autonym/review/RTL metadata, named-placeholder parity, explicit English fallback, invariant argument bytes, no printf/reparse, transactional failures and exact 4096-byte output. The generated full-scalar corpus and malformed/control negatives validate UTF-8 only. They do not qualify Unicode graphemes, cell widths, bidi/shaping, plurals, native selection, all UI domains, terminal/font/accessibility or human translation review.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

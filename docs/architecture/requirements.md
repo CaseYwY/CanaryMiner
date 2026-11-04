@@ -56,14 +56,16 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-SAFE-002 | Fault/thermal/telemetry protections remain active during settings/network/tests, with bounded restart budgets and controlled latch/cooldown states. | M-SUPERVISOR | P-03 | T-INTENT | PARTIAL |
 | R-SAFE-003 | Existing disabled hardware tuning remains disabled; future controls need separate permission, restricted helper and ownership-safe restoration. | M-SUPERVISOR | P-03 | T-INTENT | PLANNED |
 | R-SAFE-004 | Never reboot, reset/reload a display driver or perform other remote-disconnecting recovery without fresh explicit permission. | M-SUPERVISOR | P-03 | T-INTENT | PLANNED |
-| R-I18N-001 | First internationalization milestone targets 16 declared locale packs with honest translation review status and English fallback. | M-I18N | P-13 | T-I18N | PLANNED |
-| R-I18N-002 | Support UTF-8 graphemes/cell width/combining text/RTL while CLI/API keys, event codes, calculations and asset identity remain invariant. | M-I18N | P-13 | T-I18N | PLANNED |
+| R-I18N-001 | First internationalization milestone targets 16 declared locale packs with honest translation review status and English fallback. | M-I18N | P-13 | T-I18N | PARTIAL |
+| R-I18N-002 | Support UTF-8 graphemes/cell width/combining text/RTL while CLI/API keys, event codes, calculations and asset identity remain invariant. | M-I18N | P-13 | T-I18N | PARTIAL |
 | R-PRIV-001 | Keep wallet/account/device/path/rate/consumption/game-activity/config data local; collection, provider disclosure, retention and export require explicit controls. | M-PRIVACY | P-14 | T-PRIVACY | PLANNED |
 | R-PRIV-002 | Public code/docs/fixtures/commits/artifacts use synthetic data and approved metadata; scan staged files and available history; preserve upstream attribution/licences. | M-PRIVACY | P-14 | T-PRIVACY | PARTIAL |
 | R-REL-001 | Support Windows/Linux core parity with explicit capability differences; CPU/WSL tests do not prove production GPU/game support. | M-RELEASE | P-14 | T-RELEASE | PARTIAL |
 | R-REL-002 | Keep small reversible contribution batches, issue-first upstream behaviour/protocol discussion, DCO and all required release gates. | M-RELEASE | P-14 | T-RELEASE | PARTIAL |
 
 `PARTIAL` means a baseline behaviour or process exists, not that the expanded requirement is complete. For example, current Q/signal tests do not establish the future economic/game resume state machine, and current ASCII resize tests do not establish multilingual terminal accessibility.
+
+[P-13a](../localization-catalog.md) supplies all 16 locale IDs with English source fallback, explicitly machine-assisted non-English draft metadata and 13 checked common keys per pack. Strict UTF-8 scalar/template/output bounds preserve invariant arguments, not grapheme/cell/bidi/plural/formatting behavior. Complete UI-domain extraction, maintained Unicode layout, independent formatting/native controls, terminal/font/accessibility and human review remain open; R-I18N-001/002 are partial, not a completed locale milestone.
 
 [P-12a](../pool-progress-io.md) advances R-TLS-003/004 only at the actual canonical-source byte contract: explicit opposite/joint readiness, internal buffered work, bounded nonblocking progress, stable write retries and conservative zero-consumption write-attempt Unknown evidence. Ordinary TCP behavior stays unchanged. No TLS backend, certificate/SNI verification, bounded native setup/teardown, SSL configuration, plaintext consent, secure donation route or real protocol/release qualification is implemented by that contract.
 
