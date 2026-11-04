@@ -226,6 +226,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13f](../terminal-segments.md) tests source-provenance concatenation/cell totals, tones after RTL/mirroring/orphan handling, atomic identities, internal zero-cell unstyled isolates, strict policy/control refusal and post-layout fixed SGR with byte-exact plain recovery. All catalog texts cross order/direction/width/color policies, and an eight-tone/four-color/two-rule-flag oracle plus ordinary dashboard goldens guard shared palette extraction. These remain CPU line/plumbing checks, not localized-number/colored-wrap/native-language/real-terminal or release qualification.
 
+[P-13g](../terminal-number.md) crosses all 31 formats/16 languages/two digit styles with ordering/direction policies, exact >2^53 half-even originals, explicit labels, whole-quantity clipping/wrapping/padding and mixed Arabic/Hebrew tone provenance. It rejects invalid labels/tone/handling and preserves strict invariant-ASCII refusal. These display fixtures do not qualify a financial fact, full sentence, colored row, native activation, real terminal or production deployment.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

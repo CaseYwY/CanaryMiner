@@ -9,6 +9,7 @@ namespace om {
 enum class TerminalTextOrder { Ascii, Logical, Visual };
 enum class TerminalTextDirection { Auto, LeftToRight, RightToLeft };
 enum class TerminalTextFallback { None, RequestedAscii, BackendDisabled };
+enum class TerminalTextAtom { None, LeftToRight }; // atomic human presentation, NOT a byte-invariant machine identity
 struct TerminalTextPolicy {
     TerminalTextOrder order=TerminalTextOrder::Ascii;
     TerminalTextDirection direction=TerminalTextDirection::Auto;
@@ -19,7 +20,8 @@ struct TerminalTextSpan {
     std::string text;
     std::string ascii; // explicit human fallback, not guessed transliteration; empty reuses printable ASCII text
     bool invariant=false; // printable ASCII, atomic under clipping, isolated LTR under bidi; not translated or mirrored
-    TerminalTextSpan(std::string logical,std::string fallback={},bool stable=false):text(std::move(logical)),ascii(std::move(fallback)),invariant(stable){}
+    TerminalTextAtom atom=TerminalTextAtom::None;
+    TerminalTextSpan(std::string logical,std::string fallback={},bool stable=false,TerminalTextAtom atomic=TerminalTextAtom::None):text(std::move(logical)),ascii(std::move(fallback)),invariant(stable),atom(atomic){}
 };
 struct TerminalTextLine {
     std::string text;

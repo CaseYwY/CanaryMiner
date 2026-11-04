@@ -42,3 +42,6 @@ This supplies line provenance/color plumbing only. Typed localized-number isolat
 message-argument roles, complete plural/date/time/all-domain extraction, actual native renderer binding, explicit ICU data
 ownership/deployment, real terminal/font/shaping/accessibility and human review remain unqualified. Existing ASCII invariant
 rules must not be bypassed by falsely labelling a localized number or arbitrary UTF-8 identifier as invariant ASCII.
+
+[P-13g](terminal-number.md) subsequently adds the separate atomic human-LTR numeric/unit adapter without relaxing invariant
+ASCII or claiming colored-row/full-message/native/terminal qualification.

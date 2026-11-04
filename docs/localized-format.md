@@ -33,3 +33,7 @@ ICU-created bidi pattern marks are removed from numeric presentation only after 
 Fixtures check half-even positive/negative/tie/zero cases, the `2^53+1` decimal boundary without binary loss, 96-digit/24-place limits, transactional numeric/tag/policy refusal, separate fallback/resource metadata, German/French/Indian/Egyptian formatting, locale-default digit differences, language-independent numeric output, visible-fraction cardinal categories and every declared formatting locale crossed with all sixteen languages, both digit policies and bounded sample values. Exact platform/sanitizer/artifact/privacy evidence belongs to the [execution ledger](architecture/execution-plan.md).
 
 No real financial fact, profit, tariff, currency conversion, native language preference, full plural message, public machine-format change, terminal/font/shaping/assistive-technology or production qualification is established. Native selection/persistence/CLI precedence, all-domain extraction, dates/times, complete plural branches, colored/typed span integration, explicit data-owner policy and terminal/human review remain open.
+
+[P-13g](terminal-number.md) subsequently supplies a separate exact-number/explicit-unit segment adapter with atomic human-LTR
+handling. It retains the fixed ASCII value and all metadata, never labels localized digits as invariant ASCII or activates the
+ordinary native renderer. [P-13e](language-settings.md) supplies independent saved/CLI requests, not effective translation.
