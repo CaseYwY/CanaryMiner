@@ -33,6 +33,9 @@ class PearlTlsStream {
     PearlPoolTransfer receive(char *,std::size_t,uint64_t nowMonoMs)noexcept;
     PearlPoolTransfer send(const char *,std::size_t,uint64_t nowMonoMs)noexcept;
     bool bufferedRead()const noexcept;
+    // Immediate internal retry only. bufferedRead is conservative and may include an incomplete encrypted record;
+    // it must not replace socket readiness while that record still requires additional network input.
+    bool readProgressReady()const noexcept;
     PearlTlsState state()const noexcept;
     PearlTlsError error()const noexcept;
     void abort()noexcept; // terminal local close, NOT authenticated peer EOF or graceful TLS shutdown

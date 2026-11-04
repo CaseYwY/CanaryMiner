@@ -158,6 +158,8 @@ PearlPoolTransfer PearlTlsStream::receive(char *out,std::size_t maximum,uint64_t
     }catch(...){return s.fail(E::Protocol);}
 }
 bool PearlTlsStream::bufferedRead()const noexcept{const auto &s=*impl_;return s.state==S::VerifiedOpen&&(s.plainOffset!=s.plainSize||s.outputPending()||s.eof||s.native->bufferedRead());}
+bool PearlTlsStream::readProgressReady()const noexcept{const auto &s=*impl_;return s.state==S::VerifiedOpen&&
+    (s.plainOffset!=s.plainSize||s.eof||s.native->retryBufferedInput());}
 PearlTlsState PearlTlsStream::state()const noexcept{const auto &s=*impl_;return s.state==S::VerifiedOpen&&!s.native->verified()?S::Handshaking:s.state;}
 PearlTlsError PearlTlsStream::error()const noexcept{return impl_->error;}
 void PearlTlsStream::abort()noexcept{auto &s=*impl_;s.attempted=true;if(s.state!=S::Closed&&s.state!=S::Failed){s.state=S::Closed;if(s.adopted){try{s.wire.close();}catch(...){}}}}

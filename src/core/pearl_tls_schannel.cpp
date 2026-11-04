@@ -139,7 +139,18 @@ struct SchannelEngine final:PearlTlsEngine {
         if(r==SEC_I_RENEGOTIATE){
             if(now>std::numeric_limits<uint64_t>::max()-10000)return fail(E::Clock);
             control=true;authorized=localComplete=false;controlDeadline=now+10000;controlSteps=0;controlTraffic=0;
-            std::copy(std::begin(buffers),std::end(buffers),reauth);reauth[0].BufferType=SECBUFFER_TOKEN;reauthFirst=true;needMore=false;
+            // The first descriptor may now be only STREAM_HEADER (five bytes), not the control token.
+            // Prefer the returned unconsumed EXTRA tail; otherwise preserve an actual modified DATA/TOKEN
+            // (including an empty control token). Never label a header/trailer alone as a whole token.
+            const SecBuffer *token=nullptr;unsigned extras=0;
+            for(const auto &b:buffers)if((b.BufferType&~SECBUFFER_ATTRMASK)==SECBUFFER_EXTRA){if(++extras>1||b.cbBuffer>original)return fail(E::Protocol);token=&b;}
+            if(token){inputSize=token->cbBuffer;if(inputSize)std::memmove(incoming.data(),incoming.data()+original-inputSize,inputSize);}
+            else{for(const auto &b:buffers){const auto type=b.BufferType&~SECBUFFER_ATTRMASK;
+                    if((type==SECBUFFER_DATA||type==SECBUFFER_TOKEN)&&b.cbBuffer){if(token||!ownRange(b.pvBuffer,b.cbBuffer,original))return fail(E::Protocol);token=&b;}}
+                if(token){inputSize=token->cbBuffer;std::memmove(incoming.data(),token->pvBuffer,inputSize);}else inputSize=0;}
+            reauth[0]={static_cast<ULONG>(inputSize),SECBUFFER_TOKEN,incoming.data()};
+            for(unsigned i=1;i<4;++i)reauth[i]={0,SECBUFFER_EMPTY,nullptr};
+            reauthFirst=true;needMore=false;
             return {K::Progress,0};
         }
         if(r==SEC_I_CONTEXT_EXPIRED){
@@ -165,7 +176,7 @@ struct SchannelEngine final:PearlTlsEngine {
     std::size_t takeOutput(char *p,std::size_t maximum)override{const auto n=std::min(maximum,outputSize());
         if(control&&(controlTraffic+=n)>8*limit){failure=E::Capacity;return 0;}
         std::memcpy(p,outgoing.data()+outputOffset,n);outputOffset+=n;if(outputOffset==outgoing.size()){outgoing.clear();outputOffset=0;}return n;}
-    bool retryBufferedInput()const override{return (reauthFirst||inputSize)&&!needMore;}
+    bool retryBufferedInput()const override{return (control&&localComplete)||((reauthFirst||inputSize)&&!needMore);}
     bool bufferedRead()const override{return control||inputSize||outputSize();}
     std::size_t maximumPlaintext()const override{return std::min<std::size_t>(16384,sizes.cbMaximumMessage);}
     bool verified()const override{return authorized;}

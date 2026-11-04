@@ -21,6 +21,8 @@ struct PearlPoolSourceTestAccess {
     static int requestId(const PearlPoolSource &source) { return source.id_; }
     static PearlPoolSendEvidence send(PearlPoolSource &s,const std::string &body,long long deadline){return s.sendLineUntil(body,deadline);}
     static PearlPoolLineStatus read(PearlPoolSource &s,std::string *out,long long deadline,bool nonblocking=false){return s.readLineUntil(out,deadline,nonblocking);}
+    static bool intake(PearlPoolSource &s,long long deadline){return s.intakeBeforeSubmit(deadline).ready;}
+    static void drain(PearlPoolSource &s){s.drainAvailable();}
 };
 }
 
@@ -65,6 +67,8 @@ class Transport final : public PearlPoolTransport {
     bool timeoutWrite=false;uint64_t receiveCostMs=0,sendCostMs=0;
     unsigned cryptoReadProgress=0,cryptoWriteProgress=0;
     unsigned progressSends=0,progressReads=0;
+    bool localMode=false,localPending=false,localReady=false,localFailure=false,localEndless=false;
+    unsigned localWaits=0;std::vector<int> localBudgets;std::string localPayload;
     std::string retryOriginal;
     const char *retryPointer=nullptr;std::size_t retryLength=0;
     std::vector<PearlPoolInterest> interests;
@@ -107,9 +111,19 @@ class Transport final : public PearlPoolTransport {
     }
     bool progressIO()const override{return progressMode;}
     bool bufferedRead()const override{return progressMode&&(!incoming.empty()||readNeedsWrite);}
+    bool localReadPending()const override{return localPending;}
+    PearlPoolWaitStatus waitLocalRead(int ms)override{
+        ++localWaits;localBudgets.push_back(ms);clock.now+=static_cast<uint64_t>(ms);
+        if(localFailure)return PearlPoolWaitStatus::Error;
+        if(localEndless)return PearlPoolWaitStatus::Timeout;
+        localPending=false;localReady=true;
+        if(!localPayload.empty()){incoming.push_back(localPayload);localPayload.clear();}
+        return PearlPoolWaitStatus::Ready;
+    }
     PearlPoolWaitStatus waitFor(PearlPoolInterest interest,int ms)override{
         if(throwWait)throw std::runtime_error("fixture wait");
         interests.push_back(interest);
+        if(localPending)return PearlPoolWaitStatus::Timeout;
         if(interest==PearlPoolInterest::Read&&writeNeedsRead){writeNeedsRead=false;return PearlPoolWaitStatus::Ready;}
         if(interest==PearlPoolInterest::Write&&readNeedsWrite){readNeedsWrite=false;return PearlPoolWaitStatus::Ready;}
         if(spinWrite&&interest==PearlPoolInterest::Read)return PearlPoolWaitStatus::Ready;
@@ -125,7 +139,8 @@ class Transport final : public PearlPoolTransport {
             clock.now+=receiveCostMs;
             if(throwRead)throw std::runtime_error("fixture read");
             if(invalidReadInterest)return {PearlPoolTransferStatus::WouldBlock,0,PearlPoolInterest::None};
-            if(cryptoReadProgress){--cryptoReadProgress;return {PearlPoolTransferStatus::Progress,0};}
+             if(cryptoReadProgress){--cryptoReadProgress;return {PearlPoolTransferStatus::Progress,0};}
+             if(localMode){if(localReady)localReady=false;else{localPending=true;return {PearlPoolTransferStatus::WouldBlock,0,PearlPoolInterest::Read};}}
             if(readNeedsWrite)return {PearlPoolTransferStatus::WouldBlock,0,PearlPoolInterest::Write};}
         if (failReceive) return {PearlPoolTransferStatus::Error, 0};
         if (incoming.empty()) return {PearlPoolTransferStatus::WouldBlock,0,progressMode?PearlPoolInterest::Read:PearlPoolInterest::None};
@@ -141,6 +156,7 @@ class Transport final : public PearlPoolTransport {
         return {PearlPoolTransferStatus::Bytes, size};
     }
     PearlPoolTransfer send(const char *data, std::size_t length) override {
+        localMode=false;localPending=false;localReady=false; // barrier fixture ends when an actual application write is attempted
         const std::string piece(data, length);
         if(progressMode){++progressSends;
             clock.now+=sendCostMs;
@@ -1232,6 +1248,44 @@ void boundedProgressTransport(){
         check(PearlPoolSourceTestAccess::read(f.source,&line,5000)==PearlPoolLineStatus::Timeout&&f.clock.now==5000&&f.transport.interests.size()==(cost==100?1u:0u),
               "read step CPU time is deducted before waiting and expired steps never wait again");}
 }
+void isolatedReadBarrier(){
+    for(unsigned mode=0;mode<6;++mode){Fixture f;PearlRunSession session(f.backend,f.source,policy(),Clock::read,&f.clock);
+        check(f.start(session),"isolated-read fixture starts through canonical source");
+        std::vector<Solution> solutions;check(session.search(f.job,1200,1,&solutions)&&solutions.size()==1,"isolated-read fixture owns one original proof");
+        if(solutions.empty())continue;
+        const auto wire=f.transport.wire;const auto request=PearlPoolSourceTestAccess::requestId(f.source);
+        f.transport.progressMode=true;f.transport.localMode=true;
+        if(mode==1)f.transport.localPayload=notification("async-replacement",'1',"139054");
+        if(mode==2)f.transport.localFailure=true;
+        if(mode==3)f.transport.localEndless=true;
+        if(mode==4)f.transport.localPayload="{\"method\":\"mining.notify\"";
+        if(mode==5)f.transport.cryptoReadProgress=3;
+        bool delivered=false,valid=false;std::string error;
+        check(session.submit(f.job,solutions[0],&error,&delivered,&valid)&&valid&&session.finishSearch(),"local read barrier settles proof ownership");
+        if(mode==0||mode==5)check(delivered&&f.transport.submissions==1&&f.source.submitCounters().accepted==1,
+            "resolved genuine quiet result and no-line controls permit one correlated submit");
+        else check(!delivered&&f.transport.submissions==0&&f.transport.wire==wire&&PearlPoolSourceTestAccess::requestId(f.source)==request,
+            "replacement, failure, unresolved IPC or partial framing never sends the old proof or reserves its wire ID");
+        check(f.transport.localWaits>0&&std::all_of(f.transport.localBudgets.begin(),f.transport.localBudgets.end(),[](int n){return n>0&&n<=25;}),
+            "local read waits are bounded to original-deadline slices");
+        if(mode==3)check(f.transport.localWaits==16&&f.transport.progressReads==16,
+            "unresolved local read cannot evade original sixteen-call intake cap");
+    }
+    {Fixture f;f.transport.open_=true;f.transport.progressMode=true;f.transport.localMode=true;f.transport.localEndless=true;
+        const auto deadline=f.clock.now+7;
+        check(!PearlPoolSourceTestAccess::intake(f.source,static_cast<long long>(deadline))&&f.clock.now==deadline&&
+            f.transport.localWaits==1&&f.transport.localBudgets[0]==7&&f.transport.progressReads==2,
+            "pre-submit local waits exhaust the original deadline, never a fresh 25ms budget");}
+    {Fixture f;PearlRunSession session(f.backend,f.source,policy(),Clock::read,&f.clock);check(f.start(session),"control-only drain fixture starts");
+        f.transport.progressMode=true;f.transport.quietBuffered=true;f.transport.incoming.push_back("{\"method\":");
+        const auto now=f.clock.now;const auto before=f.transport.progressReads;
+        check(f.source.fetch(&f.job)&&f.job.valid&&f.clock.now==now&&f.transport.progressReads-before<=16,
+            "have-job fetch treats incomplete control/framing as bounded progress, not another twenty-second line wait");
+        PearlPoolSourceTestAccess::drain(f.source);
+        check(f.clock.now==now&&f.transport.isOpen(),"readonly drain preserves partial framing and connection on a no-line turn");
+        check(!PearlPoolSourceTestAccess::intake(f.source,static_cast<long long>(now+100)),
+            "partial line preserved by drain cannot become quiet permission at submit");}
+}
 }  // namespace
 int main() {
     normal(1, 1); normal(2, 2); normal(0, 2);
@@ -1249,6 +1303,7 @@ int main() {
     nativeCompletionIntegration();
     progressTransportFlow();
     boundedProgressTransport();
+    isolatedReadBarrier();
     if (failures) return 1;
     std::puts("Pearl run-session host integration PASS (fake proofs/device/transport; no official acceptance)");
     return 0;

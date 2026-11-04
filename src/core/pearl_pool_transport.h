@@ -59,6 +59,11 @@ class PearlPoolTransport {
     virtual bool progressIO() const { return false; }
     // Includes pending plaintext AND bounded internal read/control progress, not a promise that a full line exists.
     virtual bool bufferedRead() const { return false; }
+    // An isolated transport may still be resolving its previous nonblocking local read/quiet check.
+    // This is NOT socket readiness or permission to skip buffered work. Only the canonical source's
+    // original operation deadline may bound waiting for that exact local result before a submit.
+    virtual bool localReadPending() const { return false; }
+    virtual PearlPoolWaitStatus waitLocalRead(int) { return PearlPoolWaitStatus::Error; }
     virtual PearlPoolWaitStatus waitFor(PearlPoolInterest interest,int milliseconds) {
         if(interest==PearlPoolInterest::Read)return waitReadable(milliseconds);
         if(interest==PearlPoolInterest::Write)return waitWritable(milliseconds);

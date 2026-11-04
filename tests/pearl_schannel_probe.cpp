@@ -49,6 +49,7 @@ int main(int argc,char **argv){
         const auto reply=[&](PearlPoolTransfer r,const std::vector<char> &plain=std::vector<char>{}){
             std::cout<<"{\"status\":"<<static_cast<unsigned>(r.status)<<",\"bytes\":"<<r.bytes<<",\"interest\":"<<static_cast<unsigned>(r.interest)
                 <<",\"state\":"<<static_cast<unsigned>(tls.state())<<",\"error\":"<<static_cast<unsigned>(tls.error())
+                <<",\"buffered\":"<<tls.bufferedRead()<<",\"read_ready\":"<<tls.readProgressReady()<<",\"raw_pending\":"<<wire.incoming.size()
                 <<",\"cipher\":\""<<hex(wire.outgoing)<<"\",\"plain\":\""<<hex(plain)<<"\"}"<<std::endl;wire.outgoing.clear();};
         reply({tls.begin(policy,now)?PearlPoolTransferStatus::Progress:PearlPoolTransferStatus::Error,0});
         while(std::cin.getline(line.data(),static_cast<std::streamsize>(line.size()))){const std::string command(line.data());

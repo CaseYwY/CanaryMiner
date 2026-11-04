@@ -1872,8 +1872,8 @@ class PearlPoolSource : public JobSource {
         // Publish its terminal before any intake failure closes the session:
         // the synchronous owner already has an outstanding submit generation.
         timing.boundary(); // canonical validation, framing and dispatch bookkeeping
-        const PreSubmitIntake intake = intakeBeforeSubmit();
-        timing.boundary(); // existing bounded zero-wait intake, unchanged
+        const PreSubmitIntake intake = intakeBeforeSubmit(operationDeadline);
+        timing.boundary(); // bounded intake; an isolated local result retains this operation's original deadline
         timing.finish(); // excludes the following send and pool reply wait
         const bool currentJob = jobsMatch(job, activeJob_);
         const std::string proofDigest = pearlTranscriptProofDigest(sol.extra);
@@ -2199,9 +2199,12 @@ class PearlPoolSource : public JobSource {
             std::string line;
             const long long lineDeadline =
                 haveJob_ ? nowMs() + 20000 : deadline;
-            const PearlPoolLineStatus read =
-                readLineUntil(&line, lineDeadline);
-            if (read != PearlPoolLineStatus::Line) {
+             const PearlPoolLineStatus read =
+                 readLineUntil(&line, lineDeadline,haveJob_&&transport_->progressIO());
+             if (read != PearlPoolLineStatus::Line) {
+                 // Buffered TLS controls/local IPC progress are not a promise of another JSON line.
+                 // Preserve partial framing for the next bounded turn; pre-submit intake still must drain it.
+                 if(read==PearlPoolLineStatus::Timeout&&haveJob_&&transport_->progressIO())return;
                 if (read == PearlPoolLineStatus::Timeout)
                     lastError_ = "pool timed out in a partial work message";
                 else if (read == PearlPoolLineStatus::Oversize)
@@ -2232,8 +2235,8 @@ class PearlPoolSource : public JobSource {
      * Complete pushes use the normal canonical path. Any incomplete/ambiguous
      * intake refuses this proof; a quiet observation cannot prevent a later
      * cross-socket replacement race. */
-    PreSubmitIntake intakeBeforeSubmit() {
-        if(transport_->progressIO())return progressIntakeBeforeSubmit();
+    PreSubmitIntake intakeBeforeSubmit(long long operationDeadline) {
+        if(transport_->progressIO())return progressIntakeBeforeSubmit(operationDeadline);
         const auto failure = [](PearlSourceReason reason, const char *error) {
             return PreSubmitIntake{false, true, reason, error};
         };
@@ -2318,7 +2321,7 @@ class PearlPoolSource : public JobSource {
 
     // The encrypted backend may already hold replacement work while its socket is quiet. Always try a
     // nonblocking step first; an undrained control/partial record cannot authorize a stale proof.
-    PreSubmitIntake progressIntakeBeforeSubmit() {
+    PreSubmitIntake progressIntakeBeforeSubmit(long long operationDeadline) {
         const auto failure=[](PearlSourceReason reason,const char *error){return PreSubmitIntake{false,true,reason,error};};
         try{std::size_t lines=0,bytes=pending_.size(),calls=0;
             for(;;){const auto nl=pending_.find('\n');
@@ -2344,9 +2347,16 @@ class PearlPoolSource : public JobSource {
                 }
                 if(read.status!=PearlPoolTransferStatus::WouldBlock||!validPearlPoolInterest(read.interest))
                     return failure(PearlSourceReason::Transport,"pre-submit receive failed or disconnected; proof not sent");
-                const auto ready=transport_->waitFor(read.interest,0);
-                if(ready==PearlPoolWaitStatus::Error)return failure(PearlSourceReason::Transport,"pre-submit readiness failed; proof not sent");
-                if(ready==PearlPoolWaitStatus::Ready)continue;
+                 auto ready=transport_->waitFor(read.interest,0);
+                 if(ready==PearlPoolWaitStatus::Error)return failure(PearlSourceReason::Transport,"pre-submit readiness failed; proof not sent");
+                 if(ready==PearlPoolWaitStatus::Ready)continue;
+                 if(transport_->localReadPending()){
+                     const auto remaining=operationDeadline-nowMs();
+                     if(remaining<=0)return failure(PearlSourceReason::Timeout,"pre-submit local read expired; proof not sent");
+                     ready=transport_->waitLocalRead(remaining>25?25:static_cast<int>(remaining));
+                     if(ready==PearlPoolWaitStatus::Error)return failure(PearlSourceReason::Transport,"pre-submit local read failed; proof not sent");
+                     if(ready==PearlPoolWaitStatus::Ready||transport_->localReadPending())continue;
+                 }
                 if(!pending_.empty()||transport_->bufferedRead()||read.interest!=PearlPoolInterest::Read)
                     return failure(PearlSourceReason::Protocol,"undrained pre-submit TLS/control message; proof not sent");
                 return {};
@@ -2368,9 +2378,10 @@ class PearlPoolSource : public JobSource {
                 return;
             }
             std::string line;
-            const PearlPoolLineStatus read =
-                readLineUntil(&line, nowMs() + 20000);
-            if (read != PearlPoolLineStatus::Line) {
+             const PearlPoolLineStatus read =
+                 readLineUntil(&line, nowMs() + 20000,transport_->progressIO());
+             if (read != PearlPoolLineStatus::Line) {
+                 if(read==PearlPoolLineStatus::Timeout&&transport_->progressIO())return;
                 if (read == PearlPoolLineStatus::Timeout)
                     lastError_ = "pool timed out in a queued partial message";
                 else if (read == PearlPoolLineStatus::Oversize)

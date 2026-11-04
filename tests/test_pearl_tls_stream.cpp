@@ -28,7 +28,7 @@ struct QuietWire: PearlPoolTransport {
 PearlTlsPolicy policy(){return {true,"tls-fixture.test",{},5000};}
 void unavailable(){
     std::atomic<bool> cancel{false};
-    {QuietWire w;PearlTlsStream c(w,cancel);CHECK(c.state()==S::Dormant&&!c.bufferedRead());PearlTlsPolicy p;
+    {QuietWire w;PearlTlsStream c(w,cancel);CHECK(c.state()==S::Dormant&&!c.bufferedRead()&&!c.readProgressReady());PearlTlsPolicy p;
         CHECK(!c.begin(p,1000)&&c.error()==E::Disabled&&!w.writes&&!w.modes);
         p=policy();CHECK(!c.begin(p,1000)&&c.state()==S::Failed&&!w.writes);}
     for(unsigned mode=0;mode<6;++mode){QuietWire w;PearlTlsStream c(w,cancel);auto p=policy();

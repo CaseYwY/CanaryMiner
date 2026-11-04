@@ -1,4 +1,4 @@
-#include "pool_tls_check.h"
+#include "pool_tls_connection.h"
 #if defined(CANARY_POOL_TLS_CHECK)
 #include <algorithm>
 #include <memory>
@@ -56,6 +56,22 @@ struct Socket final:PearlPoolTransport {
     PearlPoolTransfer receive(char *p,std::size_t n)override{return p?transfer(p,nullptr,n):PearlPoolTransfer{};}
     PearlPoolTransfer send(const char *p,std::size_t n)override{return p?transfer(nullptr,p,n):PearlPoolTransfer{};}
 };
+struct Platform {bool ok=platformInit();~Platform(){if(ok)platformShutdown();}};
+struct Connected final:PoolTlsConnection {
+    std::shared_ptr<Platform> platform;std::unique_ptr<Socket> socket;PearlTlsStream tls;
+    Connected(std::shared_ptr<Platform> api,std::unique_ptr<Socket> raw,const std::atomic<bool> &cancel):platform(std::move(api)),socket(std::move(raw)),tls(*socket,cancel){}
+    PearlPoolTransfer send(const char *p,std::size_t n)override{return tls.send(p,n,nowMs());}
+    PearlPoolTransfer receive(char *p,std::size_t n)override{return tls.receive(p,n,nowMs());}
+    PearlPoolWaitStatus waitFor(PearlPoolInterest i,unsigned ms)override{
+        if(ms>25)return W::Error;
+        if((i==I::Read||i==I::ReadWrite)&&tls.readProgressReady())return W::Ready;
+        return socket->waitFor(i,static_cast<int>(ms));
+    }
+    bool bufferedRead()const override{return tls.bufferedRead();}
+    PearlTlsState state()const override{return tls.state();}
+    PearlTlsError error()const override{return tls.error();}
+    void abort()override{tls.abort();}
+};
 bool pendingConnect(){
 #if defined(_WIN32)
     const int e=WSAGetLastError();return e==WSAEWOULDBLOCK||e==WSAEINPROGRESS||e==WSAEALREADY;
@@ -72,20 +88,21 @@ bool connected(socket_t fd){int error=0;
 }
 }
 #endif
-PoolTlsCheckReply executePoolTlsCheck(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){
+static PoolTlsCheckReply nativeOpen(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel,std::unique_ptr<PoolTlsConnection> &owned){
     using S=PoolTlsCheckStatus;
     PoolTlsCheckReply out;const auto result=[&](S s){out.status=s;return out;};
     if(!r.enabled)return result(S::Disabled);
     if(cancel.load())return result(S::Cancelled);
     if(!validPoolTlsCheckRequest(r))return result(S::Invalid);
 #if !defined(CANARY_POOL_TLS_CHECK)
+    (void)owned;
     return result(S::Unavailable);
 #else
     using G=PoolTlsCheckStage;using E=PearlTlsError;
     const auto begin=nowMs();if(!begin||begin>UINT64_MAX-r.totalMs)return result(S::Invalid);const auto deadline=begin+r.totalMs;
     const auto expired=[&]{if(cancel.load()){out.status=S::Cancelled;return true;}if(nowMs()>=deadline){out.status=S::Timeout;return true;}return false;};
-    struct Platform {bool ok=platformInit();~Platform(){if(ok)platformShutdown();}} platform;
-    if(!platform.ok)return result(S::Unavailable);
+    auto platform=std::make_shared<Platform>();
+    if(!platform->ok)return result(S::Unavailable);
     out.stage=G::Resolve;
     addrinfo hints{};hints.ai_family=AF_UNSPEC;hints.ai_socktype=SOCK_STREAM;hints.ai_protocol=IPPROTO_TCP;hints.ai_flags=AI_NUMERICSERV;
     addrinfo *addresses=nullptr;const auto port=std::to_string(r.port);
@@ -130,18 +147,20 @@ PoolTlsCheckReply executePoolTlsCheck(const PoolTlsCheckRequest &r,const std::at
     if(expired())return out;
     if(!socket)return result(madeSocket?S::Connect:S::Socket);
     pending.clear(); // losers never receive a ClientHello or application data
-    out.stage=G::Handshake;PearlTlsStream tls(*socket,cancel);PearlTlsPolicy policy;
+    out.stage=G::Handshake;auto retained=std::make_unique<Connected>(platform,std::move(socket),cancel);auto &tls=retained->tls;PearlTlsPolicy policy;
     policy.enabled=true;policy.serverName=r.host;policy.caPem=r.caPem;policy.windowsPrivateTrust=r.windowsPrivateTrust;policy.handshakeDeadlineMonoMs=deadline;
     const auto failed=[&]{if(expired())return out;out.tlsError=tls.error();if(out.tlsError==E::None)out.tlsError=E::Protocol;return result(S::Tls);};
     if(!tls.begin(policy,nowMs()))return failed();
     while(tls.state()==PearlTlsState::Handshaking){if(expired())return out;const auto step=tls.handshake(nowMs());
         if(step.status==PearlPoolTransferStatus::Error)return failed();
         if(step.status==PearlPoolTransferStatus::WouldBlock){if(expired())return out;const auto current=nowMs();if(current>=deadline)continue;
-            if(socket->waitFor(step.interest,static_cast<int>(std::min<uint64_t>(deadline-current,25)))==W::Error){out.tlsError=E::Transport;return result(S::Tls);}}
+            if(retained->waitFor(step.interest,static_cast<unsigned>(std::min<uint64_t>(deadline-current,25)))==W::Error){out.tlsError=E::Transport;return result(S::Tls);}}
     }
     if(expired())return out;
     if(tls.state()!=PearlTlsState::VerifiedOpen)return failed();
-    out.stage=G::Complete;return result(S::Verified); // abort/destruction closes this socket; no application message and no transfer of authority
+    out.stage=G::Complete;owned=std::move(retained);return result(S::Verified);
 #endif
 }
+PoolTlsOpenResult openPoolTlsConnection(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){PoolTlsOpenResult result;result.reply=nativeOpen(r,cancel,result.connection);return result;}
+PoolTlsCheckReply executePoolTlsCheck(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){return openPoolTlsConnection(r,cancel).reply;} // temporary owner closes before the one-shot helper can publish
 } // namespace om

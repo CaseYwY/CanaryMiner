@@ -185,6 +185,9 @@ def scenario(args, mode, maximum=None, fragmented=False, reference='fixture.test
             received = bytearray()
             for _ in range(20000):
                 r = probe.cmd('R')
+                # The fixture has queued every complete peer record; a header-only reauth handoff must not await new network bytes.
+                if r['state'] == 1 and r['status'] == 1 and r['interest'] == 1 and r['buffered'] and not r['read_ready'] and not r['raw_pending']:
+                    raise RuntimeError('control blocked without internal retry readiness')
                 if r['state'] == 1:
                     control_turns += 1
                     if termination == 'control-deadline':
@@ -202,6 +205,27 @@ def scenario(args, mode, maximum=None, fragmented=False, reference='fixture.test
                 print('native record scope:', server.version(), 'post-handshake control turns', control_turns, flush=True)
                 if server.version() == 'TLSv1.3':
                     assert control_turns > 0
+            # A conservative buffered hint must not turn a partially received encrypted record into endless READY.
+            assert not outgoing.pending
+            tail = b'partial-native-record'
+            assert server.write(tail) == len(tail)
+            cipher = outgoing.read()
+            assert len(cipher) > 1
+            probe.cmd('I ' + cipher[:1].hex())
+            for _ in range(16):
+                r = probe.cmd('R')
+                if r['status'] == 1:
+                    break
+            assert r['status'] == 1 and r['interest'] == 1 and r['buffered'] and not r['read_ready'] and not r['plain']
+            probe.cmd('I ' + cipher[1:].hex())
+            recovered = bytearray()
+            for _ in range(128):
+                r = probe.cmd('R')
+                assert r['state'] != 4
+                recovered.extend(bytes.fromhex(r['plain']))
+                if recovered == tail:
+                    break
+            assert recovered == tail
             if termination == 'close':
                 try:
                     server.unwrap()
