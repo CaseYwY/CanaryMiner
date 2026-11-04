@@ -1,6 +1,7 @@
 #include "localized_format.h"
 #include "exact_decimal.h"
 #include "localization.h"
+#include "presentation_locales.h"
 #include <algorithm>
 #include <array>
 #include <memory>
@@ -13,13 +14,9 @@
 #endif
 namespace om {
 namespace {
-struct Locale {const char *id,*icu;};
-constexpr std::array<Locale,31> locales={{{"en","en"},{"zh-Hans","zh_Hans"},{"zh-Hant","zh_Hant"},{"es","es"},{"pt-BR","pt_BR"},{"fr","fr"},{"de","de"},{"ru","ru"},
-    {"ja","ja"},{"ko","ko"},{"ar","ar"},{"hi","hi"},{"bn","bn"},{"id","id"},{"tr","tr"},{"vi","vi"},{"en-US","en_US"},{"en-GB","en_GB"},{"fr-FR","fr_FR"},
-    {"de-DE","de_DE"},{"es-ES","es_ES"},{"ar-EG","ar_EG"},{"hi-IN","hi_IN"},{"bn-BD","bn_BD"},{"zh-CN","zh_CN"},{"zh-TW","zh_TW"},{"ja-JP","ja_JP"},
-    {"ko-KR","ko_KR"},{"id-ID","id_ID"},{"tr-TR","tr_TR"},{"vi-VN","vi_VN"}}};
+using Locale=presentation_detail::FormattingLocale;
 bool tag(const std::string &s){return !s.empty()&&s.size()<=35&&std::all_of(s.begin(),s.end(),[](unsigned char c){return (c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-';});}
-const Locale &locale(const std::string &s){for(const auto &entry:locales)if(s==entry.id)return entry;return locales[0];}
+const Locale &locale(const std::string &s){for(const auto &entry:presentation_detail::formattingLocales())if(s==entry.id)return entry;return presentation_detail::formattingLocales()[0];}
 #if defined(CANARY_TERMINAL_ICU)
 bool formatNative(const PresentationNumberRequest &request,PresentationNumber &out,const Locale &format,const Locale &language){
     std::string skeleton=request.fractionDigits?"."+std::string(request.fractionDigits,'0'):"precision-integer";
@@ -52,7 +49,7 @@ bool formatNative(const PresentationNumberRequest &request,PresentationNumber &o
 bool formatPresentationNumber(const PresentationNumberRequest &request,PresentationNumber *out){
     if(!out||request.fractionDigits>24||static_cast<unsigned>(request.digits)>1||!tag(request.formattingLocale)||!tag(request.language))return false;
     ExactDecimal value;if(!ExactDecimal::parse(request.decimal,&value))return false;
-    const auto &format=locale(request.formattingLocale);const Locale *language=&locales[0];for(std::size_t i=0;i<16;++i)if(request.language==locales[i].id){language=&locales[i];break;}
+    const auto &locales=presentation_detail::formattingLocales();const auto &format=locale(request.formattingLocale);const Locale *language=&locales[0];for(std::size_t i=0;i<16;++i)if(request.language==locales[i].id){language=&locales[i];break;}
     PresentationNumber result;result.formattingLocale=format.id;result.language=language->id;result.localeFallback=result.formattingLocale!=request.formattingLocale;result.languageFallback=result.language!=request.language;
     if(!value.formatRatio(1,request.fractionDigits,&result.ascii))return false;
     ExactDecimal rounded;if(!ExactDecimal::parse(result.ascii,&rounded))return false;result.rounded=value.compare(rounded)!=0;
@@ -63,5 +60,5 @@ bool formatPresentationNumber(const PresentationNumberRequest &request,Presentat
 #endif
     *out=std::move(result);return true;
 }
-const std::vector<std::string> &presentationFormattingLocales(){static const std::vector<std::string> ids=[](){std::vector<std::string> values;for(const auto &entry:locales)values.emplace_back(entry.id);return values;}();return ids;}
+const std::vector<std::string> &presentationFormattingLocales(){static const std::vector<std::string> ids=[](){std::vector<std::string> values;for(const auto &entry:presentation_detail::formattingLocales())values.emplace_back(entry.id);return values;}();return ids;}
 } // namespace om

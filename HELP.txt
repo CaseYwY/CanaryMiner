@@ -153,6 +153,14 @@ Contents
   not live quotes or a one-hour mean. No actual-income, forecast or net-profit rows are enabled.
   The same controls are available without mining: canary-miner settings [--config FILE]
 
+  Language requests (development branch): S -> Language; separate language-preferences.json.
+  --language ID, --format-locale ID and --ascii-ui override requests without implicitly saving.
+  V/F2 reviews complete before/after/current requests; Enter/F2 saves only this file; Esc cancels.
+  Effective native UI remains legacy English with legacy per-field formatting. Full translations/ICU
+  layout are not activated by saving; non-English packs remain machine-assisted drafts, not human reviewed.
+  Bad language files are preserved and fall back without blocking mining. No asset, currency, electricity
+  jurisdiction, timezone, worker, protocol or donation setting is inferred. See docs/language-settings.md.
+
   Games settings (development branch): S -> Games edits separate private defaults:
   off / pause / coexist, one exact ASCII process basename, explicit Windows-session
   or Linux-native-UID scope, detection poll, exit debounce and maximum detection age.

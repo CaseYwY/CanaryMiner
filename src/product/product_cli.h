@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "config.h"
+#include "language_preferences.h"
 
 namespace om {
 
@@ -77,6 +78,7 @@ struct CliOverrides {
     bool noHistory = false;   // local accepted history only, never a reward/account setting
     bool noMarket = false;    // terminal manual-price display override; never modifies saved values
     bool noEnergy = false;    // optional session energy collection override; ordinary safety telemetry is unchanged
+    LanguageOverrides presentation; // requested presentation only, never mining/config or implicit persistence
     GpuTuningConfig tuning;
 };
 
@@ -157,7 +159,23 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             }
             return true;
         };
-        if (a == "--no-energy") {
+        if(a=="--language"||a.rfind("--language=",0)==0){
+            if(r.ov.presentation.language){if(error)*error="--language given twice";return false;}
+            if(!tuningValue("--language",&v))return false;
+            if(!knownMessageLanguage(v)){if(error)*error="--language requires one supported exact locale ID; rejected value not applied.";return false;}
+            r.ov.presentation.language=v;
+        }else if(a=="--format-locale"||a.rfind("--format-locale=",0)==0){
+            if(r.ov.presentation.formattingLocale){if(error)*error="--format-locale given twice";return false;}
+            if(!tuningValue("--format-locale",&v))return false;
+            if(!knownPresentationFormattingLocale(v)){if(error)*error="--format-locale requires one supported exact formatting ID; rejected value not applied.";return false;}
+            r.ov.presentation.formattingLocale=v;
+        }else if(a=="--ascii-ui"){
+            if(r.ov.presentation.ascii){if(error)*error="--ascii-ui given twice";return false;}
+            r.ov.presentation.ascii=true;
+        }else if(a.rfind("--ascii-ui=",0)==0){
+            if(error)*error="--ascii-ui takes no value; rejected value not applied.";
+            return false;
+        }else if (a == "--no-energy") {
             r.ov.noEnergy = true;
         } else if (a == "--no-market") {
             r.ov.noMarket = true;
@@ -407,6 +425,9 @@ inline std::string productHelpText() {
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress offline manual references this run; saved values stay\n"
         "       --no-energy                   disable optional session energy recording; safety telemetry stays\n"
+        "       --language ID                 requested message language; never infers format/currency/timezone\n"
+        "       --format-locale ID            independent requested number/date style; no implicit Save\n"
+        "       --ascii-ui                    explicit ASCII recovery request; effective UI remains legacy English\n"
         "\n"
         "Pool\n"
         "  -o, --pool SPEC       HOST:PORT, stratum+tcp://HOST:PORT, or a preset: f2pool, kryptex,\n"

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canaryminer-language-preferences-v1",
+  "title": "Independent presentation requests; not effective native translation",
+  "description": "Native input is limited to 4096 bytes and rejects duplicate/unknown fields and non-integer numeric tokens. Saving does not load ICU, activate translations, change frozen current requests, or affect mining/currency/tariff/timezone/protocol settings. Legacy English and per-field formatting remain active until complete native integration is qualified.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "language", "formatting_locale", "digits", "text_order", "direction", "ambiguous_cells", "emoji_cells", "grouping"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "language": { "type": "string", "enum": ["en", "zh-Hans", "zh-Hant", "es", "pt-BR", "fr", "de", "ru", "ja", "ko", "ar", "hi", "bn", "id", "tr", "vi"], "default": "en" },
+    "formatting_locale": { "type": "string", "enum": ["en", "zh-Hans", "zh-Hant", "es", "pt-BR", "fr", "de", "ru", "ja", "ko", "ar", "hi", "bn", "id", "tr", "vi", "en-US", "en-GB", "fr-FR", "de-DE", "es-ES", "ar-EG", "hi-IN", "bn-BD", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "id-ID", "tr-TR", "vi-VN"], "default": "en" },
+    "digits": { "type": "string", "enum": ["latin", "locale_default"], "default": "latin" },
+    "text_order": { "type": "string", "enum": ["ascii", "logical", "visual"], "default": "ascii" },
+    "direction": { "type": "string", "enum": ["auto", "ltr", "rtl"], "default": "auto" },
+    "ambiguous_cells": { "type": "integer", "enum": [1, 2], "default": 1 },
+    "emoji_cells": { "type": "integer", "enum": [1, 2], "default": 2 },
+    "grouping": { "type": "boolean", "default": true }
+  }
+}

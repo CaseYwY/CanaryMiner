@@ -189,6 +189,31 @@ class GamePreferencesSchemaTests(unittest.TestCase):
         self.assertEqual(set(schema['required']), set(schema['properties']))
 
 
+class LanguagePreferencesSchemaTests(unittest.TestCase):
+    def test_independent_complete_requests_and_native_ids(self):
+        schema = load('config/language-preferences-v1.schema.json')
+        props = schema['properties']
+        value = {key: spec.get('default', spec.get('const')) for key, spec in props.items()}
+        self.assertEqual(validate(value, schema, schema), [])
+        for language in props['language']['enum']:
+            for locale in props['formatting_locale']['enum']:
+                self.assertEqual(validate({**value, 'language': language, 'formatting_locale': locale}, schema, schema), [])
+        for key, item in (('schema_version', 2), ('language', 'en-US'), ('language', 'EN'), ('formatting_locale', 'ar@currency=USD'),
+                          ('digits', 'arabic'), ('text_order', 'auto'), ('direction', 'unknown'), ('ambiguous_cells', 0),
+                          ('emoji_cells', 3), ('ambiguous_cells', True), ('grouping', 1), ('currency', 'USD')):
+            self.assertTrue(validate({**value, key: item}, schema, schema))
+        for key in value:
+            self.assertTrue(validate({k: v for k, v in value.items() if k != key}, schema, schema))
+        with open(os.path.join(ROOT, 'src/product/language_preferences.h'), encoding='utf8') as stream:
+            writer = stream.read().split('inline std::string languagePreferencesJson', 1)[1].split('inline bool parseLanguagePreferences', 1)[0]
+        self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(props))
+        self.assertEqual(set(schema['required']), set(props))
+        with open(os.path.join(ROOT, 'src/product/presentation_locales.h'), encoding='utf8') as stream:
+            ids = re.findall(r'\{"([A-Za-z-]+)","[A-Za-z_]+"\}', stream.read())
+        self.assertEqual(ids, props['formatting_locale']['enum'])
+        self.assertEqual(ids[:16], props['language']['enum'])
+
+
 class ManualMarketSchemaTests(unittest.TestCase):
     def test_disabled_example_shape_and_native_keys(self):
         schema = load('config/manual-market-preferences.schema.json')

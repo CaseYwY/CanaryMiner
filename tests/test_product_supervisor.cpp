@@ -910,6 +910,7 @@ int main(int argc, char **argv) {
         options.manualMarketFactory = makeManualMarketProjector;
         options.gamePreferencesPath = (std::filesystem::path(argv[2]) / "game-preferences.json").u8string();
         options.poolSecurityPreferencesPath=(std::filesystem::path(argv[2])/"pool-security-preferences.json").u8string();
+        options.languagePreferencesPath=(std::filesystem::path(argv[2])/"language-preferences.json").u8string();
         options.gameContext.running=true;options.gameContext.effective=GamePreferences{}; // frozen synthetic running session
         options.noMarket = std::string(argv[1]) == "--manual-no-market-session-test";
         options.electricityPreferencesPath = (std::filesystem::path(argv[2]) / "electricity-preferences.json").u8string();

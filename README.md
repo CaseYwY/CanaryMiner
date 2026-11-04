@@ -278,6 +278,12 @@ as `ui-preferences.json` in the configured state directory; this does not rewrit
 unavailable until their implementations land. See [the staged feature roadmap](docs/feature-roadmap.md). These changes have not
 been submitted to or accepted by upstream; there is no new qualified production release for this branch.
 
+**S → Language** now reviews independent [language/format/layout requests](docs/language-settings.md), stored only in
+`language-preferences.json`. `--language ID`, `--format-locale ID` and `--ascii-ui` override the current parent request
+without silently saving it. **These requests do not yet activate translations or ICU:** effective native UI remains legacy
+English with legacy per-field formatting, explicitly labelled in the editor. Bad preference files are preserved and fall
+back without blocking mining. No currency, tariff jurisdiction, timezone, asset, worker, protocol or donation choice is inferred.
+
 The [architecture book](docs/architecture/README.md) records requirements, modules, final income/valuation semantics, test
 families, implementation batches and open decisions. [Local accepted history](docs/accepted-history.md) now persists observed
 user counts for 24h/7d/30d/all-local windows with coverage warnings; `--no-history` disables it for a run. It requires the optional

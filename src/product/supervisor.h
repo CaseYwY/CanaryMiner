@@ -403,6 +403,8 @@ struct SupervisorOptions {
     DisplaySampleFactory displaySampleFactory; // empty uses native display reader; constructed/read/destroyed only in the background
     std::string gamePreferencesPath;
     std::string poolSecurityPreferencesPath;
+    std::string languagePreferencesPath;
+    LanguageSettingsContext languageContext;
     GameSettingsContext gameContext; // frozen effective settings, not inferred from later saved preferences
 };
 
@@ -576,6 +578,7 @@ class Supervisor {
         if (!opt_.runtimePreferencesPath.empty()) runtimeStore_.reset(new RuntimePreferencesStore(std::filesystem::u8path(opt_.runtimePreferencesPath)));
         if(!opt_.gamePreferencesPath.empty())gameStore_.reset(new GamePreferencesStore(std::filesystem::u8path(opt_.gamePreferencesPath)));
         if(!opt_.poolSecurityPreferencesPath.empty())poolSecurityStore_.reset(new PoolSecurityPreferencesStore(std::filesystem::u8path(opt_.poolSecurityPreferencesPath)));
+        if(!opt_.languagePreferencesPath.empty())languageStore_.reset(new LanguagePreferencesStore(std::filesystem::u8path(opt_.languagePreferencesPath)));
         if (opt_.dashboard && !opt_.manualMarketPreferencesPath.empty()) {
             manualStore_.reset(new ManualMarketStore(std::filesystem::u8path(opt_.manualMarketPreferencesPath)));
             if (!opt_.noMarket) {
@@ -699,10 +702,12 @@ class Supervisor {
                             return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),error)&&electricityStore_->save(p,error);
                         },[this](const JsonValue &p,std::string *error){return tariffStore_&&tariffStore_->save(p,error);},
                         [this](const GamePreferences &p,std::string *error){return gameStore_&&gameStore_->save(p,error);},
-                        [this](const PoolSecurityPreferences &p,std::string *error){return poolSecurityStore_&&poolSecurityStore_->save(p,error);});
+                        [this](const PoolSecurityPreferences &p,std::string *error){return poolSecurityStore_&&poolSecurityStore_->save(p,error);},
+                        [this](const LanguagePreferences &p,std::string *error){return languageStore_&&languageStore_->save(p,error);});
                         if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
                         if(result==SettingsResult::OpenGame){auto context=opt_.gameContext;context.running=true;openGameControls(&settings_,gameStore_.get(),context);}
                         if(result==SettingsResult::OpenPoolSecurity)openPoolSecurityControls(&settings_,poolSecurityStore_.get(),{true});
+                        if(result==SettingsResult::OpenLanguage){auto context=opt_.languageContext;context.running=true;openLanguageControls(&settings_,languageStore_.get(),context);}
                         if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.running=true; context.cliDisabled=opt_.noMarket; context.effective=manualEffective_; openManualMarketControls(&settings_,manualStore_.get(),context); }
                         if(result==SettingsResult::OpenElectricity){ElectricitySettingsContext context;context.running=true;context.cliNoEnergy=opt_.noEnergy;context.effective=electricityEffective_;context.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;openElectricityControls(&settings_,electricityStore_.get(),context);}
                         if(result==SettingsResult::OpenTariff){
@@ -910,6 +915,7 @@ class Supervisor {
     std::unique_ptr<RuntimePreferencesStore> runtimeStore_;
     std::unique_ptr<GamePreferencesStore> gameStore_;
     std::unique_ptr<PoolSecurityPreferencesStore> poolSecurityStore_;
+    std::unique_ptr<LanguagePreferencesStore> languageStore_;
     std::unique_ptr<ManualMarketStore> manualStore_;
     ManualMarketPreferences manualEffective_;
     ManualMarketProjector manualProjection_;

@@ -115,6 +115,8 @@ int main(int argc, char **argv) {
             return kExitUsage;
         }
     }
+    const bool explicitPresentation=cli.ov.presentation.language.has_value()||cli.ov.presentation.formattingLocale.has_value()||cli.ov.presentation.ascii;
+    if(explicitPresentation)fprintf(stderr,"Language request: effective UI en / legacy per-field formatting; full native translation/layout integration unavailable. No mining setting changed.\n");
     if (cli.command == Command::Version) {
         printf("%s\n", versionText().c_str());
         return kExitOk;
@@ -128,18 +130,27 @@ int main(int argc, char **argv) {
             return kExitConfig;
         }
     }
+    LanguageSettingsContext languageContext;
+    languageContext.cliOverrides=explicitPresentation;
+    const auto loadLanguageContext=[&](){
+        LanguagePreferencesStore store(std::filesystem::u8path(cfg.stateDir)/"language-preferences.json");LanguagePreferences saved;std::string error;
+        if(!store.load(&saved,&error))fprintf(stderr,"Language preferences unavailable; legacy English presentation retained; original file preserved.\n");
+        if(!applyLanguageOverrides(saved,cli.ov.presentation,&languageContext.requested,&error))languageContext.requested=LanguagePreferences{};
+        if(!explicitPresentation&&languageContext.requested!=LanguagePreferences{})fprintf(stderr,"Language request: effective UI en / legacy per-field formatting; full native translation/layout integration unavailable. No mining setting changed.\n");
+    };
     GpuTuningPlatform tuningPlatform = currentGpuTuningPlatform();
     if (cli.command == Command::Status) return commandStatus(cfg, cli.ov.json);
     if (cli.command == Command::Settings) {
-        if (cli.help) { printf("canary-miner settings [--config FILE]\nEdit display/runtime/game defaults without starting mining.\n"); return kExitOk; }
+        if (cli.help) { printf("canary-miner settings [--config FILE] [--language ID] [--format-locale ID] [--ascii-ui]\nEdit display/runtime/game/presentation requests without starting mining.\nEffective legacy English remains until all-domain native integration is available.\n"); return kExitOk; }
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
+        loadLanguageContext();
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
 #if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
         const auto factory=[state=cfg.stateDir](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices,{},languageContext);
 #else
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy,{},{},{},{},{},{},languageContext);
 #endif
     }
 
@@ -427,6 +438,7 @@ int main(int argc, char **argv) {
 #endif
         ;
     if (ordinaryRuntime && !cli.help) {
+        loadLanguageContext();
         RuntimePreferencesStore runtimeStore(std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json");
         std::string error;
         if (!runtimeStore.load(&runtimeDefaults, &error)) {
@@ -965,6 +977,8 @@ int main(int argc, char **argv) {
         so.runtimeContext = runtimeContext;
         so.gamePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "game-preferences.json").u8string();
         so.poolSecurityPreferencesPath=(std::filesystem::u8path(cfg.stateDir)/"pool-security-preferences.json").u8string();
+        so.languagePreferencesPath=(std::filesystem::u8path(cfg.stateDir)/"language-preferences.json").u8string();
+        so.languageContext=languageContext;so.languageContext.running=true;
         so.gameContext.running=true;so.gameContext.effective=gameDefaults;
         so.manualMarketPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "manual-market-preferences.json").u8string();
         so.manualMarketFactory = makeManualMarketProjector;
