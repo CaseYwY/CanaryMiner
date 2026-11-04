@@ -37,3 +37,7 @@ No real financial fact, profit, tariff, currency conversion, native language pre
 [P-13g](terminal-number.md) subsequently supplies a separate exact-number/explicit-unit segment adapter with atomic human-LTR
 handling. It retains the fixed ASCII value and all metadata, never labels localized digits as invariant ASCII or activates the
 ordinary native renderer. [P-13e](language-settings.md) supplies independent saved/CLI requests, not effective translation.
+
+[P-13j](terminal-count.md) subsequently adds explicit `asciiOnly` recovery (no native formatting/cardinal call, empty/unavailable
+category and `asciiRecovery=true`) plus two complete maintained count keys. Disabled or explicit ASCII count recovery selects
+neutral English headers, not an own-code plural rule. Default number behavior and exact arithmetic are unchanged.

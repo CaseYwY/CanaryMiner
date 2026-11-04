@@ -62,3 +62,7 @@ and Unicode-only capability/refusal. Exact final platform/sanitizer/corpus/artif
 Full translated plural sentences, date/time domains, all UI-domain extraction, actual native binding, explicit ICU data
 ownership/deployment, human review and physical terminal/font/shaping/accessibility remain unfinished. No ordinary native
 language, real financial/source/GPU/game/pool or production qualification is supplied by these synthetic CPU fixtures.
+
+[P-13j](terminal-count.md) subsequently reuses an internal checked fixed-domain template-pair bridge for complete Workers/
+AcceptedShares forms, with independently maintained English selection and neutral recovery when plural rules are unavailable.
+The public common-message API remains unchanged; this is not runtime user-template or full-domain/native activation.

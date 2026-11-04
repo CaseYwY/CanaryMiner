@@ -9,10 +9,11 @@ struct PresentationNumberRequest {
     unsigned fractionDigits=2;
     bool grouping=true;
     PresentationDigits digits=PresentationDigits::Latin;
+    bool asciiOnly=false; // explicit recovery: no ICU call and no guessed plural category
 };
 struct PresentationNumber {
     std::string text,ascii,formattingLocale,language,pluralCategory;
-    bool backendFallback=false,localeFallback=false,languageFallback=false,resourceInheritance=false,pluralAvailable=false,rounded=false;
+    bool backendFallback=false,localeFallback=false,languageFallback=false,resourceInheritance=false,pluralAvailable=false,rounded=false,asciiRecovery=false;
 };
 // Existing bounded ExactDecimal performs explicit round-half-even once. ICU only decorates that exact
 // fixed decimal and selects cardinal plural using the visible fraction digits. Never a money conversion,

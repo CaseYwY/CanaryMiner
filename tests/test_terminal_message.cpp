@@ -1,6 +1,7 @@
 // Typed common-message composition only; not full domains, plural sentences or ordinary activation.
 #include "product/terminal_message.h"
 #include "product/terminal_number.h"
+#include "product/terminal_message_internal.h"
 #include "product_test_util.h"
 using namespace om;
 namespace {
@@ -61,5 +62,23 @@ void boundaries(){
     request.key=i18n::MessageKey::SourceValue;request.arguments={{"source",{{"\x1b", "safe",false},Tone::Plain}},{"value",{{"value"},Tone::Plain}}};policy.order=TerminalTextOrder::Ascii;
     CHECK(!layoutTerminalMessage(request,policy,&line));request.arguments[0].value.content=TerminalTextSpan{u8"字",{},false,TerminalTextAtom::None,TerminalTextRecovery::UnicodeOnly};CHECK(!layoutTerminalMessage(request,policy,&line));
 }
+void templateBridge(){
+    TerminalMessageRequest request;request.language="fr";request.arguments={{"value",{{"1",{},true},Tone::Canary}}};
+    terminal_message_detail::Templates valid;valid.english={"Value: {value}","en",i18n::ReviewStatus::Source,false,false};valid.requested={"Valeur : {value}","fr",i18n::ReviewStatus::MachineAssisted,false,false};valid.requestedReview=i18n::ReviewStatus::MachineAssisted;
+    for(auto order:{TerminalTextOrder::Ascii,TerminalTextOrder::Logical}){TerminalTextPolicy policy;policy.order=order;policy.columns=80;TerminalMessageLine line;
+        CHECK(terminal_message_detail::layoutTemplate(request,valid,policy,&line));
+        for(unsigned mode=0;mode<7;++mode){auto malformed=valid;
+            if(mode==0)malformed.requested.text="Valeur : {missing}";
+            if(mode==1)malformed.requested.text="Valeur : {value";
+            if(mode==2)malformed.english.text="Value: {value";
+            if(mode==3)malformed.requested.text="{value} {value}";
+            if(mode==4)malformed.english.locale="fr";
+            if(mode==5)malformed.requested.text="\x1b[31m{value}";
+            if(mode==6)malformed.requested.text="";
+            line.line.line.text="unchanged";line.metadata.renderedLanguage="previous";
+            CHECK(!terminal_message_detail::layoutTemplate(request,malformed,policy,&line)&&line.line.line.text=="unchanged"&&line.metadata.renderedLanguage=="previous");
+        }
+    }
 }
-int main(){matrix();boundaries();return finishTests("typed named common-message arguments and whole-template English recovery (not native activation)");}
+}
+int main(){matrix();boundaries();templateBridge();return finishTests("typed named common-message arguments and whole-template English recovery (not native activation)");}

@@ -53,10 +53,11 @@ bool formatPresentationNumber(const PresentationNumberRequest &request,Presentat
     PresentationNumber result;result.formattingLocale=format.id;result.language=language->id;result.localeFallback=result.formattingLocale!=request.formattingLocale;result.languageFallback=result.language!=request.language;
     if(!value.formatRatio(1,request.fractionDigits,&result.ascii))return false;
     ExactDecimal rounded;if(!ExactDecimal::parse(result.ascii,&rounded))return false;result.rounded=value.compare(rounded)!=0;
+    if(request.asciiOnly){result.text=result.ascii;result.asciiRecovery=true;}
 #if defined(CANARY_TERMINAL_ICU)
-    if(!formatNative(request,result,format,*language))return false;
+    else if(!formatNative(request,result,format,*language))return false;
 #else
-    result.text=result.ascii;result.backendFallback=true; // no invented CLDR plural category when the maintained backend is disabled
+    else{result.text=result.ascii;result.backendFallback=true;} // no invented CLDR plural category when the maintained backend is disabled
 #endif
     *out=std::move(result);return true;
 }

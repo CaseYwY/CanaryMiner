@@ -7,7 +7,7 @@
 using namespace om;
 namespace {
 bool same(const PresentationNumber &a,const PresentationNumber &b){return a.text==b.text&&a.ascii==b.ascii&&a.formattingLocale==b.formattingLocale&&a.language==b.language&&
-    a.pluralCategory==b.pluralCategory&&a.backendFallback==b.backendFallback&&a.localeFallback==b.localeFallback&&a.languageFallback==b.languageFallback&&a.resourceInheritance==b.resourceInheritance&&a.pluralAvailable==b.pluralAvailable&&a.rounded==b.rounded;}
+    a.pluralCategory==b.pluralCategory&&a.backendFallback==b.backendFallback&&a.localeFallback==b.localeFallback&&a.languageFallback==b.languageFallback&&a.resourceInheritance==b.resourceInheritance&&a.pluralAvailable==b.pluralAvailable&&a.rounded==b.rounded&&a.asciiRecovery==b.asciiRecovery;}
 void boundaries(){
     const auto &ids=presentationFormattingLocales();CHECK(ids.size()==31&&std::set<std::string>(ids.begin(),ids.end()).size()==ids.size());
     PresentationNumberRequest request;request.decimal="1234.5";PresentationNumber value;CHECK(formatPresentationNumber(request,&value)&&value.ascii=="1234.50"&&!value.rounded);
@@ -58,4 +58,7 @@ void independent(){
     }
 }
 }
-int main(){const std::string processLocale=std::setlocale(LC_ALL,nullptr);boundaries();independent();CHECK(processLocale==std::setlocale(LC_ALL,nullptr));return finishTests("exact independent presentation locale and maintained cardinal plural (not native activation)");}
+int main(){const std::string processLocale=std::setlocale(LC_ALL,nullptr);boundaries();independent();
+    PresentationNumberRequest recovery;recovery.decimal="1234.5";recovery.formattingLocale="ar-EG";recovery.language="ar";recovery.digits=PresentationDigits::Locale;recovery.asciiOnly=true;
+    PresentationNumber result;CHECK(formatPresentationNumber(recovery,&result)&&result.text=="1234.50"&&result.asciiRecovery&&!result.backendFallback&&!result.pluralAvailable&&result.pluralCategory.empty()&&!result.resourceInheritance);
+    CHECK(processLocale==std::setlocale(LC_ALL,nullptr));return finishTests("exact independent presentation locale and maintained cardinal plural (not native activation)");}

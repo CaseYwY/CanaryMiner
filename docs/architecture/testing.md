@@ -232,6 +232,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13i](../terminal-message.md) crosses common keys/packs/order/direction/width with exact named roles/tones, whole English recovery, honest requested/rendered reviews and unsupported/ASCII/backend metadata. Opaque braces/percent arguments, numeric/unit atomicity, exact expansion limits, missing/extra/duplicate names, invalid original controls/types/tags/keys/tones, row transaction failure and Unicode-only refusal are explicit. These are common-domain host fixtures, not full plural/date/time/native/physical-terminal or release qualification.
 
+[P-13j](../terminal-count.md) checks all 192 count-template slots, 31 formats/16 languages/two digits/two keys/eight integers, Arabic/Russian branches, >2^53 exactness and independent order/direction/tones/atomic rows. ASCII and disabled modes must retain empty/unavailable categories with complete neutral English, never guessed rules. Invalid/missing counts preserve output; malformed fixed-domain template pairs and common-message regressions remain explicit. Count strings do not qualify source income, other domains, native activation, real terminals or human review.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

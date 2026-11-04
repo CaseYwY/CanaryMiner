@@ -1,16 +1,21 @@
 #include "terminal_message.h"
+#include "terminal_message_internal.h"
 namespace om {
 namespace {
-bool languageTag(const std::string &text){return !text.empty()&&text.size()<=35&&std::all_of(text.begin(),text.end(),[](unsigned char ch){return (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||(ch>='0'&&ch<='9')||ch=='-';});}
-bool compose(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,std::vector<TerminalSegment> &segments,TerminalMessageMetadata &metadata){
-    if(!languageTag(request.language)||request.arguments.size()>8||static_cast<unsigned>(request.literalTone)>static_cast<unsigned>(Tone::Green))return false;
-    const auto requested=i18n::message(request.language,request.key);if(requested.text.empty())return false;
-    metadata.requestedLanguage=request.language;metadata.languageFallback=requested.fallback;
-    for(const auto &pack:i18n::localePacks())if(pack.id==request.language)metadata.requestedReview=pack.review;
+bool commonTemplates(const TerminalMessageRequest &request,terminal_message_detail::Templates &templates){
+    templates.requested=i18n::message(request.language,request.key);templates.english=i18n::message("en",request.key);
+    for(const auto &pack:i18n::localePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    return !templates.requested.text.empty()&&!templates.english.text.empty();
+}
+bool compose(const TerminalMessageRequest &request,const terminal_message_detail::Templates &templates,const TerminalTextPolicy &policy,std::vector<TerminalSegment> &segments,TerminalMessageMetadata &metadata){
+    if(!terminal_message_detail::validLanguageTag(request.language)||request.arguments.size()>8||static_cast<unsigned>(request.literalTone)>static_cast<unsigned>(Tone::Green))return false;
+    const auto &requested=templates.requested;
+    if(templates.english.locale!="en"||!i18n::validTemplateTranslation(templates.english.text,requested.text))return false;
+    metadata.requestedLanguage=request.language;metadata.languageFallback=requested.fallback;metadata.requestedReview=templates.requestedReview;
     metadata.asciiRecovery=policy.order==TerminalTextOrder::Ascii;
     metadata.backendFallback=!metadata.asciiRecovery&&!terminalTextBackend().unicode;
     const bool recover=metadata.asciiRecovery||metadata.backendFallback;
-    const auto selected=recover?i18n::message("en",request.key):requested;
+    const auto selected=recover?templates.english:requested;
     metadata.renderedLanguage=std::string(selected.locale);metadata.renderedReview=selected.review;metadata.rtl=selected.rtl;
     std::vector<std::string_view> names;if(!i18n::templateParameters(selected.text,&names))return false;
     names.erase(std::unique(names.begin(),names.end()),names.end());
@@ -38,26 +43,41 @@ bool compose(const TerminalMessageRequest &request,const TerminalTextPolicy &pol
     return true;
 }
 }
-bool layoutTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+namespace terminal_message_detail {
+bool validLanguageTag(const std::string &text){return !text.empty()&&text.size()<=35&&std::all_of(text.begin(),text.end(),[](unsigned char ch){return (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||(ch>='0'&&ch<='9')||ch=='-';});}
+bool layoutTemplate(const TerminalMessageRequest &request,const Templates &templates,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     if(!out)return false;
-    std::vector<TerminalSegment> segments;TerminalMessageLine result;if(!compose(request,policy,segments,result.metadata)||!layoutTerminalSegments(segments,policy,&result.line))return false;
+    std::vector<TerminalSegment> segments;TerminalMessageLine result;if(!compose(request,templates,policy,segments,result.metadata)||!layoutTerminalSegments(segments,policy,&result.line))return false;
     *out=std::move(result);return true;
 }
-bool wrapTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+bool wrapTemplate(const TerminalMessageRequest &request,const Templates &templates,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
     if(!out)return false;
-    std::vector<TerminalSegment> segments;TerminalMessageRows result;if(!compose(request,policy,segments,result.metadata)||!wrapTerminalSegments(segments,policy,maximumLines,&result.rows))return false;
+    std::vector<TerminalSegment> segments;TerminalMessageRows result;if(!compose(request,templates,policy,segments,result.metadata)||!wrapTerminalSegments(segments,policy,maximumLines,&result.rows))return false;
     *out=std::move(result);return true;
 }
-bool renderTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+bool renderTemplate(const TerminalMessageRequest &request,const Templates &templates,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
     if(!out)return false;
     std::vector<TerminalSegment> segments;PaintedTerminalMessageLine result;
-    if(!compose(request,policy,segments,result.metadata)||!renderTerminalSegments(segments,policy,color,&result.text))return false;
+    if(!compose(request,templates,policy,segments,result.metadata)||!renderTerminalSegments(segments,policy,color,&result.text))return false;
     *out=std::move(result);return true;
 }
-bool renderWrappedTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+bool renderWrappedTemplate(const TerminalMessageRequest &request,const Templates &templates,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     if(!out)return false;
     std::vector<TerminalSegment> segments;PaintedTerminalMessageRows result;
-    if(!compose(request,policy,segments,result.metadata)||!renderWrappedTerminalSegments(segments,policy,maximumLines,color,&result.rows))return false;
+    if(!compose(request,templates,policy,segments,result.metadata)||!renderWrappedTerminalSegments(segments,policy,maximumLines,color,&result.rows))return false;
     *out=std::move(result);return true;
+}
+} // namespace terminal_message_detail
+bool layoutTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    terminal_message_detail::Templates templates;return commonTemplates(request,templates)&&terminal_message_detail::layoutTemplate(request,templates,policy,out);
+}
+bool wrapTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    terminal_message_detail::Templates templates;return commonTemplates(request,templates)&&terminal_message_detail::wrapTemplate(request,templates,policy,maximumLines,out);
+}
+bool renderTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    terminal_message_detail::Templates templates;return commonTemplates(request,templates)&&terminal_message_detail::renderTemplate(request,templates,policy,color,out);
+}
+bool renderWrappedTerminalMessage(const TerminalMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    terminal_message_detail::Templates templates;return commonTemplates(request,templates)&&terminal_message_detail::renderWrappedTemplate(request,templates,policy,maximumLines,color,out);
 }
 } // namespace om
