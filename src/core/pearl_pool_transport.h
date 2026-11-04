@@ -27,11 +27,17 @@ enum class PearlPoolConnectStatus {
 };
 
 enum class PearlPoolWaitStatus { Ready, Timeout, Error };
-enum class PearlPoolTransferStatus { Bytes, WouldBlock, EndOfStream, Error };
+enum class PearlPoolTransferStatus { Bytes, WouldBlock, EndOfStream, Error, Progress };
+// Operation interest, not operation name: a TLS read can require writes and a TLS write can require reads.
+enum class PearlPoolInterest : unsigned { None=0, Read=1, Write=2, ReadWrite=3 };
+inline bool validPearlPoolInterest(PearlPoolInterest value) {
+    return value==PearlPoolInterest::Read||value==PearlPoolInterest::Write||value==PearlPoolInterest::ReadWrite;
+}
 
 struct PearlPoolTransfer {
     PearlPoolTransferStatus status = PearlPoolTransferStatus::Error;
     std::size_t bytes = 0;
+    PearlPoolInterest interest = PearlPoolInterest::None; // mandatory on progress-IO WouldBlock; zero new application bytes
 };
 
 class PearlPoolTransport {
@@ -45,6 +51,19 @@ class PearlPoolTransport {
     virtual PearlPoolTransfer receive(char *out, std::size_t maximum) = 0;
     virtual PearlPoolTransfer send(const char *data, std::size_t length) = 0;
     virtual bool setNonblocking(bool enabled) = 0;
+    // Opt-in contract: receive/send are ALWAYS bounded nonblocking steps, including before a socket wait.
+    // Progress consumes no application bytes; Bytes on send means that chunk's owned TLS output was flushed.
+    // Retried send arguments must remain stable until positive consumption. Legacy TCP stays on its original path.
+    // For a future encrypted backend, EndOfStream is clean TLS closure; truncation/unauthenticated EOF is Error.
+    // This capability itself asserts neither encryption nor a verified handshake.
+    virtual bool progressIO() const { return false; }
+    // Includes pending plaintext AND bounded internal read/control progress, not a promise that a full line exists.
+    virtual bool bufferedRead() const { return false; }
+    virtual PearlPoolWaitStatus waitFor(PearlPoolInterest interest,int milliseconds) {
+        if(interest==PearlPoolInterest::Read)return waitReadable(milliseconds);
+        if(interest==PearlPoolInterest::Write)return waitWritable(milliseconds);
+        return PearlPoolWaitStatus::Error; // a backend needing both directions must implement their actual joint wait
+    }
 };
 
 class PearlPoolSocketTransport final : public PearlPoolTransport {

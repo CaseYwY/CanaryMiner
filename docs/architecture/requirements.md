@@ -50,8 +50,8 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-GAME-007 | One explicit key press may force the current known game/economic pause; it must be visibly active, memory-only, auto-clear when that pause clears or changes, never bypass stop/fault/cooling/clock or unknown detection, and never become a default. | M-GAME | P-11 | T-GAME, T-INTENT | PARTIAL |
 | R-TLS-001 | Add verified Stratum TLS, secure preference for new setup/presets and explicit strict SSL URLs; retain intentional TCP compatibility with warning. | M-TLS | P-12 | T-TLS | PLANNED |
 | R-TLS-002 | Per-pool plaintext fallback is off by default and requires consent plus a configured TCP endpoint; cert/name/trust failures never downgrade. | M-TLS | P-12 | T-TLS | PLANNED |
-| R-TLS-003 | Verify trust/hostname, use SNI, bounded cancellable I/O and maintained TLS; do not guess/scan ports or expose credentials before verified handshake. | M-TLS | P-12 | T-TLS | PLANNED |
-| R-TLS-004 | Preserve protocol bytes and donation semantics across transport/reconnect/fallback; do not replay ambiguous submissions. | M-TLS | P-12 | T-TLS, T-RELEASE | PLANNED |
+| R-TLS-003 | Verify trust/hostname, use SNI, bounded cancellable I/O and maintained TLS; do not guess/scan ports or expose credentials before verified handshake. | M-TLS | P-12 | T-TLS | PARTIAL |
+| R-TLS-004 | Preserve protocol bytes and donation semantics across transport/reconnect/fallback; do not replay ambiguous submissions. | M-TLS | P-12 | T-TLS, T-RELEASE | PARTIAL |
 | R-SAFE-001 | Intentional Q/Ctrl+C/window-close stop wins over every retry, refresh, economic recovery or game exit; no implicit login/startup mining. | M-SUPERVISOR | P-03 | T-INTENT | PARTIAL |
 | R-SAFE-002 | Fault/thermal/telemetry protections remain active during settings/network/tests, with bounded restart budgets and controlled latch/cooldown states. | M-SUPERVISOR | P-03 | T-INTENT | PARTIAL |
 | R-SAFE-003 | Existing disabled hardware tuning remains disabled; future controls need separate permission, restricted helper and ownership-safe restoration. | M-SUPERVISOR | P-03 | T-INTENT | PLANNED |
@@ -64,6 +64,8 @@ Each row is a testable requirement, not a checklist of already implemented featu
 | R-REL-002 | Keep small reversible contribution batches, issue-first upstream behaviour/protocol discussion, DCO and all required release gates. | M-RELEASE | P-14 | T-RELEASE | PARTIAL |
 
 `PARTIAL` means a baseline behaviour or process exists, not that the expanded requirement is complete. For example, current Q/signal tests do not establish the future economic/game resume state machine, and current ASCII resize tests do not establish multilingual terminal accessibility.
+
+[P-12a](../pool-progress-io.md) advances R-TLS-003/004 only at the actual canonical-source byte contract: explicit opposite/joint readiness, internal buffered work, bounded nonblocking progress, stable write retries and conservative zero-consumption write-attempt Unknown evidence. Ordinary TCP behavior stays unchanged. No TLS backend, certificate/SNI verification, bounded native setup/teardown, SSL configuration, plaintext consent, secure donation route or real protocol/release qualification is implemented by that contract.
 
 P-04 `DONE` is the local **observed-counter** scope in [accepted history](../accepted-history.md), with [host/PTY evidence](../history-validation.md). It is not complete pool history: missed shutdown tails/session gaps are uncertain, exact pool timestamps are unavailable, and clock warnings suppress rolling totals. Financial-credit storage and persisted runtime settings are separate tasks.
 

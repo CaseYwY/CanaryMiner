@@ -409,7 +409,10 @@ struct PearlPoolSendEvidence {
     std::size_t totalBytes = 0;
     std::size_t acceptedBytes = 0;
     bool socketUsable = true;
-    bool blockingRestored = true;
+    bool blockingRestored = true; // legacy mode restoration; true also when progress IO needed no mode transition
+    // For opt-in progress/TLS transports, a write call can emit ciphertext before accepting any plaintext.
+    // Zero accepted bytes then do NOT prove NotSent. Ordinary socket evidence keeps its existing meaning.
+    bool transportWriteAttempted = false;
 
     bool complete() const {
         return totalBytes != 0 && acceptedBytes == totalBytes;
@@ -1901,7 +1904,7 @@ class PearlPoolSource : public JobSource {
             PearlSourceDelivery delivery = PearlSourceDelivery::NotSent;
             PearlSourceTerminal terminal = PearlSourceTerminal::LocalFailure;
             bool counterFault = false;
-            if (sent.acceptedBytes != 0 && sent.acceptedBytes < sent.totalBytes) {
+            if (!sent.complete() && (sent.acceptedBytes != 0 || sent.transportWriteAttempted)) {
                 delivery = PearlSourceDelivery::PossiblySent;
                 terminal = PearlSourceTerminal::Unknown;
             } else if (sent.complete()) {
@@ -1919,6 +1922,8 @@ class PearlPoolSource : public JobSource {
             if (counterFault) publishSourceFault(PearlSourceReason::Protocol);
             *err = sent.complete()
                        ? "share sent but socket mode restoration failed; outcome unknown"
+                       : sent.transportWriteAttempted
+                             ? "transport write attempted; share outcome unknown"
                        : sent.acceptedBytes == 0
                              ? "could not send the share"
                              : "only part of the share request reached the socket; outcome unknown";
@@ -2179,9 +2184,9 @@ class PearlPoolSource : public JobSource {
             // Poll with no timeout when we already have work: take whatever
             // has arrived and get straight back to mining.
             const PearlPoolWaitStatus ready =
-                pending_.find('\n') != std::string::npos
+                pending_.find('\n') != std::string::npos || (transport_->progressIO()&&transport_->bufferedRead())
                     ? PearlPoolWaitStatus::Ready
-                    : transport_->waitReadable(haveJob_ ? 0 : 50);
+                    : transport_->progressIO()?transport_->waitFor(PearlPoolInterest::Read,haveJob_?0:50):transport_->waitReadable(haveJob_ ? 0 : 50);
             if (ready == PearlPoolWaitStatus::Error) {
                 lastError_ = "pool socket failed while waiting for work";
                 closeConnection(PearlSourceReason::Transport, true);
@@ -2228,6 +2233,7 @@ class PearlPoolSource : public JobSource {
      * intake refuses this proof; a quiet observation cannot prevent a later
      * cross-socket replacement race. */
     PreSubmitIntake intakeBeforeSubmit() {
+        if(transport_->progressIO())return progressIntakeBeforeSubmit();
         const auto failure = [](PearlSourceReason reason, const char *error) {
             return PreSubmitIntake{false, true, reason, error};
         };
@@ -2310,13 +2316,51 @@ class PearlPoolSource : public JobSource {
         return result;
     }
 
+    // The encrypted backend may already hold replacement work while its socket is quiet. Always try a
+    // nonblocking step first; an undrained control/partial record cannot authorize a stale proof.
+    PreSubmitIntake progressIntakeBeforeSubmit() {
+        const auto failure=[](PearlSourceReason reason,const char *error){return PreSubmitIntake{false,true,reason,error};};
+        try{std::size_t lines=0,bytes=pending_.size(),calls=0;
+            for(;;){const auto nl=pending_.find('\n');
+                if(nl!=std::string::npos){
+                    if(lines==64)return failure(PearlSourceReason::Protocol,"pre-submit line budget exhausted; proof not sent");
+                    const auto line=pending_.substr(0,nl);pending_.erase(0,nl+1);++lines;
+                    if(!handlePush(line))return failure(PearlSourceReason::Protocol,"unsolicited reply before submission; proof not sent");
+                    continue;
+                }
+                if(calls==16||bytes>=kMaxInboundBufferedBytes||pending_.size()>=kMaxInboundBufferedBytes)
+                    return failure(PearlSourceReason::Protocol,"pre-submit transport progress budget exhausted; proof not sent");
+                char buffer[4096];const auto maximum=std::min(sizeof(buffer),std::min(kMaxInboundBufferedBytes-bytes,kMaxInboundBufferedBytes-pending_.size()));
+                ++calls;const auto read=transport_->receive(buffer,maximum);
+                if(read.status==PearlPoolTransferStatus::Bytes){
+                    if(!read.bytes||read.bytes>maximum||read.interest!=PearlPoolInterest::None)
+                        return failure(PearlSourceReason::Transport,"invalid pre-submit byte evidence; proof not sent");
+                    bytes+=read.bytes;pending_.append(buffer,read.bytes);continue;
+                }
+                if(read.bytes)return failure(PearlSourceReason::Transport,"invalid pre-submit progress evidence; proof not sent");
+                if(read.status==PearlPoolTransferStatus::Progress){
+                    if(read.interest!=PearlPoolInterest::None)return failure(PearlSourceReason::Transport,"invalid pre-submit progress interest; proof not sent");
+                    continue;
+                }
+                if(read.status!=PearlPoolTransferStatus::WouldBlock||!validPearlPoolInterest(read.interest))
+                    return failure(PearlSourceReason::Transport,"pre-submit receive failed or disconnected; proof not sent");
+                const auto ready=transport_->waitFor(read.interest,0);
+                if(ready==PearlPoolWaitStatus::Error)return failure(PearlSourceReason::Transport,"pre-submit readiness failed; proof not sent");
+                if(ready==PearlPoolWaitStatus::Ready)continue;
+                if(!pending_.empty()||transport_->bufferedRead()||read.interest!=PearlPoolInterest::Read)
+                    return failure(PearlSourceReason::Protocol,"undrained pre-submit TLS/control message; proof not sent");
+                return {};
+            }
+        }catch(...){return failure(PearlSourceReason::Transport,"pre-submit transport progress failed; proof not sent");}
+    }
+
     /** Consume every line already queued by the socket without waiting. */
     void drainAvailable() {
         while (transport_->isOpen()) {
-            const bool buffered = pending_.find('\n') != std::string::npos;
+            const bool buffered = pending_.find('\n') != std::string::npos || (transport_->progressIO()&&transport_->bufferedRead());
             const PearlPoolWaitStatus ready = buffered
                                                   ? PearlPoolWaitStatus::Ready
-                                                  : transport_->waitReadable(0);
+                                                  : transport_->progressIO()?transport_->waitFor(PearlPoolInterest::Read,0):transport_->waitReadable(0);
             if (ready == PearlPoolWaitStatus::Timeout) return;
             if (ready == PearlPoolWaitStatus::Error) {
                 lastError_ = "pool socket failed while reading queued work";
@@ -2722,6 +2766,7 @@ class PearlPoolSource : public JobSource {
     PearlPoolSendEvidence sendLineUntil(const std::string &body,
                                         long long deadlineMs) {
         const std::string line = body + "\n";
+        if(transport_->progressIO())return sendProgressLineUntil(line,deadlineMs);
         PearlPoolSendEvidence evidence;
         evidence.totalBytes = line.size();
         if (!transport_->setNonblocking(true)) {
@@ -2757,11 +2802,35 @@ class PearlPoolSource : public JobSource {
         return evidence;
     }
 
+    PearlPoolSendEvidence sendProgressLineUntil(const std::string &line,long long deadlineMs) {
+        PearlPoolSendEvidence evidence;evidence.totalBytes=line.size();unsigned noConsumption=0;
+        try{while(evidence.acceptedBytes<line.size()){
+            const auto remaining=deadlineMs-nowMs();if(remaining<=0)break;
+            if(noConsumption++==64){evidence.socketUsable=false;break;}
+            evidence.transportWriteAttempted=true;
+            const auto transfer=transport_->send(line.data()+evidence.acceptedBytes,line.size()-evidence.acceptedBytes);
+            if(transfer.status==PearlPoolTransferStatus::Bytes){
+                if(!transfer.bytes||transfer.bytes>line.size()-evidence.acceptedBytes||transfer.interest!=PearlPoolInterest::None){evidence.socketUsable=false;break;}
+                evidence.acceptedBytes+=transfer.bytes;noConsumption=0;continue;
+            }
+            if(transfer.bytes){evidence.socketUsable=false;break;}
+            if(transfer.status==PearlPoolTransferStatus::Progress){
+                if(transfer.interest!=PearlPoolInterest::None){evidence.socketUsable=false;break;}continue;
+            }
+            if(transfer.status!=PearlPoolTransferStatus::WouldBlock||!validPearlPoolInterest(transfer.interest)){evidence.socketUsable=false;break;}
+            const auto waitRemaining=deadlineMs-nowMs();if(waitRemaining<=0)break;
+            const auto ready=transport_->waitFor(transfer.interest,waitRemaining>25000?25000:static_cast<int>(waitRemaining));
+            if(ready!=PearlPoolWaitStatus::Ready){if(ready==PearlPoolWaitStatus::Error)evidence.socketUsable=false;break;}
+        }}catch(...){evidence.socketUsable=false;}
+        return evidence;
+    }
+
     /** Read one complete line without allowing partial traffic to restart the
      * caller's overall deadline. Socket receive timeouts apply per recv and can
      * otherwise turn the post-connect 25-second authorization reply window
      * into an unbounded wait under a peer that keeps sending fragments. */
     PearlPoolLineStatus readLineUntil(std::string *out, long long deadlineMs,bool nonBlocking=false) {
+        if(transport_->progressIO())return readProgressLineUntil(out,deadlineMs,nonBlocking);
         unsigned reads=0;
         if (!out) return PearlPoolLineStatus::TransportError;
         for (;;) {
@@ -2816,6 +2885,47 @@ class PearlPoolSource : public JobSource {
                 pending_.find('\n') == std::string::npos)
                 return PearlPoolLineStatus::Oversize;
         }
+    }
+
+    PearlPoolLineStatus readProgressLineUntil(std::string *out,long long deadlineMs,bool nonBlocking) {
+        if(!out)return PearlPoolLineStatus::TransportError;
+        unsigned noConsumption=0,calls=0;
+        try{for(;;){const auto nl=pending_.find('\n');
+            if(nl!=std::string::npos){*out=pending_.substr(0,nl);pending_.erase(0,nl+1);return PearlPoolLineStatus::Line;}
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+            if(guardRetirement_&&guardRetirement_->active()){
+                const auto status=guardRetirement_->step(static_cast<uint64_t>(nowMs()));
+                if(status==guard_retirement_v2::Step::Confirmed)return PearlPoolLineStatus::GuardRetired;
+                if(status==guard_retirement_v2::Step::Failed)return PearlPoolLineStatus::TransportError;
+            }
+#endif
+            const auto remaining=deadlineMs-nowMs();if(remaining<=0||(nonBlocking&&calls==16))return PearlPoolLineStatus::Timeout;
+            if(noConsumption++==64)return PearlPoolLineStatus::TransportError;
+            if(pending_.size()>=kMaxInboundBufferedBytes)return PearlPoolLineStatus::Oversize;
+            char buffer[4096];const auto maximum=std::min(sizeof(buffer),kMaxInboundBufferedBytes-pending_.size());
+            ++calls;const auto read=transport_->receive(buffer,maximum);
+            if(read.status==PearlPoolTransferStatus::Bytes){
+                if(!read.bytes||read.bytes>maximum||read.interest!=PearlPoolInterest::None)return PearlPoolLineStatus::TransportError;
+                pending_.append(buffer,read.bytes);noConsumption=0;continue;
+            }
+            if(read.bytes)return PearlPoolLineStatus::TransportError;
+            if(read.status==PearlPoolTransferStatus::EndOfStream)return read.interest==PearlPoolInterest::None?PearlPoolLineStatus::EndOfStream:PearlPoolLineStatus::TransportError;
+            if(read.status==PearlPoolTransferStatus::Progress){if(read.interest!=PearlPoolInterest::None)return PearlPoolLineStatus::TransportError;continue;}
+            if(read.status!=PearlPoolTransferStatus::WouldBlock||!validPearlPoolInterest(read.interest))return PearlPoolLineStatus::TransportError;
+            const auto waitRemaining=deadlineMs-nowMs();if(waitRemaining<=0)return PearlPoolLineStatus::Timeout;
+            int wait=nonBlocking?0:waitRemaining>25000?25000:static_cast<int>(waitRemaining);
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+            if(guardRetirement_&&guardRetirement_->active())wait=std::min(wait,10);
+#endif
+            const auto ready=transport_->waitFor(read.interest,wait);
+            if(ready==PearlPoolWaitStatus::Error)return PearlPoolLineStatus::TransportError;
+            if(ready==PearlPoolWaitStatus::Timeout){
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+                if(guardRetirement_&&guardRetirement_->active()&&!nonBlocking)continue;
+#endif
+                return PearlPoolLineStatus::Timeout;
+            }
+        }}catch(...){return PearlPoolLineStatus::TransportError;}
     }
 
     /** Wall clock, deliberately. clock() measures CPU time, and this thread

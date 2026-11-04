@@ -180,6 +180,8 @@ Test off/pause/coexist, launcher/game/manual triggers, debounce/detection failur
 
 Use synthetic local CA fixtures for valid chain/name, wrong host/issuer, expiration, absent trust and custom CA. Test SNI, handshake/cancellation deadlines, partial TLS records/writes/buffered plaintext, read/write readiness, EOF/reconnect and no application bytes before authentication. Test strict SSL, per-pool fallback off/on, certificate errors never downgrading, explicit endpoints/no scanning, donor sessions and ambiguous-submit non-replay. A consented network-error fallback is still not downgrade-resistant.
 
+[P-12a](../pool-progress-io.md) first reproduces ten failing canonical-source assertions, then checks opposite/joint retry interest, exact stable write arguments, buffered replacement work behind a quiet socket, zero-consumption attempted-write Unknown, bounded always-ready/control progress, malformed/throwing operations, exact inbound capacity and retained fragmented turns. Existing `PearlRunSession` proof/correlation/reconnect/retirement fixtures remain regressions. This is CPU protocol-side evidence, not actual TLS, native trust/cancellation, secure presets, fallback, donation TLS or production qualification.
+
 ## T-INTENT
 
 Test priority of user stop, latched fault, thermal/telemetry limits, game constraints, economics and ordinary work. Q/Ctrl+C/close invalidate pending results/retries; no menu/save/refresh/login action starts mining. Test outer advanced-launcher/service restart boundaries as well as supervisor flags. Test bounded worker drains, crash budgets/cooldowns, helper ownership/restore without clobbering external changes, PID generation, no uncontrolled driver reset/reboot and no privilege escalation in network/UI code.
