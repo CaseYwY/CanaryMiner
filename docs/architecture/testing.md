@@ -234,6 +234,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13j](../terminal-count.md) checks all 192 count-template slots, 31 formats/16 languages/two digits/two keys/eight integers, Arabic/Russian branches, >2^53 exactness and independent order/direction/tones/atomic rows. ASCII and disabled modes must retain empty/unavailable categories with complete neutral English, never guessed rules. Invalid/missing counts preserve output; malformed fixed-domain template pairs and common-message regressions remain explicit. Count strings do not qualify source income, other domains, native activation, real terminals or human review.
 
+[P-13k](../terminal-time.md) crosses formats/digits/fields/date styles/hour cycles/millisecond choices with exact retained civil fields, explicit UTC/second-level offsets, native formatted-output assertions and honest fixed-ASCII recovery. Typed atomic/message provenance, range/leap/missing/invalid refusal and separate named TZDB New York/Apia/Winnipeg cases protect one authoritative civil conversion. These remain offline display fixtures, not clock/source/billing/native/physical-terminal/dependency-owner or production qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

@@ -16,9 +16,13 @@ def main(args):
     assert 'canary_terminal_number' not in main_cmake
     assert 'canary_terminal_message' not in main_cmake
     assert 'canary_terminal_count' not in main_cmake
+    assert 'canary_terminal_time' not in main_cmake
     for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h'):
         text = (root / source).read_text(encoding='utf-8')
-        assert all(marker not in text for marker in ('layoutTerminalCount', 'wrapTerminalCount', 'renderTerminalCount', 'renderWrappedTerminalCount', 'layoutTerminalMessage', 'wrapTerminalMessage', 'renderTerminalMessage', 'renderWrappedTerminalMessage', 'wrapTerminalTextRuns', 'padTerminalTextRuns', 'wrapTerminalSegments', 'padTerminalSegments', 'renderWrappedTerminalSegments', 'renderPaddedTerminalSegments', 'formatTerminalQuantity', 'layoutTerminalTextRuns', 'layoutTerminalSegments', 'renderTerminalSegments', 'formatPresentationNumber', 'layoutTerminalText', 'wrapTerminalText', 'padTerminalText', 'terminalGraphemeBoundaries', 'ubidi_', 'ubrk_'))
+        assert all(marker not in text for marker in ('formatTerminalTime', 'layoutTerminalCount', 'wrapTerminalCount', 'renderTerminalCount', 'renderWrappedTerminalCount', 'layoutTerminalMessage', 'wrapTerminalMessage', 'renderTerminalMessage', 'renderWrappedTerminalMessage', 'wrapTerminalTextRuns', 'padTerminalTextRuns', 'wrapTerminalSegments', 'padTerminalSegments', 'renderWrappedTerminalSegments', 'renderPaddedTerminalSegments', 'formatTerminalQuantity', 'layoutTerminalTextRuns', 'layoutTerminalSegments', 'renderTerminalSegments', 'formatPresentationNumber', 'layoutTerminalText', 'wrapTerminalText', 'padTerminalText', 'terminalGraphemeBoundaries', 'ubidi_', 'ubrk_'))
+    time = (root / 'src/product/terminal_time.cpp').read_text(encoding='utf-8')
+    assert all(marker not in time for marker in ('ucal_getNow', 'localtime', 'gmtime', 'getenv', 'setlocale', 'uloc_setDefault', 'configureCivilTimeData', 'udat_parse'))
+    assert 'civilAt(request.clock,*request.utcMs)' in time and 'calendar=gregorian' in time
     style = (root / 'src/product/terminal_style.h').read_text(encoding='utf-8')
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
@@ -28,6 +32,9 @@ def main(args):
     if args.disabled_format:
         data = args.disabled_format.read_bytes()
         assert all(marker not in data for marker in (b'unumf_', b'uplrules_', b'icuuc79.dll', b'icuin79.dll'))
+    if args.disabled_time:
+        data = args.disabled_time.read_bytes()
+        assert all(marker not in data for marker in (b'udat_open', b'udat_format', b'udatpg_', b'icuuc79.dll', b'icuin79.dll'))
     print('terminal text artifacts: ICU opt-in OFF, no automatic downloads or ordinary activation, exact notice retained')
 
 
@@ -37,4 +44,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--disabled-library', type=Path)
     parser.add_argument('--disabled-format', type=Path)
+    parser.add_argument('--disabled-time', type=Path)
     main(parser.parse_args())
