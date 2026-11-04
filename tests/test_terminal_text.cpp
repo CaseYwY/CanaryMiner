@@ -95,7 +95,46 @@ void catalogMatrix(){
         }
     }
 }
+std::string stripIsolates(std::string text){for(const auto *mark:{u8"\u2066",u8"\u2067",u8"\u2068",u8"\u2069"})for(auto at=text.find(mark);at!=text.npos;at=text.find(mark))text.erase(at,3);return text;}
+void wrapAndPad(){
+    TerminalTextPolicy policy;policy.columns=5;std::vector<TerminalTextLine> lines;
+    CHECK(wrapTerminalText({{"one two three",{},false}},policy,3,&lines)&&lines.size()==3&&lines[0].text=="one "&&lines[1].text=="two "&&lines[2].text=="three");
+    lines={{"unchanged",7,true,true,TerminalTextFallback::None}};
+    CHECK(!wrapTerminalText({{"one two three",{},false}},policy,2,&lines)&&lines.size()==1&&lines[0].text=="unchanged");
+    CHECK(!wrapTerminalText({{"123456",{},true}},policy,100,&lines)&&lines[0].text=="unchanged");
+    CHECK(!wrapTerminalText({},policy,0,&lines)&&!wrapTerminalText({},policy,4097,&lines)&&!wrapTerminalText({},policy,1,nullptr));
+    policy.columns=0;CHECK(!wrapTerminalText({},policy,1,&lines));policy.columns=5;
+    CHECK(wrapTerminalText({},policy,1,&lines)&&lines.size()==1&&lines[0].text.empty()&&!lines[0].cells&&!lines[0].clipped);
+    CHECK(wrapTerminalText({{"a   b",{},false}},policy,1,&lines)&&lines.size()==1&&lines[0].text=="a   b");
+    TerminalTextLine line;CHECK(padTerminalText({{"abc",{},false}},policy,TerminalTextAlignment::Left,&line)&&line.text=="abc  "&&line.cells==5);
+    CHECK(padTerminalText({{"abc",{},false}},policy,TerminalTextAlignment::Right,&line)&&line.text=="  abc"&&line.cells==5);
+    CHECK(padTerminalText({{"abcdef",{},false}},policy,TerminalTextAlignment::Right,&line)&&line.text=="abcde"&&line.clipped);
+    line.text="unchanged";CHECK(!padTerminalText({},policy,static_cast<TerminalTextAlignment>(99),&line)&&line.text=="unchanged");
+    policy.columns=1;CHECK(wrapTerminalText({{std::string(4096,'x'),{},false}},policy,4096,&lines)&&lines.size()==4096);
+    for(const auto &l:lines)CHECK(l.text=="x"&&l.cells==1&&!l.clipped);
+    if(!terminalTextBackend().unicode)return;
+    const std::string text=u8"e\u0301 中 👩‍💻 العربية हिन्दी বাংলা";policy.order=TerminalTextOrder::Logical;
+    for(auto direction:{TerminalTextDirection::Auto,TerminalTextDirection::LeftToRight,TerminalTextDirection::RightToLeft})for(std::size_t width:{2u,3u,4u,7u,19u,79u}){
+        policy.direction=direction;policy.columns=width;CHECK(wrapTerminalText({{text,"fallback",false}},policy,100,&lines));std::string joined;
+        for(const auto &l:lines){CHECK(l.cells<=width&&!l.clipped);joined+=stripIsolates(l.text);}
+        CHECK(joined==text);
+    }
+    policy.columns=1;lines={{"unchanged",0,false,false,TerminalTextFallback::None}};CHECK(!wrapTerminalText({{u8"中","C",false}},policy,10,&lines)&&lines[0].text=="unchanged");
+    policy.columns=20;policy.direction=TerminalTextDirection::Auto;const std::string identity="1.23 PRL / USD / UTC";
+    CHECK(wrapTerminalText({{u8"قيمة ","value ",false},{identity,{},true},{u8" 完了"," done",false}},policy,20,&lines));
+    std::string joined;for(const auto &l:lines){CHECK(l.cells<=20&&!l.clipped);joined+=stripIsolates(l.text);}
+    CHECK(joined==u8"قيمة "+identity+u8" 完了");
+    policy.columns=4;CHECK(padTerminalText({{u8"中","C",false}},policy,TerminalTextAlignment::Right,&line)&&line.cells==4&&stripIsolates(line.text)==u8"  中");
+    CHECK(padTerminalText({{u8"אב","ab",false}},policy,TerminalTextAlignment::Left,&line)&&line.cells==4&&stripIsolates(line.text)==u8"אב  ");
+    policy.order=TerminalTextOrder::Visual;CHECK(padTerminalText({{u8"אב","ab",false}},policy,TerminalTextAlignment::Right,&line)&&line.cells==4&&line.text==u8"  בא");
+    policy.order=TerminalTextOrder::Logical;policy.columns=4096;
+    std::string wideBytes="e";for(unsigned i=0;i<1365;++i)wideBytes+=u8"\u20dd"; // 4096 bytes, one visible base/cell
+    line={"unchanged",7,true,true,TerminalTextFallback::BackendDisabled};
+    CHECK(!padTerminalText({{wideBytes,"e",false}},policy,TerminalTextAlignment::Left,&line)&&line.text=="unchanged"&&line.cells==7);
+    policy.columns=1;policy.direction=TerminalTextDirection::LeftToRight;CHECK(wrapTerminalText({{std::string(4096,'x'),{},false}},policy,4096,&lines)&&lines.size()==4096);
+    std::size_t output=0;for(const auto &l:lines){output+=l.text.size();CHECK(l.cells==1&&stripIsolates(l.text)=="x");}CHECK(output<=32768);
+}
 }
 int main(int argc,char **argv){if(argc>2)return 2;const auto backend=terminalTextBackend();CHECK(backend.unicode?(backend.implementation=="ICU"&&!backend.version.empty()&&!backend.unicodeVersion.empty()):(backend.implementation=="ASCII"&&backend.version.empty()&&backend.unicodeVersion.empty()));
     std::printf("presentation backend: %s %s / Unicode %s\n",backend.implementation.c_str(),backend.version.c_str(),backend.unicodeVersion.c_str());
-    asciiAndRefusal();unicode();catalogMatrix();if(argc==2)corpus(argv[1]);return finishTests("bounded terminal grapheme/cell/bidi presentation (not glyph/terminal qualification)");}
+    asciiAndRefusal();unicode();catalogMatrix();wrapAndPad();if(argc==2)corpus(argv[1]);return finishTests("bounded terminal grapheme/cell/bidi presentation (not glyph/terminal qualification)");}

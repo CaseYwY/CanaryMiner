@@ -28,11 +28,20 @@ struct TerminalTextLine {
     TerminalTextFallback fallback=TerminalTextFallback::None;
 };
 struct TerminalTextBackend {bool unicode=false;std::string implementation,version,unicodeVersion;};
+enum class TerminalTextAlignment { Left, Right };
 TerminalTextBackend terminalTextBackend();
 // At most 64 spans/4096 input bytes, 4096 cells, 8192 output bytes. Failure preserves the output.
 // Span edges must be grapheme boundaries. Logical output isolates an explicit paragraph direction and invariant spans;
 // Visual output removes them and must NOT be sent to an auto-bidi terminal. Neither mode shapes glyphs.
 bool layoutTerminalText(const std::vector<TerminalTextSpan> &,const TerminalTextPolicy &,TerminalTextLine *);
+// Complete autonomous display rows, no dropped whitespace/identity. ICU root line opportunities when enabled, ASCII
+// space opportunities for fallback. Too-wide graphemes/atomic identities, row/output limits fail transactionally.
+// Long human words may break only at grapheme edges. Logical rows are independent bidi paragraphs;
+// they are NOT a rich-text paragraph's preserved cross-line bidi context. 1..4096 rows; 32768 output bytes.
+bool wrapTerminalText(const std::vector<TerminalTextSpan> &,const TerminalTextPolicy &,std::size_t maximumLines,std::vector<TerminalTextLine> *);
+// Pad the clipped line to exactly policy.columns cells. Logical mode isolates a physical LTR field
+// around an FSI-isolated content block; it is render-only, never a machine/identity string.
+bool padTerminalText(const std::vector<TerminalTextSpan> &,const TerminalTextPolicy &,TerminalTextAlignment,TerminalTextLine *);
 // UTF-8 byte offsets (including 0/end), maintained UAX #29 when enabled. No terminal-control safety claim.
 // General conformance input may include controls; layoutTerminalText is the stricter render boundary.
 bool terminalGraphemeBoundaries(std::string_view,std::vector<std::size_t> *);

@@ -218,6 +218,8 @@ Test all declared locales/key coverage, placeholders/plurals, review/fallback st
 
 [P-13b](../terminal-text.md) checks separately enabled ICU complete-line boundaries against 853 explicitly supplied upstream corpus cases, plus width conventions, exact output bounds, atomic identities, orphan replacement, cross-span cluster refusal, logical/visual RTL isolation/mirroring and all common messages/order/direction/width combinations. Disabled artifacts have no ICU symbols or ordinary factory activation and use explicit ASCII fallback metadata. These are algorithmic fixtures, not physical cell/font/shaping/terminal/accessibility or human-review qualification; ICU/data-loader initialization and release packaging remain separate gates.
 
+P-13c extends those real line-core fixtures with maintained root line opportunities, lossless whitespace, long-word whole-grapheme wrapping, atomic identities, impossible-width/row/zero-width refusal without partial output, exact 4096-row limits and physical left/right padding under the final byte cap. Three direction policies and mixed combining/wide/emoji/Arabic/Indic/Bengali rows remain independent bidi scopes; no cross-line rich-paragraph or native colored-renderer qualification is inferred.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
