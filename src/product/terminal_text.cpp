@@ -1,4 +1,5 @@
 #include "terminal_text.h"
+#include "terminal_runs.h"
 #include "localization.h"
 #include <algorithm>
 #include <cstdint>
@@ -38,11 +39,16 @@ bool valid(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &
         const auto &fallback=s.ascii.empty()?s.text:s.ascii;if(fallback.size()>inputLimit-fallbackBytes)return false;fallbackBytes+=fallback.size();}
     return true;
 }
-TerminalTextLine asciiLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextFallback reason){
+void appendRun(std::vector<TerminalTextRun> *runs,std::string text,std::size_t span,std::size_t width,bool control=false){
+    if(!runs||text.empty())return;
+    if(!runs->empty()&&runs->back().control==control&&(control||runs->back().sourceSpan==span)){runs->back().text+=text;runs->back().cells+=width;}
+    else runs->push_back({std::move(text),span,width,control});
+}
+TerminalTextLine asciiLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextFallback reason,std::vector<TerminalTextRun> *runs=nullptr){
     TerminalTextLine out;out.fallback=reason;
-    for(const auto &s:spans){const auto &text=s.ascii.empty()?s.text:s.ascii;const auto remaining=policy.columns-out.cells;
-        if(text.size()>remaining){if(!s.invariant){out.text.append(text,0,remaining);out.cells+=remaining;}out.clipped=true;break;}
-        out.text+=text;out.cells+=text.size();}
+    for(std::size_t span=0;span<spans.size();++span){const auto &s=spans[span];const auto &text=s.ascii.empty()?s.text:s.ascii;const auto remaining=policy.columns-out.cells;
+        if(text.size()>remaining){if(!s.invariant){out.text.append(text,0,remaining);out.cells+=remaining;appendRun(runs,text.substr(0,remaining),span,remaining);}out.clipped=true;break;}
+        out.text+=text;out.cells+=text.size();appendRun(runs,text,span,text.size());}
     return out;
 }
 #if defined(CANARY_TERMINAL_ICU)
@@ -90,7 +96,7 @@ bool makeClusters(const std::vector<TerminalTextSpan> &spans,const TerminalTextP
         const auto width=cells(text,breaks[i-1],breaks[i],policy);clusters.push_back({breaks[i-1],breaks[i],span,width?width:1,width==0});}
     return true;
 }
-bool unicodeLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextLine &out){
+bool unicodeLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextLine &out,std::vector<TerminalTextRun> *runs=nullptr){
     Utf16 text;std::vector<Cluster> clusters;if(!makeClusters(spans,policy,text,clusters))return false;
     TerminalTextLine result;std::size_t retained=0;
     while(retained<clusters.size()){
@@ -101,15 +107,18 @@ bool unicodeLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPo
     }
     clusters.resize(retained);if(clusters.empty()){out=std::move(result);return true;}
     Utf16 decorated;std::vector<int32_t> starts;std::size_t previous=spans.size();
-    for(const auto &cluster:clusters){if(previous!=cluster.span){if(previous!=spans.size()&&spans[previous].invariant)decorated.push_back(0x2069);
-            if(spans[cluster.span].invariant)decorated.push_back(0x2066);
+    for(const auto &cluster:clusters){if(previous!=cluster.span){if(previous!=spans.size()&&spans[previous].invariant){decorated.push_back(0x2069);if(policy.order==TerminalTextOrder::Logical)appendRun(runs,u8"\u2069",0,0,true);}
+            if(spans[cluster.span].invariant){decorated.push_back(0x2066);if(policy.order==TerminalTextOrder::Logical)appendRun(runs,u8"\u2066",0,0,true);}
             previous=cluster.span;}
         starts.push_back(static_cast<int32_t>(decorated.size()));
         if(cluster.orphan)decorated.push_back('?');else decorated.insert(decorated.end(),text.begin()+cluster.begin,text.begin()+cluster.end);
+        if(runs&&policy.order==TerminalTextOrder::Logical){std::string part="?";if(!cluster.orphan&&!utf8(text.data()+cluster.begin,static_cast<std::size_t>(cluster.end-cluster.begin),part))return false;
+            appendRun(runs,std::move(part),cluster.span,cluster.width);}
     }
-    if(spans[previous].invariant)decorated.push_back(0x2069);
+    if(spans[previous].invariant){decorated.push_back(0x2069);if(policy.order==TerminalTextOrder::Logical)appendRun(runs,u8"\u2069",0,0,true);}
     if(policy.order==TerminalTextOrder::Logical){
-        if(policy.direction!=TerminalTextDirection::Auto){decorated.insert(decorated.begin(),policy.direction==TerminalTextDirection::RightToLeft?0x2067:0x2066);decorated.push_back(0x2069);}
+        if(policy.direction!=TerminalTextDirection::Auto){decorated.insert(decorated.begin(),policy.direction==TerminalTextDirection::RightToLeft?0x2067:0x2066);decorated.push_back(0x2069);
+            if(runs){runs->insert(runs->begin(),{policy.direction==TerminalTextDirection::RightToLeft?u8"\u2067":u8"\u2066",0,0,true});appendRun(runs,u8"\u2069",0,0,true);}}
         if(!utf8(decorated.data(),decorated.size(),result.text))return false;
         out=std::move(result);return true;}
     UErrorCode error=U_ZERO_ERROR;std::unique_ptr<UBiDi,decltype(&ubidi_close)> bidi(ubidi_openSized(static_cast<int32_t>(decorated.size()),0,&error),ubidi_close);
@@ -124,10 +133,12 @@ bool unicodeLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPo
         if(*range.second-*range.first!=count-1)return false; // a directionally discontinuous cluster is never torn apart
         order.emplace_back(*range.first,i);}
     std::sort(order.begin(),order.end());Utf16 finalText;
-    for(const auto &item:order){const auto i=item.second;const auto &cluster=clusters[i];if(cluster.orphan){finalText.push_back('?');continue;}
+    for(const auto &item:order){const auto i=item.second;const auto &cluster=clusters[i];if(cluster.orphan){finalText.push_back('?');appendRun(runs,"?",cluster.span,cluster.width);continue;}
+        const auto begin=finalText.size();
         for(int32_t at=cluster.begin;at<cluster.end;){UChar32 cp;U16_NEXT(text.data(),at,cluster.end,cp);
             if(ubidi_getLevelAt(bidi.get(),starts[i])&1)cp=u_charMirror(cp);
             if(cp<=0xffff)finalText.push_back(static_cast<UChar>(cp));else{finalText.push_back(U16_LEAD(cp));finalText.push_back(U16_TRAIL(cp));}}
+        if(runs){std::string part;if(!utf8(finalText.data()+begin,finalText.size()-begin,part))return false;appendRun(runs,std::move(part),cluster.span,cluster.width);}
     }
     if(!utf8(finalText.data(),finalText.size(),result.text))return false;
     out=std::move(result);return true;
@@ -161,6 +172,22 @@ bool layoutTerminalText(const std::vector<TerminalTextSpan> &spans,const Termina
 #else
     *out=asciiLine(spans,policy,TerminalTextFallback::BackendDisabled);return true;
 #endif
+}
+bool layoutTerminalTextRuns(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextRunLine *out){
+    if(!out||!valid(spans,policy))return false;
+    TerminalTextRunLine result;
+    if(policy.order==TerminalTextOrder::Ascii)result.line=asciiLine(spans,policy,TerminalTextFallback::RequestedAscii,&result.runs);
+#if defined(CANARY_TERMINAL_ICU)
+    else if(!unicodeLine(spans,policy,result.line,&result.runs))return false;
+#else
+    else result.line=asciiLine(spans,policy,TerminalTextFallback::BackendDisabled,&result.runs);
+#endif
+    if(result.runs.size()>4226)return false;
+    std::string joined;std::size_t width=0;
+    for(const auto &run:result.runs){if(run.text.size()>outputLimit-joined.size()||run.cells>policy.columns-width||(!run.control&&run.sourceSpan>=spans.size())||(run.control&&run.cells))return false;
+        joined+=run.text;width+=run.cells;}
+    if(joined!=result.line.text||width!=result.line.cells)return false;
+    *out=std::move(result);return true;
 }
 bool wrapTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,std::size_t maximumLines,std::vector<TerminalTextLine> *out){
     if(!out||!valid(spans,policy)||!policy.columns||!maximumLines||maximumLines>4096)return false;

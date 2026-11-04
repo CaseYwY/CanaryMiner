@@ -1,6 +1,6 @@
 # Explicitly supplied maintained Unicode backend; no download, OS ICU guessing or ordinary UI activation.
 option(CANARY_ENABLE_TERMINAL_ICU "Enable development ICU grapheme/cell/bidi layout" OFF)
-add_library(canary_terminal_text STATIC "${CMAKE_SOURCE_DIR}/src/product/terminal_text.cpp")
+add_library(canary_terminal_text STATIC "${CMAKE_SOURCE_DIR}/src/product/terminal_text.cpp" "${CMAKE_SOURCE_DIR}/src/product/terminal_segments.cpp")
 add_library(canary_localized_format STATIC "${CMAKE_SOURCE_DIR}/src/product/localized_format.cpp")
 target_link_libraries(canary_localized_format PRIVATE canary_market)
 foreach(target canary_terminal_text canary_localized_format)
