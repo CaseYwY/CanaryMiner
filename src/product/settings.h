@@ -13,6 +13,7 @@
 #include "game_settings.h"
 #include "pool_security_settings.h"
 #include "language_settings.h"
+#include "settings_messages.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -75,8 +76,10 @@ class SettingsPanel {
     bool dirty() const { return active != draft; }
 
     static const std::vector<std::string> &groups() {
-        static const std::vector<std::string> names = {"Display", "Automatic mining", "Electricity", "Market and timing", "Profiles and tests",
-                                                      "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
+        // Source extraction only: requested translations remain unactivated in the legacy byte renderer.
+        static const std::vector<std::string> names=[](){std::vector<std::string> result;
+            for(auto key:i18n::settingsGroupKeys())result.push_back(i18n::settingsEnglish(key));
+            return result;}();
         return names;
     }
     int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3 || group == 5 || group == 6 || group == 7) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
@@ -119,9 +122,9 @@ class SettingsPanel {
                 std::string error;
                 if (save && save(draft, &error)) {
                     active = draft;
-                    message = "Saved. Presentation changes are live; mining settings were not changed.";
+                    message = i18n::settingsEnglish(i18n::SettingsMessageKey::Saved);
                     page = SettingsPage::Browse;
-                } else message = error.empty() ? "Save failed; active settings are unchanged." : error;
+                } else message = error.empty() ? i18n::settingsEnglish(i18n::SettingsMessageKey::SaveFailed) : error;
             }
             return SettingsResult::None;
         }
@@ -192,27 +195,27 @@ class SettingsPanel {
         using namespace dash_detail;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
         const bool compact = rows > 0 && rows < 20;
-        if (rows > 0 && rows < 12) return "Terminal too short.\nResize to 12+ rows.\n[Q] Stop [Esc] Back\n";
-        const std::string footer = page == SettingsPage::Review ? "[Enter/F2] Save  [Esc] Edit  [Q] Stop" :
-                                   "[Arrows] Move [Tab] Pane [Space/Enter] Change [V/F2] Review [Esc] Back [Q] Stop";
+        using ShellKey=i18n::SettingsMessageKey;
+        if (rows > 0 && rows < 12) return i18n::settingsEnglish(ShellKey::ShortTitle)+"\n"+i18n::settingsEnglish(ShellKey::ShortResize)+"\n"+i18n::settingsEnglish(ShellKey::ShortKeys)+"\n";
+        const std::string footer = i18n::settingsEnglish(page==SettingsPage::Review?ShellKey::FooterReview:ShellKey::FooterBrowse);
         const auto footerRows = wrapText(footer, width);
         const size_t budget = rows > 0 ? static_cast<size_t>(std::max(1, rows - static_cast<int>(footerRows.size()) - 2)) : 1000;
         std::vector<Line> body;
-        body.push_back(one("(o> CanaryMiner / Settings" + std::string(dirty() ? " * unsaved" : ""), Tone::Canary));
+        body.push_back(one(i18n::settingsEnglish(ShellKey::Title) + (dirty()?i18n::settingsEnglish(ShellKey::UnsavedSuffix):std::string{}), Tone::Canary));
         if (!compact) {
-            body.push_back(one("UI, runtime and offline references save separately; no automatic miner restart.", Tone::Plain));
+            body.push_back(one(i18n::settingsEnglish(ShellKey::SeparateSaves), Tone::Plain));
             body.push_back(one(""));
         }
         if (page == SettingsPage::Review) {
             const auto diff = changes();
-            body.push_back(one("Review " + std::to_string(diff.size()) + " changes / arrows scroll", Tone::Canary));
-            if (diff.empty()) body.push_back(one("No changes."));
+            body.push_back(one(i18n::settingsEnglishField(ShellKey::ReviewHeading,std::to_string(diff.size())), Tone::Canary));
+            if (diff.empty()) body.push_back(one(i18n::settingsEnglish(ShellKey::NoChanges)));
             const size_t start = diff.empty() ? 0 : std::min(static_cast<size_t>(reviewOffset), diff.size() - 1);
             for (size_t i = start; i < diff.size(); ++i) body.push_back(one(diff[i]));
-            body.push_back(one("Mining config, donation and hardware settings are untouched."));
+            body.push_back(one(i18n::settingsEnglish(ShellKey::Untouched)));
         } else if (page == SettingsPage::Leave) {
-            body.push_back(one("Unsaved changes", Tone::Canary));
-            body.push_back(one("[Enter] Review/save   [D] Discard   [Esc] Continue editing"));
+            body.push_back(one(i18n::settingsEnglish(ShellKey::Unsaved), Tone::Canary));
+            body.push_back(one(i18n::settingsEnglish(ShellKey::LeaveKeys)));
         } else {
             const auto content = fieldsText();
             if (width >= 80 && !compact) {
@@ -226,17 +229,17 @@ class SettingsPanel {
                     body.push_back(line);
                 }
             } else {
-                body.push_back(one("< " + groups()[group] + " >  (Left/Right: group)", Tone::Canary));
+                body.push_back(one(i18n::settingsEnglishField(ShellKey::GroupHeading,groups()[group]), Tone::Canary));
                 const size_t available = budget > body.size() + 1 ? budget - body.size() - 1 : 1;
                 const size_t start = !groupsFocused && static_cast<size_t>(field) >= available ? static_cast<size_t>(field) - available + 1 : 0;
                 for (size_t i = start; i < content.size() && i < start + available; ++i) body.push_back(Line{content[i]});
             }
-            body.push_back(one(groupsFocused ? "Focus: groups / Tab or Enter to edit" : "Focus: fields / Tab to choose a group", Tone::Plain));
+            body.push_back(one(i18n::settingsEnglish(groupsFocused?ShellKey::FocusGroups:ShellKey::FocusFields), Tone::Plain));
         }
         if (body.size() > budget) body.resize(budget);
         std::string output;
         for (const auto &line : body) output += paintLine(fitLine(line, width), color) + "\n";
-        const std::string note = message.empty() ? "No private config values are shown here." : message;
+        const std::string note = message.empty() ? i18n::settingsEnglish(ShellKey::PrivacyNote) : message;
         output += paint(clip(note, width), Tone::Plain, color) + "\n";
         for (const auto &line : footerRows) output += paint(line, Tone::Plain, color) + "\n";
         return output;

@@ -236,6 +236,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13k](../terminal-time.md) crosses formats/digits/fields/date styles/hour cycles/millisecond choices with exact retained civil fields, explicit UTC/second-level offsets, native formatted-output assertions and honest fixed-ASCII recovery. Typed atomic/message provenance, range/leap/missing/invalid refusal and separate named TZDB New York/Apia/Winnipeg cases protect one authoritative civil conversion. These remain offline display fixtures, not clock/source/billing/native/physical-terminal/dependency-owner or production qualification.
 
+[P-13l](../settings-messages.md) checks 480 shell texts, exact keys/reviews/placeholders/keyboard tokens, complete typed/painted recovery, bounded opaque arguments, source tones and row transactions. A private generated fixture compares 61440 whole native frames against the fixed predecessor class; actual settings/display/language/CLI/PTY/supervisor regressions protect ordinary English source extraction. No remaining field/subpanel/domain, effective native language, physical terminal or human qualification is inferred.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
