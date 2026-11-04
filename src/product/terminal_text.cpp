@@ -35,8 +35,15 @@ bool valid(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &
     if(spans.size()>64||policy.columns>4096||(policy.ambiguousCells!=1&&policy.ambiguousCells!=2)||(policy.emojiCells!=1&&policy.emojiCells!=2)||
         static_cast<unsigned>(policy.order)>2||static_cast<unsigned>(policy.direction)>2)return false;
     std::size_t bytes=0,fallbackBytes=0;
-    for(const auto &s:spans){if(s.text.size()>inputLimit-bytes||!renderSafe(s.text)||!ascii(s.ascii)||static_cast<unsigned>(s.atom)>1)return false;bytes+=s.text.size();
-        if((s.invariant&&(!ascii(s.text)||(!s.ascii.empty()&&s.ascii!=s.text)))||(!ascii(s.text)&&s.ascii.empty()))return false;
+    for(const auto &s:spans){if(s.text.size()>inputLimit-bytes||!renderSafe(s.text)||!ascii(s.ascii)||static_cast<unsigned>(s.atom)>1||static_cast<unsigned>(s.recovery)>1)return false;bytes+=s.text.size();
+        if(s.recovery==TerminalTextRecovery::UnicodeOnly){
+#if defined(CANARY_TERMINAL_ICU)
+            if(policy.order==TerminalTextOrder::Ascii||s.invariant||!s.ascii.empty())return false;
+#else
+            return false;
+#endif
+        }
+        if((s.invariant&&(!ascii(s.text)||(!s.ascii.empty()&&s.ascii!=s.text)))||(!ascii(s.text)&&s.ascii.empty()&&s.recovery!=TerminalTextRecovery::UnicodeOnly))return false;
         const auto &fallback=s.ascii.empty()?s.text:s.ascii;if(fallback.size()>inputLimit-fallbackBytes)return false;fallbackBytes+=fallback.size();}
     return true;
 }
@@ -222,7 +229,7 @@ bool wrapRows(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolic
         if(end==cursor&&cursor<units.size())return false;
         if(end<units.size()&&last>cursor)end=last;
         std::vector<TerminalTextSpan> parts;std::vector<std::size_t> sources;std::size_t previous=spans.size();
-        for(auto i=cursor;i<end;++i){const auto &unit=units[i];if(unit.span!=previous){parts.emplace_back(unit.text,std::string{},spans[unit.span].invariant,spans[unit.span].atom);sources.push_back(unit.span);previous=unit.span;}
+        for(auto i=cursor;i<end;++i){const auto &unit=units[i];if(unit.span!=previous){parts.emplace_back(unit.text,std::string{},spans[unit.span].invariant,spans[unit.span].atom,spans[unit.span].recovery);sources.push_back(unit.span);previous=unit.span;}
             else parts.back().text+=unit.text;}
         TerminalTextRunLine row;auto &line=row.line;auto *runs=provenance?&row.runs:nullptr;
 #if defined(CANARY_TERMINAL_ICU)

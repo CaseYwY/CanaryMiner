@@ -230,6 +230,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13h](../terminal-rows.md) crosses all common texts/order/direction/width policies with plain-versus-typed wrap/pad equivalence, original source mapping, generated padding/zero-cell controls, whole-group paint limits, full 4096-row bounds and mixed quantity/orphan/capacity refusal. Color stripping must recover exact raw rows; this is not rich-paragraph reflow, native translation activation, full messages, physical terminal or production qualification.
 
+[P-13i](../terminal-message.md) crosses common keys/packs/order/direction/width with exact named roles/tones, whole English recovery, honest requested/rendered reviews and unsupported/ASCII/backend metadata. Opaque braces/percent arguments, numeric/unit atomicity, exact expansion limits, missing/extra/duplicate names, invalid original controls/types/tags/keys/tones, row transaction failure and Unicode-only refusal are explicit. These are common-domain host fixtures, not full plural/date/time/native/physical-terminal or release qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

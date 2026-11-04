@@ -14,9 +14,10 @@ def main(args):
     assert 'target_link_libraries(canaryminer PRIVATE canary_terminal_text)' not in main_cmake
     assert 'canary_localized_format' not in main_cmake
     assert 'canary_terminal_number' not in main_cmake
+    assert 'canary_terminal_message' not in main_cmake
     for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h'):
         text = (root / source).read_text(encoding='utf-8')
-        assert all(marker not in text for marker in ('wrapTerminalTextRuns', 'padTerminalTextRuns', 'wrapTerminalSegments', 'padTerminalSegments', 'renderWrappedTerminalSegments', 'renderPaddedTerminalSegments', 'formatTerminalQuantity', 'layoutTerminalTextRuns', 'layoutTerminalSegments', 'renderTerminalSegments', 'formatPresentationNumber', 'layoutTerminalText', 'wrapTerminalText', 'padTerminalText', 'terminalGraphemeBoundaries', 'ubidi_', 'ubrk_'))
+        assert all(marker not in text for marker in ('layoutTerminalMessage', 'wrapTerminalMessage', 'renderTerminalMessage', 'renderWrappedTerminalMessage', 'wrapTerminalTextRuns', 'padTerminalTextRuns', 'wrapTerminalSegments', 'padTerminalSegments', 'renderWrappedTerminalSegments', 'renderPaddedTerminalSegments', 'formatTerminalQuantity', 'layoutTerminalTextRuns', 'layoutTerminalSegments', 'renderTerminalSegments', 'formatPresentationNumber', 'layoutTerminalText', 'wrapTerminalText', 'padTerminalText', 'terminalGraphemeBoundaries', 'ubidi_', 'ubrk_'))
     style = (root / 'src/product/terminal_style.h').read_text(encoding='utf-8')
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'

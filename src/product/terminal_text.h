@@ -10,6 +10,7 @@ enum class TerminalTextOrder { Ascii, Logical, Visual };
 enum class TerminalTextDirection { Auto, LeftToRight, RightToLeft };
 enum class TerminalTextFallback { None, RequestedAscii, BackendDisabled };
 enum class TerminalTextAtom { None, LeftToRight }; // atomic human presentation, NOT a byte-invariant machine identity
+enum class TerminalTextRecovery { RequireAscii, UnicodeOnly }; // no invented fallback for split trusted message literals
 struct TerminalTextPolicy {
     TerminalTextOrder order=TerminalTextOrder::Ascii;
     TerminalTextDirection direction=TerminalTextDirection::Auto;
@@ -21,7 +22,8 @@ struct TerminalTextSpan {
     std::string ascii; // explicit human fallback, not guessed transliteration; empty reuses printable ASCII text
     bool invariant=false; // printable ASCII, atomic under clipping, isolated LTR under bidi; not translated or mirrored
     TerminalTextAtom atom=TerminalTextAtom::None;
-    TerminalTextSpan(std::string logical,std::string fallback={},bool stable=false,TerminalTextAtom atomic=TerminalTextAtom::None):text(std::move(logical)),ascii(std::move(fallback)),invariant(stable),atom(atomic){}
+    TerminalTextRecovery recovery=TerminalTextRecovery::RequireAscii;
+    TerminalTextSpan(std::string logical,std::string fallback={},bool stable=false,TerminalTextAtom atomic=TerminalTextAtom::None,TerminalTextRecovery recover=TerminalTextRecovery::RequireAscii):text(std::move(logical)),ascii(std::move(fallback)),invariant(stable),atom(atomic),recovery(recover){}
 };
 struct TerminalTextLine {
     std::string text;
