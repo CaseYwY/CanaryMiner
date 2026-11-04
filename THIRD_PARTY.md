@@ -120,6 +120,10 @@ provider module, private key, CA bundle or production runtime activation. Any ev
 the exact OpenSSL/provider artifacts and their notices separately; the API floor is not patch/security approval.
 See `docs/pool-native-tls.md` for the unqualified Windows, revocation, whole-connection and deployment boundaries.
 
+The separate disabled offline Windows private-trust inspector uses native Crypt32 under platform terms. Its explicit
+synthetic public-DER generator imports separately installed Python `cryptography` only for development fixtures; no
+package/implementation, private key, certificate bundle or OS-store enrollment is distributed or automatically installed.
+
 ## 8. Optional offline named-time development backend
 
 `CANARY_ENABLE_NAMED_TZDB` is default-off. When enabled, the electricity/civil-time host core links separately supplied
