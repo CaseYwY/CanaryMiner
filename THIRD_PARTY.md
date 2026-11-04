@@ -114,6 +114,12 @@ and `LICENSES/c-ares-1.34.9.txt`; exact download hashes and source-authenticatio
 These do not substitute for the final package's exact dependency graph, OpenSSL/provider notices, CRT/OS terms,
 security review and clean-machine qualification. No production binary for this feature is published.
 
+The independent default-off `CANARY_ENABLE_POOL_TLS_OPENSSL` development target also uses separately supplied Linux
+OpenSSL 3.5+ for native TLS record steps and in-memory synthetic tests. It includes no OpenSSL implementation, library,
+provider module, private key, CA bundle or production runtime activation. Any eventual redistribution must inventory
+the exact OpenSSL/provider artifacts and their notices separately; the API floor is not patch/security approval.
+See `docs/pool-native-tls.md` for the unqualified Windows, revocation, whole-connection and deployment boundaries.
+
 ## 8. Optional offline named-time development backend
 
 `CANARY_ENABLE_NAMED_TZDB` is default-off. When enabled, the electricity/civil-time host core links separately supplied
