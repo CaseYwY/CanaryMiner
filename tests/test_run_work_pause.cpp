@@ -26,6 +26,7 @@ struct Rig {
     bool rawBoundaryOpen=false,rawOrdering=true;
     WorkerControlGate *gate=nullptr;uint64_t *gateClock=nullptr;unsigned gateMode=0;
     WorkerControlClient *nativeClient=nullptr;
+    bool nativeWorkStream=false;
     unsigned searches=0,submits=0,drains=0,resumes=0,fetches=0,version=1;
     uint64_t completedAttempts=0;
     std::vector<std::string> events;
@@ -71,7 +72,7 @@ struct Algo:Algorithm {
     uint64_t completedSearchAttempts()const override{return active->completedAttempts;}
     bool search(const Job &j,uint64_t nonce,uint64_t count,std::vector<Solution> *out)override{
         auto &r=*active;r.rawOrdering=r.rawOrdering&&!r.rawBoundaryOpen;++r.searches;r.completedAttempts+=count;r.events.push_back("search"+std::to_string(j.epoch));Solution s;s.nonce=nonce;out->push_back(s);
-        if(r.nativeClient){std::this_thread::sleep_for(std::chrono::milliseconds(5));if(r.searches>=1000)r.stop=1;return true;}
+        if(r.nativeClient){std::this_thread::sleep_for(std::chrono::milliseconds(5));if(r.searches>=(r.nativeWorkStream?2u:1000u))r.stop=1;return true;}
         if(r.gate){if(r.gateMode==6){const auto view=r.gate->snapshot();r.waitOrdering=r.waitOrdering&&view.receipt&&view.receipt->kind==WorkerReceiptKind::WaitApplied;
                 if(view.receipt&&view.receipt->command.hostWaitMs)r.appliedWaits.push_back(*view.receipt->command.hostWaitMs);
                 if(r.searches==1)r.gate->receive({binding(),3,1000,2000,WorkerDirective::Run,0});else r.stop=1;
@@ -115,6 +116,25 @@ struct WorkSink:CompletedWorkSink {
 }
 namespace om {JobSource *workPauseTestSource(){active->sourceMade=true;return new Source;}}
 int main(int argc,char **argv){
+    if(argc==6&&std::string(argv[1])=="--work-stream-fixture"&&std::string(argv[2])=="--worker-control-v1"){
+        WorkerChannelHandles handles;WorkerControlClient client(true);
+        if(!parseWorkerChannelHandles(argv[3],argv[4],argv[5],&handles)||!client.adopt(handles))return 90;
+        WorkerControlSnapshot view;const auto until=workerControlNowMs()+2000;
+        do{view=client.snapshot();if(view.receipt)break;std::this_thread::sleep_for(std::chrono::milliseconds(1));}while(workerControlNowMs()<until);
+        if(!view.receipt)return 91;
+        uint64_t sequence=0;
+        WorkerWorkPublisher raw(view.receipt->command.binding,[&](const auto &e){if(!client.publishWork(e))return false;sequence=e.sequence;return true;});
+        if(!raw.start(completedWorkNow()))return 92;
+        Rig r;active=&r;r.nativeClient=&client;r.nativeWorkStream=true;Algo algo;Hook hook;auto o=options(r);
+        o.workPause=&client;o.loopHook=&hook;o.completedWork=&raw;
+        const auto result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);
+        if(result||raw.failed()||!raw.finish(completedWorkNow()))return 93;
+        const auto end=workerControlNowMs()+2000;
+        while(client.flushedWorkSequence()!=sequence&&workerControlNowMs()<end&&client.requestState()!=WorkControlRequest::Fault)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const bool flushed=client.flushedWorkSequence()==sequence;client.stop();
+        return flushed&&r.searches==2&&r.submits==2?0:94;
+    }
     if(argc==6&&std::string(argv[1])=="--channel-fixture"&&std::string(argv[2])=="--worker-control-v1"){
         WorkerChannelHandles handles;WorkerControlClient client;
         if(!parseWorkerChannelHandles(argv[3],argv[4],argv[5],&handles)||!client.adopt(handles))return 90;

@@ -7,6 +7,7 @@ struct WorkerProcessOwner::Impl {
     bool attempted=false;WorkerOwnerSnapshot view;WorkerControlBinding binding;
     std::optional<WorkerCommand> pending;
     std::deque<std::string> lines;size_t bytes=0;
+    std::deque<WorkerWorkEvent> work;
     std::string fragment;bool dropping=false;
     void append(const std::string &text){
         for(char c:text){
@@ -24,11 +25,11 @@ struct WorkerProcessOwner::Impl {
         std::lock_guard<std::mutex> lock(mutex);view.state=state;view.exitCode=code;
         view.reaped=reaped;view.revoked=true;view.done=true;
     }
-    void run(std::filesystem::path exe,std::vector<std::string> args,WorkerCommand initial,unsigned drain){
+    void run(std::filesystem::path exe,std::vector<std::string> args,WorkerCommand initial,unsigned drain,bool collectWork){
         WorkerControlProcess process;bool fault=false,stopping=false;
         auto deadline=std::chrono::steady_clock::time_point::max();
         try{
-            if(!process.start(exe,args,initial,cancel)){
+            if(!process.start(exe,args,initial,cancel,collectWork)){
                 const auto p=process.poll();const bool unresolved=p.state==WorkerProcessState::Unreaped,stopped=cancel.load();
                 complete(unresolved?WorkerOwnerState::Unreaped:stopped?WorkerOwnerState::Exited:WorkerOwnerState::Faulted,
                     unresolved||!stopped?8:process.reaped()&&p.exitCode!=0?7:0,process.reaped());return;
@@ -46,12 +47,28 @@ struct WorkerProcessOwner::Impl {
                     }}
                 if(cancel.load()&&!stopping){process.requestStop();stopping=true;deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);}
                 const auto p=process.poll();
-                fault=fault||p.controlFault;
+                fault=fault||p.controlFault||(collectWork&&!cancel.load()&&p.workStreamClosed&&!p.workStreamComplete);
                 {std::lock_guard<std::mutex> lock(mutex);append(p.output);
-                    if(!cancel.load()&&!fault&&p.state==WorkerProcessState::Running)for(const auto &receipt:p.receipts)view.receipt=receipt;}
+                    view.workStreamClosed=view.workStreamClosed||p.workStreamClosed;
+                    if(!cancel.load()&&!fault){
+                        if(p.state==WorkerProcessState::Running)for(const auto &receipt:p.receipts)view.receipt=receipt;
+                        if(p.work.size()>32-work.size())fault=true;
+                        else for(const auto &e:p.work){work.push_back(e);view.workSequence=e.sequence;}
+                        view.workStreamComplete=p.workStreamComplete;
+                    }
+                    if(fault){view.revoked=true;view.workStreamComplete=false;}}
                 if(p.state==WorkerProcessState::Exited){
+                    if(collectWork&&!stopping&&!p.workStreamClosed&&!fault){
+                        // Reaping is not raw-stream EOF. Drain only while this finite owned deadline remains.
+                        if(deadline==std::chrono::steady_clock::time_point::max())deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);
+                        if(std::chrono::steady_clock::now()<deadline){std::this_thread::sleep_for(std::chrono::milliseconds(5));continue;}
+                        fault=true;
+                    }
+                    if(collectWork&&!cancel.load()&&!p.workStreamComplete)fault=true;
                     complete(fault||p.exitCode==8?WorkerOwnerState::Faulted:WorkerOwnerState::Exited,fault?8:p.exitCode,process.reaped());return;
                 }
+                if(fault&&!stopping){process.requestStop();stopping=true;deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);
+                    std::lock_guard<std::mutex> lock(mutex);view.state=WorkerOwnerState::Faulted;view.revoked=true;}
                 if(p.state==WorkerProcessState::Unreaped){fault=true;break;}
                 if(p.state==WorkerProcessState::Disconnected&&!stopping){process.requestStop();stopping=true;deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(drain);
                     std::lock_guard<std::mutex> lock(mutex);view.state=WorkerOwnerState::Stopping;view.revoked=true;}
@@ -69,14 +86,14 @@ struct WorkerProcessOwner::Impl {
 };
 WorkerProcessOwner::WorkerProcessOwner():impl_(new Impl){}
 WorkerProcessOwner::~WorkerProcessOwner(){stop();}
-bool WorkerProcessOwner::start(std::filesystem::path exe,std::vector<std::string> args,WorkerCommand initial,unsigned drain){
+bool WorkerProcessOwner::start(std::filesystem::path exe,std::vector<std::string> args,WorkerCommand initial,unsigned drain,bool work){
     auto &p=*impl_;std::lock_guard<std::mutex> lock(p.mutex);
     if(p.attempted||p.cancel.load())return false;
     p.attempted=true;
     size_t bytes=0;for(const auto &arg:args)bytes+=arg.size();
     if(args.size()>256||bytes>24000||exe.native().size()>4096||!validWorkerCommand(initial)||initial.revision!=1||initial.directive!=WorkerDirective::Pause||drain>65000){p.view.state=WorkerOwnerState::Faulted;p.view.revoked=true;p.view.done=true;p.view.exitCode=8;return false;}
     p.binding=initial.binding;p.view.state=WorkerOwnerState::Starting;
-    try{p.thread=std::thread([&p,exe=std::move(exe),args=std::move(args),initial=std::move(initial),drain]()mutable{p.run(std::move(exe),std::move(args),std::move(initial),drain);});}
+    try{p.thread=std::thread([&p,exe=std::move(exe),args=std::move(args),initial=std::move(initial),drain,work]()mutable{p.run(std::move(exe),std::move(args),std::move(initial),drain,work);});}
     catch(...){p.view.state=WorkerOwnerState::Faulted;p.view.revoked=true;p.view.done=true;p.view.exitCode=8;return false;}return true;
 }
 bool WorkerProcessOwner::submit(const WorkerCommand &command){
@@ -89,6 +106,8 @@ bool WorkerProcessOwner::submit(const WorkerCommand &command){
 WorkerOwnerSnapshot WorkerProcessOwner::snapshot()const{std::lock_guard<std::mutex> lock(impl_->mutex);return impl_->view;}
 std::vector<std::string> WorkerProcessOwner::takeLines(){std::lock_guard<std::mutex> lock(impl_->mutex);
     std::vector<std::string> out;out.reserve(impl_->lines.size());for(auto &line:impl_->lines)out.push_back(std::move(line));impl_->lines.clear();impl_->bytes=0;return out;}
+std::vector<WorkerWorkEvent> WorkerProcessOwner::takeWork(){std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::vector<WorkerWorkEvent> out;out.reserve(impl_->work.size());for(auto &e:impl_->work)out.push_back(std::move(e));impl_->work.clear();return out;}
 void WorkerProcessOwner::requestStop(){
     auto &p=*impl_;p.cancel=true;std::lock_guard<std::mutex> lock(p.mutex);p.attempted=true;p.view.revoked=true;
     if(p.view.state==WorkerOwnerState::Starting||p.view.state==WorkerOwnerState::Running)p.view.state=WorkerOwnerState::Stopping;

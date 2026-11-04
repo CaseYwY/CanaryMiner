@@ -3,6 +3,7 @@
 #include <array>
 #include <charconv>
 #include <chrono>
+#include <deque>
 #include <limits>
 #include <thread>
 #if defined(_WIN32)
@@ -111,6 +112,9 @@ struct WorkerControlClient::Impl {
     mutable bool fault=false;bool attempted=false,held=false;
     std::atomic<bool> cancel{false};std::thread thread;Channel channel;WorkerControlFramer frames;
     uint64_t startup=0;mutable uint64_t last=0;
+    bool workEnabled=false,workFinished=false;uint64_t workSequence=0,workFlushed=0;
+    struct WorkFrame {std::string wire;uint64_t deadline,sequence;};
+    std::deque<WorkFrame> work; // at most 32 immutable originals; no overwrite, decimation or restamping
 #if defined(_WIN32)
     Native parent=invalid;
     ~Impl(){closeNative(parent);}
@@ -128,7 +132,7 @@ struct WorkerControlClient::Impl {
     }
     void fail(){std::lock_guard<std::mutex> lock(mutex);fault=true;if(gate)gate->fail();}
     void run(){
-        try{std::string sent;
+        try{std::string sent;uint64_t sendingWork=0;
             while(!cancel.load()){
                 if(!parentAlive()){cancel=true;break;}
                 char bytes[workerControlChunkLimit];size_t count=0;const auto read=readBytes(channel.input,bytes,sizeof(bytes),count);
@@ -145,9 +149,13 @@ struct WorkerControlClient::Impl {
                     if(current==WorkControlRequest::Stop||current==WorkControlRequest::Fault)break;
                     if(gate)view=gate->snapshot();}
                 if(!channel.flush(workerControlNowMs())){fail();break;}
+                if(sendingWork&&channel.pending.empty()){std::lock_guard<std::mutex> lock(mutex);workFlushed=sendingWork;sendingWork=0;}
                 if(channel.pending.empty()&&view.receipt){std::string wire;
                     if(!encodeWorkerReceipt(*view.receipt,&wire)){fail();break;}
-                    if(wire!=sent){if(!channel.queue(wire,view.receipt->command.deadlineMonoMs)){fail();break;}sent=std::move(wire);}}
+                    if(wire!=sent){if(!channel.queue(wire,view.receipt->command.deadlineMonoMs)){fail();break;}sent=std::move(wire);}
+                    else if(workEnabled){std::optional<WorkFrame> next;
+                        {std::lock_guard<std::mutex> lock(mutex);if(!cancel.load()&&!fault&&!work.empty()){next=std::move(work.front());work.pop_front();}}
+                        if(next){if(!channel.queue(next->wire,next->deadline)){fail();break;}sendingWork=next->sequence;}}}
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
             }
         }catch(...){fail();}
@@ -155,7 +163,7 @@ struct WorkerControlClient::Impl {
         channel.close();
     }
 };
-WorkerControlClient::WorkerControlClient():impl_(new Impl){}
+WorkerControlClient::WorkerControlClient(bool work):impl_(new Impl){impl_->workEnabled=work;}
 WorkerControlClient::~WorkerControlClient(){stop();}
 bool WorkerControlClient::adopt(WorkerChannelHandles h){
     auto &p=*impl_;if(p.attempted||p.cancel.load())return false;p.attempted=true;
@@ -194,6 +202,20 @@ WorkerControlSnapshot WorkerControlClient::snapshot()const{
     else if(impl_->fault)out.state=WorkerControlState::Faulted;
     return out;
 }
+bool WorkerControlClient::publishWork(const WorkerWorkEvent &event)noexcept{
+    auto &p=*impl_;
+    try{std::string wire;const bool valid=encodeWorkerWorkEvent(event,&wire);
+        std::lock_guard<std::mutex> lock(p.mutex);const auto state=p.state();
+        if(!p.workEnabled||state==WorkControlRequest::Stop||state==WorkControlRequest::Fault)return false;
+        const auto view=p.gate?p.gate->snapshot():WorkerControlSnapshot{};
+        if(!valid||!view.receipt||!sameBinding(event.binding,view.receipt->command.binding)||p.workFinished||p.workSequence==UINT64_MAX||
+            event.sequence!=p.workSequence+1||(p.workSequence==0)!=(event.kind==WorkerWorkKind::Start)||
+            event.observed.monotonicMs>p.last||p.work.size()>=32){p.fault=true;if(p.gate)p.gate->fail();return false;}
+        p.work.push_back({std::move(wire),view.receipt->command.deadlineMonoMs,event.sequence});p.workSequence=event.sequence;
+        p.workFinished=event.kind==WorkerWorkKind::Finish;return true;
+    }catch(...){p.fail();return false;}
+}
+uint64_t WorkerControlClient::flushedWorkSequence()const{std::lock_guard<std::mutex> lock(impl_->mutex);return impl_->workFlushed;}
 WorkControlRequest WorkerControlClient::requestState()const noexcept{std::lock_guard<std::mutex> lock(impl_->mutex);return impl_->state();}
 bool WorkerControlClient::pauseRequested()const noexcept{return requestState()!=WorkControlRequest::Run;}
 void WorkerControlClient::pauseBoundary(bool held)noexcept{std::lock_guard<std::mutex> lock(impl_->mutex);impl_->held=held;if(impl_->gate)impl_->gate->pauseBoundary(held);}
@@ -205,6 +227,7 @@ struct WorkerControlProcess::Impl {
     bool attempted=false,owned=false,settled=false,unknown=false,reserved=false,blocked=false,controlFault=false;
     WorkerProcessState state=WorkerProcessState::Dormant;int exit=-1;
     WorkerControlBinding binding;Channel channel;Native logs=invalid;WorkerControlFramer frames;
+    bool workEnabled=false,workFinished=false,workClosed=false;uint64_t workSequence=0;
 #if defined(_WIN32)
     Native process=invalid,job=invalid;
 #else
@@ -235,7 +258,10 @@ struct WorkerControlProcess::Impl {
         if(result!=pid){unknown=true;unreaped();return false;} // no signalling a possibly reused PID after another reaper consumed it
         exit=WIFEXITED(status)?WEXITSTATUS(status):128+(WIFSIGNALED(status)?WTERMSIG(status):0);
 #endif
-        settled=true;if(blocked){blocked=false;--unresolved();}state=WorkerProcessState::Exited;channel.close();return true;
+        settled=true;if(blocked){blocked=false;--unresolved();}state=WorkerProcessState::Exited;
+        // An opted-in raw stream may still have buffered originals after actual reaping. Drain it with bounded later polls.
+        if(!workEnabled||workClosed)channel.close();
+        return true;
     }
     static bool reserve(){
         std::lock_guard<std::mutex> lock(registryMutex());auto &held=quarantine();
@@ -328,13 +354,13 @@ WorkerControlProcess::~WorkerControlProcess(){
     if(!impl_->reap(250)){std::lock_guard<std::mutex> lock(Impl::registryMutex());Impl::quarantine().push_back(impl_.release());}
     else{std::lock_guard<std::mutex> lock(Impl::registryMutex());impl_.reset();}
 }
-bool WorkerControlProcess::start(const std::filesystem::path &exe,const std::vector<std::string> &args,const WorkerCommand &initial,const std::atomic<bool> &cancel){
+bool WorkerControlProcess::start(const std::filesystem::path &exe,const std::vector<std::string> &args,const WorkerCommand &initial,const std::atomic<bool> &cancel,bool work){
     auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
     size_t total=0;bool valid=args.size()<=256;
     for(const auto &arg:args){valid=valid&&!arg.empty()&&arg.size()<=4096&&arg.find('\0')==arg.npos&&arg!="--worker-control-v1";total+=arg.size();}
     if(cancel.load()||!valid||total>24000||!pathAllowed(exe)||!live(initial,workerControlNowMs())||initial.revision!=1||initial.directive!=WorkerDirective::Pause||!Impl::reserve()){
         p.state=WorkerProcessState::Failed;return false;}
-    p.reserved=true;p.binding=initial.binding;
+    p.reserved=true;p.binding=initial.binding;p.workEnabled=work;
     try{if(!p.launch(exe,args,cancel)||cancel.load()){p.fail();p.reap(250);return false;}
         p.state=WorkerProcessState::Running;
         if(!submit(initial)){p.fail();p.reap(250);return false;}
@@ -349,22 +375,30 @@ bool WorkerControlProcess::submit(const WorkerCommand &command){
 WorkerProcessPoll WorkerControlProcess::poll(){
     auto &p=*impl_;WorkerProcessPoll out;
     if(p.state==WorkerProcessState::Running){
-        if(!p.channel.flush(workerControlNowMs()))p.fail();
-        if(p.state==WorkerProcessState::Running){char bytes[workerControlChunkLimit];size_t count=0;const auto result=readBytes(p.channel.input,bytes,sizeof(bytes),count);
+        if(!p.channel.flush(workerControlNowMs()))p.fail();}
+    if(p.state==WorkerProcessState::Running||(p.state==WorkerProcessState::Exited&&p.workEnabled&&!p.workClosed&&p.channel.input!=invalid)){
+        {char bytes[workerControlChunkLimit];size_t count=0;
+            // A burst of small raw events must not accidentally exceed the unchanged 16-frame parser budget.
+            const auto result=readBytes(p.channel.input,bytes,p.workEnabled?workerControlFrameLimit:sizeof(bytes),count);
             if(result==IO::Failed)p.fail();
-            else if(result==IO::Closed){if(!p.frames.complete())p.fail();else{p.channel.close();p.state=WorkerProcessState::Disconnected;}}
+            else if(result==IO::Closed){p.workClosed=true;if(!p.frames.complete())p.fail();else{p.channel.close();if(!p.settled)p.state=WorkerProcessState::Disconnected;}}
             else if(count&&!p.frames.feed(std::string_view(bytes,count),[&](std::string_view frame){WorkerReceipt r;
+                if(frame.substr(0,6)=="CMWW1 "){WorkerWorkEvent e;
+                    if(!p.workEnabled||p.workFinished||!decodeWorkerWorkEvent(frame,&e)||!sameBinding(e.binding,p.binding)||p.workSequence==UINT64_MAX||
+                        e.sequence!=p.workSequence+1||(p.workSequence==0)!=(e.kind==WorkerWorkKind::Start)||e.observed.monotonicMs>workerControlNowMs())return false;
+                    p.workSequence=e.sequence;p.workFinished=e.kind==WorkerWorkKind::Finish;out.work.push_back(std::move(e));return true;}
                 if(!decodeWorkerReceipt(frame,&r)||!sameBinding(r.command.binding,p.binding))return false;
-                out.receipts.push_back(std::move(r));return true;}))p.fail();}}
+                out.receipts.push_back(std::move(r));return true;})){out.work.clear();p.fail();}}}
     if(p.logs!=invalid){char bytes[8192];size_t count=0;const auto result=readBytes(p.logs,bytes,sizeof(bytes),count);
         if(count)out.output.assign(bytes,count);
         if(result==IO::Closed||result==IO::Failed)closeNative(p.logs);}
     const bool streamEnded=p.state==WorkerProcessState::Running||p.state==WorkerProcessState::Disconnected||p.state==WorkerProcessState::Failed;
     if(p.owned)p.observe();
-    if(streamEnded&&p.settled&&!p.frames.complete())p.controlFault=true; // actual exit cannot erase an incomplete/malformed receipt stream
-    out.state=p.state;out.exitCode=p.exit;out.controlFault=p.controlFault;return out;
+    if(streamEnded&&p.settled&&(!p.workEnabled||p.workClosed)&&!p.frames.complete())p.controlFault=true; // actual exit cannot erase an incomplete/malformed receipt stream
+    out.state=p.state;out.exitCode=p.exit;out.controlFault=p.controlFault;
+    out.workStreamClosed=p.workClosed;out.workStreamComplete=p.workEnabled&&p.workClosed&&p.workFinished&&p.frames.complete()&&!p.controlFault;return out;
 }
-void WorkerControlProcess::requestStop(){auto &p=*impl_;p.attempted=true;p.channel.close();
+void WorkerControlProcess::requestStop(){auto &p=*impl_;p.attempted=true;p.channel.close(); // intentional cancellation leaves any unconsumed tail incomplete
     if(p.state!=WorkerProcessState::Exited&&p.state!=WorkerProcessState::Unreaped)p.state=WorkerProcessState::Stopping;}
 bool WorkerControlProcess::terminate(unsigned ms){return impl_->reap((std::min)(ms,2000u));}
 bool WorkerControlProcess::reaped()const{return impl_->settled;}

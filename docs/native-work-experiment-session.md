@@ -20,6 +20,8 @@ The next tick first admits current aggregate safety/game conditions and consumes
 
 The fixture producer binds samples to explicit synthetic identity/plan/conditions. The raw [P-09f alignment record](work-power-alignment.md) is not automatically converted here: sensor support, full source identity/drift qualification, native sample sequencing and cross-thread/process transport are still required for a production source.
 
+Follow-on [P-09h](worker-work-stream.md) provides the independently opted-in original raw-work native/background transport and exact replay. It does not convert those events to this inbox's qualified measurement samples or enable the ordinary fleet.
+
 ## Exclusive commands and one-use transfer
 
 After baseline admission, only the experiment owner calls issue/ack. Each returned command is submitted once to the same actual `WorkerProcessOwner`. Accepted remains pending; the actual original WaitApplied/Paused settles it. Source/permission expiry, unsafe/game/drift conditions, invalid sample/sequence, transport failure, or loss of the worker during measurement revokes **every** fleet channel immediately through the session's existing halt path. No second Pause overwrites a pending Run.
