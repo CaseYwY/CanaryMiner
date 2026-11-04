@@ -45,3 +45,6 @@ rules must not be bypassed by falsely labelling a localized number or arbitrary 
 
 [P-13g](terminal-number.md) subsequently adds the separate atomic human-LTR numeric/unit adapter without relaxing invariant
 ASCII or claiming colored-row/full-message/native/terminal qualification.
+
+[P-13h](terminal-rows.md) subsequently adds original-span colored autonomous rows and physical padded fields with distinct
+generated padding/control roles and transactional painted-group bounds, not native/full-message/rich-paragraph qualification.

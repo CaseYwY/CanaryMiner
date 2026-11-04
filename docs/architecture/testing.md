@@ -228,6 +228,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13g](../terminal-number.md) crosses all 31 formats/16 languages/two digit styles with ordering/direction policies, exact >2^53 half-even originals, explicit labels, whole-quantity clipping/wrapping/padding and mixed Arabic/Hebrew tone provenance. It rejects invalid labels/tone/handling and preserves strict invariant-ASCII refusal. These display fixtures do not qualify a financial fact, full sentence, colored row, native activation, real terminal or production deployment.
 
+[P-13h](../terminal-rows.md) crosses all common texts/order/direction/width policies with plain-versus-typed wrap/pad equivalence, original source mapping, generated padding/zero-cell controls, whole-group paint limits, full 4096-row bounds and mixed quantity/orphan/capacity refusal. Color stripping must recover exact raw rows; this is not rich-paragraph reflow, native translation activation, full messages, physical terminal or production qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

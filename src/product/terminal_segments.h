@@ -15,4 +15,9 @@ bool layoutTerminalSegments(const std::vector<TerminalSegment> &,const TerminalT
 // Uses the existing fixed palette after layout, no input escape interpretation or rule-glyph substitution.
 // ColorLevel::None is byte-exact plain output; caller owns NO_COLOR/capability selection. Max 65536 bytes.
 bool renderTerminalSegments(const std::vector<TerminalSegment> &,const TerminalTextPolicy &,ColorLevel,std::string *);
+bool wrapTerminalSegments(const std::vector<TerminalSegment> &,const TerminalTextPolicy &,std::size_t maximumLines,std::vector<ColoredTerminalLine> *);
+bool padTerminalSegments(const std::vector<TerminalSegment> &,const TerminalTextPolicy &,TerminalTextAlignment,ColoredTerminalLine *,Tone padding=Tone::Plain);
+// Entire row group is transactional. Original 4096-row/32768-plain-byte limits apply; painted group <=262144 bytes.
+bool renderWrappedTerminalSegments(const std::vector<TerminalSegment> &,const TerminalTextPolicy &,std::size_t maximumLines,ColorLevel,std::vector<std::string> *);
+bool renderPaddedTerminalSegments(const std::vector<TerminalSegment> &,const TerminalTextPolicy &,TerminalTextAlignment,ColorLevel,std::string *,Tone padding=Tone::Plain);
 } // namespace om

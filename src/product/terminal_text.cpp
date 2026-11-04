@@ -42,8 +42,8 @@ bool valid(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &
 }
 void appendRun(std::vector<TerminalTextRun> *runs,std::string text,std::size_t span,std::size_t width,bool control=false){
     if(!runs||text.empty())return;
-    if(!runs->empty()&&runs->back().control==control&&(control||runs->back().sourceSpan==span)){runs->back().text+=text;runs->back().cells+=width;}
-    else runs->push_back({std::move(text),span,width,control});
+    if(!runs->empty()&&!runs->back().padding&&runs->back().control==control&&(control||runs->back().sourceSpan==span)){runs->back().text+=text;runs->back().cells+=width;}
+    else runs->push_back({std::move(text),span,width,control,false});
 }
 TerminalTextLine asciiLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextFallback reason,std::vector<TerminalTextRun> *runs=nullptr){
     TerminalTextLine out;out.fallback=reason;
@@ -119,7 +119,7 @@ bool unicodeLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPo
     if(atomicLtr(spans[previous])){decorated.push_back(0x2069);if(policy.order==TerminalTextOrder::Logical)appendRun(runs,u8"\u2069",0,0,true);}
     if(policy.order==TerminalTextOrder::Logical){
         if(policy.direction!=TerminalTextDirection::Auto){decorated.insert(decorated.begin(),policy.direction==TerminalTextDirection::RightToLeft?0x2067:0x2066);decorated.push_back(0x2069);
-            if(runs){runs->insert(runs->begin(),{policy.direction==TerminalTextDirection::RightToLeft?u8"\u2067":u8"\u2066",0,0,true});appendRun(runs,u8"\u2069",0,0,true);}}
+            if(runs){runs->insert(runs->begin(),{policy.direction==TerminalTextDirection::RightToLeft?u8"\u2067":u8"\u2066",0,0,true,false});appendRun(runs,u8"\u2069",0,0,true);}}
         if(!utf8(decorated.data(),decorated.size(),result.text))return false;
         out=std::move(result);return true;}
     UErrorCode error=U_ZERO_ERROR;std::unique_ptr<UBiDi,decltype(&ubidi_close)> bidi(ubidi_openSized(static_cast<int32_t>(decorated.size()),0,&error),ubidi_close);
@@ -174,6 +174,17 @@ bool layoutTerminalText(const std::vector<TerminalTextSpan> &spans,const Termina
     *out=asciiLine(spans,policy,TerminalTextFallback::BackendDisabled);return true;
 #endif
 }
+namespace {
+bool completeRunLine(const TerminalTextRunLine &result,std::size_t spans,const TerminalTextPolicy &policy,bool padding=false){
+    if(result.runs.size()>(padding?4231u:4226u))return false;
+    std::string joined;std::size_t width=0;
+    for(const auto &run:result.runs){if(run.text.size()>outputLimit-joined.size()||run.cells>policy.columns-width||
+            (!run.control&&!run.padding&&run.sourceSpan>=spans)||(run.control&&(run.cells||run.padding))||
+            (run.padding&&(!padding||run.cells!=run.text.size()||run.text.find_first_not_of(' ')!=run.text.npos)))return false;
+        joined+=run.text;width+=run.cells;}
+    return joined==result.line.text&&width==result.line.cells;
+}
+}
 bool layoutTerminalTextRuns(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextRunLine *out){
     if(!out||!valid(spans,policy))return false;
     TerminalTextRunLine result;
@@ -183,14 +194,11 @@ bool layoutTerminalTextRuns(const std::vector<TerminalTextSpan> &spans,const Ter
 #else
     else result.line=asciiLine(spans,policy,TerminalTextFallback::BackendDisabled,&result.runs);
 #endif
-    if(result.runs.size()>4226)return false;
-    std::string joined;std::size_t width=0;
-    for(const auto &run:result.runs){if(run.text.size()>outputLimit-joined.size()||run.cells>policy.columns-width||(!run.control&&run.sourceSpan>=spans.size())||(run.control&&run.cells))return false;
-        joined+=run.text;width+=run.cells;}
-    if(joined!=result.line.text||width!=result.line.cells)return false;
+    if(!completeRunLine(result,spans.size(),policy))return false;
     *out=std::move(result);return true;
 }
-bool wrapTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,std::size_t maximumLines,std::vector<TerminalTextLine> *out){
+namespace {
+bool wrapRows(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,std::size_t maximumLines,bool provenance,std::vector<TerminalTextRunLine> *out){
     if(!out||!valid(spans,policy)||!policy.columns||!maximumLines||maximumLines>4096)return false;
     struct Unit {std::string text;std::size_t span,width;bool opportunity;};std::vector<Unit> units;
     const auto fallback=policy.order==TerminalTextOrder::Ascii?TerminalTextFallback::RequestedAscii:TerminalTextFallback::BackendDisabled;
@@ -207,24 +215,36 @@ bool wrapTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalT
     {for(std::size_t span=0;span<spans.size();++span){const auto &s=spans[span];const auto &text=s.ascii.empty()?s.text:s.ascii;
         if(atomicLtr(s)){if(!text.empty())units.push_back({text,span,text.size(),true});}
         else for(char ch:text)units.push_back({std::string(1,ch),span,1,ch==' '});}}
-    std::vector<TerminalTextLine> result;std::size_t cursor=0,total=0;
+    std::vector<TerminalTextRunLine> result;std::size_t cursor=0,total=0;
     do{if(result.size()==maximumLines)return false;
         std::size_t end=cursor,width=0,last=cursor;
         while(end<units.size()&&units[end].width<=policy.columns-width){width+=units[end].width;if(units[end].opportunity)last=end+1;++end;}
         if(end==cursor&&cursor<units.size())return false;
         if(end<units.size()&&last>cursor)end=last;
-        std::vector<TerminalTextSpan> parts;std::size_t previous=spans.size();
-        for(auto i=cursor;i<end;++i){const auto &unit=units[i];if(unit.span!=previous){parts.emplace_back(unit.text,std::string{},spans[unit.span].invariant,spans[unit.span].atom);previous=unit.span;}
+        std::vector<TerminalTextSpan> parts;std::vector<std::size_t> sources;std::size_t previous=spans.size();
+        for(auto i=cursor;i<end;++i){const auto &unit=units[i];if(unit.span!=previous){parts.emplace_back(unit.text,std::string{},spans[unit.span].invariant,spans[unit.span].atom);sources.push_back(unit.span);previous=unit.span;}
             else parts.back().text+=unit.text;}
-        TerminalTextLine line;
+        TerminalTextRunLine row;auto &line=row.line;auto *runs=provenance?&row.runs:nullptr;
 #if defined(CANARY_TERMINAL_ICU)
-        if(unicode){if(!unicodeLine(parts,policy,line)||line.clipped)return false;}else
+        if(unicode){if(!unicodeLine(parts,policy,line,runs)||line.clipped)return false;}else
 #endif
-        line=asciiLine(parts,policy,fallback);
+        line=asciiLine(parts,policy,fallback,runs);
+        if(provenance){if(!completeRunLine(row,parts.size(),policy))return false;
+            for(auto &run:row.runs)if(!run.control)run.sourceSpan=sources[run.sourceSpan];
+            if(!completeRunLine(row,spans.size(),policy))return false;}
         if(line.text.size()>32768-total)return false;
-        total+=line.text.size();result.push_back(std::move(line));cursor=end;
+        total+=line.text.size();result.push_back(std::move(row));cursor=end;
     }while(cursor<units.size());
     *out=std::move(result);return true;
+}
+}
+bool wrapTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,std::size_t maximumLines,std::vector<TerminalTextLine> *out){
+    if(!out)return false;
+    std::vector<TerminalTextRunLine> rows;if(!wrapRows(spans,policy,maximumLines,false,&rows))return false;
+    std::vector<TerminalTextLine> result;for(auto &row:rows)result.push_back(std::move(row.line));*out=std::move(result);return true;
+}
+bool wrapTerminalTextRuns(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,std::size_t maximumLines,std::vector<TerminalTextRunLine> *out){
+    return out&&wrapRows(spans,policy,maximumLines,true,out);
 }
 bool padTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextAlignment alignment,TerminalTextLine *out){
     if(!out||static_cast<unsigned>(alignment)>1)return false;
@@ -235,5 +255,17 @@ bool padTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalTe
     if(line.fallback==TerminalTextFallback::None&&policy.order==TerminalTextOrder::Logical&&!line.text.empty())line.text=u8"\u2066"+line.text+u8"\u2069";
     if(line.text.size()>outputLimit)return false;
     line.cells=policy.columns;*out=std::move(line);return true;
+}
+bool padTerminalTextRuns(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextAlignment alignment,TerminalTextRunLine *out){
+    if(!out||static_cast<unsigned>(alignment)>1)return false;
+    TerminalTextRunLine result;if(!layoutTerminalTextRuns(spans,policy,&result))return false;
+    auto &line=result.line;const std::string padding(policy.columns-line.cells,' ');
+    const bool logical=line.fallback==TerminalTextFallback::None&&policy.order==TerminalTextOrder::Logical;
+    if(logical&&!line.text.empty()){line.text=u8"\u2068"+line.text+u8"\u2069";result.runs.insert(result.runs.begin(),{u8"\u2068",0,0,true,false});appendRun(&result.runs,u8"\u2069",0,0,true);}
+    if(!padding.empty()){TerminalTextRun run{padding,0,padding.size(),false,true};if(alignment==TerminalTextAlignment::Right)result.runs.insert(result.runs.begin(),std::move(run));else result.runs.push_back(std::move(run));}
+    line.text=alignment==TerminalTextAlignment::Right?padding+line.text:line.text+padding;
+    if(logical&&!line.text.empty()){line.text=u8"\u2066"+line.text+u8"\u2069";result.runs.insert(result.runs.begin(),{u8"\u2066",0,0,true,false});appendRun(&result.runs,u8"\u2069",0,0,true);}
+    line.cells=policy.columns;if(!completeRunLine(result,spans.size(),policy,true))return false;
+    *out=std::move(result);return true;
 }
 } // namespace om

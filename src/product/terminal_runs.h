@@ -6,9 +6,12 @@ struct TerminalTextRun {
     std::string text;
     std::size_t sourceSpan=0,cells=0;
     bool control=false; // only internally generated direction isolation; sourceSpan is unspecified here
+    bool padding=false; // only generated printable spaces; sourceSpan is unspecified, cells == text.size()
 };
 struct TerminalTextRunLine {TerminalTextLine line;std::vector<TerminalTextRun> runs;};
 // Same validation, clipping and bounds as layoutTerminalText. Runs concatenate exactly to line.text;
 // their cells sum to line.cells. Color/control bytes must be added only after this layout boundary.
 bool layoutTerminalTextRuns(const std::vector<TerminalTextSpan> &,const TerminalTextPolicy &,TerminalTextRunLine *);
+bool wrapTerminalTextRuns(const std::vector<TerminalTextSpan> &,const TerminalTextPolicy &,std::size_t maximumLines,std::vector<TerminalTextRunLine> *);
+bool padTerminalTextRuns(const std::vector<TerminalTextSpan> &,const TerminalTextPolicy &,TerminalTextAlignment,TerminalTextRunLine *);
 } // namespace om

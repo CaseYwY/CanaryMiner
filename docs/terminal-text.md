@@ -41,6 +41,10 @@ P-13c subsequently adds bounded autonomous-row wrapping and padding below. Color
 
 [P-13f](terminal-segments.md) subsequently adds source-provenance/cell/control runs and native fixed-palette color after line layout, without ordinary activation or typed localized-number/colored-row qualification.
 
+[P-13g](terminal-number.md) supplies atomic exact numeric/unit human spans and [P-13h](terminal-rows.md) carries original
+provenance into colored autonomous rows/physical fields. These do not activate the ordinary native renderer or qualify full
+messages, rich-paragraph reflow, data ownership or real terminals.
+
 ## Autonomous rows and padded fields (P-13c)
 
 `wrapTerminalText` delegates enabled Unicode line opportunities to ICU's root `UBRK_LINE`, intersected with the maintained grapheme edges and atomic invariant spans. Disabled/requested ASCII uses explicit fallback text and ASCII-space opportunities. It prefers the last complete opportunity that fits the declared cell width; long human words can break only at grapheme edges. It preserves all original whitespace, unlike the old ASCII helper. Each output is an **independent display row/bidi paragraph**, suitable for separate native fields, not a rich-text paragraph with preserved cross-line embedding/bracket context. It does not claim full paragraph reflow/UAX #9 `setLine` equivalence.
