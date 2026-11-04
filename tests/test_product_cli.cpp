@@ -50,7 +50,8 @@ int main() {
         CHECK(parsePoolSpec("prl-us.kryptex.network:7048", &e, &err) && e.preset == "kryptex" && e.policyKnown);
         CHECK(parsePoolSpec("stratum+tcp://us2.pearl.herominers.com:1200", &e, &err) && e.preset == "herominers" && e.port == 1200);
         CHECK(parsePoolSpec("example.net:3333", &e, &err) && e.preset.empty() && !e.policyKnown && e.host == "example.net");
-        CHECK(!parsePoolSpec("stratum+ssl://pearl.f2pool.com:5500", &e, &err) && contains(err, "TLS not supported yet"));        CHECK(!parsePoolSpec("stratum+tcp://", &e, &err) && contains(err, "neither a preset"));
+        CHECK(!parsePoolSpec("stratum+ssl://pearl.f2pool.com:5500", &e, &err) && contains(err, "strict TLS") && contains(err,"No TCP fallback") && !contains(err,"use stratum+tcp"));
+        CHECK(!parsePoolSpec("stratum+tcp://", &e, &err) && contains(err, "neither a preset"));
         // a lookalike domain is not a known host
         CHECK(parsePoolSpec("evilf2pool.com:5500", &e, &err) && e.preset.empty());
     }

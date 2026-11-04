@@ -171,7 +171,7 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
     }
     std::string endpoint = spec;
     if (endpoint.rfind("stratum+ssl://", 0) == 0) {
-        if (error) *error = "TLS not supported yet: stratum+ssl:// needs TLS, which this build does not have; use stratum+tcp:// or HOST:PORT";
+        if (error) *error = "stratum+ssl:// is strict TLS; this build has no qualified ordinary pool TLS runtime. No TCP fallback was attempted.";
         return false;
     }
     if (endpoint.rfind("stratum+tcp://", 0) == 0) endpoint = endpoint.substr(std::string("stratum+tcp://").size());

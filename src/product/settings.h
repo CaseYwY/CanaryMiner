@@ -11,6 +11,7 @@
 #include "ui_preferences.h"
 #include "runtime_settings.h"
 #include "game_settings.h"
+#include "pool_security_settings.h"
 #include "manual_market_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
@@ -23,7 +24,7 @@
 namespace om {
 
 enum class SettingsPage { Browse, Review, Leave };
-enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket, OpenElectricity, OpenTariff, OpenGame };
+enum class SettingsResult { None, Close, Quit, OpenRuntime, OpenManualMarket, OpenElectricity, OpenTariff, OpenGame, OpenPoolSecurity };
 
 class SettingsPanel {
    public:
@@ -37,6 +38,7 @@ class SettingsPanel {
     std::string message;
     RuntimeSettingsPanel runtime;
     GameSettingsPanel game;
+    PoolSecuritySettingsPanel poolSecurity;
     ManualMarketSettingsPanel manual;
     ElectricitySettingsPanel electricity;
     TariffSettingsPanel tariff;
@@ -58,6 +60,7 @@ class SettingsPanel {
         message.clear();
         runtime.visible = false;
         game.visible = false;
+        poolSecurity.visible=false;
         manual.visible = false;
         electricity.visible = false;
         tariff.visible = false;
@@ -73,19 +76,20 @@ class SettingsPanel {
                                                       "Games", "Pools and TLS", "Language", "Privacy", "Details", "Log"};
         return names;
     }
-    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3 || group == 5) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3 || group == 5 || group == 6) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
     void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
     void updateBillingReview(){if(billingReview.visible)billingReview.sync(billingAccess);}
     void stopBillingReview(){billingReview.key(3,billingAccess);}
 
-    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}, const GameSettingsPanel::Save &gameSave = {}) {
-        const auto result=routeKey(key,save,runtimeSave,manualSave,nowUtc,electricitySave,tariffSave,gameSave);
+    SettingsResult key(int key, const Save &save, const RuntimeSettingsPanel::Save &runtimeSave = {}, const ManualMarketSettingsPanel::Save &manualSave = {}, uint64_t nowUtc = 0, const ElectricitySettingsPanel::Save &electricitySave = {}, const TariffSettingsPanel::Save &tariffSave = {}, const GameSettingsPanel::Save &gameSave = {}, const PoolSecuritySettingsPanel::Save &poolSave = {}) {
+        const auto result=routeKey(key,save,runtimeSave,manualSave,nowUtc,electricitySave,tariffSave,gameSave,poolSave);
         if(result==SettingsResult::Quit)stopBillingReview();
         return result;
     }
-    SettingsResult routeKey(int key,const Save &save,const RuntimeSettingsPanel::Save &runtimeSave,const ManualMarketSettingsPanel::Save &manualSave,uint64_t nowUtc,const ElectricitySettingsPanel::Save &electricitySave,const TariffSettingsPanel::Save &tariffSave,const GameSettingsPanel::Save &gameSave){
+    SettingsResult routeKey(int key,const Save &save,const RuntimeSettingsPanel::Save &runtimeSave,const ManualMarketSettingsPanel::Save &manualSave,uint64_t nowUtc,const ElectricitySettingsPanel::Save &electricitySave,const TariffSettingsPanel::Save &tariffSave,const GameSettingsPanel::Save &gameSave,const PoolSecuritySettingsPanel::Save &poolSave){
+        if(poolSecurity.visible)return poolSecurity.key(key,poolSave)==PoolSecuritySettingsResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(game.visible)return game.key(key,gameSave)==GameSettingsResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(billingReview.visible)return billingReview.key(key,billingAccess)==BillingReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;
         if(energyAuthorization.visible){updateEnergyAuthorization();return energyAuthorization.key(key,energyAuthorizationAccess)==EnergyAuthorizationPanelResult::Quit?SettingsResult::Quit:SettingsResult::None;}
@@ -138,6 +142,7 @@ class SettingsPanel {
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3) return SettingsResult::OpenManualMarket;
             else if (group == 5) return SettingsResult::OpenGame;
+            else if (group == 6) return SettingsResult::OpenPoolSecurity;
             else if ((group==2&&field==4)||(group==8&&field==5)) billingReview.open(billingAccess.snapshot?billingAccess.snapshot():nullptr);
             else if ((group==2&&field==3)||(group==8&&field==4)) energyAuthorization.open(energyAuthorizationAccess.snapshot?energyAuthorizationAccess.snapshot():nullptr);
             else if ((group==2&&field==2)||(group==8&&field==3)) energyReview.open(energyAccess.snapshot?energyAccess.snapshot():nullptr);
@@ -168,6 +173,7 @@ class SettingsPanel {
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
+        if(poolSecurity.visible)return poolSecurity.render(columns,rows,color);
         if(game.visible)return game.render(columns,rows,color);
         if(billingReview.visible)return billingReview.render(columns,rows,color);
         if(energyAuthorization.visible)return energyAuthorization.render(columns,rows,color,energyAuthorizationAccess);
@@ -294,6 +300,10 @@ class SettingsPanel {
             row(0,"Game mode / exact target defaults [Enter]");
             result.push_back({"Configured only; native safety/CLI activation unavailable.",Tone::Plain});
             result.push_back({"Non-off requests refuse the next ordinary start.",Tone::Plain});
+        } else if(group==6){
+            row(0,"TLS / independent plaintext declarations [Enter]");
+            result.push_back({"Strict URLs, per-user-pool consent, separate donation.",Tone::Plain});
+            result.push_back({"No live activation; requested TLS refuses ordinary startup.",Tone::Plain});
         } else if (group == 2) {
             row(0,"Session board energy / declared flat energy-only rate [Enter]");
             row(1,"Combined tariff / declared whole-meter opening [Enter]");
@@ -360,6 +370,12 @@ inline void openGameControls(SettingsPanel *panel,GamePreferencesStore *store,co
     if(!store->load(&value,&error)){panel->message="Game defaults unavailable: "+error;return;}
     panel->game.open(std::move(value),context);
 }
+inline void openPoolSecurityControls(SettingsPanel *panel,PoolSecurityPreferencesStore *store,const PoolSecuritySettingsContext &context){
+    if(!store){panel->message="Pool security declarations unavailable: no local target.";return;}
+    PoolSecurityPreferences value;std::string error;
+    if(!store->load(&value,&error)){panel->message="Pool security declarations unavailable: "+error;return;}
+    panel->poolSecurity.open(std::move(value),context);
+}
 inline void openElectricityControls(SettingsPanel *panel,ElectricityPreferencesStore *store,const ElectricitySettingsContext &context) {
     if(!store){panel->message="Electricity settings unavailable: no local target.";return;}
     ElectricityPreferences p;std::string error;
@@ -386,6 +402,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     UiPreferencesStore store(std::filesystem::u8path(stateDir) / "ui-preferences.json");
     RuntimePreferencesStore runtimeStore(std::filesystem::u8path(stateDir) / "runtime-preferences.json");
     GamePreferencesStore gameStore(std::filesystem::u8path(stateDir) / "game-preferences.json");
+    PoolSecurityPreferencesStore poolStore(std::filesystem::u8path(stateDir) / "pool-security-preferences.json");
     ManualMarketStore manualStore(std::filesystem::u8path(stateDir) / "manual-market-preferences.json");
     ElectricityPreferencesStore electricityStore(std::filesystem::u8path(stateDir) / "electricity-preferences.json");
     TariffDeclarationStore tariffStore(std::filesystem::u8path(stateDir) / "tariff-declaration.json");
@@ -421,12 +438,14 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
                 [&](ManualMarketPreferences &p, std::string *e) { return confirmManualMarket(&p,static_cast<uint64_t>(time(nullptr)),e) && manualStore.save(p,e); }, static_cast<uint64_t>(time(nullptr)),
                 [&](ElectricityPreferences &p,std::string *e){return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),e)&&electricityStore.save(p,e);},
                 [&](const JsonValue &p,std::string *e){return tariffStore.save(p,e);},
-                [&](const GamePreferences &p,std::string *e){return gameStore.save(p,e);});
+                [&](const GamePreferences &p,std::string *e){return gameStore.save(p,e);},
+                [&](const PoolSecurityPreferences &p,std::string *e){return poolStore.save(p,e);});
             if (result == SettingsResult::OpenRuntime) openRuntimeControls(&panel, &runtimeStore, {});
             else if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.cliDisabled=noMarket; openManualMarketControls(&panel,&manualStore,context); }
             else if (result == SettingsResult::OpenElectricity) {ElectricitySettingsContext context;context.cliNoEnergy=noEnergy;openElectricityControls(&panel,&electricityStore,context);}
             else if (result == SettingsResult::OpenTariff) openTariffControls(&panel,&tariffStore);
-            else if (result == SettingsResult::OpenGame) openGameControls(&panel,&gameStore,{});
+             else if (result == SettingsResult::OpenGame) openGameControls(&panel,&gameStore,{});
+             else if (result == SettingsResult::OpenPoolSecurity) openPoolSecurityControls(&panel,&poolStore,{});
             else if (result != SettingsResult::None) { panel.visible = false;if(runtime)runtime->requestStop();break; }
         }
         panel.updateCreditReview();

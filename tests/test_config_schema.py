@@ -141,6 +141,27 @@ class RuntimePreferencesSchemaTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r'\\"([a-z_]+)\\":', writer)), set(schema['properties']))
 
 
+class PoolSecurityPreferencesSchemaTests(unittest.TestCase):
+    def test_independent_scope_strict_urls_and_consent(self):
+        schema = load('config/pool-security-preferences-v1.schema.json')
+        empty = dict(mode='unchanged', tls_url='', plaintext_url='', plaintext_consent=False)
+        selected = dict(mode='prefer_tls', tls_url='stratum+ssl://pool-fixture.test:8048', plaintext_url='stratum+tcp://pool-fixture.test:7048', plaintext_consent=True)
+        value = dict(schema_version=1, user_pools=[empty], donation=empty)
+        self.assertEqual(validate(value, schema, schema), [])
+        self.assertEqual(validate({**value, 'user_pools': [selected] * 8}, schema, schema), [])
+        self.assertEqual(validate({**value, 'donation': selected}, schema, schema), [])  # declaration, never endpoint capability
+        for bad in ({}, {**value, 'schema_version': 9}, {**value, 'user_pools': []}, {**value, 'user_pools': [empty] * 9}, {**value, 'wallet': 'fixture'},
+                    {**value, 'donation': {**selected, 'mode': 'strict_tls'}}, {**value, 'user_pools': [{**empty, 'mode': 'strict_tls'}]},
+                    {**value, 'user_pools': [{**selected, 'plaintext_url': ''}]}, {**value, 'user_pools': [{**selected, 'plaintext_consent': 1}]}):
+            self.assertTrue(validate(bad, schema, schema))
+        for url in ('stratum+ssl://pool.test:0', 'stratum+ssl://pool.test:65536', 'stratum+ssl://pool.test:01', 'stratum+ssl://user@pool.test:1',
+                    'stratum+ssl://127.0.0.1:1', 'stratum+ssl://[::1]:1', 'stratum+ssl://pool.test:1/path', 'stratum+ssl://pool.test:1\n',
+                    'stratum+ssl://Pool.test:1', 'stratum+ssl://' + 'x' * 64 + '.test:1'):
+            self.assertTrue(validate({**value, 'user_pools': [{**selected, 'tls_url': url}]}, schema, schema), url)
+        for port in (1, 9999, 10000, 59999, 60000, 64999, 65000, 65499, 65500, 65529, 65530, 65535):
+            self.assertEqual(validate({**value, 'user_pools': [{**selected, 'tls_url': f'stratum+ssl://pool.test:{port}'}]}, schema, schema), [])
+
+
 class GamePreferencesSchemaTests(unittest.TestCase):
     def test_private_target_mode_and_bounds(self):
         schema = load('config/game-preferences-v1.schema.json')

@@ -447,6 +447,19 @@ int main(int argc, char **argv) {
             return kExitConfig;
         }
     }
+    // Secure intent is not an optional game/economics feature: pooled parent research/evidence
+    // modes must not bypass it and silently construct the legacy plaintext source either.
+    if(cli.command==Command::Run&&!workerChild&&!cli.help&&!opt.bench&&!opt.formalBenchmark.enabled){
+        std::string error;
+        PoolSecurityPreferencesStore poolStore(std::filesystem::u8path(cfg.stateDir)/"pool-security-preferences.json");PoolSecurityPreferences poolDefaults;
+        if(!poolStore.load(&poolDefaults,&error)){
+            fprintf(stderr,"pool security declarations unavailable: %s; no mining was started\n",error.c_str());return kExitConfig;
+        }
+        if(poolSecurityRequested(poolDefaults)){
+            fprintf(stderr,"configured pool TLS requires qualified ordinary transport/trust binding, unavailable in this build; review Pools and TLS declarations before an ordinary start; no TCP downgrade or mining was started\n");return kExitConfig;
+        }
+    }
+    if(ordinaryRuntime&&!cli.help)fprintf(stderr,"Legacy TCP compatibility is unencrypted; no automatic TLS migration or downgrade is performed.\n");
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
         fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
         return kExitUsage;
@@ -951,6 +964,7 @@ int main(int argc, char **argv) {
         so.runtimePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json").u8string();
         so.runtimeContext = runtimeContext;
         so.gamePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "game-preferences.json").u8string();
+        so.poolSecurityPreferencesPath=(std::filesystem::u8path(cfg.stateDir)/"pool-security-preferences.json").u8string();
         so.gameContext.running=true;so.gameContext.effective=gameDefaults;
         so.manualMarketPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "manual-market-preferences.json").u8string();
         so.manualMarketFactory = makeManualMarketProjector;
