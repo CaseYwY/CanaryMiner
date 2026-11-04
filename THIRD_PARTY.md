@@ -159,3 +159,8 @@ The full upstream 79.1 `LICENSE`, including its third-party notices, is retained
 See `docs/terminal-text.md` for the exact development source/binary/corpus hashes, different Windows/Linux linkage,
 signature-authentication limitations and unqualified data-loading/deployment/terminal/font/shaping boundaries.
 The API floor is not a patch/security approval. No production miner is linked to or published with this capability.
+
+The separate `canary_localized_format` development library uses the same explicitly selected ICU number/cardinal
+facilities after the existing exact decimal display-rounding boundary. It includes no additional external binary,
+dataset or runtime activation. The same notice/data-owner/servicing/redistribution qualification limits apply.
+See `docs/localized-format.md`; no locale, asset precision, currency, tariff or timezone is inferred.

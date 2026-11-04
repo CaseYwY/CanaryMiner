@@ -37,6 +37,8 @@ Native fixtures cover transactional invalid/control/size/policy rejection, zero/
 
 P-13c subsequently adds bounded autonomous-row wrapping and padding below. Colored segment/native renderer integration, independent formatting/plural messages, native language/persistence/CLI precedence, all UI domains, terminal capability/fallback discovery, startup data-owner policy, Windows/Linux terminal/font/assistive-technology qualification and human translations remain open. Existing byte helpers must not be used for non-English activation in the meantime. Reference contracts: [ICU boundary analysis](https://unicode-org.github.io/icu/userguide/boundaryanalysis/), [ICU bidi](https://unicode-org.github.io/icu/userguide/transforms/bidi.html), [ICU4C build guide](https://unicode-org.github.io/icu/userguide/icu4c/build.html).
 
+[P-13d](localized-format.md) subsequently supplies exact independent number/cardinal primitives, not complete plural translations, date/time formatting or native activation.
+
 ## Autonomous rows and padded fields (P-13c)
 
 `wrapTerminalText` delegates enabled Unicode line opportunities to ICU's root `UBRK_LINE`, intersected with the maintained grapheme edges and atomic invariant spans. Disabled/requested ASCII uses explicit fallback text and ASCII-space opportunities. It prefers the last complete opportunity that fits the declared cell width; long human words can break only at grapheme edges. It preserves all original whitespace, unlike the old ASCII helper. Each output is an **independent display row/bidi paragraph**, suitable for separate native fields, not a rich-text paragraph with preserved cross-line embedding/bracket context. It does not claim full paragraph reflow/UAX #9 `setLine` equivalence.
