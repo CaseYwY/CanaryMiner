@@ -1,0 +1,161 @@
+#include "terminal_text.h"
+#include "localization.h"
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <numeric>
+#if defined(CANARY_TERMINAL_ICU)
+#include <unicode/ubidi.h>
+#include <unicode/ubrk.h>
+#include <unicode/uchar.h>
+#include <unicode/ustring.h>
+#include <unicode/uversion.h>
+#endif
+namespace om {
+namespace {
+constexpr std::size_t inputLimit=4096,outputLimit=8192;
+bool ascii(std::string_view text){return std::all_of(text.begin(),text.end(),[](unsigned char c){return c>=32&&c<=126;});}
+bool scalar(std::string_view text,std::size_t &at,uint32_t &cp){
+    if(at==text.size())return false;
+    const auto first=static_cast<unsigned char>(text[at++]);cp=first;unsigned count=0;
+    if(first<0x80)count=0;else if(first>=0xc2&&first<=0xdf){count=1;cp=first&31;}else if(first>=0xe0&&first<=0xef){count=2;cp=first&15;}
+    else if(first>=0xf0&&first<=0xf4){count=3;cp=first&7;}else return false;
+    if(count>text.size()-at)return false;
+    for(unsigned i=0;i<count;++i){const auto next=static_cast<unsigned char>(text[at++]);if((next&0xc0)!=0x80)return false;cp=(cp<<6)|(next&63);}
+    return !((count==1&&cp<0x80)||(count==2&&cp<0x800)||(count==3&&cp<0x10000)||cp>0x10ffff||(cp>=0xd800&&cp<=0xdfff));
+}
+bool renderSafe(std::string_view text){
+    if(!i18n::safeMessageText(text))return false;
+    for(std::size_t at=0;at<text.size();){uint32_t cp=0;if(!scalar(text,at,cp)||cp==0x061c||cp==0x200e||cp==0x200f)return false;}
+    return true;
+}
+bool valid(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy){
+    if(spans.size()>64||policy.columns>4096||(policy.ambiguousCells!=1&&policy.ambiguousCells!=2)||(policy.emojiCells!=1&&policy.emojiCells!=2)||
+        static_cast<unsigned>(policy.order)>2||static_cast<unsigned>(policy.direction)>2)return false;
+    std::size_t bytes=0,fallbackBytes=0;
+    for(const auto &s:spans){if(s.text.size()>inputLimit-bytes||!renderSafe(s.text)||!ascii(s.ascii))return false;bytes+=s.text.size();
+        if((s.invariant&&(!ascii(s.text)||(!s.ascii.empty()&&s.ascii!=s.text)))||(!ascii(s.text)&&s.ascii.empty()))return false;
+        const auto &fallback=s.ascii.empty()?s.text:s.ascii;if(fallback.size()>inputLimit-fallbackBytes)return false;fallbackBytes+=fallback.size();}
+    return true;
+}
+TerminalTextLine asciiLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextFallback reason){
+    TerminalTextLine out;out.fallback=reason;
+    for(const auto &s:spans){const auto &text=s.ascii.empty()?s.text:s.ascii;const auto remaining=policy.columns-out.cells;
+        if(text.size()>remaining){if(!s.invariant){out.text.append(text,0,remaining);out.cells+=remaining;}out.clipped=true;break;}
+        out.text+=text;out.cells+=text.size();}
+    return out;
+}
+#if defined(CANARY_TERMINAL_ICU)
+using Utf16=std::vector<UChar>;
+bool toUtf16(std::string_view text,Utf16 &out,std::vector<std::size_t> *offsets=nullptr){
+    if(text.size()>inputLimit)return false;
+    Utf16 result;std::vector<std::size_t> map;
+    for(std::size_t at=0;at<text.size();){const auto begin=at;uint32_t cp=0;if(!scalar(text,at,cp))return false;
+        map.push_back(begin);if(cp<=0xffff)result.push_back(static_cast<UChar>(cp));else{cp-=0x10000;result.push_back(static_cast<UChar>(0xd800+(cp>>10)));map.push_back(begin);result.push_back(static_cast<UChar>(0xdc00+(cp&1023)));}}
+    map.push_back(text.size());out=std::move(result);if(offsets)*offsets=std::move(map);return true;
+}
+bool utf8(const UChar *text,std::size_t length,std::string &out){
+    if(length>outputLimit)return false;
+    std::string result(outputLimit,'\0');int32_t written=0;UErrorCode error=U_ZERO_ERROR;
+    u_strToUTF8(result.data(),static_cast<int32_t>(result.size()),&written,text,static_cast<int32_t>(length),&error);
+    if(U_FAILURE(error)||written<0||static_cast<std::size_t>(written)>outputLimit)return false;
+    result.resize(static_cast<std::size_t>(written));out=std::move(result);return true;
+}
+bool boundaries(const Utf16 &text,std::vector<int32_t> &out){
+    UErrorCode error=U_ZERO_ERROR;
+    const UChar empty=0;std::unique_ptr<UBreakIterator,decltype(&ubrk_close)> iterator(ubrk_open(UBRK_CHARACTER,"root",text.empty()?&empty:text.data(),static_cast<int32_t>(text.size()),&error),ubrk_close);
+    if(U_FAILURE(error)||!iterator)return false;
+    std::vector<int32_t> result;for(int32_t at=ubrk_first(iterator.get());at!=UBRK_DONE;at=ubrk_next(iterator.get()))result.push_back(at);
+    if(result.empty()||result.front()!=0||result.back()!=static_cast<int32_t>(text.size()))return false;
+    out=std::move(result);return true;
+}
+std::size_t cells(const Utf16 &text,int32_t begin,int32_t end,const TerminalTextPolicy &policy){
+    std::size_t width=0;
+    for(int32_t at=begin;at<end;){UChar32 cp;U16_NEXT(text.data(),at,end,cp);const auto category=u_charType(cp);
+        const auto east=u_getIntPropertyValue(cp,UCHAR_EAST_ASIAN_WIDTH);
+        if(category!=U_NON_SPACING_MARK&&category!=U_ENCLOSING_MARK&&category!=U_COMBINING_SPACING_MARK&&category!=U_FORMAT_CHAR&&
+            !u_hasBinaryProperty(cp,UCHAR_DEFAULT_IGNORABLE_CODE_POINT))width=std::max(width,static_cast<std::size_t>(east==U_EA_WIDE||east==U_EA_FULLWIDTH?2:east==U_EA_AMBIGUOUS?policy.ambiguousCells:1));
+    }
+    // Use maintained UTS #51 string membership, not a homemade ZWJ/keycap recognizer.
+    if(u_stringHasBinaryProperty(text.data()+begin,end-begin,UCHAR_RGI_EMOJI))return policy.emojiCells;
+    return width;
+}
+struct Cluster {int32_t begin=0,end=0;std::size_t span=0,width=0;bool orphan=false;};
+bool unicodeLine(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextLine &out){
+    Utf16 text;std::vector<int32_t> spanEnds;for(const auto &span:spans){Utf16 part;if(!toUtf16(span.text,part))return false;text.insert(text.end(),part.begin(),part.end());spanEnds.push_back(static_cast<int32_t>(text.size()));}
+    std::vector<int32_t> breaks;if(!boundaries(text,breaks))return false;
+    for(auto end:spanEnds)if(!std::binary_search(breaks.begin(),breaks.end(),end))return false; // never split one cluster between tones/identity spans
+    std::vector<Cluster> clusters;std::size_t span=0;
+    for(std::size_t i=1;i<breaks.size();++i){while(span<spanEnds.size()&&breaks[i-1]>=spanEnds[span])++span;if(span==spans.size())return false;
+        const auto width=cells(text,breaks[i-1],breaks[i],policy);clusters.push_back({breaks[i-1],breaks[i],span,width?width:1,width==0});}
+    TerminalTextLine result;std::size_t retained=0;
+    while(retained<clusters.size()){
+        const auto current=clusters[retained].span;std::size_t end=retained+1,width=clusters[retained].width;
+        if(spans[current].invariant)while(end<clusters.size()&&clusters[end].span==current)width+=clusters[end++].width;
+        if(width>policy.columns-result.cells){result.clipped=true;break;}
+        result.cells+=width;for(auto i=retained;i<end;++i)result.replacedOrphan=result.replacedOrphan||clusters[i].orphan;retained=end;
+    }
+    clusters.resize(retained);if(clusters.empty()){out=std::move(result);return true;}
+    Utf16 decorated;std::vector<int32_t> starts;std::size_t previous=spans.size();
+    for(const auto &cluster:clusters){if(previous!=cluster.span){if(previous!=spans.size()&&spans[previous].invariant)decorated.push_back(0x2069);
+            if(spans[cluster.span].invariant)decorated.push_back(0x2066);
+            previous=cluster.span;}
+        starts.push_back(static_cast<int32_t>(decorated.size()));
+        if(cluster.orphan)decorated.push_back('?');else decorated.insert(decorated.end(),text.begin()+cluster.begin,text.begin()+cluster.end);
+    }
+    if(spans[previous].invariant)decorated.push_back(0x2069);
+    if(policy.order==TerminalTextOrder::Logical){
+        if(policy.direction!=TerminalTextDirection::Auto){decorated.insert(decorated.begin(),policy.direction==TerminalTextDirection::RightToLeft?0x2067:0x2066);decorated.push_back(0x2069);}
+        if(!utf8(decorated.data(),decorated.size(),result.text))return false;
+        out=std::move(result);return true;}
+    UErrorCode error=U_ZERO_ERROR;std::unique_ptr<UBiDi,decltype(&ubidi_close)> bidi(ubidi_openSized(static_cast<int32_t>(decorated.size()),0,&error),ubidi_close);
+    if(U_FAILURE(error)||!bidi)return false;
+    const UBiDiLevel level=policy.direction==TerminalTextDirection::Auto?UBIDI_DEFAULT_LTR:policy.direction==TerminalTextDirection::RightToLeft?1:0;
+    ubidi_setPara(bidi.get(),decorated.data(),static_cast<int32_t>(decorated.size()),level,nullptr,&error);if(U_FAILURE(error))return false;
+    std::vector<int32_t> visual(decorated.size());ubidi_getVisualMap(bidi.get(),visual.data(),&error);if(U_FAILURE(error))return false;
+    std::vector<int32_t> logical(decorated.size());for(std::size_t i=0;i<visual.size();++i){if(visual[i]<0||static_cast<std::size_t>(visual[i])>=logical.size())return false;logical[visual[i]]=static_cast<int32_t>(i);}
+    std::vector<std::pair<int32_t,std::size_t>> order;
+    for(std::size_t i=0;i<clusters.size();++i){const auto count=clusters[i].orphan?1:clusters[i].end-clusters[i].begin;
+        const auto range=std::minmax_element(logical.begin()+starts[i],logical.begin()+starts[i]+count);
+        if(*range.second-*range.first!=count-1)return false; // a directionally discontinuous cluster is never torn apart
+        order.emplace_back(*range.first,i);}
+    std::sort(order.begin(),order.end());Utf16 finalText;
+    for(const auto &item:order){const auto i=item.second;const auto &cluster=clusters[i];if(cluster.orphan){finalText.push_back('?');continue;}
+        for(int32_t at=cluster.begin;at<cluster.end;){UChar32 cp;U16_NEXT(text.data(),at,cluster.end,cp);
+            if(ubidi_getLevelAt(bidi.get(),starts[i])&1)cp=u_charMirror(cp);
+            if(cp<=0xffff)finalText.push_back(static_cast<UChar>(cp));else{finalText.push_back(U16_LEAD(cp));finalText.push_back(U16_TRAIL(cp));}}
+    }
+    if(!utf8(finalText.data(),finalText.size(),result.text))return false;
+    out=std::move(result);return true;
+}
+#endif
+}
+TerminalTextBackend terminalTextBackend(){
+#if defined(CANARY_TERMINAL_ICU)
+    UVersionInfo version{},unicode{};u_getVersion(version);u_getUnicodeVersion(unicode);char v[U_MAX_VERSION_STRING_LENGTH]{},u[U_MAX_VERSION_STRING_LENGTH]{};
+    u_versionToString(version,v);u_versionToString(unicode,u);return {true,"ICU",v,u};
+#else
+    return {false,"ASCII",{}, {}};
+#endif
+}
+bool terminalGraphemeBoundaries(std::string_view text,std::vector<std::size_t> *out){
+    if(!out||text.size()>inputLimit)return false;
+#if defined(CANARY_TERMINAL_ICU)
+    Utf16 utf16;std::vector<std::size_t> offsets;if(!toUtf16(text,utf16,&offsets))return false;
+    std::vector<int32_t> points;if(!boundaries(utf16,points))return false;
+    std::vector<std::size_t> result;for(auto point:points)result.push_back(offsets[point]);*out=std::move(result);return true;
+#else
+    if(!ascii(text))return false;
+    std::vector<std::size_t> result(text.size()+1);std::iota(result.begin(),result.end(),0);*out=std::move(result);return true;
+#endif
+}
+bool layoutTerminalText(const std::vector<TerminalTextSpan> &spans,const TerminalTextPolicy &policy,TerminalTextLine *out){
+    if(!out||!valid(spans,policy))return false;
+    if(policy.order==TerminalTextOrder::Ascii){*out=asciiLine(spans,policy,TerminalTextFallback::RequestedAscii);return true;}
+#if defined(CANARY_TERMINAL_ICU)
+    return unicodeLine(spans,policy,*out);
+#else
+    *out=asciiLine(spans,policy,TerminalTextFallback::BackendDisabled);return true;
+#endif
+}
+} // namespace om

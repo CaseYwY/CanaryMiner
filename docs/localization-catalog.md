@@ -20,6 +20,8 @@ Before native selection is enabled, replace the renderer's byte clipping/wrappin
 
 The dependency review has checked ICU's [character-boundary contract](https://unicode-org.github.io/icu/userguide/boundaryanalysis/) (UAX #29 character boundaries are grapheme clusters) and [bidirectional guidance](https://unicode-org.github.io/icu/userguide/transforms/bidi.html). Grapheme count is not cell width; mirroring/reordering is not a complete glyph renderer. These references are requirements input, not an adopted/built/packaged dependency or passing native rendering evidence.
 
+[P-13b](terminal-text.md) subsequently adopts a separately disabled ICU line core with explicit width/bidi/ASCII policies. It still does not activate this catalog in the native byte-based UI or qualify physical fonts, shaping or terminal accessibility.
+
 ## Executed test scope
 
 `test_localization` validates all 16 IDs/autonyms/review/RTL metadata and 208 current key translations, exact source/translation placeholder parity, explicit English fallback, output/metadata preservation, no printf/reparse, both exact 4096-byte template boundaries and alias-safe output. An exhaustive generated scalar corpus covers all values through U+10FFFF, plus malformed/truncated byte sequences and control negatives. That exhaustive scalar check still does not prove grapheme/cell/bidi/formatting behavior. Exact platform counts, sanitizer and privacy results are in the [execution ledger](architecture/execution-plan.md).

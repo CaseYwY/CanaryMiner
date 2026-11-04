@@ -148,3 +148,14 @@ any different build must inventory its own used files. IANA's development licenc
 publication, which is not copied here. Future packages must include all applicable exact dependency notices, OS/CRT
 terms and reviewed data/update provenance. These development inputs have not passed independent release-signature
 authentication or clean-machine production qualification. No production binary for this feature is published.
+
+## 9. Optional maintained Unicode presentation backend
+
+`CANARY_ENABLE_TERMINAL_ICU` defaults OFF. The independently linked development presentation library uses separately
+supplied ICU4C 79.1+ for UAX #29 boundaries, Unicode character/emoji properties and UAX #9 levels/index maps.
+No ICU implementation archive, library binary, corpus or data package is included or downloaded by this build.
+The full upstream 79.1 `LICENSE`, including its third-party notices, is retained byte-exactly in
+`LICENSES/ICU-79.1.txt` (SHA-256 `e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d`).
+See `docs/terminal-text.md` for the exact development source/binary/corpus hashes, different Windows/Linux linkage,
+signature-authentication limitations and unqualified data-loading/deployment/terminal/font/shaping boundaries.
+The API floor is not a patch/security approval. No production miner is linked to or published with this capability.

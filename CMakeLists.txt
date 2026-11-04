@@ -18,6 +18,7 @@ option(CANARY_FEE_TEST_POLICY "Build the explicitly test-only accelerated donati
 if(CANARY_PROFILE STREQUAL "tests")
   # Host-side tests only: CPU, no nvcc, no GPU, no network. Built with warnings; format warnings are errors.
   project(canaryminer-tests LANGUAGES CXX)
+  include(cmake/CanaryTerminalText.cmake)
   include(cmake/CanaryPublicHttps.cmake)
   include(cmake/CanaryPoolTls.cmake)
   include(cmake/CanaryMarket.cmake)
@@ -38,6 +39,7 @@ if(CANARY_PROFILE STREQUAL "tests")
 endif()
 
 project(canaryminer LANGUAGES CXX CUDA)
+include(cmake/CanaryTerminalText.cmake)
 include(cmake/CanaryPublicHttps.cmake)
 include(cmake/CanaryPoolTls.cmake)
 include(cmake/CanaryMarket.cmake)
