@@ -19,6 +19,7 @@
 #include "pool_value_messages.h"
 #include "pool_rule_messages.h"
 #include "manual_market_field_messages.h"
+#include "manual_market_notice_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -203,4 +204,13 @@ bool layoutTerminalManualMarketFieldMessage(const TerminalManualMarketFieldMessa
 bool wrapTerminalManualMarketFieldMessage(const TerminalManualMarketFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalManualMarketFieldMessage(const TerminalManualMarketFieldMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalManualMarketFieldMessage(const TerminalManualMarketFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalManualMarketNoticeMessageRequest {
+    std::string language="en";
+    i18n::ManualMarketNoticeMessageKey key=i18n::ManualMarketNoticeMessageKey::InvalidDecimal;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalManualMarketNoticeMessage(const TerminalManualMarketNoticeMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalManualMarketNoticeMessage(const TerminalManualMarketNoticeMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalManualMarketNoticeMessage(const TerminalManualMarketNoticeMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalManualMarketNoticeMessage(const TerminalManualMarketNoticeMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

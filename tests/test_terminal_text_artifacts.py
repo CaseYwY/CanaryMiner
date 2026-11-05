@@ -20,6 +20,7 @@ def main(args):
     assert 'canary_terminal_settings_message' not in main_cmake
     for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/game_settings.h', 'src/product/pool_security_settings.h', 'src/product/manual_market_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h', 'src/product/game_preferences.h', 'src/product/pool_security_preferences.h', 'src/product/manual_market_preferences.h', 'src/product/manual_market.cpp'):
         text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalManualMarketNoticeMessage', 'wrapTerminalManualMarketNoticeMessage', 'renderTerminalManualMarketNoticeMessage', 'renderWrappedTerminalManualMarketNoticeMessage'))
         assert all(marker not in text for marker in ('layoutTerminalManualMarketFieldMessage', 'wrapTerminalManualMarketFieldMessage', 'renderTerminalManualMarketFieldMessage', 'renderWrappedTerminalManualMarketFieldMessage'))
         assert all(marker not in text for marker in ('layoutTerminalPoolRuleMessage', 'wrapTerminalPoolRuleMessage', 'renderTerminalPoolRuleMessage', 'renderWrappedTerminalPoolRuleMessage'))
         assert all(marker not in text for marker in ('layoutTerminalPoolValueMessage', 'wrapTerminalPoolValueMessage', 'renderTerminalPoolValueMessage', 'renderWrappedTerminalPoolValueMessage'))
@@ -51,7 +52,7 @@ def main(args):
     assert all(marker not in pool_preferences for marker in ('pool_field_messages.h', 'pool_notice_messages.h', 'pool_panel_messages.h', 'pool_value_messages.h', 'pool_rule_messages.h', 'localization.h', 'poolFieldMessage(', 'poolNoticeMessage(', 'poolPanelMessage(', 'poolValueMessage(', 'poolRuleMessage('))
     for source in ('src/product/manual_market_preferences.h', 'src/product/manual_market.cpp'):
         text = (root / source).read_text(encoding='utf-8')
-        assert all(marker not in text for marker in ('manual_market_field_messages.h', 'localization.h', 'manualMarketFieldMessage('))
+        assert all(marker not in text for marker in ('manual_market_field_messages.h', 'manual_market_notice_messages.h', 'localization.h', 'manualMarketFieldMessage(', 'manualMarketNoticeMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:

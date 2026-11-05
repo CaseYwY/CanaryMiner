@@ -34,3 +34,6 @@ CLI/PTY regressions remain separate. Exact platform/sanitizer/privacy results ar
 Manual shell/diagnostics/dynamic values, other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment,
 human review and physical terminal/font/shaping/accessibility remain open. Public-feed/reward/credit attribution, real power/
 safety/game/GPU/TLS, global quarantine and production release gates are not supplied by human labels.
+
+[P-13ae](manual-market-notice-messages.md) later extracts local editor/save/explicit-clock notices. This eight-field domain's
+historical results and value-free scope remain unchanged; neither extraction activates translated native rendering.

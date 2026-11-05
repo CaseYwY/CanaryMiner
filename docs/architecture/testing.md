@@ -276,6 +276,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ad](../manual-market-field-messages.md) checks 128 literal manual-reference labels, exact English/field-order/identity-token/review/RTL parity and typed line/paint/independent-wrap/refusal transactions. Fixed-predecessor before/after comparison retains 131072 native frames / 38912 contextual transitions/resulting frames/serializations with empty save access. Native store/projector/CLI/PTY, reference/confirmation clock and financial-source qualification remain independent; labels do not localize quantities or establish quote facts.
 
+[P-13ae](../manual-market-notice-messages.md) checks 144 literal editor/save/explicit-clock texts, protected input/CLI/clock restrictions and native memory-only selection of all nine outcomes with raw-error preservation, unavailable clocks, CLI precedence and confirmation/reference separation. Typed line/paint/independent-wrap/refusal and fixed-predecessor/native store/projector/CLI/PTY remain separate from actual action/source/physical-terminal qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

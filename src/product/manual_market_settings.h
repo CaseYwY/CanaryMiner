@@ -2,6 +2,7 @@
 #include "dashboard.h"
 #include "manual_market_preferences.h"
 #include "manual_market_field_messages.h"
+#include "manual_market_notice_messages.h"
 namespace om {
 enum class ManualMarketSettingsResult { None, Close, Quit };
 enum class ManualMarketSettingsPage { Browse, Edit, Review, Leave };
@@ -24,6 +25,7 @@ class ManualMarketSettingsPanel {
         *out=n; return true;
     }
     ManualMarketSettingsResult key(int key,const Save &save,uint64_t nowUtc) {
+        using NoticeKey=i18n::ManualMarketNoticeMessageKey;
         if(key==3)return ManualMarketSettingsResult::Quit;
         if(page==ManualMarketSettingsPage::Edit) {
             if(key==27){page=ManualMarketSettingsPage::Browse; message.clear();}
@@ -32,11 +34,11 @@ class ManualMarketSettingsPanel {
                 if(field==1 || field==4) {
                     ok=input.empty() || canonicalManualPrice(input,&value);
                     if(ok){(field==1?draft.prlUsdt:draft.usdtUsd)=value; if(value.empty())(field==1?draft.prlAsOfUtc:draft.fxAsOfUtc)=0;}
-                    else message="Enter a positive decimal: <=38 digits / <=18 decimals; no exponent or symbol.";
+                    else message=i18n::manualMarketNoticeEnglish(NoticeKey::InvalidDecimal);
                 } else {
                     ok=integer(input,&number) && (field!=6 || (number>=60 && number<=86400)) && (field!=7 || number<=3600);
                     if(ok){if(field==2)draft.prlAsOfUtc=number; else if(field==5)draft.fxAsOfUtc=number; else if(field==6)draft.validitySeconds=static_cast<unsigned>(number); else draft.maxFxSkewSeconds=static_cast<unsigned>(number);}
-                    else message=field==6?"Validity: integer 60..86400 seconds; no automatic refresh.":field==7?"Maximum FX reference-time skew: integer 0..3600 seconds.":"Enter UTC Unix seconds, not milliseconds/local time; [Esc] cancels.";
+                    else message=i18n::manualMarketNoticeEnglish(field==6?NoticeKey::InvalidValidity:field==7?NoticeKey::InvalidSkew:NoticeKey::InvalidReference);
                 }
                 if(ok){page=ManualMarketSettingsPage::Browse; message.clear();}
             } else if(key==8||key==127){if(replaceInput)input.clear(); else if(!input.empty())input.pop_back(); replaceInput=false;}
@@ -57,8 +59,8 @@ class ManualMarketSettingsPanel {
                 if(!confirmManualMarket(&saved,nowUtc,&error)){message=error; focusProblem(nowUtc);}
                 else if(save && save(saved,&error)) {
                     active=draft=saved; if(context.running&&!context.cliDisabled)context.effective=saved;
-                    page=ManualMarketSettingsPage::Browse; message=context.cliDisabled?"Saved; --no-market still suppresses this session's display.":"Saved. Manual reference display only; no miner restart or network request.";
-                } else message=error.empty()?"Save failed; draft retained and active display unchanged.":error;
+                    page=ManualMarketSettingsPage::Browse; message=i18n::manualMarketNoticeEnglish(context.cliDisabled?NoticeKey::SavedCliDisabled:NoticeKey::Saved);
+                } else message=error.empty()?i18n::manualMarketNoticeEnglish(NoticeKey::SaveFailed):error;
             }
         } else if(key==27) {
             if(dirty())page=ManualMarketSettingsPage::Leave; else {visible=false; return ManualMarketSettingsResult::Close;}
@@ -66,8 +68,8 @@ class ManualMarketSettingsPanel {
         else if(key==kKeyDown||key=='\t')field=(field+1)%8;
         else if(key==kKeyUp||key==kKeyBackTab)field=(field+7)%8;
         else if((key=='n'||key=='N')&&(field==2||field==5)) {
-            if(!nowUtc||nowUtc>kManualLastUtc)message="UTC clock unavailable; reference time unchanged.";
-            else {(field==2?draft.prlAsOfUtc:draft.fxAsOfUtc)=nowUtc; message="Reference stamped NOW by explicit action; use only for a reference from now.";}
+            if(!nowUtc||nowUtc>kManualLastUtc)message=i18n::manualMarketNoticeEnglish(NoticeKey::ClockUnavailable);
+            else {(field==2?draft.prlAsOfUtc:draft.fxAsOfUtc)=nowUtc; message=i18n::manualMarketNoticeEnglish(NoticeKey::StampedNow);}
         } else if(key==' '||key=='\r'||key=='\n') {
             message.clear();
             if(field==0)draft.enabled=!draft.enabled;
