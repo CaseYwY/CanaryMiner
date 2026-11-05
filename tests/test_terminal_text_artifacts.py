@@ -74,6 +74,11 @@ def main(args):
         assert all(marker not in text for marker in ('layoutTerminalEnergyAuthorizationPrivateMessage', 'wrapTerminalEnergyAuthorizationPrivateMessage', 'renderTerminalEnergyAuthorizationPrivateMessage', 'renderWrappedTerminalEnergyAuthorizationPrivateMessage'))
         if source not in ('src/product/energy_authorization_settings.h', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
             assert all(marker not in text for marker in ('energy_authorization_field_messages.h', 'energy_authorization_notice_messages.h', 'energy_authorization_panel_messages.h', 'energy_authorization_value_messages.h', 'energy_authorization_private_messages.h', 'localization.h', 'energyAuthorizationFieldMessage(', 'energyAuthorizationNoticeMessage(', 'energyAuthorizationPanelMessage(', 'energyAuthorizationValueMessage(', 'energyAuthorizationPrivateMessage('))
+    for source in ('src/product/tariff_settings.h', 'src/product/tariff_declaration.h', 'src/product/tariff_declaration.cpp', 'src/product/tariff_store.h', 'src/product/electricity.cpp', 'src/product/civil_time.cpp', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
+        text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalTariffNoticeMessage', 'wrapTerminalTariffNoticeMessage', 'renderTerminalTariffNoticeMessage', 'renderWrappedTerminalTariffNoticeMessage'))
+        if source not in ('src/product/tariff_settings.h', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
+            assert all(marker not in text for marker in ('tariff_notice_messages.h', 'localization.h', 'tariffNoticeMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:

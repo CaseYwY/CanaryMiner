@@ -127,6 +127,10 @@ other domains/effective native/data-owner/terminal/human and actual-source quali
 preserving reveal/source/selection/sanitizer boundaries and distinguishing human position from invariant bounded display.
 Formatting is not disclosure authority; other domains/effective native/data-owner/terminal/human and actual-source gates remain.
 
+[P-13at](tariff-notice-messages.md) adds eleven local offline-tariff notice keys (176 texts), retaining ASCII/length/validation/
+review/save/raw-error semantics without supplier, reset, billing or runtime authority. Tariff shell/hints/review/dynamic/other
+domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

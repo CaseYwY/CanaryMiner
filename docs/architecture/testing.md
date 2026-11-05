@@ -306,6 +306,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13as](../energy-authorization-private-messages.md) checks 224 private display/presence templates, one-pass expansion and per-argument nonempty/role/atomic/original/recovery/control/UTF-8 refusal across all wrappers. Native hidden/revealed/selected/retained-original/64-selection/blank/hostile/overlong vectors preserve sanitizer output and original requests without submission. Fixed-predecessor/helper/owner/storage/crash/CLI/PTY evidence stays separate from disclosure authorization, canonical identity, actual consent/receipts/source or effective-native/physical qualification.
 
+[P-13at](../tariff-notice-messages.md) checks 176 literal notices, exact English/review/RTL/token parity and typed line/paint/independent-wrap/refusal. Native memory-only selection covers all eleven outcomes with injected Save callbacks and unchanged raw errors. Fixed-predecessor before/after comparison retains 108160 nested frames / 33800 contextual transitions/resulting frames/active-draft-review serializations with empty save access. Actual store/model/CLI/PTY evidence stays separate from supplier approval, physical storage, reset/billing or runtime activation.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

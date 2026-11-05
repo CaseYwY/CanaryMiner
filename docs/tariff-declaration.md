@@ -65,3 +65,7 @@ python3 -B tests/test_tariff_declaration_terminal.py <host-cli-fixture> <host-su
 Linux development builds used direct GCC (`-std=c++17 -O1 -Wall -Wextra -Werror -pthread`) over tariff-declaration/electricity/civil-time/exact-decimal sources; sanitizer builds add `-g -fsanitize=address,undefined -fno-omit-frame-pointer`. This is not Linux CMake qualification. Host/PTY checks do not qualify supplier, native GPU, household/meter or physical durability behavior. The legacy compile-only recipe links tariff/time/decimal objects as host code; it does not qualify CUDA/SASS itself. Full pinned-toolchain/verifier/protocol/SASS, native GPU/game, named-zone packaging, hardware/driver stalls and physical-storage qualification remain unrun for this slice.
 
 Remaining: isolated durable observed bill/energy state, independent reset calendars, capable reviewed supplier adapters, qualified whole-meter/baseline observations, authenticated named-zone packaging, provider-qualified credit/reward/FX forecasts, runtime economic integration, profiles/optimizer/game/TLS/i18n and release gates. P-05/P-08 and the overall planning-book objective remain partial.
+
+[P-13at](tariff-notice-messages.md) later extracts eleven local input/draft/save notices with exact native English and separate
+typed drafts. The original editor/validator/store/JSON/review and no-runtime-activation contract remain; printed outcomes and
+mock callbacks are not persisted receipts, supplier approval or billing/reset permission. Historical P-05c evidence is unchanged.

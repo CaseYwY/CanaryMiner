@@ -1,6 +1,7 @@
 #pragma once
 #include "dashboard.h"
 #include "tariff_store.h"
+#include "tariff_notice_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -21,28 +22,29 @@ class TariffSettingsPanel {
         return s;
     }
     TariffSettingsResult key(int key,const Save &save,uint64_t now){
+        using NoticeKey=i18n::TariffNoticeMessageKey;
         if(key==3)return TariffSettingsResult::Quit;
         if(page==TariffSettingsPage::Edit){
             if(key==27){page=TariffSettingsPage::Browse;message.clear();}
             else if(key=='\r'||key=='\n'){
-                if(inputRejected){message="Input rejected; shorten/use ASCII or cancel. Nothing applied.";return TariffSettingsResult::None;}
+                if(inputRejected){message=i18n::tariffNoticeEnglish(NoticeKey::InputRejected);return TariffSettingsResult::None;}
                 auto *v=selected();if(!v)return TariffSettingsResult::None;
                 const auto name=selectedName();
                 if(input.empty()&&(name=="minimum_cycle_subtotal"||name=="through_kwh"||name=="date"))*v={};
                 else if(v->isNumber()){
-                    JsonValue number;if(!parseJsonStrict(input,&number,nullptr)||!number.isNumber()||input.find_first_not_of("-0123456789")!=std::string::npos){message="Integer only, in the field's stated units.";return TariffSettingsResult::None;}
+                    JsonValue number;if(!parseJsonStrict(input,&number,nullptr)||!number.isNumber()||input.find_first_not_of("-0123456789")!=std::string::npos){message=i18n::tariffNoticeEnglish(NoticeKey::IntegerOnly);return TariffSettingsResult::None;}
                     *v=std::move(number);
                 }else{v->type=JsonValue::Type::String;v->text=input;}
-                page=TariffSettingsPage::Browse;message="Draft only; V/F2 reviews and validates before Save.";
+                page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::DraftOnly);
             }else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;inputRejected=false;}
-            else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<128)input+=static_cast<char>(key);else{inputRejected=true;message="Maximum 128 characters; input was not truncated into a saved value.";}}
-            else if(key>=128&&key<=255){inputRejected=true;message="ASCII editor only; non-ASCII input rejected.";}
+            else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<128)input+=static_cast<char>(key);else{inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::TooLong);}}
+            else if(key>=128&&key<=255){inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::AsciiOnly);}
             return TariffSettingsResult::None;
         }
         if(key=='q'||key=='Q')return TariffSettingsResult::Quit;
         if(page==TariffSettingsPage::Remove){
             if(key==27)page=TariffSettingsPage::Browse;
-            else if(key=='\r'||key=='\n'){auto *v=node();if(v->isArray()&&field<v->items.size()){v->items.erase(v->items.begin()+field);if(field&&field==v->items.size())--field;}page=TariffSettingsPage::Browse;message="Removed from draft only; review before saving.";}
+            else if(key=='\r'||key=='\n'){auto *v=node();if(v->isArray()&&field<v->items.size()){v->items.erase(v->items.begin()+field);if(field&&field==v->items.size())--field;}page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::Removed);}
         }else if(page==TariffSettingsPage::Leave){
             if(key==27)page=TariffSettingsPage::Browse;
             else if(key=='d'||key=='D'){draft=active;visible=false;return TariffSettingsResult::Close;}
@@ -55,8 +57,8 @@ class TariffSettingsPanel {
                 auto candidate=draft;for(auto &m:candidate.members)if(m.first=="confirmed_utc"){m.second.type=JsonValue::Type::Number;m.second.text=std::to_string(now);}
                 TariffDeclaration checked;TariffProblem error;
                 if(!decodeTariffDeclaration(candidate,&checked,&error)){message=error.path+": "+error.message;focus(error.path);page=TariffSettingsPage::Browse;}
-                else if(save&&save(candidate,&message)){active=draft=std::move(candidate);page=TariffSettingsPage::Browse;message="Saved offline declaration + opening ONLY. Runtime collectors and policies do not use it yet.";}
-                else if(message.empty())message="Save unavailable; draft retained.";
+                else if(save&&save(candidate,&message)){active=draft=std::move(candidate);page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::SavedOffline);}
+                else if(message.empty())message=i18n::tariffNoticeEnglish(NoticeKey::SaveUnavailable);
             }
         }else if(key==27){
             if(!route.empty()){field=route.back();route.pop_back();}
@@ -67,13 +69,13 @@ class TariffSettingsPanel {
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
         else if((key=='a'||key=='A')&&node()->isArray()){
             const auto collection=collectionName();const size_t bound=collection=="revisions"?16:collection=="dynamic"?256:32;
-            if(count()>=bound||tariffJson(draft).size()>tariffDeclarationMaxBytes-1024)message="Collection/document capacity reached.";
-            else{auto value=tariffRowTemplate(collection);if(value.isObject()){node()->items.push_back(std::move(value));field=count()-1;message="Added blank row; unknown rates stay empty. Enter to edit.";}}
+            if(count()>=bound||tariffJson(draft).size()>tariffDeclarationMaxBytes-1024)message=i18n::tariffNoticeEnglish(NoticeKey::Capacity);
+            else{auto value=tariffRowTemplate(collection);if(value.isObject()){node()->items.push_back(std::move(value));field=count()-1;message=i18n::tariffNoticeEnglish(NoticeKey::AddedBlank);}}
         }else if((key=='x'||key=='X')&&node()->isArray()&&count())page=TariffSettingsPage::Remove;
         else if(key=='\r'||key=='\n'||key==' '){
             auto *v=selected();if(!v)return TariffSettingsResult::None;
             if(v->isObject()||v->isArray()){route.push_back(field);field=0;message.clear();}
-            else if(readOnly(selectedName()))message="Fixed schema/model contract. This field is not user-editable.";
+            else if(readOnly(selectedName()))message=i18n::tariffNoticeEnglish(NoticeKey::FixedContract);
             else if(v->isBool())v->boolean=!v->boolean;
             else{input=v->type==JsonValue::Type::Null?"":v->text;replaceInput=true;inputRejected=false;page=TariffSettingsPage::Edit;message.clear();}
         }
