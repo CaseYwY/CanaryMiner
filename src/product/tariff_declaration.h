@@ -3,6 +3,7 @@
 #include "electricity.h"
 #include "json_dom.h"
 #include <cstddef>
+#include <optional>
 namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
 struct TariffDeclaration {
@@ -11,7 +12,14 @@ struct TariffDeclaration {
     TariffPlan plan;
     BillOpening opening;
 };
-struct TariffProblem { std::string path, message; };
+// Display-neutral rejection sites, not persisted identifiers, source qualification or permission.
+enum class TariffProblemKind { Unknown, MissingFields, SchemaFields, DuplicateField, Label, Integer, Decimal, Choice, Collection, NoOutput, Oversized, SchemaVersion, Acknowledgement, Confirmation, Currency, FixedOffset, Date, OpeningQuantity, ArithmeticCapacity, ModelStatus, FuturePublication, InvalidJson };
+struct TariffProblem {
+    std::string path,message;
+    TariffProblemKind kind=TariffProblemKind::Unknown;
+    std::vector<std::string> choices{};
+    std::optional<ElectricityStatus> modelStatus{};
+};
 // Display-neutral private source records. Row counts are not JSON strings; value tokens retain exact source serialization.
 struct TariffDeclarationChange {
     enum class Kind { Value, RowCount };

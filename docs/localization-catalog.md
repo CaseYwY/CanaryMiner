@@ -151,6 +151,10 @@ errors/other domains/effective native/data-owner/terminal/human and actual-sourc
 preserving legacy lines/native review while separating invariant JSON/path from human atomic-LTR row-count display. Model code
 imports no UI; raw errors/legacy/other domains/complete native/data-owner/terminal/human and actual-source gates remain open.
 
+[P-13az](tariff-problem-metadata.md) adds display-neutral refusal kinds and choice/model-status payloads, not new translations
+or effective native UI. Original paths/messages/priority remain; later reason/envelope binding and raw/legacy/other domains/
+complete native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

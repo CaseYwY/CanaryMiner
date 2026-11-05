@@ -44,3 +44,6 @@ the [execution ledger](architecture/execution-plan.md).
 Tariff raw errors/legacy APIs and other panels/dashboard/log/raw domains, complete effective typed native/data-owner/
 deployment, human review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/
 game/GPU/TLS/financial sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13az](tariff-problem-metadata.md) subsequently adds display-neutral refusal classifications/payloads without changing
+these historical review results, legacy path/message bytes or model/UI import boundaries. Reasons remain untranslated.

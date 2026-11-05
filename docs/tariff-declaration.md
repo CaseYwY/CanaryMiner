@@ -85,3 +85,7 @@ semantics. Opaque original tokens are not localized human quantities, disclosure
 [P-13ay](tariff-review-messages.md) later exposes display-neutral private change records without model UI imports, preserving
 legacy strings and native complete review. Original JSON/path and row counts remain distinct and grant no fact/disclosure
 authority; parser/store and offline-only save semantics are unchanged.
+
+[P-13az](tariff-problem-metadata.md) later adds display-neutral refusal kinds and ordered choice/typed model-status payloads.
+All legacy refusal paths/messages/priority, raw native rendering and offline save contracts remain; metadata is not approval
+or a translated/effective UI.
