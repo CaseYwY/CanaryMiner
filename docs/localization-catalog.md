@@ -103,6 +103,10 @@ domains/effective native/data-owner/terminal/human and actual-source qualificati
 templates), separating human clock/atomic position from invariant original offset/time bytes and literal missing instants.
 Current-tariff/raw/other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13an](electricity-tariff-messages.md) adds nine complete frozen-current-tariff/off/presence keys (144 texts/templates),
+preserving invariant original requests and legacy blank developer fields without validating rates/currencies/versions.
+Raw/other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

@@ -28,6 +28,7 @@
 #include "electricity_panel_messages.h"
 #include "electricity_value_messages.h"
 #include "electricity_context_messages.h"
+#include "electricity_tariff_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -297,4 +298,14 @@ bool layoutTerminalElectricityContextMessage(const TerminalElectricityContextMes
 bool wrapTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalElectricityTariffMessageRequest {
+    std::string language="en";
+    i18n::ElectricityTariffMessageKey key=i18n::ElectricityTariffMessageKey::Off;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

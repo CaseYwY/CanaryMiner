@@ -6,6 +6,7 @@
 #include "electricity_panel_messages.h"
 #include "electricity_value_messages.h"
 #include "electricity_context_messages.h"
+#include "electricity_tariff_messages.h"
 #include <functional>
 namespace om {
 enum class ElectricitySettingsResult { None, Close, Quit };
@@ -117,7 +118,13 @@ class ElectricitySettingsPanel {
     }
     std::string currentTariff()const{
         const auto &p=context.effective;
-        return "Current tariff: "+(context.running&&p.collectEnergy&&p.tariffEnabled&&!context.cliNoEnergy?p.ratePerKwh+" "+p.currency+"/kWh | "+p.version:std::string("off/no active collection"));
+        if(!(context.running&&p.collectEnergy&&p.tariffEnabled&&!context.cliNoEnergy))return i18n::electricityTariffEnglish(i18n::ElectricityTariffMessageKey::Off);
+        const bool rate=!p.ratePerKwh.empty(),currency=!p.currency.empty(),version=!p.version.empty();
+        i18n::MessageArguments arguments;
+        if(rate)arguments.emplace_back("rate",p.ratePerKwh);
+        if(currency)arguments.emplace_back("currency",p.currency);
+        if(version)arguments.emplace_back("version",p.version);
+        return i18n::electricityTariffEnglish(i18n::electricityTariffPresenceKey(rate,currency,version),arguments);
     }
     static std::string label(unsigned f){const auto &keys=i18n::electricityFieldKeys();return i18n::electricityFieldEnglish(f<keys.size()?keys[f]:i18n::ElectricityFieldMessageKey::Count);}
     static std::string value(const ElectricityPreferences &p,unsigned f,bool display=true){

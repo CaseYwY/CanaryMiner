@@ -44,3 +44,6 @@ financial sources, global quarantine and production release gates remain unquali
 
 [P-13am](electricity-context-messages.md) later extracts complete field-position/model/effective-time/collection rows, not the
 current-tariff row. This original-request/input domain's historical evidence and no-source-admission scope remain unchanged.
+
+[P-13an](electricity-tariff-messages.md) later extracts that separate complete current-tariff row, without changing these
+historical request/input results or qualifying rates, currencies, versions or source facts.

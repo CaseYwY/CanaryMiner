@@ -42,3 +42,6 @@ store/owner/CLI/PTY regressions remain independent; exact results are in the [ex
 Current-tariff/raw/other panels/dashboard/log domains, effective typed native/data-owner/deployment, human review and physical
 terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/financial sources, global
 quarantine and production release gates remain unqualified.
+
+[P-13an](electricity-tariff-messages.md) subsequently extracts complete current-tariff/off/presence rows. These historical
+context-domain results and the no-time/source/activation-authority boundary remain unchanged.
