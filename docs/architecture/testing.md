@@ -286,6 +286,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ai](../electricity-field-messages.md) checks 272 literal electricity labels, exact English/order/unit/review/RTL parity and typed line/paint/independent-wrap/refusal. A fixed-predecessor comparison retains 278528 frames / 87040 contextual transitions/resulting frames/serializations with empty save access and original non-ASCII-input rejection. Actual store/session-owner/CLI/PTY tests remain independent of human semantics, sensor/billing/utility/currency/clock facts or physical-terminal qualification.
 
+[P-13aj](../electricity-notice-messages.md) checks 192 literal local electricity notices and all twelve native memory-only selection paths, rejection latches, signed/zero canonicalization, untouched raw callback errors, invalid NOW and frozen-current Save. Typed line/paint/independent-wrap/refusal, fixed-predecessor and actual store/owner/CLI/PTY remain separate from action receipts, supplier timestamps, sensor/billing/source or physical-terminal qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

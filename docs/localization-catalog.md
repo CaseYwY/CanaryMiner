@@ -87,6 +87,10 @@ other domains/effective native/data-owner/terminal/human and actual-source quali
 measurements/rates/identities or inferring supplier/currency/clock. Electricity shell/dynamic/other domains/effective native/
 data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13aj](electricity-notice-messages.md) adds twelve local electricity input/save/stamped-start keys (192 texts) without
+action/supplier-time/measurement authority or native behavior changes. Electricity shell/dynamic/other domains/effective
+native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

@@ -35,3 +35,6 @@ remain separate. Exact platform/sanitizer/privacy results are in the [execution 
 Electricity shell/notices/dynamic values, other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment,
 human review and physical terminal/font/shaping/accessibility remain open. Real utility/rate/power/safety/game/GPU/TLS/financial
 sources, global quarantine and production release gates are not supplied by labels.
+
+[P-13aj](electricity-notice-messages.md) later extracts local input/save/stamped-start notices without changing these label
+results or activating translated native rendering. Descriptions remain separate from actions, supplier times and readings.

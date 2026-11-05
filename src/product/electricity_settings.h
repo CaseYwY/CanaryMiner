@@ -2,6 +2,7 @@
 #include "dashboard.h"
 #include "electricity_preferences.h"
 #include "electricity_field_messages.h"
+#include "electricity_notice_messages.h"
 #include <functional>
 namespace om {
 enum class ElectricitySettingsResult { None, Close, Quit };
@@ -20,13 +21,14 @@ class ElectricitySettingsPanel {
         uint64_t n=0;for(char c:s){if(c<'0'||c>'9')return false;n=n*10+static_cast<unsigned>(c-'0');}if(n>253402300799ULL)return false;*value=n;return true;
     }
     ElectricitySettingsResult key(int key,const Save &save,uint64_t now){
+        using NoticeKey=i18n::ElectricityNoticeMessageKey;
         if(key==3)return ElectricitySettingsResult::Quit;
         if(page==ElectricitySettingsPage::Edit){
             if(key==27){page=ElectricitySettingsPage::Browse;message.clear();}
             else if(key=='\r'||key=='\n'){if(applyInput()){page=ElectricitySettingsPage::Browse;message.clear();}}
             else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;inputRejected=false;}
-            else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<64)input+=static_cast<char>(key);else{inputRejected=true;message="Input exceeds 64 characters; nothing applied. Edit shorter or cancel.";}}
-            else if(key>=128&&key<=255){inputRejected=true;message="This editor currently requires ASCII; non-ASCII input was not applied. Cancel or edit again.";}
+            else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<64)input+=static_cast<char>(key);else{inputRejected=true;message=i18n::electricityNoticeEnglish(NoticeKey::InputTooLong);}}
+            else if(key>=128&&key<=255){inputRejected=true;message=i18n::electricityNoticeEnglish(NoticeKey::NonAscii);}
             return ElectricitySettingsResult::None;
         }
         if(key=='q'||key=='Q')return ElectricitySettingsResult::Quit;
@@ -41,14 +43,14 @@ class ElectricitySettingsPanel {
             else if(key=='\r'||key=='\n'||key==kKeyF2){
                 auto candidate=draft;std::string error;
                 if(!confirmElectricityPreferences(&candidate,now,&error)){message=error;focusProblem();}
-                else if(save&&save(candidate,&error)){active=draft=std::move(candidate);page=ElectricitySettingsPage::Browse;message="Saved for NEXT EXPLICIT SESSION ONLY; current collection/tariff unchanged. No miner restart.";}
-                else message=error.empty()?"Save failed; draft retained and current session unchanged.":error;
+                else if(save&&save(candidate,&error)){active=draft=std::move(candidate);page=ElectricitySettingsPage::Browse;message=i18n::electricityNoticeEnglish(NoticeKey::Saved);}
+                else message=error.empty()?i18n::electricityNoticeEnglish(NoticeKey::SaveFailed):error;
             }
         }else if(key==27){if(dirty())page=ElectricitySettingsPage::Leave;else{visible=false;return ElectricitySettingsResult::Close;}}
         else if(key=='v'||key=='V'||key==kKeyF2){page=ElectricitySettingsPage::Review;reviewOffset=0;}
         else if(key==kKeyDown||key=='\t')field=(field+1)%17;
         else if(key==kKeyUp||key==kKeyBackTab)field=(field+16)%17;
-        else if((key=='n'||key=='N')&&field==15){if(now&&now<=253402300799ULL){draft.effectiveFromUtc=now;message="Effective start explicitly stamped now; this is a user declaration, not a supplier timestamp.";}}
+        else if((key=='n'||key=='N')&&field==15){if(now&&now<=253402300799ULL){draft.effectiveFromUtc=now;message=i18n::electricityNoticeEnglish(NoticeKey::StampedNow);}}
         else if(key==' '||key=='\r'||key=='\n'){
             message.clear();
             if(field==0)draft.collectEnergy=!draft.collectEnergy;else if(field==1)draft.showEnergy=!draft.showEnergy;
@@ -115,17 +117,18 @@ class ElectricitySettingsPanel {
         return std::to_string(f==15?p.effectiveFromUtc:p.effectiveThroughUtc);
     }
     bool applyInput(){
-        if(inputRejected){message="Input was too long or non-ASCII; nothing applied. Shorten/edit or cancel.";return false;}
+        using NoticeKey=i18n::ElectricityNoticeMessageKey;
+        if(inputRejected){message=i18n::electricityNoticeEnglish(NoticeKey::RejectedInput);return false;}
         if(field>=6&&field<=11){
-            if(!electricityLabel(input)){message="Use <=64 printable ASCII characters, no surrounding spaces.";return false;}
-            if(field==11&&!input.empty()&&(input.size()!=3||input.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")!=std::string::npos)){message="Currency: three UPPERCASE letters, no symbol or implicit FX.";return false;}
+            if(!electricityLabel(input)){message=i18n::electricityNoticeEnglish(NoticeKey::InvalidLabel);return false;}
+            if(field==11&&!input.empty()&&(input.size()!=3||input.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")!=std::string::npos)){message=i18n::electricityNoticeEnglish(NoticeKey::InvalidCurrency);return false;}
             std::string *values[]={&draft.country,&draft.region,&draft.supplier,&draft.product,&draft.version,&draft.currency};*values[field-6]=input;return true;
         }
-        if(field==12){std::string normalized;if(!input.empty()&&!canonicalElectricityRate(input,&normalized)){message="Enter a signed decimal <=38 digits / <=18 decimals; zero valid, no exponent.";return false;}draft.ratePerKwh=normalized;return true;}
+        if(field==12){std::string normalized;if(!input.empty()&&!canonicalElectricityRate(input,&normalized)){message=i18n::electricityNoticeEnglish(NoticeKey::InvalidRate);return false;}draft.ratePerKwh=normalized;return true;}
         uint64_t number=0;const bool negative=field==14&&!input.empty()&&input.front()=='-';const auto digits=negative?input.substr(1):input;
-        if(!unsignedNumber(digits,&number)){message="Enter an integer in the stated units; UTC uses seconds, not milliseconds.";return false;}
-        if(field==2||field==3){if(number<500||number>60000){message="Milliseconds must be 500..60000; maximum gap must also cover selection.";return false;}(field==2?draft.recordIntervalMs:draft.maximumGapMs)=static_cast<unsigned>(number);}
-        else if(field==14){if(number>64800||number%60||(!draft.fixedStandardTime&&number)){message="Select fixed STANDARD clock first; offset in whole-minute seconds within +/-64800.";return false;}draft.fixedOffsetSeconds=static_cast<int>(number)*(negative?-1:1);}
+        if(!unsignedNumber(digits,&number)){message=i18n::electricityNoticeEnglish(NoticeKey::InvalidInteger);return false;}
+        if(field==2||field==3){if(number<500||number>60000){message=i18n::electricityNoticeEnglish(NoticeKey::InvalidInterval);return false;}(field==2?draft.recordIntervalMs:draft.maximumGapMs)=static_cast<unsigned>(number);}
+        else if(field==14){if(number>64800||number%60||(!draft.fixedStandardTime&&number)){message=i18n::electricityNoticeEnglish(NoticeKey::InvalidOffset);return false;}draft.fixedOffsetSeconds=static_cast<int>(number)*(negative?-1:1);}
         else (field==15?draft.effectiveFromUtc:draft.effectiveThroughUtc)=number;
         return true;
     }
