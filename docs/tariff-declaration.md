@@ -75,3 +75,6 @@ JSON. Descriptions remain distinct from model/parser/store enforcement and do no
 
 [P-13av](tariff-hint-messages.md) later extracts editor guidance without changing field matching, native English, JSON or
 validation. Displaying syntax, unit or clock guidance neither admits a declaration nor supplies supplier/source facts.
+
+[P-13aw](tariff-context-messages.md) later extracts editor/path/position envelopes with unchanged native raw originals and
+indices. Independent typed display bounds do not alter editor/parser/store admission or supply numeric/path/source truth.

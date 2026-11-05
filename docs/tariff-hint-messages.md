@@ -36,3 +36,6 @@ example vectors. Actual store/model/CLI/PTY regressions remain separate; exact r
 Tariff dynamic/raw JSON and other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human
 review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/financial
 sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13aw](tariff-context-messages.md) subsequently extracts editor/path/position envelopes without changing these historical
+hint results, matching predicates or the distinction between source-only raw preservation and typed/schema validation.

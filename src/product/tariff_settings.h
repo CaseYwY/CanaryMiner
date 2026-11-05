@@ -4,6 +4,7 @@
 #include "tariff_notice_messages.h"
 #include "tariff_panel_messages.h"
 #include "tariff_hint_messages.h"
+#include "tariff_context_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -86,6 +87,7 @@ class TariffSettingsPanel {
     std::string render(int columns,int rows,ColorLevel color)const{
         using namespace dash_detail;const size_t width=static_cast<size_t>(std::max(20,columns)-1);
         using PanelKey=i18n::TariffPanelMessageKey;
+        using ContextKey=i18n::TariffContextMessageKey;
         if(rows>0&&rows<12)return i18n::tariffPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
         auto notice=wrapText(message.empty()?i18n::tariffPanelEnglish(PanelKey::OfflineDefault):message,width);
@@ -93,18 +95,20 @@ class TariffSettingsPanel {
         if(notice.size()>3)notice.resize(3);
         const size_t budget=rows>0?static_cast<size_t>(std::max(1,rows-static_cast<int>(footer.size()+notice.size())-1)):10000;
         std::vector<std::string> body;
-        if(page==TariffSettingsPage::Edit){body={"Edit "+selectedName(),"> "+input+"_",hint(selectedName()),i18n::tariffPanelEnglish(PanelKey::EditorKeys)};}
+        if(page==TariffSettingsPage::Edit){const auto heading=field>=count()?i18n::tariffContextEnglish(ContextKey::EditBlank):node()->isObject()?
+            i18n::tariffContextEnglish(ContextKey::EditField,{{"field",selectedName()}}):i18n::tariffContextEnglish(ContextKey::EditRow,{{"position",std::to_string(field)}});
+            body={heading,i18n::tariffContextEnglish(ContextKey::EditInput,{{"input",input}}),hint(selectedName()),i18n::tariffPanelEnglish(PanelKey::EditorKeys)};}
         else if(page==TariffSettingsPage::Review)body=review;
         else if(page==TariffSettingsPage::Leave)body={i18n::tariffPanelEnglish(PanelKey::LeaveTitle),i18n::tariffPanelEnglish(PanelKey::LeaveKeys)};
-        else if(page==TariffSettingsPage::Remove)body={"Remove draft row "+std::to_string(field)+"?",i18n::tariffPanelEnglish(PanelKey::RemoveKeys),i18n::tariffPanelEnglish(PanelKey::RemovePreserve)};
+        else if(page==TariffSettingsPage::Remove)body={i18n::tariffContextEnglish(ContextKey::RemoveRow,{{"position",std::to_string(field)}}),i18n::tariffPanelEnglish(PanelKey::RemoveKeys),i18n::tariffPanelEnglish(PanelKey::RemovePreserve)};
         else{
             // Focus first: path is secondary so deep nesting cannot push the selected control off screen.
             const auto *v=node();const auto n=count();
             if(!n)body.push_back(i18n::tariffPanelEnglish(PanelKey::EmptyTable));
-            for(size_t i=field;i<n&&i<field+6;++i){const auto &value=v->isObject()?v->members[i].second:v->items[i];const auto name=v->isObject()?v->members[i].first:"row "+std::to_string(i);
-                body.push_back(std::string(i==field?"> ":"  ")+name+": "+(value.isObject()?i18n::tariffPanelEnglish(PanelKey::FieldsPrompt):value.isArray()?"[Enter] "+std::to_string(value.items.size())+" rows":tariffJson(value)+(readOnly(name)?i18n::tariffPanelEnglish(PanelKey::FixedSuffix):std::string{})));}
-            body.push_back("Path: "+(path().empty()?"declaration":path()));
-            body.push_back("Field "+std::to_string(n?field+1:0)+"/"+std::to_string(n));
+            for(size_t i=field;i<n&&i<field+6;++i){const auto &value=v->isObject()?v->members[i].second:v->items[i];const auto name=v->isObject()?v->members[i].first:i18n::tariffContextEnglish(ContextKey::RowName,{{"position",std::to_string(i)}});
+                body.push_back(std::string(i==field?"> ":"  ")+name+": "+(value.isObject()?i18n::tariffPanelEnglish(PanelKey::FieldsPrompt):value.isArray()?i18n::tariffContextEnglish(ContextKey::RowsPrompt,{{"count",std::to_string(value.items.size())}}):tariffJson(value)+(readOnly(name)?i18n::tariffPanelEnglish(PanelKey::FixedSuffix):std::string{})));}
+            const auto routePath=path();body.push_back(routePath.empty()?i18n::tariffContextEnglish(ContextKey::RootPath):i18n::tariffContextEnglish(ContextKey::Path,{{"path",routePath}}));
+            body.push_back(i18n::tariffContextEnglish(ContextKey::FieldPosition,{{"position",std::to_string(n?field+1:0)},{"count",std::to_string(n)}}));
         }
         std::vector<std::string> lines;for(const auto &s:body)for(const auto &part:wrapText(s,width))lines.push_back(part);
         if(page==TariffSettingsPage::Review&&lines.size()>budget){const auto offset=std::min(reviewOffset,lines.size()-budget);lines.erase(lines.begin(),lines.begin()+offset);}
@@ -120,7 +124,7 @@ class TariffSettingsPanel {
     const JsonValue *node()const{return const_cast<TariffSettingsPanel *>(this)->node();}
     size_t count()const{const auto *v=node();return v->isObject()?v->members.size():v->items.size();}
     JsonValue *selected(){if(field>=count())return nullptr;auto *v=node();return v->isObject()?&v->members[field].second:&v->items[field];}
-    std::string selectedName()const{if(field>=count())return "";const auto *v=node();return v->isObject()?v->members[field].first:"row "+std::to_string(field);}
+    std::string selectedName()const{if(field>=count())return "";const auto *v=node();return v->isObject()?v->members[field].first:i18n::tariffContextEnglish(i18n::TariffContextMessageKey::RowName,{{"position",std::to_string(field)}});}
     std::string collectionName()const{const auto s=path();const auto at=s.rfind('.');return at==std::string::npos?s:s.substr(at+1);}
     static bool readOnly(const std::string &s){return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";}
     static std::string hint(const std::string &s){
