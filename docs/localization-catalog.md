@@ -143,6 +143,10 @@ effective native/data-owner/terminal/human and actual-source qualification remai
 originals while independently bounding invariant schema/input/path and human atomic-LTR positions/counts. Tariff raw/review/
 other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ax](tariff-value-messages.md) adds seven complete offline-tariff browse-row keys (112 templates), preserving original JSON
+and fixed/field-versus-row predicates with independent invariant field/value and human atomic-LTR positions/counts. Raw review/
+errors/other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

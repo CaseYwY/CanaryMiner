@@ -5,6 +5,7 @@
 #include "tariff_panel_messages.h"
 #include "tariff_hint_messages.h"
 #include "tariff_context_messages.h"
+#include "tariff_value_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -105,8 +106,12 @@ class TariffSettingsPanel {
             // Focus first: path is secondary so deep nesting cannot push the selected control off screen.
             const auto *v=node();const auto n=count();
             if(!n)body.push_back(i18n::tariffPanelEnglish(PanelKey::EmptyTable));
-            for(size_t i=field;i<n&&i<field+6;++i){const auto &value=v->isObject()?v->members[i].second:v->items[i];const auto name=v->isObject()?v->members[i].first:i18n::tariffContextEnglish(ContextKey::RowName,{{"position",std::to_string(i)}});
-                body.push_back(std::string(i==field?"> ":"  ")+name+": "+(value.isObject()?i18n::tariffPanelEnglish(PanelKey::FieldsPrompt):value.isArray()?i18n::tariffContextEnglish(ContextKey::RowsPrompt,{{"count",std::to_string(value.items.size())}}):tariffJson(value)+(readOnly(name)?i18n::tariffPanelEnglish(PanelKey::FixedSuffix):std::string{})));}
+            for(size_t i=field;i<n&&i<field+6;++i){using ValueKey=i18n::TariffValueMessageKey;const bool object=v->isObject();const auto &value=object?v->members[i].second:v->items[i];
+                i18n::MessageArguments arguments=object?i18n::MessageArguments{{"field",v->members[i].first}}:i18n::MessageArguments{{"position",std::to_string(i)}};ValueKey key;
+                if(value.isObject())key=object?ValueKey::FieldFields:ValueKey::RowFields;
+                else if(value.isArray()){key=object?ValueKey::FieldRows:ValueKey::RowRows;arguments.emplace_back("count",std::to_string(value.items.size()));}
+                else{key=object?(readOnly(v->members[i].first)?ValueKey::FieldJsonFixed:ValueKey::FieldJson):ValueKey::RowJson;arguments.emplace_back("value",tariffJson(value));}
+                body.push_back(std::string(i==field?"> ":"  ")+i18n::tariffValueEnglish(key,arguments));}
             const auto routePath=path();body.push_back(routePath.empty()?i18n::tariffContextEnglish(ContextKey::RootPath):i18n::tariffContextEnglish(ContextKey::Path,{{"path",routePath}}));
             body.push_back(i18n::tariffContextEnglish(ContextKey::FieldPosition,{{"position",std::to_string(n?field+1:0)},{"count",std::to_string(n)}}));
         }

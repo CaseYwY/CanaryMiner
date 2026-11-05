@@ -78,3 +78,6 @@ validation. Displaying syntax, unit or clock guidance neither admits a declarati
 
 [P-13aw](tariff-context-messages.md) later extracts editor/path/position envelopes with unchanged native raw originals and
 indices. Independent typed display bounds do not alter editor/parser/store admission or supply numeric/path/source truth.
+
+[P-13ax](tariff-value-messages.md) later extracts complete browse rows without changing JSON tokens or fixed-field/prompt
+semantics. Opaque original tokens are not localized human quantities, disclosure authority or parser/model admission.

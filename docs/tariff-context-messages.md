@@ -42,3 +42,6 @@ store/model/CLI/PTY regressions remain separate; exact evidence is in the [execu
 Tariff raw JSON/review and other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human
 review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/financial
 sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13ax](tariff-value-messages.md) subsequently extracts complete browse rows around original JSON without changing these
+historical context results, source-only raw preservation or the stricter independent typed display boundary.

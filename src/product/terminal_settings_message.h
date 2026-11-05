@@ -38,6 +38,7 @@
 #include "tariff_panel_messages.h"
 #include "tariff_hint_messages.h"
 #include "tariff_context_messages.h"
+#include "tariff_value_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -401,4 +402,14 @@ bool layoutTerminalTariffContextMessage(const TerminalTariffContextMessageReques
 bool wrapTerminalTariffContextMessage(const TerminalTariffContextMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalTariffContextMessage(const TerminalTariffContextMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalTariffContextMessage(const TerminalTariffContextMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalTariffValueMessageRequest {
+    std::string language="en";
+    i18n::TariffValueMessageKey key=i18n::TariffValueMessageKey::FieldJson;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalTariffValueMessage(const TerminalTariffValueMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalTariffValueMessage(const TerminalTariffValueMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalTariffValueMessage(const TerminalTariffValueMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalTariffValueMessage(const TerminalTariffValueMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

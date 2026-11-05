@@ -80,8 +80,9 @@ def main(args):
         assert all(marker not in text for marker in ('layoutTerminalTariffPanelMessage', 'wrapTerminalTariffPanelMessage', 'renderTerminalTariffPanelMessage', 'renderWrappedTerminalTariffPanelMessage'))
         assert all(marker not in text for marker in ('layoutTerminalTariffHintMessage', 'wrapTerminalTariffHintMessage', 'renderTerminalTariffHintMessage', 'renderWrappedTerminalTariffHintMessage'))
         assert all(marker not in text for marker in ('layoutTerminalTariffContextMessage', 'wrapTerminalTariffContextMessage', 'renderTerminalTariffContextMessage', 'renderWrappedTerminalTariffContextMessage'))
+        assert all(marker not in text for marker in ('layoutTerminalTariffValueMessage', 'wrapTerminalTariffValueMessage', 'renderTerminalTariffValueMessage', 'renderWrappedTerminalTariffValueMessage'))
         if source not in ('src/product/tariff_settings.h', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
-            assert all(marker not in text for marker in ('tariff_notice_messages.h', 'tariff_panel_messages.h', 'tariff_hint_messages.h', 'tariff_context_messages.h', 'localization.h', 'tariffNoticeMessage(', 'tariffPanelMessage(', 'tariffHintMessage(', 'tariffContextMessage('))
+            assert all(marker not in text for marker in ('tariff_notice_messages.h', 'tariff_panel_messages.h', 'tariff_hint_messages.h', 'tariff_context_messages.h', 'tariff_value_messages.h', 'localization.h', 'tariffNoticeMessage(', 'tariffPanelMessage(', 'tariffHintMessage(', 'tariffContextMessage(', 'tariffValueMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:
