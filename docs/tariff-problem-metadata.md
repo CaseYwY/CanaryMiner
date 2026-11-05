@@ -35,3 +35,7 @@ or vectors are refreshed. Actual model/store/CLI/PTY evidence and exact platform
 Translated tariff diagnostic/reason binding, legacy/raw/other panels/dashboard/log domains, complete effective typed native/
 data-owner/deployment, human review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/
 safety/game/GPU/TLS/financial sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13ba](tariff-diagnostic-messages.md) subsequently binds classified refusal descriptions in a UI-only bridge with exact
+English/source equality and untouched raw unknown/model/changed originals. Historical metadata results and model import
+boundaries remain; non-English descriptions are independent machine-assisted drafts, not effective native UI.

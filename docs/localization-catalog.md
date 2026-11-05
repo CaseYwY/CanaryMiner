@@ -155,6 +155,10 @@ imports no UI; raw errors/legacy/other domains/complete native/data-owner/termin
 or effective native UI. Original paths/messages/priority remain; later reason/envelope binding and raw/legacy/other domains/
 complete native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ba](tariff-diagnostic-messages.md) adds twenty classified refusal keys (320 texts/templates) with explicit UI-only kind
+mapping, unchanged native English/raw recovery and bounded invariant choice display. Model-status/raw envelopes/legacy/other
+domains/complete native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

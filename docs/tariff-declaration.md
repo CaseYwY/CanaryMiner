@@ -89,3 +89,7 @@ authority; parser/store and offline-only save semantics are unchanged.
 [P-13az](tariff-problem-metadata.md) later adds display-neutral refusal kinds and ordered choice/typed model-status payloads.
 All legacy refusal paths/messages/priority, raw native rendering and offline save contracts remain; metadata is not approval
 or a translated/effective UI.
+
+[P-13ba](tariff-diagnostic-messages.md) later extracts classified refusal descriptions through explicit UI-only kind mapping
+and exact source equality. Native English/raw unknown/model/changed outcomes and parser/store/offline-save semantics remain;
+choice display supplies no enum admission or supplier/source truth.
