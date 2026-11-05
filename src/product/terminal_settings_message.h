@@ -6,6 +6,7 @@
 #include "settings_action_messages.h"
 #include "settings_diagnostic_messages.h"
 #include "language_field_messages.h"
+#include "language_panel_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -67,4 +68,14 @@ bool layoutTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageReques
 bool wrapTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalLanguagePanelMessageRequest {
+    std::string language="en";
+    i18n::LanguagePanelMessageKey key=i18n::LanguagePanelMessageKey::Title;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

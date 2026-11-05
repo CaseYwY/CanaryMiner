@@ -61,6 +61,14 @@ bool prepare(const TerminalLanguageFieldMessageRequest &request,TerminalMessageR
     for(const auto &pack:i18n::languageFieldLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;return true;
 }
+bool prepare(const TerminalLanguagePanelMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments))return false;
+    for(const auto &argument:request.arguments)if(argument.name=="value"&&!argument.value.content.invariant)return false;
+    templates.requested=i18n::languagePanelMessage(request.language,request.key);templates.english=i18n::languagePanelMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::languagePanelLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -132,6 +140,18 @@ bool renderTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageReques
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalLanguageFieldMessage(const TerminalLanguageFieldMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalLanguagePanelMessage(const TerminalLanguagePanelMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

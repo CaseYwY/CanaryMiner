@@ -28,6 +28,10 @@ void parsing(){
     CHECK(applyLanguageOverrides(saved,overrides,&copy,&error)&&copy.language=="zh-Hans"&&copy.formattingLocale=="de-DE"&&copy.textOrder==TerminalTextOrder::Visual&&saved.language=="en");
     overrides.language.reset();overrides.formattingLocale="en-US";overrides.ascii=true;CHECK(applyLanguageOverrides(saved,overrides,&copy,&error)&&copy.language=="en"&&copy.formattingLocale=="en-US"&&copy.textOrder==TerminalTextOrder::Ascii);
     overrides.language="private-invalid";const auto before=copy;CHECK(!applyLanguageOverrides(saved,overrides,&copy,&error)&&copy==before);
+    const auto *format=effectiveNativeNumberFormat(),*reason=nativeLanguageFallbackReason();const auto json=languagePreferencesJson(value);
+    CHECK(std::string(format)=="legacy per-field formatting"&&std::string(reason)=="Full native translation/typed-layout integration unavailable; legacy English presentation remains active.");
+    for(const auto &pack:i18n::languagePanelLocalePacks())CHECK(!i18n::languagePanelMessage(pack.id,i18n::LanguagePanelMessageKey::FallbackReason).text.empty());
+    CHECK(std::string(format)=="legacy per-field formatting"&&std::string(effectiveNativeMessageLanguage())=="en"&&languagePreferencesJson(value)==json);
 }
 void storage(const std::filesystem::path &dir){
     const auto path=dir/std::filesystem::u8path(u8"fixture-语言.json");LanguagePreferencesStore first(path),second(path);LanguagePreferences p,copy;std::string error;

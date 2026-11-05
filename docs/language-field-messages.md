@@ -38,3 +38,6 @@ actual store/CLI/PTY regressions remain independent. Exact platform/privacy/sani
 Remaining Language shell/review envelopes/notices, other subpanels/dashboard/raw domains, effective typed native/data-owner/
 deployment integration, human review and physical terminal/font/shaping/accessibility gates stay open. No real GPU/game/
 pool/power/financial/release qualification or production-miner replacement is implied.
+
+[P-13r](language-panel-messages.md) subsequently extracts the Language shell/review envelopes and limitation notices.
+The original eleven-key label scope and its evidence are unchanged; other domains/effective activation remain separate.

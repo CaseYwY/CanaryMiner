@@ -1,6 +1,7 @@
 // Independent local presentation requests. Parsing, saving and navigation never activate Unicode or mining.
 #pragma once
 #include "localization.h"
+#include "language_panel_messages.h"
 #include "localized_format.h"
 #include "presentation_locales.h"
 #include "terminal_text.h"
@@ -56,6 +57,6 @@ inline bool applyLanguageOverrides(const LanguagePreferences &saved,const Langua
 // Ordinary all-domain/typed-span integration is not available yet, even if an independent ICU test target exists.
 // Saved/CLI requests never block mining or pretend to activate the independent primitives.
 inline const char *effectiveNativeMessageLanguage(){return "en";}
-inline const char *effectiveNativeNumberFormat(){return "legacy per-field formatting";}
-inline const char *nativeLanguageFallbackReason(){return "Full native translation/typed-layout integration unavailable; legacy English presentation remains active.";}
+inline const char *effectiveNativeNumberFormat(){return i18n::languagePanelMessage("en",i18n::LanguagePanelMessageKey::LegacyNumberFormat).text.data();}
+inline const char *nativeLanguageFallbackReason(){return i18n::languagePanelMessage("en",i18n::LanguagePanelMessageKey::FallbackReason).text.data();}
 } // namespace om
