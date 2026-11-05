@@ -39,3 +39,6 @@ GPU/TLS, global quarantine and production release gates remain unqualified.
 
 [P-13ag](manual-market-value-messages.md) subsequently extracts field/change/edit/toggle/missing-price text. Complete current-
 reference/UTC context rows remain separate; this literal-domain historical evidence and no-source-authority scope are unchanged.
+
+[P-13ah](manual-market-context-messages.md) subsequently extracts those complete context rows without changing this literal
+domain's historical evidence or qualifying any price/time/source facts.

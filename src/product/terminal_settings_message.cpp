@@ -202,6 +202,17 @@ bool prepare(const TerminalManualMarketValueMessageRequest &request,TerminalMess
     for(const auto &pack:i18n::manualMarketValueLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
 }
+bool prepare(const TerminalManualMarketContextMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments))return false;
+    for(const auto &argument:request.arguments){const auto &content=argument.value.content;const bool state=argument.name=="state";
+        const std::size_t maximum=state?256:64;
+        if(content.text.empty()||content.text.size()>maximum||content.ascii.size()>maximum||(state?content.invariant:!content.invariant))return false;
+    }
+    templates.requested=i18n::manualMarketContextMessage(request.language,request.key);templates.english=i18n::manualMarketContextMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::manualMarketContextLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -465,6 +476,18 @@ bool renderTerminalManualMarketValueMessage(const TerminalManualMarketValueMessa
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalManualMarketContextMessage(const TerminalManualMarketContextMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalManualMarketContextMessage(const TerminalManualMarketContextMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalManualMarketContextMessage(const TerminalManualMarketContextMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalManualMarketContextMessage(const TerminalManualMarketContextMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

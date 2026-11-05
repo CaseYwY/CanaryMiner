@@ -282,6 +282,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ag](../manual-market-value-messages.md) checks 192 saved-request/human-toggle/missing-price/edit templates, bounded one-pass expansion, per-argument role/original/recovery/UTF-8 refusal and typed provenance/paint/independent-row transactions. Native optional-price/toggle matrices preserve original rows/JSON, including explicit developer-only inconsistent states. Fixed-predecessor/native store/projector/CLI/PTY evidence remains separate from canonical numeric admission, complete context-row binding, observed financial facts or physical-terminal qualification.
 
+[P-13ah](../manual-market-context-messages.md) checks 112 complete current-display/optional-PRL/UTC-N templates and each parameter's nonempty/role/original/recovery/UTF-8 refusal across all wrappers. Native optional-price/time/state matrices preserve original complete rows, context and CLI suppression, including explicit developer-only render states. Opaque non-time/invalid-UTC inputs remain display evidence only; fixed-predecessor/store/projector/CLI/PTY checks do not qualify actual numeric/time/source or physical-terminal facts.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

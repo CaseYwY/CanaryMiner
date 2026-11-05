@@ -79,6 +79,10 @@ terminal/human and actual-source qualification remain open.
 opaque invariant saved requests from human labels/toggles and literal missing prices. Complete context rows/other domains/
 effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ah](manual-market-context-messages.md) adds seven complete manual current-display/optional-PRL/UTC-N keys (112 texts/
+templates). Human state and invariant original price/time bytes remain distinct; missing literals invent no facts. Raw/
+other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

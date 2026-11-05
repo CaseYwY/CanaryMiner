@@ -42,3 +42,6 @@ evidence is in the [execution ledger](architecture/execution-plan.md).
 Complete manual context rows/other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human
 review and physical terminal/font/shaping/accessibility remain open. Public feeds/rewards/credit attribution, real power/
 safety/game/GPU/TLS, global quarantine and production release gates remain unqualified.
+
+[P-13ah](manual-market-context-messages.md) later extracts the complete current-display/current-PRL/UTC-N rows. This saved-
+request/input domain's historical evidence and no-numeric/source-admission boundary remain unchanged.

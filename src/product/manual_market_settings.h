@@ -5,6 +5,7 @@
 #include "manual_market_notice_messages.h"
 #include "manual_market_panel_messages.h"
 #include "manual_market_value_messages.h"
+#include "manual_market_context_messages.h"
 namespace om {
 enum class ManualMarketSettingsResult { None, Close, Quit };
 enum class ManualMarketSettingsPage { Browse, Edit, Review, Leave };
@@ -84,6 +85,7 @@ class ManualMarketSettingsPanel {
         using namespace dash_detail;
         using PanelKey=i18n::ManualMarketPanelMessageKey;
         using ValueKey=i18n::ManualMarketValueMessageKey;
+        using ContextKey=i18n::ManualMarketContextMessageKey;
         const size_t width=static_cast<size_t>(std::max(20,columns)-1);
         if(rows>0&&rows<12)return i18n::manualMarketPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::manualMarketPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::manualMarketPanelEnglish(PanelKey::ShortKeys)+"\n";
         const bool compact=width<70 || (rows>0&&rows<20);
@@ -112,13 +114,13 @@ class ManualMarketSettingsPanel {
             for(size_t i=start;i<8&&i<start+available;++i)body.push_back(std::string(i==field?"> ":"  ")+fieldValue(draft,static_cast<unsigned>(i)));
             if(!compact){
                 body.push_back(i18n::manualMarketPanelEnglish(PanelKey::Identity));
-                body.push_back(context.cliDisabled?i18n::manualMarketPanelEnglish(PanelKey::CurrentOff):context.running?std::string("Current display: ")+on(context.effective.enabled):i18n::manualMarketPanelEnglish(PanelKey::NoSession));
+                body.push_back(context.cliDisabled?i18n::manualMarketPanelEnglish(PanelKey::CurrentOff):context.running?i18n::manualMarketContextEnglish(ContextKey::CurrentDisplay,{{"state",on(context.effective.enabled)}}):i18n::manualMarketPanelEnglish(PanelKey::NoSession));
                 if(context.running&&!context.cliDisabled&&context.effective!=active) {
-                    body.push_back("Current PRL input: "+(context.effective.prlUsdt.empty()?i18n::manualMarketValueEnglish(ValueKey::NotSupplied):context.effective.prlUsdt)+" USDT/PRL | "+stamp(context.effective.prlAsOfUtc));
+                    body.push_back(currentPrl(context.effective));
                     body.push_back(i18n::manualMarketPanelEnglish(PanelKey::ConfiguredBoundary));
                 }
                 body.push_back(i18n::manualMarketPanelEnglish(PanelKey::NoProvider));
-                if(field==2||field==5)body.push_back("UTC: "+stamp(field==2?draft.prlAsOfUtc:draft.fxAsOfUtc)+" | N explicitly stamps NOW.");
+                if(field==2||field==5)body.push_back(utcLine(field==2?draft.prlAsOfUtc:draft.fxAsOfUtc));
             }
         }
         std::vector<std::string> lines;
@@ -147,6 +149,17 @@ class ManualMarketSettingsPanel {
         if(!beforeMissing)arguments.emplace_back("before",value(a,i));
         if(!afterMissing)arguments.emplace_back("after",value(b,i));
         return i18n::manualMarketValueEnglish(key,arguments);
+    }
+    static std::string currentPrl(const ManualMarketPreferences &p){using Key=i18n::ManualMarketContextMessageKey;
+        const bool price=!p.prlUsdt.empty(),time=p.prlAsOfUtc!=0;
+        const auto key=price?(time?Key::CurrentPrlBoth:Key::CurrentPrlPrice):(time?Key::CurrentPrlStamp:Key::CurrentPrlUnset);
+        i18n::MessageArguments arguments;
+        if(price)arguments.emplace_back("price",p.prlUsdt);
+        if(time)arguments.emplace_back("stamp",stamp(p.prlAsOfUtc));
+        return i18n::manualMarketContextEnglish(key,arguments);
+    }
+    static std::string utcLine(uint64_t utc){using Key=i18n::ManualMarketContextMessageKey;
+        return i18n::manualMarketContextEnglish(utc?Key::UtcStamp:Key::UtcUnset,utc?i18n::MessageArguments{{"stamp",stamp(utc)}}:i18n::MessageArguments{});
     }
     void focusProblem(uint64_t now){page=ManualMarketSettingsPage::Browse; if((draft.enabled||draft.prlAsOfUtc)&&draft.prlUsdt.empty())field=1; else if(!draft.prlUsdt.empty()&&(!draft.prlAsOfUtc||(draft.enabled&&draft.prlAsOfUtc>now)))field=2; else if((draft.fxEnabled||draft.fxAsOfUtc)&&draft.usdtUsd.empty())field=4; else if(!draft.usdtUsd.empty()&&(!draft.fxAsOfUtc||(draft.enabled&&draft.fxEnabled&&draft.fxAsOfUtc>now)))field=5;}
 };
