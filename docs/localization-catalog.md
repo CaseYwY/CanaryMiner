@@ -131,6 +131,10 @@ Formatting is not disclosure authority; other domains/effective native/data-owne
 review/save/raw-error semantics without supplier, reset, billing or runtime authority. Tariff shell/hints/review/dynamic/other
 domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13au](tariff-panel-messages.md) adds twenty-seven literal offline-tariff shell/review/limitation keys (432 texts), without
+private declaration/source values or supplier/reset/billing/activation authority. Tariff hints/dynamic/raw/other domains/
+effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

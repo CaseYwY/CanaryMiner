@@ -308,6 +308,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13at](../tariff-notice-messages.md) checks 176 literal notices, exact English/review/RTL/token parity and typed line/paint/independent-wrap/refusal. Native memory-only selection covers all eleven outcomes with injected Save callbacks and unchanged raw errors. Fixed-predecessor before/after comparison retains 108160 nested frames / 33800 contextual transitions/resulting frames/active-draft-review serializations with empty save access. Actual store/model/CLI/PTY evidence stays separate from supplier approval, physical storage, reset/billing or runtime activation.
 
+[P-13au](../tariff-panel-messages.md) checks 432 literal shell/review/limitation texts, exact English/review/RTL/key/file/model/range/currency parity, human fixed-annotation structure and typed line/paint/independent-wrap/refusal. Native memory-only selection covers all twenty-seven literals without storage, including review of an invalid blank template, not model admission. Fixed-predecessor/store/model/CLI/PTY evidence stays independent of real supplier/opening/reset/billing/source or effective-native/physical qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

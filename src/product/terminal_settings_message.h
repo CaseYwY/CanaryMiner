@@ -35,6 +35,7 @@
 #include "energy_authorization_value_messages.h"
 #include "energy_authorization_private_messages.h"
 #include "tariff_notice_messages.h"
+#include "tariff_panel_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -370,4 +371,13 @@ bool layoutTerminalTariffNoticeMessage(const TerminalTariffNoticeMessageRequest 
 bool wrapTerminalTariffNoticeMessage(const TerminalTariffNoticeMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalTariffNoticeMessage(const TerminalTariffNoticeMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalTariffNoticeMessage(const TerminalTariffNoticeMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalTariffPanelMessageRequest {
+    std::string language="en";
+    i18n::TariffPanelMessageKey key=i18n::TariffPanelMessageKey::Title;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalTariffPanelMessage(const TerminalTariffPanelMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalTariffPanelMessage(const TerminalTariffPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalTariffPanelMessage(const TerminalTariffPanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalTariffPanelMessage(const TerminalTariffPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

@@ -2,6 +2,7 @@
 #include "dashboard.h"
 #include "tariff_store.h"
 #include "tariff_notice_messages.h"
+#include "tariff_panel_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -83,30 +84,31 @@ class TariffSettingsPanel {
     }
     std::string render(int columns,int rows,ColorLevel color)const{
         using namespace dash_detail;const size_t width=static_cast<size_t>(std::max(20,columns)-1);
-        if(rows>0&&rows<12)return "Terminal too short.\nResize to 12+ rows.\n[Ctrl+C] Stop [Esc] Back\n";
-        const auto footer=wrapText(page==TariffSettingsPage::Edit?"[Enter] Apply draft [Esc] Cancel edit [Ctrl+C] Stop":page==TariffSettingsPage::Review?"[Enter/F2] Save declaration [Arrows] Scroll [Esc] Edit [Q] Stop":"[Arrows/Tab] Field [Enter] Open/edit [A] Add row [X] Remove row [V/F2] Review [Esc] Back [Q] Stop",width);
-        auto notice=wrapText(message.empty()?"OFFLINE DECLARATION / whole-meter scenario; no automatic reset or runtime activation.":message,width);
+        using PanelKey=i18n::TariffPanelMessageKey;
+        if(rows>0&&rows<12)return i18n::tariffPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortKeys)+"\n";
+        const auto footer=wrapText(i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
+        auto notice=wrapText(message.empty()?i18n::tariffPanelEnglish(PanelKey::OfflineDefault):message,width);
         // Reserve focus/editor space even for multi-line validation messages on a 60x12 terminal.
         if(notice.size()>3)notice.resize(3);
         const size_t budget=rows>0?static_cast<size_t>(std::max(1,rows-static_cast<int>(footer.size()+notice.size())-1)):10000;
         std::vector<std::string> body;
-        if(page==TariffSettingsPage::Edit){body={"Edit "+selectedName(),"> "+input+"_",hint(selectedName()),"Q/D/L/S are text here; Ctrl+C stops."};}
+        if(page==TariffSettingsPage::Edit){body={"Edit "+selectedName(),"> "+input+"_",hint(selectedName()),i18n::tariffPanelEnglish(PanelKey::EditorKeys)};}
         else if(page==TariffSettingsPage::Review)body=review;
-        else if(page==TariffSettingsPage::Leave)body={"Unsaved tariff declaration","[Enter] Review [D] Discard [Esc] Continue editing"};
-        else if(page==TariffSettingsPage::Remove)body={"Remove draft row "+std::to_string(field)+"?","[Enter] Remove from draft [Esc] Cancel","Saved declaration is preserved until reviewed Save."};
+        else if(page==TariffSettingsPage::Leave)body={i18n::tariffPanelEnglish(PanelKey::LeaveTitle),i18n::tariffPanelEnglish(PanelKey::LeaveKeys)};
+        else if(page==TariffSettingsPage::Remove)body={"Remove draft row "+std::to_string(field)+"?",i18n::tariffPanelEnglish(PanelKey::RemoveKeys),i18n::tariffPanelEnglish(PanelKey::RemovePreserve)};
         else{
             // Focus first: path is secondary so deep nesting cannot push the selected control off screen.
             const auto *v=node();const auto n=count();
-            if(!n)body.push_back("Empty table: [A] Add a blank row");
+            if(!n)body.push_back(i18n::tariffPanelEnglish(PanelKey::EmptyTable));
             for(size_t i=field;i<n&&i<field+6;++i){const auto &value=v->isObject()?v->members[i].second:v->items[i];const auto name=v->isObject()?v->members[i].first:"row "+std::to_string(i);
-                body.push_back(std::string(i==field?"> ":"  ")+name+": "+(value.isObject()?"[Enter] fields":value.isArray()?"[Enter] "+std::to_string(value.items.size())+" rows":tariffJson(value)+(readOnly(name)?" [fixed]":"")));}
+                body.push_back(std::string(i==field?"> ":"  ")+name+": "+(value.isObject()?i18n::tariffPanelEnglish(PanelKey::FieldsPrompt):value.isArray()?"[Enter] "+std::to_string(value.items.size())+" rows":tariffJson(value)+(readOnly(name)?i18n::tariffPanelEnglish(PanelKey::FixedSuffix):std::string{})));}
             body.push_back("Path: "+(path().empty()?"declaration":path()));
             body.push_back("Field "+std::to_string(n?field+1:0)+"/"+std::to_string(n));
         }
         std::vector<std::string> lines;for(const auto &s:body)for(const auto &part:wrapText(s,width))lines.push_back(part);
         if(page==TariffSettingsPage::Review&&lines.size()>budget){const auto offset=std::min(reviewOffset,lines.size()-budget);lines.erase(lines.begin(),lines.begin()+offset);}
         if(lines.size()>budget)lines.resize(budget);
-        std::string text=paint("Combined tariff / declared opening"+std::string(dirty()?" *":""),Tone::Canary,color)+"\n";
+        std::string text=paint(i18n::tariffPanelEnglish(PanelKey::Title)+(dirty()?i18n::tariffPanelEnglish(PanelKey::UnsavedSuffix):std::string{}),Tone::Canary,color)+"\n";
         for(const auto &s:lines)text+=s+"\n";
         for(const auto &s:notice)text+=s+"\n";
         for(const auto &s:footer)text+=s+"\n";
@@ -143,17 +145,15 @@ class TariffSettingsPanel {
     }
     void focus(const std::string &wanted){std::vector<size_t> found;size_t f=0;if(findPath(draft,"",wanted,found,f)){route=std::move(found);field=f;}}
     void beginReview(){
-        review={"Review tariff-declaration.json ONLY","Saved declaration does NOT activate the runtime energy owner or an optimizer.",
-            "Whole-meter DECLARED FORECAST opening; source reference is an unverified local claim.",
-            "Reset: explicit single cycle only, <=370 elapsed days. Rates do not reset shared tiers.",
-            "EXCLUDES demand/export/prepaid/independent resets/proration/ordered taxes/provider rounding.",
-            "No missing household usage, future prices or unobserved load is filled with zero.",
-            "Minimum/all-units need full remaining cycle. USD conversion is not inferred.",
-            "Changes (old -> draft); unchanged fields follow:"};
+        using PanelKey=i18n::TariffPanelMessageKey;
+        review={i18n::tariffPanelEnglish(PanelKey::ReviewHeading),i18n::tariffPanelEnglish(PanelKey::NoActivation),
+            i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),i18n::tariffPanelEnglish(PanelKey::ResetLimit),
+            i18n::tariffPanelEnglish(PanelKey::Excludes),i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
+            i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
         const auto diff=tariffDeclarationChanges(active,draft);review.insert(review.end(),diff.begin(),diff.end());
-        if(diff.empty())review.push_back("No value changes.");
+        if(diff.empty())review.push_back(i18n::tariffPanelEnglish(PanelKey::NoChanges));
         const auto complete=tariffDeclarationChanges({},draft);review.insert(review.end(),complete.begin(),complete.end());
-        review.push_back("Save stamps local confirmation time only; not supplier approval or freshness renewal.");
+        review.push_back(i18n::tariffPanelEnglish(PanelKey::ConfirmationOnly));
         page=TariffSettingsPage::Review;reviewOffset=0;message.clear();
     }
 };

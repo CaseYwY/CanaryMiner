@@ -77,8 +77,9 @@ def main(args):
     for source in ('src/product/tariff_settings.h', 'src/product/tariff_declaration.h', 'src/product/tariff_declaration.cpp', 'src/product/tariff_store.h', 'src/product/electricity.cpp', 'src/product/civil_time.cpp', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
         text = (root / source).read_text(encoding='utf-8')
         assert all(marker not in text for marker in ('layoutTerminalTariffNoticeMessage', 'wrapTerminalTariffNoticeMessage', 'renderTerminalTariffNoticeMessage', 'renderWrappedTerminalTariffNoticeMessage'))
+        assert all(marker not in text for marker in ('layoutTerminalTariffPanelMessage', 'wrapTerminalTariffPanelMessage', 'renderTerminalTariffPanelMessage', 'renderWrappedTerminalTariffPanelMessage'))
         if source not in ('src/product/tariff_settings.h', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
-            assert all(marker not in text for marker in ('tariff_notice_messages.h', 'localization.h', 'tariffNoticeMessage('))
+            assert all(marker not in text for marker in ('tariff_notice_messages.h', 'tariff_panel_messages.h', 'localization.h', 'tariffNoticeMessage(', 'tariffPanelMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:

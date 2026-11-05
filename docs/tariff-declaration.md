@@ -69,3 +69,6 @@ Remaining: isolated durable observed bill/energy state, independent reset calend
 [P-13at](tariff-notice-messages.md) later extracts eleven local input/draft/save notices with exact native English and separate
 typed drafts. The original editor/validator/store/JSON/review and no-runtime-activation contract remain; printed outcomes and
 mock callbacks are not persisted receipts, supplier approval or billing/reset permission. Historical P-05c evidence is unchanged.
+
+[P-13au](tariff-panel-messages.md) subsequently extracts literal shell/review limitations with unchanged native frames and
+JSON. Descriptions remain distinct from model/parser/store enforcement and do not activate or qualify actual billing.
