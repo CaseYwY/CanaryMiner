@@ -43,6 +43,10 @@ effective native/data-owner/terminal/human gates remain open.
 invariant private/machine requests from human scope descriptions with independent recovery. English native source remains
 unchanged; other domains/effective native/data-owner/terminal/human gates remain open.
 
+[P-13y](pool-field-messages.md) adds eight human pool-declaration field keys (128 texts). Endpoints, mode tokens, consent
+phrases and donation/fallback rules remain independent; pool shell/dynamic/other domains/effective native/data-owner/
+terminal/human and real TLS qualification stay open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

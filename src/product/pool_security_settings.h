@@ -2,6 +2,7 @@
 #pragma once
 #include "dashboard.h"
 #include "pool_security_preferences.h"
+#include "pool_field_messages.h"
 #include <functional>
 namespace om {
 enum class PoolSecuritySettingsResult { None, Close, Quit };
@@ -96,7 +97,7 @@ class PoolSecuritySettingsPanel {
     PoolSecurityRule &selected(){return donation?draft.donation:draft.users[slot];}
     const PoolSecurityRule &selected()const{return donation?draft.donation:draft.users[slot];}
     static std::string describe(const PoolSecurityRule &r){return std::string(poolSecurityModeName(r.mode))+" | TLS: "+(r.tlsUrl.empty()?"unset":r.tlsUrl)+" | TCP: "+(r.plaintextUrl.empty()?"unset":r.plaintextUrl)+" | plaintext consent: "+(r.plaintextConsent?"YES":"off");}
-    static const char *label(unsigned n){static const char *labels[]={"Scope","Mode","TLS URL","TCP URL","Plaintext consent","Add user pool","Remove user pool"};return n<7?labels[n]:"Invalid";}
+    static std::string label(unsigned n){const auto &keys=i18n::poolFieldKeys();return i18n::poolFieldEnglish(n<keys.size()?keys[n]:i18n::PoolFieldMessageKey::Invalid);}
     std::string value(const PoolSecurityRule &r,unsigned n)const{switch(n){case 0:return donation?"Donation (independent)":"User pool "+std::to_string(slot+1);case 1:return poolSecurityModeName(r.mode);
         case 2:return r.tlsUrl.empty()?"unset":r.tlsUrl;case 3:return r.plaintextUrl.empty()?"unset":r.plaintextUrl;case 4:return r.plaintextConsent?"YES (Enter revokes)":"off (explicit phrase required)";case 5:return "[Enter] strict TLS, no consent";default:return "[Enter] explicit confirmation";}}
     bool validate(){if(draft.users.empty()||draft.users.size()>8){message="Invalid user slot count.";return false;}

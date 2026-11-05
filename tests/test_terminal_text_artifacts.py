@@ -18,8 +18,9 @@ def main(args):
     assert 'canary_terminal_count' not in main_cmake
     assert 'canary_terminal_time' not in main_cmake
     assert 'canary_terminal_settings_message' not in main_cmake
-    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/game_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h', 'src/product/game_preferences.h'):
+    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/game_settings.h', 'src/product/pool_security_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h', 'src/product/game_preferences.h', 'src/product/pool_security_preferences.h'):
         text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalPoolFieldMessage', 'wrapTerminalPoolFieldMessage', 'renderTerminalPoolFieldMessage', 'renderWrappedTerminalPoolFieldMessage'))
         assert all(marker not in text for marker in ('layoutTerminalGameValueMessage', 'wrapTerminalGameValueMessage', 'renderTerminalGameValueMessage', 'renderWrappedTerminalGameValueMessage'))
         assert all(marker not in text for marker in ('layoutTerminalGamePanelMessage', 'wrapTerminalGamePanelMessage', 'renderTerminalGamePanelMessage', 'renderWrappedTerminalGamePanelMessage'))
         assert all(marker not in text for marker in ('layoutTerminalGameFieldMessage', 'wrapTerminalGameFieldMessage', 'renderTerminalGameFieldMessage', 'renderWrappedTerminalGameFieldMessage'))
@@ -41,6 +42,8 @@ def main(args):
     preferences = (root / 'src/product/runtime_preferences.h').read_text(encoding='utf-8')
     assert '#include "activation_source.h"' in preferences
     assert all(marker not in preferences for marker in ('activation_messages.h', 'localization.h', 'activationLocalePacks', 'activationMessage('))
+    pool_preferences = (root / 'src/product/pool_security_preferences.h').read_text(encoding='utf-8')
+    assert all(marker not in pool_preferences for marker in ('pool_field_messages.h', 'localization.h', 'poolFieldMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:

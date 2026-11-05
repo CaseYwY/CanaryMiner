@@ -264,6 +264,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13x](../game-value-messages.md) checks 112 Game dynamic templates, one-pass/reordered/empty/bounded English expansion, invariant machine/input/mode versus human scope roles, original/recovery validation and transactional line/wrap/paint failures. Fixed-predecessor native frames/transitions/serializations and store/CLI/PTY/supervisor regressions remain separate from effective typed native binding, localized timing quantities, real detectors, physical terminals or real-game qualification.
 
+[P-13y](../pool-field-messages.md) checks 128 literal pool labels, exact English/field-order/token/review/RTL parity and typed line/paint/wrap/refusal transactions. The unchanged fixed-predecessor host harness checks 258048 frame comparisons / 91392 contextual transitions/resulting frames/declaration serializations, independently of actual store/CLI/PTY/transport tests and real TLS/trust/fallback/donation qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
