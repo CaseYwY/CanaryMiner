@@ -10,6 +10,7 @@
 #include "runtime_field_messages.h"
 #include "runtime_panel_messages.h"
 #include "activation_messages.h"
+#include "game_field_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -110,4 +111,13 @@ bool layoutTerminalActivationMessage(const TerminalActivationMessageRequest &,co
 bool wrapTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalGameFieldMessageRequest {
+    std::string language="en";
+    i18n::GameFieldMessageKey key=i18n::GameFieldMessageKey::Mode;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalGameFieldMessage(const TerminalGameFieldMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalGameFieldMessage(const TerminalGameFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalGameFieldMessage(const TerminalGameFieldMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalGameFieldMessage(const TerminalGameFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

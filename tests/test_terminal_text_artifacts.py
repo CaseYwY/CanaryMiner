@@ -18,8 +18,9 @@ def main(args):
     assert 'canary_terminal_count' not in main_cmake
     assert 'canary_terminal_time' not in main_cmake
     assert 'canary_terminal_settings_message' not in main_cmake
-    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h'):
+    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/game_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h', 'src/product/game_preferences.h'):
         text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalGameFieldMessage', 'wrapTerminalGameFieldMessage', 'renderTerminalGameFieldMessage', 'renderWrappedTerminalGameFieldMessage'))
         assert all(marker not in text for marker in ('layoutTerminalActivationMessage', 'wrapTerminalActivationMessage', 'renderTerminalActivationMessage', 'renderWrappedTerminalActivationMessage'))
         assert all(marker not in text for marker in ('layoutTerminalRuntimePanelMessage', 'wrapTerminalRuntimePanelMessage', 'renderTerminalRuntimePanelMessage', 'renderWrappedTerminalRuntimePanelMessage'))
         assert all(marker not in text for marker in ('layoutTerminalRuntimeFieldMessage', 'wrapTerminalRuntimeFieldMessage', 'renderTerminalRuntimeFieldMessage', 'renderWrappedTerminalRuntimeFieldMessage'))

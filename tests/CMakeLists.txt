@@ -2,6 +2,15 @@
 # Every test builds with -Wall -Wformat -Werror=format; the CLI host tests also build with -Werror.
 enable_testing()
 set(R ${CMAKE_SOURCE_DIR})
+add_executable(test_game_field_messages ${R}/tests/test_game_field_messages.cpp)
+target_link_libraries(test_game_field_messages PRIVATE canary_terminal_settings_message)
+if(MSVC)
+  target_compile_options(test_game_field_messages PRIVATE /W3 /utf-8)
+else()
+  target_compile_options(test_game_field_messages PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME game_field_messages COMMAND $<TARGET_FILE:test_game_field_messages>)
+set_tests_properties(game_field_messages PROPERTIES TIMEOUT 60)
 # This consumer deliberately does not opt into UTF-8, matching the native helper include boundary.
 add_executable(test_activation_ascii_consumer ${R}/tests/test_activation_ascii_consumer.cpp)
 target_include_directories(test_activation_ascii_consumer PRIVATE ${R}/src)

@@ -67,6 +67,10 @@ native/data-owner/terminal/human gates remain open.
 ASCII-only standard-header source instead of importing multi-language catalogs. Descriptions grant no activation/restart/
 permission authority; other-domain/effective native/data-owner/terminal/human gates remain open.
 
+[P-13v](game-field-messages.md) adds nine Game field/human-scope label keys (144 texts), with unchanged English native
+frames and machine mode/scope/timing/target values. Game shell/value envelopes and other-domain/effective native/data-owner/
+terminal/human gates remain open.
+
 ## Executed test scope
 
 `test_localization` validates all 16 IDs/autonyms/review/RTL metadata and 208 current key translations, exact source/translation placeholder parity, explicit English fallback, output/metadata preservation, no printf/reparse, both exact 4096-byte template boundaries and alias-safe output. An exhaustive generated scalar corpus covers all values through U+10FFFF, plus malformed/truncated byte sequences and control negatives. That exhaustive scalar check still does not prove grapheme/cell/bidi/formatting behavior. Exact platform counts, sanitizer and privacy results are in the [execution ledger](architecture/execution-plan.md).

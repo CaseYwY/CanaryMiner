@@ -256,6 +256,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13u](../activation-messages.md) checks 80 literal descriptions, exact English source/unknown-enum/pointer/serialization compatibility, argument-free typed layout/paint/wrap transactions and honest recovery/review metadata. A permanent default-codepage ASCII preferences consumer and source/import guards protect the low-level boundary; the Windows CP936 red/UTF-8 control/source-split green does not qualify every code page, physical terminal or global helper quarantine.
 
+[P-13v](../game-field-messages.md) checks 144 literal Game labels, fixed field order, protected units/platform/UID tokens, source/draft metadata and typed layout/paint/wrap/refusal transactions. A private fixed-predecessor harness checks 124416 frames / 44064 transitions/resulting frames/machine serializations across representative timing vectors, scope/mode/session contexts and contextual input; actual store/CLI/PTY/detector/real-game qualification stays independent.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

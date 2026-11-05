@@ -3,6 +3,7 @@
 #include <functional>
 #include "dashboard.h"
 #include "game_preferences.h"
+#include "game_field_messages.h"
 namespace om {
 struct GameSettingsContext {bool running=false;std::optional<GamePreferences> effective;};
 enum class GameSettingsResult { None, Close, Quit };
@@ -99,9 +100,9 @@ class GameSettingsPanel {
     }
    private:
     void review(){if(validGamePreferences(draft,&message,&field)){page=GameSettingsPage::Review;reviewOffset=0;message.clear();}else page=GameSettingsPage::Browse;}
-    static std::string label(unsigned field){static const char *names[]={"Mode","Target","Scope","Poll ms","Exit debounce ms","Max age ms"};return field<6?names[field]:"Invalid";}
+    static std::string label(unsigned field){const auto &keys=i18n::gameFieldKeys();return i18n::gameFieldEnglish(field<keys.size()?keys[field]:i18n::GameFieldMessageKey::Invalid);}
     static std::string value(const GamePreferences &v,unsigned field){switch(field){
-        case 0:return gameModeName(v.mode);case 1:return v.executable;case 2:return v.adapter==GameProcessAdapter::WindowsSessionImage?"Windows session":"Linux native UID";
+        case 0:return gameModeName(v.mode);case 1:return v.executable;case 2:return i18n::gameFieldEnglish(v.adapter==GameProcessAdapter::WindowsSessionImage?i18n::GameFieldMessageKey::WindowsSession:i18n::GameFieldMessageKey::LinuxNativeUid);
         case 3:return std::to_string(v.pollMs);case 4:return std::to_string(v.exitDebounceMs);default:return std::to_string(v.maximumDetectionAgeMs);}}
 };
 } // namespace om
