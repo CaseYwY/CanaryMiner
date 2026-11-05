@@ -4,6 +4,7 @@
 #include "electricity_field_messages.h"
 #include "electricity_notice_messages.h"
 #include "electricity_panel_messages.h"
+#include "electricity_value_messages.h"
 #include <functional>
 namespace om {
 enum class ElectricitySettingsResult { None, Close, Quit };
@@ -64,18 +65,19 @@ class ElectricitySettingsPanel {
     std::string render(int columns,int rows,ColorLevel color)const{
         using namespace dash_detail;const size_t width=static_cast<size_t>(std::max(20,columns)-1);
         using PanelKey=i18n::ElectricityPanelMessageKey;
+        using ValueKey=i18n::ElectricityValueMessageKey;
         if(rows>0&&rows<12)return i18n::electricityPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::electricityPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::electricityPanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::electricityPanelEnglish(page==ElectricitySettingsPage::Edit?PanelKey::FooterEdit:page==ElectricitySettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
         const auto notice=wrapText(message.empty()?i18n::electricityPanelEnglish(PanelKey::LocalDefaults):message,width);
         const size_t budget=rows>0?static_cast<size_t>(std::max(1,rows-static_cast<int>(footer.size()+notice.size())-1)):1000;
         std::vector<std::string> body={i18n::electricityPanelEnglish(PanelKey::Title)+(dirty()?i18n::electricityPanelEnglish(PanelKey::UnsavedSuffix):std::string{})};
         if(page==ElectricitySettingsPage::Edit){
-            body.push_back(std::string("Edit ")+label(field));body.push_back("> "+input+"_");
+            body.push_back(i18n::electricityValueEnglish(ValueKey::EditHeading,{{"field",label(field)}}));body.push_back(i18n::electricityValueEnglish(ValueKey::EditInput,{{"input",input}}));
             body.push_back(i18n::electricityPanelEnglish(field==12?PanelKey::RateGuide:field>=6&&field<=11?PanelKey::IdentityGuide:field==14?PanelKey::OffsetGuide:field>=15?PanelKey::UtcGuide:PanelKey::IntervalGuide));
             body.push_back(i18n::electricityPanelEnglish(PanelKey::EditorKeys));
         }else if(page==ElectricitySettingsPage::Review){
             body.push_back(i18n::electricityPanelEnglish(PanelKey::ReviewHeading));
-            for(unsigned i=0;i<17;++i)if(value(active,i)!=value(draft,i))body.push_back(std::string(label(i))+": "+value(active,i)+" -> "+value(draft,i));
+            for(unsigned i=0;i<17;++i)if(value(active,i)!=value(draft,i))body.push_back(fieldChange(active,draft,i));
             if(!dirty())body.push_back(i18n::electricityPanelEnglish(PanelKey::NoChanges));
             body.push_back(i18n::electricityPanelEnglish(PanelKey::Activation));
             body.push_back("Model/basis: flat ENERGY-ONLY / GPU BOARD proxy; clock "+value(draft,13)+", offset "+value(draft,14)+" seconds.");
@@ -89,7 +91,7 @@ class ElectricitySettingsPanel {
         }else if(page==ElectricitySettingsPage::Leave){body.push_back(i18n::electricityPanelEnglish(PanelKey::LeaveTitle));body.push_back(i18n::electricityPanelEnglish(PanelKey::LeaveKeys));}
         else{
             body.push_back("Field "+std::to_string(field+1)+"/17 | configured next-session defaults");
-            for(unsigned i=field;i<17&&i<field+7;++i)body.push_back(std::string(i==field?"> ":"  ")+label(i)+": "+value(draft,i));
+            for(unsigned i=field;i<17&&i<field+7;++i)body.push_back(std::string(i==field?"> ":"  ")+fieldValue(draft,i));
             body.push_back("Current collection: "+std::string(context.cliNoEnergy?"off (--no-energy)":context.running&&context.effective.collectEnergy?"on (frozen session defaults)":"off/no active session"));
             body.push_back(currentTariff());
             body.push_back(i18n::electricityPanelEnglish(PanelKey::NoInference));
@@ -109,14 +111,29 @@ class ElectricitySettingsPanel {
     }
     static std::string label(unsigned f){const auto &keys=i18n::electricityFieldKeys();return i18n::electricityFieldEnglish(f<keys.size()?keys[f]:i18n::ElectricityFieldMessageKey::Count);}
     static std::string value(const ElectricityPreferences &p,unsigned f,bool display=true){
+        using Key=i18n::ElectricityValueMessageKey;
         std::string text;
-        if(f==0||f==1||f==4||f==5)return (f==0?p.collectEnergy:f==1?p.showEnergy:f==4?p.tariffEnabled:p.exclusionsAcknowledged)?"on":"off";
+        if(f==0||f==1||f==4||f==5)return i18n::electricityValueEnglish((f==0?p.collectEnergy:f==1?p.showEnergy:f==4?p.tariffEnabled:p.exclusionsAcknowledged)?Key::On:Key::Off);
         if(f==2)return std::to_string(p.recordIntervalMs);
         if(f==3)return std::to_string(p.maximumGapMs);
-        if(f>=6&&f<=12){const std::string *values[]={&p.country,&p.region,&p.supplier,&p.product,&p.version,&p.currency,&p.ratePerKwh};text=*values[f-6];return display&&text.empty()?"not supplied":text;}
-        if(f==13)return p.fixedStandardTime?"fixed STANDARD (no DST)":"explicit UTC";
+        if(f>=6&&f<=12){const std::string *values[]={&p.country,&p.region,&p.supplier,&p.product,&p.version,&p.currency,&p.ratePerKwh};text=*values[f-6];return display&&text.empty()?i18n::electricityValueEnglish(Key::NotSupplied):text;}
+        if(f==13)return i18n::electricityValueEnglish(p.fixedStandardTime?Key::FixedClock:Key::ExplicitUtc);
         if(f==14)return std::to_string(p.fixedOffsetSeconds);
         return std::to_string(f==15?p.effectiveFromUtc:p.effectiveThroughUtc);
+    }
+    static bool humanField(unsigned f){return f==0||f==1||f==4||f==5||f==13;}
+    static bool missingDeclaration(const ElectricityPreferences &p,unsigned f){return f>=6&&f<=12&&value(p,f,false).empty();}
+    static std::string fieldValue(const ElectricityPreferences &p,unsigned f){using Key=i18n::ElectricityValueMessageKey;
+        if(missingDeclaration(p,f))return i18n::electricityValueEnglish(Key::MissingFieldValue,{{"field",label(f)}});
+        return i18n::electricityValueEnglish(humanField(f)?Key::HumanFieldValue:Key::FieldValue,{{"field",label(f)},{"value",value(p,f)}});
+    }
+    static std::string fieldChange(const ElectricityPreferences &a,const ElectricityPreferences &b,unsigned f){using Key=i18n::ElectricityValueMessageKey;
+        const bool beforeMissing=missingDeclaration(a,f),afterMissing=missingDeclaration(b,f);
+        const auto key=humanField(f)?Key::HumanFieldChange:beforeMissing?Key::FieldAfterOnly:afterMissing?Key::FieldBeforeOnly:Key::FieldChange;
+        i18n::MessageArguments arguments={{"field",label(f)}};
+        if(!beforeMissing)arguments.emplace_back("before",value(a,f));
+        if(!afterMissing)arguments.emplace_back("after",value(b,f));
+        return i18n::electricityValueEnglish(key,arguments);
     }
     bool applyInput(){
         using NoticeKey=i18n::ElectricityNoticeMessageKey;

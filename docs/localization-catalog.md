@@ -95,6 +95,10 @@ native/data-owner/terminal/human and actual-source qualification remain open.
 without rate/clock/source facts or changed native English. Dynamic electricity/other domains/effective native/data-owner/
 terminal/human and actual-source qualification remain open.
 
+[P-13al](electricity-value-messages.md) adds fourteen electricity field/change/input/human-state keys (224 texts/templates),
+separating opaque original requests from human labels/toggles/clocks and literal missing declarations. Complete context/other
+domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

@@ -35,3 +35,6 @@ native store/owner/CLI/PTY regressions are independent; exact platform/sanitizer
 Dynamic electricity/other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human review and
 physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/financial sources,
 global quarantine and production release gates remain unqualified.
+
+[P-13al](electricity-value-messages.md) subsequently extracts field/change/input/human-state envelopes, without changing these
+literal-shell results or qualifying complete context/source/activation facts.

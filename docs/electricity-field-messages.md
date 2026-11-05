@@ -41,3 +41,6 @@ results or activating translated native rendering. Descriptions remain separate 
 
 [P-13ak](electricity-panel-messages.md) later extracts literal shell/editor/limitations. These field-label results and their
 value-free/no-source-authority scope remain unchanged; effective typed native rendering stays separate.
+
+[P-13al](electricity-value-messages.md) subsequently extracts field/change/input/human-state envelopes. These historical label
+results remain unchanged; original request bytes, source admission and effective native rendering retain separate contracts.
