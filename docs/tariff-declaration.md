@@ -72,3 +72,6 @@ mock callbacks are not persisted receipts, supplier approval or billing/reset pe
 
 [P-13au](tariff-panel-messages.md) subsequently extracts literal shell/review limitations with unchanged native frames and
 JSON. Descriptions remain distinct from model/parser/store enforcement and do not activate or qualify actual billing.
+
+[P-13av](tariff-hint-messages.md) later extracts editor guidance without changing field matching, native English, JSON or
+validation. Displaying syntax, unit or clock guidance neither admits a declaration nor supplies supplier/source facts.

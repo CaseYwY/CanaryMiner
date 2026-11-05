@@ -3,6 +3,7 @@
 #include "tariff_store.h"
 #include "tariff_notice_messages.h"
 #include "tariff_panel_messages.h"
+#include "tariff_hint_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -123,17 +124,18 @@ class TariffSettingsPanel {
     std::string collectionName()const{const auto s=path();const auto at=s.rfind('.');return at==std::string::npos?s:s.substr(at+1);}
     static bool readOnly(const std::string &s){return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";}
     static std::string hint(const std::string &s){
-        if(s=="tiers")return "none / progressive / all_units; additive shared-register bands.";
-        if(s=="time_mode")return "constant / calendar / dynamic. Clear incompatible tables explicitly.";
-        if(s=="kind")return "utc / fixed_standard (no DST or OS timezone inference).";
-        if(s=="date")return "YYYY-MM-DD; clear for null (no exact-date condition).";
-        if(s=="minimum_cycle_subtotal"||s=="through_kwh")return "Canonical decimal; clear for null. Final band MUST be unbounded/null.";
-        if(s.find("utc_ms")!=std::string::npos)return "UTC Unix MILLISECONDS. Cycle/revision end is exclusive; no automatic now/reset.";
-        if(s=="imported_kwh"||s=="accrued_subtotal")return "Explicit whole-meter opening; subtotal BEFORE multiplier. Missing history is not zero.";
-        if(s.find("mask")!=std::string::npos)return "Bit mask: weekdays Monday bit 0 (1..127); months January bit 0 (1..4095).";
-        if(s=="fixed_offset_seconds")return "Whole-minute STANDARD offset in seconds, +/-64800. UTC requires 0.";
-        if(s.find("minute")!=std::string::npos)return "Local minute 0..1440, begin < end. Split overnight windows.";
-        return "Explicit local declaration. Decimal strings: no exponent; zero must be entered. No account/credentials.";
+        using HintKey=i18n::TariffHintMessageKey;
+        if(s=="tiers")return i18n::tariffHintEnglish(HintKey::Tiers);
+        if(s=="time_mode")return i18n::tariffHintEnglish(HintKey::TimeMode);
+        if(s=="kind")return i18n::tariffHintEnglish(HintKey::ClockKind);
+        if(s=="date")return i18n::tariffHintEnglish(HintKey::Date);
+        if(s=="minimum_cycle_subtotal"||s=="through_kwh")return i18n::tariffHintEnglish(HintKey::OptionalDecimal);
+        if(s.find("utc_ms")!=std::string::npos)return i18n::tariffHintEnglish(HintKey::UtcMs);
+        if(s=="imported_kwh"||s=="accrued_subtotal")return i18n::tariffHintEnglish(HintKey::Opening);
+        if(s.find("mask")!=std::string::npos)return i18n::tariffHintEnglish(HintKey::Mask);
+        if(s=="fixed_offset_seconds")return i18n::tariffHintEnglish(HintKey::FixedOffset);
+        if(s.find("minute")!=std::string::npos)return i18n::tariffHintEnglish(HintKey::Minute);
+        return i18n::tariffHintEnglish(HintKey::Default);
     }
     bool findPath(JsonValue &v,const std::string &current,const std::string &wanted,std::vector<size_t> &found,size_t &selectedField){
         if(!v.isObject()&&!v.isArray())return false;

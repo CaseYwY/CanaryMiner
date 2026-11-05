@@ -39,3 +39,6 @@ in the [execution ledger](architecture/execution-plan.md).
 Tariff hints/dynamic/raw JSON domains, other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment,
 human review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/
 financial sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13av](tariff-hint-messages.md) subsequently extracts editor guidance with unchanged field matching and native English.
+These historical shell results remain; guidance is not parser/model validation or supplier/opening/source qualification.

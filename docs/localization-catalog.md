@@ -135,6 +135,10 @@ domains/effective native/data-owner/terminal/human and actual-source qualificati
 private declaration/source values or supplier/reset/billing/activation authority. Tariff hints/dynamic/raw/other domains/
 effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13av](tariff-hint-messages.md) adds eleven offline-tariff editor-hint keys (176 texts), retaining exact/substring/case/
+priority/default selection without numeric, clock, opening or source-validation authority. Tariff dynamic/raw/other domains/
+effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.
