@@ -254,6 +254,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13t](../runtime-panel-messages.md) checks 480 Runtime shell/editor/notice texts, protected contextual keys, exact English, opaque empty/maximum/nonnumeric input, invariant original/recovery admission and complete layout/paint/row transactions. Prior fixed-predecessor frames/transitions, actual store/CLI/PTY/supervisor and numeric parser checks remain distinct from real terminal, activation-description, all-input-space or current-worker qualification.
 
+[P-13u](../activation-messages.md) checks 80 literal descriptions, exact English source/unknown-enum/pointer/serialization compatibility, argument-free typed layout/paint/wrap transactions and honest recovery/review metadata. A permanent default-codepage ASCII preferences consumer and source/import guards protect the low-level boundary; the Windows CP936 red/UTF-8 control/source-split green does not qualify every code page, physical terminal or global helper quarantine.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

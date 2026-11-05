@@ -11,6 +11,7 @@
 #include "../core/host_work_wait.h"
 #include "../core/platform.h"
 #include "json_dom.h"
+#include "activation_source.h"
 #if defined(_WIN32)
 #include <windows.h>
 #include <fcntl.h>
@@ -28,13 +29,14 @@ namespace om {
 
 enum class ChangeActivation { Presentation, WorkBoundary, NextStart, SeparatePermission };
 inline const char *activationName(ChangeActivation value) {
+    using Key=i18n::ActivationMessageKey;
     switch (value) {
-        case ChangeActivation::Presentation: return "live presentation";
-        case ChangeActivation::WorkBoundary: return "safe work boundary";
-        case ChangeActivation::NextStart: return "next explicit start; no automatic restart";
-        case ChangeActivation::SeparatePermission: return "separate permission required";
+        case ChangeActivation::Presentation: return i18n::activationEnglishText(Key::Presentation).data();
+        case ChangeActivation::WorkBoundary: return i18n::activationEnglishText(Key::WorkBoundary).data();
+        case ChangeActivation::NextStart: return i18n::activationEnglishText(Key::NextStart).data();
+        case ChangeActivation::SeparatePermission: return i18n::activationEnglishText(Key::SeparatePermission).data();
     }
-    return "unsupported";
+    return i18n::activationEnglishText(Key::Unsupported).data();
 }
 
 struct RuntimePreferences {

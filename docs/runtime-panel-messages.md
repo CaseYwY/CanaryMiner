@@ -39,3 +39,6 @@ worker/hardware qualification. Exact evidence is in the [execution ledger](archi
 Activation descriptions, other subpanels/dashboard/log/raw domains and effective typed native/data-owner/deployment binding
 remain unfinished. Human review, physical terminal/font/shaping/accessibility and real GPU/game/pool/power/financial/release
 gates stay open. No production miner replacement or restart is authorized by this extraction.
+
+[P-13u](activation-messages.md) subsequently extracts the five activation-value descriptions behind a shared ASCII-only
+low-level source boundary. This thirty-key shell/editor scope and its historical evidence stay unchanged.

@@ -18,8 +18,9 @@ def main(args):
     assert 'canary_terminal_count' not in main_cmake
     assert 'canary_terminal_time' not in main_cmake
     assert 'canary_terminal_settings_message' not in main_cmake
-    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h'):
+    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h'):
         text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalActivationMessage', 'wrapTerminalActivationMessage', 'renderTerminalActivationMessage', 'renderWrappedTerminalActivationMessage'))
         assert all(marker not in text for marker in ('layoutTerminalRuntimePanelMessage', 'wrapTerminalRuntimePanelMessage', 'renderTerminalRuntimePanelMessage', 'renderWrappedTerminalRuntimePanelMessage'))
         assert all(marker not in text for marker in ('layoutTerminalRuntimeFieldMessage', 'wrapTerminalRuntimeFieldMessage', 'renderTerminalRuntimeFieldMessage', 'renderWrappedTerminalRuntimeFieldMessage'))
         assert all(marker not in text for marker in ('layoutTerminalLanguagePanelMessage', 'wrapTerminalLanguagePanelMessage', 'renderTerminalLanguagePanelMessage', 'renderWrappedTerminalLanguagePanelMessage'))
@@ -32,6 +33,11 @@ def main(args):
     assert all(marker not in time for marker in ('ucal_getNow', 'localtime', 'gmtime', 'getenv', 'setlocale', 'uloc_setDefault', 'configureCivilTimeData', 'udat_parse'))
     assert 'civilAt(request.clock,*request.utcMs)' in time and 'calendar=gregorian' in time
     style = (root / 'src/product/terminal_style.h').read_text(encoding='utf-8')
+    source = (root / 'src/product/activation_source.h').read_bytes().decode('ascii')
+    assert '#include "' not in source and 'activationEnglishText' in source
+    preferences = (root / 'src/product/runtime_preferences.h').read_text(encoding='utf-8')
+    assert '#include "activation_source.h"' in preferences
+    assert all(marker not in preferences for marker in ('activation_messages.h', 'localization.h', 'activationLocalePacks', 'activationMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:

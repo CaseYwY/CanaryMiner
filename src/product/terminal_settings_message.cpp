@@ -87,6 +87,13 @@ bool prepare(const TerminalRuntimePanelMessageRequest &request,TerminalMessageRe
     for(const auto &pack:i18n::runtimePanelLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
 }
+bool prepare(const TerminalActivationMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!terminal_message_detail::validLanguageTag(request.language))return false;
+    templates.requested=i18n::activationMessage(request.language,request.key);templates.english=i18n::activationMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::activationLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -194,6 +201,18 @@ bool renderTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest 
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalActivationMessage(const TerminalActivationMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalActivationMessage(const TerminalActivationMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalActivationMessage(const TerminalActivationMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalActivationMessage(const TerminalActivationMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

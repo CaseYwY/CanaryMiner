@@ -3,6 +3,7 @@
 #include <iterator>
 #include "../src/product/settings.h"
 #include "product_test_util.h"
+#include "product/activation_messages.h"
 
 using namespace om;
 
@@ -65,6 +66,14 @@ static void panelTests() {
         }
     }
     CHECK(std::string(activationName(ChangeActivation::SeparatePermission)).find("permission") != std::string::npos);
+    const std::array<ChangeActivation,5> phases={{ChangeActivation::Presentation,ChangeActivation::WorkBoundary,ChangeActivation::NextStart,ChangeActivation::SeparatePermission,static_cast<ChangeActivation>(999)}};
+    const std::array<std::string,5> descriptions={{"live presentation","safe work boundary","next explicit start; no automatic restart","separate permission required","unsupported"}};
+    std::array<const char *,5> pointers{};const auto original=runtimePreferencesJson(panel.active);
+    for(std::size_t i=0;i<phases.size();++i){pointers[i]=activationName(phases[i]);CHECK(std::string(pointers[i])==descriptions[i]);}
+    for(const auto &pack:i18n::activationLocalePacks())(void)i18n::activationMessage(pack.id,i18n::ActivationMessageKey::WorkBoundary);
+    for(std::size_t i=0;i<phases.size();++i)CHECK(std::string(pointers[i])==descriptions[i]);
+    CHECK(std::string(activationName(static_cast<ChangeActivation>(-1)))=="unsupported");
+    CHECK(runtimePreferencesJson(panel.active)==original);
 }
 
 static void storeTests(const std::filesystem::path &directory) {

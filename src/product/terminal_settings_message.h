@@ -9,6 +9,7 @@
 #include "language_panel_messages.h"
 #include "runtime_field_messages.h"
 #include "runtime_panel_messages.h"
+#include "activation_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -100,4 +101,13 @@ bool layoutTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest 
 bool wrapTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalActivationMessageRequest {
+    std::string language="en";
+    i18n::ActivationMessageKey key=i18n::ActivationMessageKey::NextStart;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalActivationMessage(const TerminalActivationMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om
