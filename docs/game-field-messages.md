@@ -34,3 +34,6 @@ Game shell/review envelopes/editor/notices, other subpanels/dashboard/log/raw do
 deployment binding, human review and physical terminal/font/shaping/accessibility remain open. No game or mining process is
 started by these APIs, no safety/experience/economic qualification is inferred and no production replacement/restart is
 authorized.
+
+[P-13w](game-panel-messages.md) subsequently extracts thirty-three literal Game shell/editor/limitation notices. This
+nine-key field/scope domain and its historical evidence remain unchanged; dynamic envelopes/native gates remain separate.

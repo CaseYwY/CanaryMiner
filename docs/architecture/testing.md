@@ -260,6 +260,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-03j/P-11p](../cached-run-renewal.md) first reproduces the existing cached-safety four-assertion failure at concurrency four, then deterministically checks the actual native settled-Run call site in real time: identical cached ceiling must not reissue, while fresh eligible evidence must renew. The twelve-check pre-fix red/control result is separate from bounded original stress, pending-revocation, session/economic/runtime/full-suite and sanitizer checks; physical scheduling, global quarantine and real GPU/game qualification stay open.
 
+[P-13w](../game-panel-messages.md) checks 528 literal Game shell/editor/limitation texts, exact English, protected key/range/unit/reference tokens, honest source/draft metadata and typed line/paint/wrap/refusal transactions. Fixed-predecessor frame/transition/machine-serialization and actual store/CLI/PTY regressions stay separate from dynamic private-input envelopes, full-domain rendering, detector, physical terminal or real-game qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
