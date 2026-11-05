@@ -71,6 +71,10 @@ native/data-owner/terminal/human and real quote/credit/source qualification rema
 quote/reference/refresh/action evidence and keep native validation, clocks and CLI precedence unchanged. Manual shell/
 dynamic/other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13af](manual-market-panel-messages.md) adds twenty-eight literal manual shell/editor/limitation keys (448 texts), without
+value/source/activation authority or changed native English. Dynamic manual/other domains/effective native/data-owner/
+terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

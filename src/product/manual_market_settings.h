@@ -3,6 +3,7 @@
 #include "manual_market_preferences.h"
 #include "manual_market_field_messages.h"
 #include "manual_market_notice_messages.h"
+#include "manual_market_panel_messages.h"
 namespace om {
 enum class ManualMarketSettingsResult { None, Close, Quit };
 enum class ManualMarketSettingsPage { Browse, Edit, Review, Leave };
@@ -80,40 +81,41 @@ class ManualMarketSettingsPanel {
     }
     std::string render(int columns,int rows,ColorLevel color) const {
         using namespace dash_detail;
+        using PanelKey=i18n::ManualMarketPanelMessageKey;
         const size_t width=static_cast<size_t>(std::max(20,columns)-1);
-        if(rows>0&&rows<12)return "Terminal too short.\nResize to 12+ rows.\n[Ctrl+C] Stop [Esc] Back\n";
+        if(rows>0&&rows<12)return i18n::manualMarketPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::manualMarketPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::manualMarketPanelEnglish(PanelKey::ShortKeys)+"\n";
         const bool compact=width<70 || (rows>0&&rows<20);
-        const std::string footer=page==ManualMarketSettingsPage::Edit?"[Enter] Apply draft [Esc] Cancel edit [Ctrl+C] Stop":
-            page==ManualMarketSettingsPage::Review?"[Enter/F2] Save [Arrows] Scroll [Esc] Edit [Q] Stop":"[Tab/Arrows] Field [Enter/Space] Change [N] Stamp UTC [V/F2] Review [Esc] Back [Q] Stop";
+        const std::string footer=i18n::manualMarketPanelEnglish(page==ManualMarketSettingsPage::Edit?PanelKey::FooterEdit:
+            page==ManualMarketSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse);
         const auto footerLines=wrapText(footer,width);
-        const auto messageLines=wrapText(message.empty()?"Manual input only; stored confirmation is NOT a quote timestamp.":message,width);
+        const auto messageLines=wrapText(message.empty()?i18n::manualMarketPanelEnglish(PanelKey::LocalDefaults):message,width);
         const size_t budget=rows>0?static_cast<size_t>(std::max(1,rows-static_cast<int>(footerLines.size()+messageLines.size())-1)):1000;
-        std::vector<std::string> body={"Manual/offline market"+std::string(dirty()?" *":"")};
+        std::vector<std::string> body={i18n::manualMarketPanelEnglish(PanelKey::Title)+(dirty()?i18n::manualMarketPanelEnglish(PanelKey::UnsavedSuffix):std::string{})};
         if(page==ManualMarketSettingsPage::Edit) {
             body.push_back(std::string("Edit ")+label(field)); body.push_back("> "+input+"_");
-            body.push_back(field==1||field==4?"Positive base-10 decimal; empty clears this pair.":field==6?"Validity in seconds (60..86400), not refresh cadence.":field==7?"Maximum separation of PRL/FX reference times (0..3600 seconds).":"Reference UTC Unix seconds. [N] from browse explicitly stamps now.");
-            body.push_back("Q/D/L/S are text here. Ctrl+C still stops.");
-        } else if(page==ManualMarketSettingsPage::Leave) {body.push_back("Unsaved offline-market settings"); body.push_back("[Enter] Review/save [D] Discard [Esc] Continue editing");}
+            body.push_back(i18n::manualMarketPanelEnglish(field==1||field==4?PanelKey::DecimalGuide:field==6?PanelKey::ValidityGuide:field==7?PanelKey::SkewGuide:PanelKey::ReferenceGuide));
+            body.push_back(i18n::manualMarketPanelEnglish(PanelKey::EditorKeys));
+        } else if(page==ManualMarketSettingsPage::Leave) {body.push_back(i18n::manualMarketPanelEnglish(PanelKey::LeaveTitle)); body.push_back(i18n::manualMarketPanelEnglish(PanelKey::LeaveKeys));}
         else if(page==ManualMarketSettingsPage::Review) {
-            body.push_back("Review manual-market-preferences.json only");
+            body.push_back(i18n::manualMarketPanelEnglish(PanelKey::ReviewHeading));
             for(unsigned i=0;i<8;++i)if(value(active,i)!=value(draft,i))body.push_back(std::string(label(i))+": "+value(active,i)+" -> "+value(draft,i));
-            if(!dirty())body.push_back("No value changes; saving does not refresh reference times.");
-            body.push_back(context.running?"Activation: live terminal references only; no restart.":"Activation: next explicit dashboard session; no mining was started.");
-            if(context.cliDisabled)body.push_back("Current CLI --no-market wins over saved preferences.");
-            body.push_back("No HTTPS, trading, actual income, forecasts or economic control.");
-            body.push_back("Prices/FX stay local; UI/runtime drafts and donation are untouched.");
+            if(!dirty())body.push_back(i18n::manualMarketPanelEnglish(PanelKey::NoChanges));
+            body.push_back(i18n::manualMarketPanelEnglish(context.running?PanelKey::ActivationLive:PanelKey::ActivationNext));
+            if(context.cliDisabled)body.push_back(i18n::manualMarketPanelEnglish(PanelKey::CliWins));
+            body.push_back(i18n::manualMarketPanelEnglish(PanelKey::NoFinance));
+            body.push_back(i18n::manualMarketPanelEnglish(PanelKey::LocalOnly));
         } else {
             const size_t available=budget>1?std::min(size_t{8},budget-1):1;
             const size_t start=compact?field:0; // selected field precedes any wrapping/truncation in a short terminal
             for(size_t i=start;i<8&&i<start+available;++i)body.push_back(std::string(i==field?"> ":"  ")+label(static_cast<unsigned>(i))+": "+value(draft,static_cast<unsigned>(i)));
             if(!compact){
-                body.push_back("Identity: Pearl mainnet native PRL; quote USDT; FX USD per USDT.");
-                body.push_back(context.cliDisabled?"Current display: OFF (--no-market CLI override)":context.running?std::string("Current display: ")+on(context.effective.enabled):"No active mining session; local settings only.");
+                body.push_back(i18n::manualMarketPanelEnglish(PanelKey::Identity));
+                body.push_back(context.cliDisabled?i18n::manualMarketPanelEnglish(PanelKey::CurrentOff):context.running?std::string("Current display: ")+on(context.effective.enabled):i18n::manualMarketPanelEnglish(PanelKey::NoSession));
                 if(context.running&&!context.cliDisabled&&context.effective!=active) {
                     body.push_back("Current PRL input: "+(context.effective.prlUsdt.empty()?"not supplied":context.effective.prlUsdt)+" USDT/PRL | "+stamp(context.effective.prlAsOfUtc));
-                    body.push_back("Fields above are configured values; current inputs change only after successful Save.");
+                    body.push_back(i18n::manualMarketPanelEnglish(PanelKey::ConfiguredBoundary));
                 }
-                body.push_back("No provider fetch or 1h average. Manual references are not income.");
+                body.push_back(i18n::manualMarketPanelEnglish(PanelKey::NoProvider));
                 if(field==2||field==5)body.push_back("UTC: "+stamp(field==2?draft.prlAsOfUtc:draft.fxAsOfUtc)+" | N explicitly stamps NOW.");
             }
         }

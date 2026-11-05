@@ -180,4 +180,6 @@ Settled product decisions are distinct from unresolved implementation choices. T
 
 | D-130 | Accepted manual editor/save/explicit-clock notices separate from quote and action evidence | [P-13ae](../manual-market-notice-messages.md) extracts nine literal source/draft notices across sixteen packs, retaining exact English branches, restrictions, raw errors and CLI precedence. Argument-free typed text owns no values or clocks; a saved/NOW description is not a receipt, does not renew either reference or establish provider freshness. Manual shell/dynamic/native/data-owner/terminal/human and real financial/source qualification stay separate. |
 
+| D-131 | Accepted literal manual-reference shell and limitations without quote or activation authority | [P-13af](../manual-market-panel-messages.md) extracts twenty-eight literal source/draft keys across sixteen packs and retains exact native English frames/controls. Independent argument-free layouts preserve identity/clock/CLI/financial limitations but do not enforce or prove them; controller/store/projector owners remain authoritative. Dynamic/manual/native/data-owner/terminal/human and real financial/source qualification stay open. |
+
 Any later change must add its rationale and affected requirements/tests here. Do not erase the previous decision or change a display label to conceal different semantics.

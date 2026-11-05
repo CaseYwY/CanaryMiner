@@ -37,3 +37,6 @@ safety/game/GPU/TLS, global quarantine and production release gates are not supp
 
 [P-13ae](manual-market-notice-messages.md) later extracts local editor/save/explicit-clock notices. This eight-field domain's
 historical results and value-free scope remain unchanged; neither extraction activates translated native rendering.
+
+[P-13af](manual-market-panel-messages.md) subsequently extracts the literal shell/editor/limitations. This label domain's
+historical evidence remains unchanged; dynamic/value/source/effective native qualification stays separate.

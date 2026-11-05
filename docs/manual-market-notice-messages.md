@@ -33,3 +33,6 @@ are in the [execution ledger](architecture/execution-plan.md).
 Manual shell/dynamic values, other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human
 review and physical terminal/font/shaping/accessibility remain open. Public-feed/reward/credit attribution, real power/
 safety/game/GPU/TLS, global quarantine and production release gates remain unqualified.
+
+[P-13af](manual-market-panel-messages.md) later extracts literal shell/editor/limitation text, without changing this notice
+domain's historical results or action-versus-description distinction.
