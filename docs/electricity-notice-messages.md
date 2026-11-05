@@ -34,3 +34,6 @@ store/owner/CLI/PTY regressions remain separate; exact platform/sanitizer/privac
 Electricity literal shell/dynamic values, other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment,
 human review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/
 financial sources, global quarantine and production release gates remain unqualified.
+
+[P-13ak](electricity-panel-messages.md) subsequently extracts literal shell/editor/limitations without changing these notice
+results, numeric/ASCII admission or the distinction between descriptions and owner-confirmed actions.

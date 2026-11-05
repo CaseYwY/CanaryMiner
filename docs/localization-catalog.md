@@ -91,6 +91,10 @@ data-owner/terminal/human and actual-source qualification remain open.
 action/supplier-time/measurement authority or native behavior changes. Electricity shell/dynamic/other domains/effective
 native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ak](electricity-panel-messages.md) adds twenty-five literal electricity shell/editor/model-limitation keys (400 texts),
+without rate/clock/source facts or changed native English. Dynamic electricity/other domains/effective native/data-owner/
+terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

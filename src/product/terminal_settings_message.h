@@ -25,6 +25,7 @@
 #include "manual_market_context_messages.h"
 #include "electricity_field_messages.h"
 #include "electricity_notice_messages.h"
+#include "electricity_panel_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -265,4 +266,13 @@ bool layoutTerminalElectricityNoticeMessage(const TerminalElectricityNoticeMessa
 bool wrapTerminalElectricityNoticeMessage(const TerminalElectricityNoticeMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalElectricityNoticeMessage(const TerminalElectricityNoticeMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalElectricityNoticeMessage(const TerminalElectricityNoticeMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalElectricityPanelMessageRequest {
+    std::string language="en";
+    i18n::ElectricityPanelMessageKey key=i18n::ElectricityPanelMessageKey::Title;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalElectricityPanelMessage(const TerminalElectricityPanelMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalElectricityPanelMessage(const TerminalElectricityPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalElectricityPanelMessage(const TerminalElectricityPanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalElectricityPanelMessage(const TerminalElectricityPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

@@ -3,6 +3,7 @@
 #include "electricity_preferences.h"
 #include "electricity_field_messages.h"
 #include "electricity_notice_messages.h"
+#include "electricity_panel_messages.h"
 #include <functional>
 namespace om {
 enum class ElectricitySettingsResult { None, Close, Quit };
@@ -62,35 +63,36 @@ class ElectricitySettingsPanel {
     }
     std::string render(int columns,int rows,ColorLevel color)const{
         using namespace dash_detail;const size_t width=static_cast<size_t>(std::max(20,columns)-1);
-        if(rows>0&&rows<12)return "Terminal too short.\nResize to 12+ rows.\n[Ctrl+C] Stop [Esc] Back\n";
-        const auto footer=wrapText(page==ElectricitySettingsPage::Edit?"[Enter] Apply draft [Esc] Cancel edit [Ctrl+C] Stop":page==ElectricitySettingsPage::Review?"[Enter/F2] Save next-session defaults [Arrows] Scroll [Esc] Edit [Q] Stop":"[Tab/Arrows] Field [Enter/Space] Change [N] Start UTC now [V/F2] Review [Esc] Back [Q] Stop",width);
-        const auto notice=wrapText(message.empty()?"GPU BOARD / SESSION ONLY. Flat ENERGY-ONLY is not a utility bill or net income.":message,width);
+        using PanelKey=i18n::ElectricityPanelMessageKey;
+        if(rows>0&&rows<12)return i18n::electricityPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::electricityPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::electricityPanelEnglish(PanelKey::ShortKeys)+"\n";
+        const auto footer=wrapText(i18n::electricityPanelEnglish(page==ElectricitySettingsPage::Edit?PanelKey::FooterEdit:page==ElectricitySettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
+        const auto notice=wrapText(message.empty()?i18n::electricityPanelEnglish(PanelKey::LocalDefaults):message,width);
         const size_t budget=rows>0?static_cast<size_t>(std::max(1,rows-static_cast<int>(footer.size()+notice.size())-1)):1000;
-        std::vector<std::string> body={"Electricity/energy"+std::string(dirty()?" *":"")};
+        std::vector<std::string> body={i18n::electricityPanelEnglish(PanelKey::Title)+(dirty()?i18n::electricityPanelEnglish(PanelKey::UnsavedSuffix):std::string{})};
         if(page==ElectricitySettingsPage::Edit){
             body.push_back(std::string("Edit ")+label(field));body.push_back("> "+input+"_");
-            body.push_back(field==12?"Signed decimal currency/kWh; zero valid. No exponent or implicit FX.":field>=6&&field<=11?"Printable ASCII, max 64. Do NOT enter account, wallet or credentials.":field==14?"Whole-minute fixed STANDARD seconds (+/-64800), not an IANA/DST zone.":field>=15?"UTC Unix seconds, not milliseconds or local time.":"Milliseconds; selection >=500; max gap >= selection and <=60000.");
-            body.push_back("Q/D/L/S are text here, not global actions.");
+            body.push_back(i18n::electricityPanelEnglish(field==12?PanelKey::RateGuide:field>=6&&field<=11?PanelKey::IdentityGuide:field==14?PanelKey::OffsetGuide:field>=15?PanelKey::UtcGuide:PanelKey::IntervalGuide));
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::EditorKeys));
         }else if(page==ElectricitySettingsPage::Review){
-            body.push_back("Review electricity-preferences.json ONLY");
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::ReviewHeading));
             for(unsigned i=0;i<17;++i)if(value(active,i)!=value(draft,i))body.push_back(std::string(label(i))+": "+value(active,i)+" -> "+value(draft,i));
-            if(!dirty())body.push_back("No value changes.");
-            body.push_back("Activation: NEXT EXPLICIT parent session only, never on child retry.");
+            if(!dirty())body.push_back(i18n::electricityPanelEnglish(PanelKey::NoChanges));
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::Activation));
             body.push_back("Model/basis: flat ENERGY-ONLY / GPU BOARD proxy; clock "+value(draft,13)+", offset "+value(draft,14)+" seconds.");
             body.push_back("Declared effective UTC: "+(draft.effectiveFromUtc?utcIsoClock(static_cast<time_t>(draft.effectiveFromUtc)):"not supplied")+" to "+(draft.effectiveThroughUtc?utcIsoClock(static_cast<time_t>(draft.effectiveThroughUtc)):"not supplied")+" (end exclusive).");
-            if(context.cliNoEnergy)body.push_back("Current --no-energy overrides collection, including after Save.");
+            if(context.cliNoEnergy)body.push_back(i18n::electricityPanelEnglish(PanelKey::CliWins));
             body.push_back("Current session collection: "+std::string(context.running&&context.effective.collectEnergy&&!context.cliNoEnergy?"on":"off/no active session"));
             body.push_back(currentTariff());
-            body.push_back("UI/runtime/manual-market drafts save separately. No history deletion.");
-            body.push_back("Flat energy-only EXCLUDES tiers/TOU/dynamic/fees/tax/shared-meter bill effects.");
-            body.push_back("No hardware changes, income/net forecast, optimizer, network or mining permission.");
-        }else if(page==ElectricitySettingsPage::Leave){body.push_back("Unsaved electricity settings");body.push_back("[Enter] Review/save [D] Discard [Esc] Continue editing");}
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::SeparateDrafts));
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::Exclusions));
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::NoPermission));
+        }else if(page==ElectricitySettingsPage::Leave){body.push_back(i18n::electricityPanelEnglish(PanelKey::LeaveTitle));body.push_back(i18n::electricityPanelEnglish(PanelKey::LeaveKeys));}
         else{
             body.push_back("Field "+std::to_string(field+1)+"/17 | configured next-session defaults");
             for(unsigned i=field;i<17&&i<field+7;++i)body.push_back(std::string(i==field?"> ":"  ")+label(i)+": "+value(draft,i));
             body.push_back("Current collection: "+std::string(context.cliNoEnergy?"off (--no-energy)":context.running&&context.effective.collectEnergy?"on (frozen session defaults)":"off/no active session"));
             body.push_back(currentTariff());
-            body.push_back("No country, supplier, tariff, currency or OS timezone inference.");
+            body.push_back(i18n::electricityPanelEnglish(PanelKey::NoInference));
         }
         std::vector<std::string> lines;for(const auto &line:body)for(const auto &part:wrapText(line,width))lines.push_back(part);
         if(page==ElectricitySettingsPage::Review&&lines.size()>budget){const auto offset=std::min(static_cast<size_t>(reviewOffset),lines.size()-std::min(budget,lines.size()));lines.erase(lines.begin(),lines.begin()+offset);}

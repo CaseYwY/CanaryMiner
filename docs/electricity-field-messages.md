@@ -38,3 +38,6 @@ sources, global quarantine and production release gates are not supplied by labe
 
 [P-13aj](electricity-notice-messages.md) later extracts local input/save/stamped-start notices without changing these label
 results or activating translated native rendering. Descriptions remain separate from actions, supplier times and readings.
+
+[P-13ak](electricity-panel-messages.md) later extracts literal shell/editor/limitations. These field-label results and their
+value-free/no-source-authority scope remain unchanged; effective typed native rendering stays separate.
