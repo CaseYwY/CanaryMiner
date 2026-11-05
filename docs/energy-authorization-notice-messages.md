@@ -35,3 +35,6 @@ are in the [execution ledger](architecture/execution-plan.md).
 Authorization shell/dynamic/private-original domains, other panels/dashboard/log/raw domains, effective typed native/
 data-owner/deployment, human review and physical terminal/font/shaping/accessibility remain open. Actual source/power/safety/
 game/GPU/TLS/financial evidence, global quarantine, physical durability and production release remain unqualified.
+
+[P-13aq](energy-authorization-panel-messages.md) subsequently extracts literal shell/review/limitations without changing
+these historical notice results, native guards or the distinction between printed descriptions and owner/helper evidence.

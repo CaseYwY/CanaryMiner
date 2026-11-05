@@ -4,6 +4,7 @@
 #include "dashboard.h"
 #include "energy_authorization_field_messages.h"
 #include "energy_authorization_notice_messages.h"
+#include "energy_authorization_panel_messages.h"
 namespace om {
 struct EnergyAuthorizationAccess {
     std::function<std::shared_ptr<const EnergyAuthorizationSnapshot>()> snapshot;
@@ -101,8 +102,8 @@ class EnergyAuthorizationPanel {
         return EnergyAuthorizationPanelResult::None;
     }
     std::vector<std::string> lines(const EnergyAuthorizationAccess &access={})const{
-        using P=EnergyAuthorizationPage;std::vector<std::string> out={"Energy persistence / independent authorization"};
-        if(!current){out.push_back("UNAVAILABLE: no authorization helper owner supplied.");out.push_back("Session energy collection alone never permits disk retention.");return out;}
+        using P=EnergyAuthorizationPage;using PanelKey=i18n::EnergyAuthorizationPanelMessageKey;std::vector<std::string> out={i18n::energyAuthorizationPanelEnglish(PanelKey::Title)};
+        if(!current){out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::Unavailable));out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NoRetention));return out;}
         std::string capture=access.captureActive?"frozen active plan":"not active";
         if(access.captureSnapshot){const auto s=access.captureSnapshot();if(s){
             if(s->state==EnergyCaptureState::Collecting)capture="frozen active plan";
@@ -111,27 +112,27 @@ class EnergyAuthorizationPanel {
             else if(s->state==EnergyCaptureState::Faulted||s->state==EnergyCaptureState::ClockFault)capture="unavailable / preserve local history";
             else capture="not active";}}
         out.push_back("Current capture: "+capture+(current->cliNoEnergy?" | --no-energy overrides provisioning":""));
-        if(current->startupPending)out.push_back("STARTING: freezing this parent's capture decision. Settings edits wait for a fresh snapshot.");
-        if(access.selectedDevices.empty())out.push_back("Enrollment unavailable: select full explicit GPU UUIDs; idle settings does not discover GPUs.");
-        out.push_back(current->pending?"BUSY: bounded helper request; admission is not confirmation.":"IDLE: settings do not start or restart mining.");
+        if(current->startupPending)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::StartupPending));
+        if(access.selectedDevices.empty())out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NeedSelection));
+        out.push_back(i18n::energyAuthorizationPanelEnglish(current->pending?PanelKey::Busy:PanelKey::Idle));
         if(current->reply)out.push_back("Last result: "+std::string(status(current->reply->status)));
-        else if(current->state==EnergyAuthorizationOwnerState::Faulted)out.push_back("UNAVAILABLE: authorization helper failed; preserve local stores.");
-        if(current->uncertain)out.push_back("UNKNOWN retained original; new mutations blocked until reviewed inspection.");
-        if(page==P::Leave){out.push_back("Unsaved draft. D discards and closes; Esc returns to editing.");return out;}
-        if(page==P::Edit){out.push_back(std::string(labels()[field])+" = "+input+"_");out.push_back("Whole numbers only. Enter keeps draft; Esc cancels this edit.");return out;}
+        else if(current->state==EnergyAuthorizationOwnerState::Faulted)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::HelperFailed));
+        if(current->uncertain)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::UnknownRetained));
+        if(page==P::Leave){out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::Leave));return out;}
+        if(page==P::Edit){out.push_back(std::string(labels()[field])+" = "+input+"_");out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::EditGuide));return out;}
         const auto doc=current->reply&&current->reply->document?&*current->reply->document:nullptr;
         out.push_back("Enrollment: "+std::string(!doc?"unavailable":doc->enrollment==EnergyEnrollment::None?"none":doc->enrollment==EnergyEnrollment::Pending?"PENDING - never auto-create again":"ready / immutable identity and retention"));
         if(page==P::Review){
-            out.push_back(ackReview?"REVIEW INSPECTION acknowledgement":reviewedCommand.action==EnergyAuthorizationAction::Enroll?"REVIEW ENROLLMENT / creates a new private store":reviewedCommand.action==EnergyAuthorizationAction::Confirm?"REVIEW CONFIRM / exact empty store only":"REVIEW SAVE / next explicit parent only");
-            out.push_back("GPU board sample-and-hold; gaps remain unknown. Finite budgets reject at capacity.");
-            out.push_back("Exact compaction expires raw originals, not aggregate energy; no guaranteed retention days.");
+            out.push_back(i18n::energyAuthorizationPanelEnglish(ackReview?PanelKey::ReviewInspection:reviewedCommand.action==EnergyAuthorizationAction::Enroll?PanelKey::ReviewEnroll:reviewedCommand.action==EnergyAuthorizationAction::Confirm?PanelKey::ReviewConfirm:PanelKey::ReviewSave));
+            out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::SampleHold));
+            out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::CompactionExpires));
         }
         const bool reviewValues=page==P::Review&&!ackReview&&(reviewedCommand.action==EnergyAuthorizationAction::Save||reviewedCommand.action==EnergyAuthorizationAction::Enroll);
         const bool originalValues=ackReview&&current->uncertain&&(current->uncertain->action==EnergyAuthorizationAction::Save||current->uncertain->action==EnergyAuthorizationAction::Enroll);
         const auto p=originalValues?current->uncertain->policy:reviewValues?reviewedCommand.policy:draftPolicy;
         const auto l=originalValues?current->uncertain->limits:reviewValues?reviewedCommand.limits:draftLimits;
         const auto v=values(p,l);for(size_t i=0;i<v.size();++i)out.push_back(std::string(page==P::Browse&&i==field?"> ":"  ")+labels()[i]+": "+v[i]);
-        if(!reveal)out.push_back("PRIVATE selected UUIDs, namespace, scope, session and original timestamps hidden. I reveals locally.");
+        if(!reveal)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::PrivateHidden));
         else{
             const auto &ids=ackReview&&current->uncertain?current->uncertain->devices:access.selectedDevices;
             for(size_t i=0;i<ids.size()&&i<64;++i)out.push_back("Selected UUID "+std::to_string(i+1)+": "+safe(ids[i]));
@@ -141,15 +142,15 @@ class EnergyAuthorizationPanel {
             if(ackReview&&current->uncertain){const auto &r=*current->uncertain;out.push_back("ORIGINAL action "+std::to_string(static_cast<unsigned>(r.action))+" | UTC ms "+std::to_string(r.nowUtcMs));out.push_back("Original CAS "+safe(r.expected));}
         }
         if(page==P::Review&&(ackReview||reviewedCommand.action!=EnergyAuthorizationAction::Save))out.push_back(std::string(acknowledged?"[x]":"[ ]")+" Reviewed exact selection / private state; Space acknowledges.");
-        out.push_back("Saved authorization affects only the next explicit parent. No collection or plan issuance on this page.");
+        out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NextParent));
         return out;
     }
     std::string render(int columns,int rows,ColorLevel color,const EnergyAuthorizationAccess &access={})const{
         using namespace dash_detail;const size_t width=static_cast<size_t>((std::max)(20,columns)-1);
-        if(rows>0&&rows<12)return "Terminal too short.\nResize to 12+ rows.\n[Q/Ctrl+C] Stop\n";
-        const auto footer=wrapText(page==EnergyAuthorizationPage::Review?"[I] Reveal [Space] Ack [Enter] Submit [Arrows] Scroll [Esc] Cancel [Q] Stop":page==EnergyAuthorizationPage::Edit?
-            "[Enter] Keep draft [Esc] Cancel [Q/Ctrl+C] Stop":"[V] Save review [E] Enroll [C] Confirm [F] Inspect [A] Ack [I] Reveal [Arrows] Move [Esc] Back [Q] Stop",width);
-        auto note=wrapText(message.empty()?"Independent opt-in; durable acknowledgement required.":message,width);if(note.size()>2)note.resize(2);
+        using PanelKey=i18n::EnergyAuthorizationPanelMessageKey;
+        if(rows>0&&rows<12)return i18n::energyAuthorizationPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::energyAuthorizationPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::energyAuthorizationPanelEnglish(PanelKey::ShortKeys)+"\n";
+        const auto footer=wrapText(i18n::energyAuthorizationPanelEnglish(page==EnergyAuthorizationPage::Review?PanelKey::FooterReview:page==EnergyAuthorizationPage::Edit?PanelKey::FooterEdit:PanelKey::FooterBrowse),width);
+        auto note=wrapText(message.empty()?i18n::energyAuthorizationPanelEnglish(PanelKey::LocalDefault):message,width);if(note.size()>2)note.resize(2);
         const auto budget=rows>0?static_cast<size_t>((std::max)(1,rows-static_cast<int>(footer.size()+note.size())-1)):size_t(10000);
         std::vector<std::string> content;for(const auto &line:lines(access))for(const auto &part:wrapText(line,width))content.push_back(part);
         size_t requested=offset;
