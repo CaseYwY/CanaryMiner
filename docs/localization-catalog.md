@@ -55,6 +55,10 @@ terminal/human and actual TLS qualification stay open.
 English enforcement and independent trust/fallback/consent/donation ownership. Dynamic/private-input/other domains and
 effective native/data-owner/terminal/human/actual TLS qualification remain open.
 
+[P-13ab](pool-value-messages.md) adds ten pool field/slot/input/action-description keys (160 texts), separating invariant
+machine/private inputs from human values and recovery. Full rule summaries/other domains/effective native/data-owner/
+terminal/human and actual TLS qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

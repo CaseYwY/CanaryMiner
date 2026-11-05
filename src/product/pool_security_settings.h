@@ -5,6 +5,7 @@
 #include "pool_field_messages.h"
 #include "pool_notice_messages.h"
 #include "pool_panel_messages.h"
+#include "pool_value_messages.h"
 #include <functional>
 namespace om {
 enum class PoolSecuritySettingsResult { None, Close, Quit };
@@ -65,6 +66,7 @@ class PoolSecuritySettingsPanel {
     std::string render(int columns,int rows,ColorLevel color)const{
         using namespace dash_detail;const auto width=static_cast<std::size_t>(std::max(20,columns)-1);
         using PanelKey=i18n::PoolPanelMessageKey;
+        using ValueKey=i18n::PoolValueMessageKey;
         if(rows>0&&rows<12)return i18n::poolPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::poolPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::poolPanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::poolPanelEnglish(page==PoolSecuritySettingsPage::Edit?PanelKey::FooterEdit:page==PoolSecuritySettingsPage::Review?
             PanelKey::FooterReview:PanelKey::FooterBrowse),width);
@@ -74,20 +76,21 @@ class PoolSecuritySettingsPanel {
         if(page==PoolSecuritySettingsPage::Edit){
             add(i18n::poolPanelEnglish(field==4?PanelKey::LoginExposed:field==6?PanelKey::RemoveOnly:PanelKey::ExplicitDns));
             add(i18n::poolPanelEnglish(field==4?PanelKey::ConsentPrompt:field==6?PanelKey::RemovePrompt:PanelKey::EditorKeys));
-            const auto tail=input.size()>width-3?input.substr(input.size()-(width-3)):input;add("> "+tail+"_");
+            const auto tail=input.size()>width-3?input.substr(input.size()-(width-3)):input;add(i18n::poolValueEnglish(ValueKey::EditInput,{{"input",tail}}));
             focus=body.size()>budget?body.size()-budget:0;
         }else if(page==PoolSecuritySettingsPage::Leave){add(i18n::poolPanelEnglish(PanelKey::LeaveTitle));add(i18n::poolPanelEnglish(PanelKey::LeaveKeys));}
         else if(page==PoolSecuritySettingsPage::Review){
             add(i18n::poolPanelEnglish(PanelKey::ReviewHeading));add(i18n::poolPanelEnglish(PanelKey::NoRuntime));
             add(i18n::poolPanelEnglish(PanelKey::NoDowngrade));
             add(i18n::poolPanelEnglish(PanelKey::PlaintextExposure));
-            for(std::size_t i=0;i<std::max(active.users.size(),draft.users.size());++i){add("User pool "+std::to_string(i+1));if(i<active.users.size())add("Before: "+describe(active.users[i]));else add(i18n::poolPanelEnglish(PanelKey::BeforeAbsent));
+            for(std::size_t i=0;i<std::max(active.users.size(),draft.users.size());++i){add(userPool(i+1));if(i<active.users.size())add("Before: "+describe(active.users[i]));else add(i18n::poolPanelEnglish(PanelKey::BeforeAbsent));
                 if(i<draft.users.size())add("After: "+describe(draft.users[i]));else add(i18n::poolPanelEnglish(PanelKey::AfterRemoved));}
             add(i18n::poolPanelEnglish(PanelKey::DonationIndependent));add("Before: "+describe(active.donation));add("After: "+describe(draft.donation));
             add(i18n::poolPanelEnglish(context.running?PanelKey::CurrentUnchanged:PanelKey::NoSessionNetwork));
             add(i18n::poolPanelEnglish(PanelKey::EndpointNotVerified));add(i18n::poolPanelEnglish(PanelKey::EndMarker));
         }else{
-            const auto &rule=selected();for(unsigned i=0;i<7;++i){if(i==field)focus=body.size();add(std::string(i==field?"> ":"  ")+label(i)+": "+value(rule,i));}
+            const auto &rule=selected();for(unsigned i=0;i<7;++i){if(i==field)focus=body.size();const bool machine=i==1||(i==2&&!rule.tlsUrl.empty())||(i==3&&!rule.plaintextUrl.empty());
+                add(std::string(i==field?"> ":"  ")+i18n::poolValueEnglish(machine?ValueKey::FieldValue:ValueKey::HumanFieldValue,{{"field",label(i)},{"value",value(rule,i)}}));}
             add(i18n::poolPanelEnglish(PanelKey::ConfiguredOnly));
         }
         std::size_t start=0;if(body.size()>budget){if(page==PoolSecuritySettingsPage::Review)start=std::min(static_cast<std::size_t>(reviewOffset),body.size()-budget);
@@ -102,8 +105,9 @@ class PoolSecuritySettingsPanel {
     const PoolSecurityRule &selected()const{return donation?draft.donation:draft.users[slot];}
     static std::string describe(const PoolSecurityRule &r){return std::string(poolSecurityModeName(r.mode))+" | TLS: "+(r.tlsUrl.empty()?"unset":r.tlsUrl)+" | TCP: "+(r.plaintextUrl.empty()?"unset":r.plaintextUrl)+" | plaintext consent: "+(r.plaintextConsent?"YES":"off");}
     static std::string label(unsigned n){const auto &keys=i18n::poolFieldKeys();return i18n::poolFieldEnglish(n<keys.size()?keys[n]:i18n::PoolFieldMessageKey::Invalid);}
-    std::string value(const PoolSecurityRule &r,unsigned n)const{switch(n){case 0:return donation?"Donation (independent)":"User pool "+std::to_string(slot+1);case 1:return poolSecurityModeName(r.mode);
-        case 2:return r.tlsUrl.empty()?"unset":r.tlsUrl;case 3:return r.plaintextUrl.empty()?"unset":r.plaintextUrl;case 4:return r.plaintextConsent?"YES (Enter revokes)":"off (explicit phrase required)";case 5:return "[Enter] strict TLS, no consent";default:return "[Enter] explicit confirmation";}}
+    static std::string userPool(std::size_t n){return i18n::poolValueEnglish(i18n::PoolValueMessageKey::UserPool,{{"slot",std::to_string(n)}});}
+    std::string value(const PoolSecurityRule &r,unsigned n)const{using ValueKey=i18n::PoolValueMessageKey;switch(n){case 0:return donation?i18n::poolValueEnglish(ValueKey::Donation):userPool(slot+1);case 1:return poolSecurityModeName(r.mode);
+        case 2:return r.tlsUrl.empty()?i18n::poolValueEnglish(ValueKey::Unset):r.tlsUrl;case 3:return r.plaintextUrl.empty()?i18n::poolValueEnglish(ValueKey::Unset):r.plaintextUrl;case 4:return i18n::poolValueEnglish(r.plaintextConsent?ValueKey::ConsentEnabled:ValueKey::ConsentDisabled);case 5:return i18n::poolValueEnglish(ValueKey::AddAction);default:return i18n::poolValueEnglish(ValueKey::RemoveAction);}}
     bool validate(){if(draft.users.empty()||draft.users.size()>8){message=i18n::poolNoticeEnglish(i18n::PoolNoticeMessageKey::InvalidUserCount);return false;}
         unsigned bad=0;for(std::size_t i=0;i<draft.users.size();++i)if(!validPoolSecurityRule(draft.users[i],&message,&bad)){donation=false;slot=static_cast<unsigned>(i);field=bad+1;return false;}
         if(!validPoolSecurityRule(draft.donation,&message,&bad)){donation=true;field=bad+1;return false;}return true;}

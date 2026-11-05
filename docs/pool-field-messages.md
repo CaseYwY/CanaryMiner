@@ -39,3 +39,6 @@ results and their argument-free scope remain unchanged; neither batch activates 
 
 [P-13aa](pool-panel-messages.md) subsequently extracts literal shell/security-warning text, still without effective native
 translation or enforcement authority. Dynamic/private-input and real trust qualification remain separate.
+
+[P-13ab](pool-value-messages.md) subsequently extracts dynamic field/slot/input/action-description text with separate
+invariant/human roles. This does not change field-label historical evidence or activate saved language requests.

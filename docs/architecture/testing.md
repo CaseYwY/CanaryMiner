@@ -270,6 +270,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13aa](../pool-panel-messages.md) checks 480 literal pool shell/editor/security-warning texts, exact English/key/review/RTL/parameter and protected token parity, typed line/paint/independent-wrap/refusal transactions and unchanged fixed-predecessor frames/transitions/declarations. Actual native store/CLI/PTY/fallback and transport tests remain separate; structural translation checks do not establish human security meaning, physical readability or real trust/failure qualification.
 
+[P-13ab](../pool-value-messages.md) checks 160 pool field/slot/input/description texts, bounded nonrecursive/reordered expansion, original/recovery/role refusal and typed provenance/paint/independent-row transactions. A synthetic maximum-DNS endpoint stays intact or omitted and refuses too-narrow wrapping. Fixed-predecessor native frames/transitions/declarations and actual native store/CLI/PTY regressions are separate from full rule-summary/native integration and real URL/TLS/source qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

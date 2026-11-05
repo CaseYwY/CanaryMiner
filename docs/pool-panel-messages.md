@@ -35,3 +35,6 @@ store/CLI/PTY/fallback/transport tests are independent. Exact evidence is in the
 Dynamic pool/private-input/other domains, effective typed native/data-owner/deployment, human translation review and physical
 terminal/font/shaping/accessibility remain open. Normal TLS/trust/egress/fallback/donation/deployment, global quarantine and
 real GPU/game/financial/power/safety/release gates are not qualified by these warnings.
+
+[P-13ab](pool-value-messages.md) later extracts field/slot/input/action-description envelopes while full before/after rule
+summaries remain separate. This literal-domain historical evidence and no-trust-authority boundary remain unchanged.

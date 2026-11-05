@@ -16,6 +16,7 @@
 #include "pool_field_messages.h"
 #include "pool_notice_messages.h"
 #include "pool_panel_messages.h"
+#include "pool_value_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -171,4 +172,14 @@ bool layoutTerminalPoolPanelMessage(const TerminalPoolPanelMessageRequest &,cons
 bool wrapTerminalPoolPanelMessage(const TerminalPoolPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalPoolPanelMessage(const TerminalPoolPanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalPoolPanelMessage(const TerminalPoolPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalPoolValueMessageRequest {
+    std::string language="en";
+    i18n::PoolValueMessageKey key=i18n::PoolValueMessageKey::FieldValue;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalPoolValueMessage(const TerminalPoolValueMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalPoolValueMessage(const TerminalPoolValueMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalPoolValueMessage(const TerminalPoolValueMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalPoolValueMessage(const TerminalPoolValueMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om
