@@ -5,6 +5,7 @@
 #include "energy_authorization_field_messages.h"
 #include "energy_authorization_notice_messages.h"
 #include "energy_authorization_panel_messages.h"
+#include "energy_authorization_value_messages.h"
 namespace om {
 struct EnergyAuthorizationAccess {
     std::function<std::shared_ptr<const EnergyAuthorizationSnapshot>()> snapshot;
@@ -103,25 +104,26 @@ class EnergyAuthorizationPanel {
     }
     std::vector<std::string> lines(const EnergyAuthorizationAccess &access={})const{
         using P=EnergyAuthorizationPage;using PanelKey=i18n::EnergyAuthorizationPanelMessageKey;std::vector<std::string> out={i18n::energyAuthorizationPanelEnglish(PanelKey::Title)};
+        using ValueKey=i18n::EnergyAuthorizationValueMessageKey;
         if(!current){out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::Unavailable));out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NoRetention));return out;}
-        std::string capture=access.captureActive?"frozen active plan":"not active";
+        std::string capture=i18n::energyAuthorizationValueEnglish(access.captureActive?ValueKey::CaptureFrozen:ValueKey::CaptureInactive);
         if(access.captureSnapshot){const auto s=access.captureSnapshot();if(s){
-            if(s->state==EnergyCaptureState::Collecting)capture="frozen active plan";
-            else if(s->state==EnergyCaptureState::Starting)capture="starting / awaiting helper";
-            else if(s->state==EnergyCaptureState::NeedsReview)capture="paused / recovery review required";
-            else if(s->state==EnergyCaptureState::Faulted||s->state==EnergyCaptureState::ClockFault)capture="unavailable / preserve local history";
-            else capture="not active";}}
-        out.push_back("Current capture: "+capture+(current->cliNoEnergy?" | --no-energy overrides provisioning":""));
+            if(s->state==EnergyCaptureState::Collecting)capture=i18n::energyAuthorizationValueEnglish(ValueKey::CaptureFrozen);
+            else if(s->state==EnergyCaptureState::Starting)capture=i18n::energyAuthorizationValueEnglish(ValueKey::CaptureStarting);
+            else if(s->state==EnergyCaptureState::NeedsReview)capture=i18n::energyAuthorizationValueEnglish(ValueKey::CaptureReview);
+            else if(s->state==EnergyCaptureState::Faulted||s->state==EnergyCaptureState::ClockFault)capture=i18n::energyAuthorizationValueEnglish(ValueKey::CaptureUnavailable);
+            else capture=i18n::energyAuthorizationValueEnglish(ValueKey::CaptureInactive);}}
+        out.push_back(i18n::energyAuthorizationValueEnglish(current->cliNoEnergy?ValueKey::CaptureCli:ValueKey::CurrentCapture,{{"state",capture}}));
         if(current->startupPending)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::StartupPending));
         if(access.selectedDevices.empty())out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NeedSelection));
         out.push_back(i18n::energyAuthorizationPanelEnglish(current->pending?PanelKey::Busy:PanelKey::Idle));
-        if(current->reply)out.push_back("Last result: "+std::string(status(current->reply->status)));
+        if(current->reply)out.push_back(i18n::energyAuthorizationValueEnglish(ValueKey::LastResult,{{"state",status(current->reply->status)}}));
         else if(current->state==EnergyAuthorizationOwnerState::Faulted)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::HelperFailed));
         if(current->uncertain)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::UnknownRetained));
         if(page==P::Leave){out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::Leave));return out;}
-        if(page==P::Edit){out.push_back(std::string(labels()[field])+" = "+input+"_");out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::EditGuide));return out;}
+        if(page==P::Edit){out.push_back(i18n::energyAuthorizationValueEnglish(ValueKey::EditInput,{{"field",labels()[field]},{"input",input}}));out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::EditGuide));return out;}
         const auto doc=current->reply&&current->reply->document?&*current->reply->document:nullptr;
-        out.push_back("Enrollment: "+std::string(!doc?"unavailable":doc->enrollment==EnergyEnrollment::None?"none":doc->enrollment==EnergyEnrollment::Pending?"PENDING - never auto-create again":"ready / immutable identity and retention"));
+        out.push_back(i18n::energyAuthorizationValueEnglish(ValueKey::Enrollment,{{"state",i18n::energyAuthorizationValueEnglish(!doc?ValueKey::Unavailable:doc->enrollment==EnergyEnrollment::None?ValueKey::EnrollmentNone:doc->enrollment==EnergyEnrollment::Pending?ValueKey::EnrollmentPending:ValueKey::EnrollmentReady)}}));
         if(page==P::Review){
             out.push_back(i18n::energyAuthorizationPanelEnglish(ackReview?PanelKey::ReviewInspection:reviewedCommand.action==EnergyAuthorizationAction::Enroll?PanelKey::ReviewEnroll:reviewedCommand.action==EnergyAuthorizationAction::Confirm?PanelKey::ReviewConfirm:PanelKey::ReviewSave));
             out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::SampleHold));
@@ -131,7 +133,8 @@ class EnergyAuthorizationPanel {
         const bool originalValues=ackReview&&current->uncertain&&(current->uncertain->action==EnergyAuthorizationAction::Save||current->uncertain->action==EnergyAuthorizationAction::Enroll);
         const auto p=originalValues?current->uncertain->policy:reviewValues?reviewedCommand.policy:draftPolicy;
         const auto l=originalValues?current->uncertain->limits:reviewValues?reviewedCommand.limits:draftLimits;
-        const auto v=values(p,l);for(size_t i=0;i<v.size();++i)out.push_back(std::string(page==P::Browse&&i==field?"> ":"  ")+labels()[i]+": "+v[i]);
+        const auto v=values(p,l);for(size_t i=0;i<v.size();++i){const bool human=i==0||i==11||(i>=12&&!l.compaction);
+            out.push_back(std::string(page==P::Browse&&i==field?"> ":"  ")+i18n::energyAuthorizationValueEnglish(human?ValueKey::FieldHuman:ValueKey::FieldRequest,{{"field",labels()[i]},{"value",v[i]}}));}
         if(!reveal)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::PrivateHidden));
         else{
             const auto &ids=ackReview&&current->uncertain?current->uncertain->devices:access.selectedDevices;
@@ -141,7 +144,7 @@ class EnergyAuthorizationPanel {
                 for(const auto &channel:doc->binding.channels)out.push_back("Channel "+safe(channel));}
             if(ackReview&&current->uncertain){const auto &r=*current->uncertain;out.push_back("ORIGINAL action "+std::to_string(static_cast<unsigned>(r.action))+" | UTC ms "+std::to_string(r.nowUtcMs));out.push_back("Original CAS "+safe(r.expected));}
         }
-        if(page==P::Review&&(ackReview||reviewedCommand.action!=EnergyAuthorizationAction::Save))out.push_back(std::string(acknowledged?"[x]":"[ ]")+" Reviewed exact selection / private state; Space acknowledges.");
+        if(page==P::Review&&(ackReview||reviewedCommand.action!=EnergyAuthorizationAction::Save))out.push_back(i18n::energyAuthorizationValueEnglish(acknowledged?ValueKey::AckChecked:ValueKey::AckUnchecked));
         out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NextParent));
         return out;
     }
@@ -185,14 +188,15 @@ class EnergyAuthorizationPanel {
         static const std::array<std::string,14> names=[](){std::array<std::string,14> result;const auto &keys=i18n::energyAuthorizationFieldKeys();
             for(std::size_t i=0;i<result.size();++i){result[i]=i18n::energyAuthorizationFieldEnglish(keys[i]);}return result;}();return names;
     }
-    static std::vector<std::string> values(const EnergyCapturePolicy &p,const EnergyHistoryLimits &l){return {p.persistenceAuthorized?"ON":"OFF",std::to_string(p.selectionMs),std::to_string(p.maximumGapMs),std::to_string(p.flushMs),std::to_string(p.bufferedReadings),std::to_string(p.batchReadings),
-        std::to_string(l.maxBatches),std::to_string(l.maxReadings),std::to_string(l.maxSessions),std::to_string(l.maxWindows),std::to_string(l.maxDatabaseBytes),l.compaction?"ON":"OFF",l.compaction?std::to_string(l.compaction->afterBatches):"unavailable",l.compaction?std::to_string(l.compaction->maxSegments):"unavailable"};}
+    static std::vector<std::string> values(const EnergyCapturePolicy &p,const EnergyHistoryLimits &l){using Key=i18n::EnergyAuthorizationValueMessageKey;return {i18n::energyAuthorizationValueEnglish(p.persistenceAuthorized?Key::On:Key::Off),std::to_string(p.selectionMs),std::to_string(p.maximumGapMs),std::to_string(p.flushMs),std::to_string(p.bufferedReadings),std::to_string(p.batchReadings),
+        std::to_string(l.maxBatches),std::to_string(l.maxReadings),std::to_string(l.maxSessions),std::to_string(l.maxWindows),std::to_string(l.maxDatabaseBytes),i18n::energyAuthorizationValueEnglish(l.compaction?Key::On:Key::Off),l.compaction?std::to_string(l.compaction->afterBatches):i18n::energyAuthorizationValueEnglish(Key::Unavailable),l.compaction?std::to_string(l.compaction->maxSegments):i18n::energyAuthorizationValueEnglish(Key::Unavailable)};}
     std::vector<uint64_t> numbers()const{return {0,draftPolicy.selectionMs,draftPolicy.maximumGapMs,draftPolicy.flushMs,draftPolicy.bufferedReadings,draftPolicy.batchReadings,draftLimits.maxBatches,draftLimits.maxReadings,draftLimits.maxSessions,draftLimits.maxWindows,draftLimits.maxDatabaseBytes,0,draftLimits.compaction?draftLimits.compaction->afterBatches:0,draftLimits.compaction?draftLimits.compaction->maxSegments:0};}
     void setNumber(uint64_t n){switch(field){case 1:draftPolicy.selectionMs=static_cast<unsigned>(n);break;case 2:draftPolicy.maximumGapMs=static_cast<unsigned>(n);break;case 3:draftPolicy.flushMs=static_cast<unsigned>(n);break;
         case 4:draftPolicy.bufferedReadings=static_cast<size_t>(n);break;case 5:draftPolicy.batchReadings=static_cast<size_t>(n);break;case 6:draftLimits.maxBatches=static_cast<size_t>(n);break;case 7:draftLimits.maxReadings=static_cast<size_t>(n);break;
         case 8:draftLimits.maxSessions=static_cast<size_t>(n);break;case 9:draftLimits.maxWindows=static_cast<size_t>(n);break;case 10:draftLimits.maxDatabaseBytes=n;break;
         case 12:if(draftLimits.compaction)draftLimits.compaction->afterBatches=static_cast<size_t>(n);break;case 13:if(draftLimits.compaction)draftLimits.compaction->maxSegments=static_cast<size_t>(n);break;default:break;}}
     static std::string safe(const std::string &s){std::string out;for(unsigned char c:s){if(out.size()==128)break;out+=c>=32&&c<=126?static_cast<char>(c):'?';}return out;}
-    static const char *status(EnergyAuthorizationStatus s){switch(s){case EnergyAuthorizationStatus::Ok:return "Ok";case EnergyAuthorizationStatus::Missing:return "Missing / disabled defaults";case EnergyAuthorizationStatus::Invalid:return "Invalid";case EnergyAuthorizationStatus::Conflict:return "Conflict";case EnergyAuthorizationStatus::Storage:return "Storage unavailable";case EnergyAuthorizationStatus::Clock:return "Clock fault";case EnergyAuthorizationStatus::Selection:return "Selection mismatch";case EnergyAuthorizationStatus::Disabled:return "Disabled";case EnergyAuthorizationStatus::NeedsReview:return "NeedsReview";case EnergyAuthorizationStatus::Entropy:return "System entropy unavailable";}return "Unknown";}
+    static std::string status(EnergyAuthorizationStatus s){using Key=i18n::EnergyAuthorizationValueMessageKey;auto key=Key::StatusUnknown;
+        switch(s){case EnergyAuthorizationStatus::Ok:key=Key::StatusOk;break;case EnergyAuthorizationStatus::Missing:key=Key::StatusMissing;break;case EnergyAuthorizationStatus::Invalid:key=Key::StatusInvalid;break;case EnergyAuthorizationStatus::Conflict:key=Key::StatusConflict;break;case EnergyAuthorizationStatus::Storage:key=Key::StatusStorage;break;case EnergyAuthorizationStatus::Clock:key=Key::StatusClock;break;case EnergyAuthorizationStatus::Selection:key=Key::StatusSelection;break;case EnergyAuthorizationStatus::Disabled:key=Key::StatusDisabled;break;case EnergyAuthorizationStatus::NeedsReview:key=Key::StatusNeedsReview;break;case EnergyAuthorizationStatus::Entropy:key=Key::StatusEntropy;break;}return i18n::energyAuthorizationValueEnglish(key);}
 };
 } // namespace om

@@ -32,6 +32,7 @@
 #include "energy_authorization_field_messages.h"
 #include "energy_authorization_notice_messages.h"
 #include "energy_authorization_panel_messages.h"
+#include "energy_authorization_value_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -338,4 +339,14 @@ bool layoutTerminalEnergyAuthorizationPanelMessage(const TerminalEnergyAuthoriza
 bool wrapTerminalEnergyAuthorizationPanelMessage(const TerminalEnergyAuthorizationPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalEnergyAuthorizationPanelMessage(const TerminalEnergyAuthorizationPanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalEnergyAuthorizationPanelMessage(const TerminalEnergyAuthorizationPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalEnergyAuthorizationValueMessageRequest {
+    std::string language="en";
+    i18n::EnergyAuthorizationValueMessageKey key=i18n::EnergyAuthorizationValueMessageKey::FieldRequest;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

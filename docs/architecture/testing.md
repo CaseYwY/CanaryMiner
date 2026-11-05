@@ -302,6 +302,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13aq](../energy-authorization-panel-messages.md) checks 416 literal shell/review/limitation texts, exact English/review/RTL/status/keyboard parity and typed line/paint/independent-wrap/refusal. Native memory-only selection covers all twenty-six literals with empty access; injected startup/pending/fault/unknown/reveal states and review headings prove no real owner/disclosure/receipt fact. Fixed-predecessor/helper/owner/storage/crash/CLI/PTY evidence stays independent of physical/source/effective-native qualification.
 
+[P-13ar](../energy-authorization-value-messages.md) checks 496 request/input/human-state templates, bounded one-pass expansion and per-argument role/nonempty/control/UTF-8/original/recovery refusal across all wrappers. Native result/fallback/capture-snapshot/CLI/enrollment/compaction/editor/checkbox vectors preserve original rows without submissions. Fixed-predecessor/helper/owner/storage/crash/CLI/PTY evidence stays independent of numeric policy admission, actual consent/receipts/source facts or effective-native/physical-terminal qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

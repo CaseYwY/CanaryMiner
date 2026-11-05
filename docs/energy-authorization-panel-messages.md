@@ -38,3 +38,6 @@ results are in the [execution ledger](architecture/execution-plan.md).
 Authorization dynamic/private-original domains, other panels/dashboard/log/raw domains, effective typed native/data-owner/
 deployment, human review and physical terminal/font/shaping/accessibility remain open. Actual source/power/safety/game/GPU/
 TLS/financial evidence, global quarantine, physical durability and production release remain unqualified.
+
+[P-13ar](energy-authorization-value-messages.md) subsequently extracts request/input and human status/capture/enrollment/
+acknowledgement rows without changing these historical shell results or qualifying private originals and actual owner facts.

@@ -38,3 +38,6 @@ game/GPU/TLS/financial evidence, global quarantine, physical durability and prod
 
 [P-13aq](energy-authorization-panel-messages.md) subsequently extracts literal shell/review/limitations without changing
 these historical notice results, native guards or the distinction between printed descriptions and owner/helper evidence.
+
+[P-13ar](energy-authorization-value-messages.md) later extracts request/input and human state envelopes. These notice results
+and their no-receipt/consent/plan-authority scope remain unchanged; effective native rendering is still separate.
