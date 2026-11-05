@@ -5,6 +5,7 @@
 #include "game_preferences.h"
 #include "game_field_messages.h"
 #include "game_panel_messages.h"
+#include "game_value_messages.h"
 namespace om {
 struct GameSettingsContext {bool running=false;std::optional<GamePreferences> effective;};
 enum class GameSettingsResult { None, Close, Quit };
@@ -63,6 +64,7 @@ class GameSettingsPanel {
     std::string render(int columns,int rows,ColorLevel color)const{
         using namespace dash_detail;const size_t width=static_cast<size_t>((std::max)(20,columns)-1);
         using PanelKey=i18n::GamePanelMessageKey;
+        using ValueKey=i18n::GameValueMessageKey;
         if(rows>0&&rows<12)return i18n::gamePanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::gamePanelEnglish(PanelKey::ShortResize)+"\n"+i18n::gamePanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::gamePanelEnglish(page==GameSettingsPage::Edit?PanelKey::FooterEdit:
             page==GameSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
@@ -70,25 +72,25 @@ class GameSettingsPanel {
         std::vector<std::string> body;size_t focus=0;
         auto add=[&](const std::string &text){const auto lines=wrapText(text,width);body.insert(body.end(),lines.begin(),lines.end());};
         add(i18n::gamePanelEnglish(PanelKey::Title)+(dirty()?i18n::gamePanelEnglish(PanelKey::UnsavedSuffix):std::string{}));
-        if(page==GameSettingsPage::Edit){add(label(field)+":");
-            const auto tail=input.size()>width-3?input.substr(input.size()-(width-3)):input;add("> "+tail+"_");
+        if(page==GameSettingsPage::Edit){add(i18n::gameValueEnglish(ValueKey::EditPrompt,{{"field",label(field)}}));
+            const auto tail=input.size()>width-3?input.substr(input.size()-(width-3)):input;add(i18n::gameValueEnglish(ValueKey::EditInput,{{"input",tail}}));
             add(i18n::gamePanelEnglish(PanelKey::EditKeys));
         }else if(page==GameSettingsPage::Leave){add(i18n::gamePanelEnglish(PanelKey::LeaveTitle));add(i18n::gamePanelEnglish(PanelKey::LeaveKeys));}
         else if(page==GameSettingsPage::Review){
             add(i18n::gamePanelEnglish(PanelKey::ReviewHeading));add(i18n::gamePanelEnglish(PanelKey::NextParentStart));
             add(i18n::gamePanelEnglish(PanelKey::NativeUnavailable));add(i18n::gamePanelEnglish(PanelKey::NonOffRefusal));
-            for(unsigned i=0;i<6;++i)add(label(i)+": "+value(active,i)+" -> "+value(draft,i));
+            for(unsigned i=0;i<6;++i)add(i18n::gameValueEnglish(i==2?ValueKey::ScopeChange:ValueKey::FieldChange,{{"field",label(i)},{"before",value(active,i)},{"after",value(draft,i)}}));
             if(context.running){
                 add(i18n::gamePanelEnglish(context.effective?PanelKey::FrozenHeading:PanelKey::EffectiveUnavailableHeading));
-                if(context.effective)for(unsigned i=0;i<6;++i)add(label(i)+": "+value(*context.effective,i));
+                if(context.effective)for(unsigned i=0;i<6;++i)add(i18n::gameValueEnglish(i==2?ValueKey::ScopeValue:ValueKey::FieldValue,{{"field",label(i)},{"value",value(*context.effective,i)}}));
             }else add(i18n::gamePanelEnglish(PanelKey::NoSession));
             add(i18n::gamePanelEnglish(PanelKey::ScopeUnknown));
             add(i18n::gamePanelEnglish(PanelKey::CoexistQualification));
             add(i18n::gamePanelEnglish(PanelKey::CurrentFrozen));
             add(i18n::gamePanelEnglish(PanelKey::EndMarker));
         }else{
-            add(context.running?(context.effective?"Effective: "+std::string(gameModeName(context.effective->mode))+" (frozen)":i18n::gamePanelEnglish(PanelKey::EffectiveUnavailable)):i18n::gamePanelEnglish(PanelKey::NoSessionCompact));
-            for(unsigned i=0;i<6;++i){if(i==field)focus=body.size();add(std::string(i==field?"> ":"  ")+label(i)+": "+value(draft,i));}
+            add(context.running?(context.effective?i18n::gameValueEnglish(ValueKey::EffectiveFrozen,{{"mode",gameModeName(context.effective->mode)}}):i18n::gamePanelEnglish(PanelKey::EffectiveUnavailable)):i18n::gamePanelEnglish(PanelKey::NoSessionCompact));
+            for(unsigned i=0;i<6;++i){if(i==field)focus=body.size();add(std::string(i==field?"> ":"  ")+i18n::gameValueEnglish(i==2?ValueKey::ScopeValue:ValueKey::FieldValue,{{"field",label(i)},{"value",value(draft,i)}}));}
             add(i18n::gamePanelEnglish(PanelKey::ConfiguredOnly));
             add(i18n::gamePanelEnglish(PanelKey::ExactBasename));
         }

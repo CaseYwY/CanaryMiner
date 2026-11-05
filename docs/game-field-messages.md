@@ -37,3 +37,6 @@ authorized.
 
 [P-13w](game-panel-messages.md) subsequently extracts thirty-three literal Game shell/editor/limitation notices. This
 nine-key field/scope domain and its historical evidence remain unchanged; dynamic envelopes/native gates remain separate.
+
+[P-13x](game-value-messages.md) later extracts dynamic Game envelopes with separate human-scope and invariant-request
+roles. Neither later extraction changes these label-domain historical results or activates native translations.

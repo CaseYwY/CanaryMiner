@@ -38,3 +38,6 @@ Exact platform/sanitizer/privacy evidence is in the [execution ledger](architect
 Dynamic Game envelopes, other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment binding, human
 review and physical terminal/font/shaping/accessibility remain open. No GPU, installed miner or real game is started by this
 batch; physical safety/experience/economics, source, global helper-quarantine and production gates remain unqualified.
+
+[P-13x](game-value-messages.md) subsequently extracts seven dynamic envelopes, including private input. This batch's
+literal-only scope and historical evidence remain unchanged; effective native/data-owner/terminal/human gates stay open.

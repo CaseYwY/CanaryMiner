@@ -39,6 +39,10 @@ again with English-only native source binding and separate typed draft rendering
 roles, unchanged native English change vectors and separately typed numeric/unit presentation. Remaining domains and
 effective native/data-owner/terminal/human gates remain open.
 
+[P-13x](game-value-messages.md) adds seven Game dynamic field/review/input/frozen-mode keys (112 texts), separating
+invariant private/machine requests from human scope descriptions with independent recovery. English native source remains
+unchanged; other domains/effective native/data-owner/terminal/human gates remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

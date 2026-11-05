@@ -262,6 +262,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13w](../game-panel-messages.md) checks 528 literal Game shell/editor/limitation texts, exact English, protected key/range/unit/reference tokens, honest source/draft metadata and typed line/paint/wrap/refusal transactions. Fixed-predecessor frame/transition/machine-serialization and actual store/CLI/PTY regressions stay separate from dynamic private-input envelopes, full-domain rendering, detector, physical terminal or real-game qualification.
 
+[P-13x](../game-value-messages.md) checks 112 Game dynamic templates, one-pass/reordered/empty/bounded English expansion, invariant machine/input/mode versus human scope roles, original/recovery validation and transactional line/wrap/paint failures. Fixed-predecessor native frames/transitions/serializations and store/CLI/PTY/supervisor regressions remain separate from effective typed native binding, localized timing quantities, real detectors, physical terminals or real-game qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
