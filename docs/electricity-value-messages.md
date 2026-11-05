@@ -41,3 +41,6 @@ regressions remain independent; exact platform/sanitizer/privacy evidence is in 
 Complete electricity context rows/other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment,
 human review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/
 financial sources, global quarantine and production release gates remain unqualified.
+
+[P-13am](electricity-context-messages.md) later extracts complete field-position/model/effective-time/collection rows, not the
+current-tariff row. This original-request/input domain's historical evidence and no-source-admission scope remain unchanged.

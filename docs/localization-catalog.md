@@ -99,6 +99,10 @@ terminal/human and actual-source qualification remain open.
 separating opaque original requests from human labels/toggles/clocks and literal missing declarations. Complete context/other
 domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13am](electricity-context-messages.md) adds eleven complete electricity model/time/collection/position keys (176 texts/
+templates), separating human clock/atomic position from invariant original offset/time bytes and literal missing instants.
+Current-tariff/raw/other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

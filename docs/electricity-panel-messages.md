@@ -38,3 +38,6 @@ global quarantine and production release gates remain unqualified.
 
 [P-13al](electricity-value-messages.md) subsequently extracts field/change/input/human-state envelopes, without changing these
 literal-shell results or qualifying complete context/source/activation facts.
+
+[P-13am](electricity-context-messages.md) subsequently extracts complete field-position/model/effective-time/collection rows.
+These historical literal-shell results remain unchanged; current tariff/source/activation qualification stays separate.

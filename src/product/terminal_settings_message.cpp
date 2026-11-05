@@ -247,6 +247,18 @@ bool prepare(const TerminalElectricityValueMessageRequest &request,TerminalMessa
     for(const auto &pack:i18n::electricityValueLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
 }
+bool prepare(const TerminalElectricityContextMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments))return false;
+    for(const auto &argument:request.arguments){const auto &content=argument.value.content;const bool human=argument.name=="clock"||argument.name=="position";
+        const std::size_t maximum=human?256:64;
+        if(content.text.empty()||content.text.size()>maximum||content.ascii.size()>maximum||(human?content.invariant:!content.invariant))return false;
+        if(argument.name=="position"&&content.atom!=TerminalTextAtom::LeftToRight)return false;
+    }
+    templates.requested=i18n::electricityContextMessage(request.language,request.key);templates.english=i18n::electricityContextMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::electricityContextLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -570,6 +582,18 @@ bool renderTerminalElectricityValueMessage(const TerminalElectricityValueMessage
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalElectricityValueMessage(const TerminalElectricityValueMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalElectricityContextMessage(const TerminalElectricityContextMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

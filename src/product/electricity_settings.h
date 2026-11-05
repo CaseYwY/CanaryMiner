@@ -5,6 +5,7 @@
 #include "electricity_notice_messages.h"
 #include "electricity_panel_messages.h"
 #include "electricity_value_messages.h"
+#include "electricity_context_messages.h"
 #include <functional>
 namespace om {
 enum class ElectricitySettingsResult { None, Close, Quit };
@@ -66,6 +67,7 @@ class ElectricitySettingsPanel {
         using namespace dash_detail;const size_t width=static_cast<size_t>(std::max(20,columns)-1);
         using PanelKey=i18n::ElectricityPanelMessageKey;
         using ValueKey=i18n::ElectricityValueMessageKey;
+        using ContextKey=i18n::ElectricityContextMessageKey;
         if(rows>0&&rows<12)return i18n::electricityPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::electricityPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::electricityPanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::electricityPanelEnglish(page==ElectricitySettingsPage::Edit?PanelKey::FooterEdit:page==ElectricitySettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
         const auto notice=wrapText(message.empty()?i18n::electricityPanelEnglish(PanelKey::LocalDefaults):message,width);
@@ -80,19 +82,19 @@ class ElectricitySettingsPanel {
             for(unsigned i=0;i<17;++i)if(value(active,i)!=value(draft,i))body.push_back(fieldChange(active,draft,i));
             if(!dirty())body.push_back(i18n::electricityPanelEnglish(PanelKey::NoChanges));
             body.push_back(i18n::electricityPanelEnglish(PanelKey::Activation));
-            body.push_back("Model/basis: flat ENERGY-ONLY / GPU BOARD proxy; clock "+value(draft,13)+", offset "+value(draft,14)+" seconds.");
-            body.push_back("Declared effective UTC: "+(draft.effectiveFromUtc?utcIsoClock(static_cast<time_t>(draft.effectiveFromUtc)):"not supplied")+" to "+(draft.effectiveThroughUtc?utcIsoClock(static_cast<time_t>(draft.effectiveThroughUtc)):"not supplied")+" (end exclusive).");
+            body.push_back(i18n::electricityContextEnglish(ContextKey::ModelBasis,{{"clock",value(draft,13)},{"offset",value(draft,14)}}));
+            body.push_back(effectiveLine(draft));
             if(context.cliNoEnergy)body.push_back(i18n::electricityPanelEnglish(PanelKey::CliWins));
-            body.push_back("Current session collection: "+std::string(context.running&&context.effective.collectEnergy&&!context.cliNoEnergy?"on":"off/no active session"));
+            body.push_back(i18n::electricityContextEnglish(context.running&&context.effective.collectEnergy&&!context.cliNoEnergy?ContextKey::SessionOn:ContextKey::SessionOff));
             body.push_back(currentTariff());
             body.push_back(i18n::electricityPanelEnglish(PanelKey::SeparateDrafts));
             body.push_back(i18n::electricityPanelEnglish(PanelKey::Exclusions));
             body.push_back(i18n::electricityPanelEnglish(PanelKey::NoPermission));
         }else if(page==ElectricitySettingsPage::Leave){body.push_back(i18n::electricityPanelEnglish(PanelKey::LeaveTitle));body.push_back(i18n::electricityPanelEnglish(PanelKey::LeaveKeys));}
         else{
-            body.push_back("Field "+std::to_string(field+1)+"/17 | configured next-session defaults");
+            body.push_back(i18n::electricityContextEnglish(ContextKey::FieldPosition,{{"position",std::to_string(field+1)}}));
             for(unsigned i=field;i<17&&i<field+7;++i)body.push_back(std::string(i==field?"> ":"  ")+fieldValue(draft,i));
-            body.push_back("Current collection: "+std::string(context.cliNoEnergy?"off (--no-energy)":context.running&&context.effective.collectEnergy?"on (frozen session defaults)":"off/no active session"));
+            body.push_back(i18n::electricityContextEnglish(context.cliNoEnergy?ContextKey::CollectionCli:context.running&&context.effective.collectEnergy?ContextKey::CollectionOn:ContextKey::CollectionOff));
             body.push_back(currentTariff());
             body.push_back(i18n::electricityPanelEnglish(PanelKey::NoInference));
         }
@@ -105,6 +107,14 @@ class ElectricitySettingsPanel {
         return text;
     }
    private:
+    static std::string effectiveLine(const ElectricityPreferences &p){using Key=i18n::ElectricityContextMessageKey;
+        const bool from=p.effectiveFromUtc!=0,through=p.effectiveThroughUtc!=0;
+        const auto key=from?(through?Key::EffectiveBoth:Key::EffectiveFrom):(through?Key::EffectiveThrough:Key::EffectiveUnset);
+        i18n::MessageArguments arguments;
+        if(from)arguments.emplace_back("from",utcIsoClock(static_cast<time_t>(p.effectiveFromUtc)));
+        if(through)arguments.emplace_back("through",utcIsoClock(static_cast<time_t>(p.effectiveThroughUtc)));
+        return i18n::electricityContextEnglish(key,arguments);
+    }
     std::string currentTariff()const{
         const auto &p=context.effective;
         return "Current tariff: "+(context.running&&p.collectEnergy&&p.tariffEnabled&&!context.cliNoEnergy?p.ratePerKwh+" "+p.currency+"/kWh | "+p.version:std::string("off/no active collection"));

@@ -292,6 +292,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13al](../electricity-value-messages.md) checks 224 request/input/human-state/missing-declaration templates, bounded one-pass expansion and per-argument role/control/UTF-8/original/recovery refusals across all four wrappers. Native seventeen-field matrices preserve original rows/JSON, including maximum labels, braces, zero/signed rates, fixed offsets and literal-missing collisions. Fixed-predecessor/store/owner/CLI/PTY evidence remains separate from numeric/time/source admission, complete context binding or physical-terminal qualification.
 
+[P-13am](../electricity-context-messages.md) checks 176 complete model/time/collection/position templates and per-argument nonempty/role/original/recovery/UTF-8 refusal across all wrappers, including explicit human atomic-LTR position/recovery. Native optional-time/clock/context matrices retain original rows and JSON; inconsistent developer states and opaque invalid-UTC bytes do not establish time/source admission. Fixed-predecessor/store/owner/CLI/PTY checks stay separate from actual collection or physical-terminal qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
