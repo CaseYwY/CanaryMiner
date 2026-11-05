@@ -63,6 +63,10 @@ terminal/human and actual TLS qualification remain open.
 presence, invariant nonempty original tokens and literal human missing labels. Native enforcement remains separate; raw/
 other domains/effective native/data-owner/terminal/human and actual TLS/source qualification stay open.
 
+[P-13ad](manual-market-field-messages.md) adds eight manual-reference field keys (128 texts), protecting independent
+PRL/USDT/FX/USD/UTC identities without accepting any values or source facts. Manual shell/dynamic/other domains/effective
+native/data-owner/terminal/human and real quote/credit/source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

@@ -274,6 +274,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ac](../pool-rule-messages.md) checks 128 complete before/after/presence templates and each argument's invariant/nonempty/bound/recovery refusals across all wrappers. Native memory-only output covers all mode/presence/consent combinations against original literal rows with unchanged declarations, including explicit inconsistent developer render states. Fixed-predecessor/store/CLI/PTY/transport regressions remain independent; display cannot qualify URL/consent/trust or physical terminals.
 
+[P-13ad](../manual-market-field-messages.md) checks 128 literal manual-reference labels, exact English/field-order/identity-token/review/RTL parity and typed line/paint/independent-wrap/refusal transactions. Fixed-predecessor before/after comparison retains 131072 native frames / 38912 contextual transitions/resulting frames/serializations with empty save access. Native store/projector/CLI/PTY, reference/confirmation clock and financial-source qualification remain independent; labels do not localize quantities or establish quote facts.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

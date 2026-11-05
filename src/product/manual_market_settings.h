@@ -1,6 +1,7 @@
 #pragma once
 #include "dashboard.h"
 #include "manual_market_preferences.h"
+#include "manual_market_field_messages.h"
 namespace om {
 enum class ManualMarketSettingsResult { None, Close, Quit };
 enum class ManualMarketSettingsPage { Browse, Edit, Review, Leave };
@@ -124,7 +125,7 @@ class ManualMarketSettingsPanel {
         return out;
     }
    private:
-    static const char *label(unsigned i){static const char *names[]={"Display enabled","PRL price (USDT/PRL)","PRL reference UTC seconds","FX enabled","FX price (USD/USDT)","FX reference UTC seconds","Validity seconds","Maximum FX skew seconds"}; return names[i];}
+    static std::string label(unsigned i){const auto &keys=i18n::manualMarketFieldKeys();return i18n::manualMarketFieldEnglish(i<keys.size()?keys[i]:i18n::ManualMarketFieldMessageKey::Count);}
     static std::string on(bool b){return b?"on":"off";}
     static std::string stamp(uint64_t utc){return utc?utcIsoClock(static_cast<time_t>(utc)):"not supplied";}
     static std::string value(const ManualMarketPreferences &p,unsigned i){return i==0?on(p.enabled):i==3?on(p.fxEnabled):i==1?(p.prlUsdt.empty()?"not supplied":p.prlUsdt):i==4?(p.usdtUsd.empty()?"not supplied":p.usdtUsd):i==2?std::to_string(p.prlAsOfUtc):i==5?std::to_string(p.fxAsOfUtc):i==6?std::to_string(p.validitySeconds):std::to_string(p.maxFxSkewSeconds);}
