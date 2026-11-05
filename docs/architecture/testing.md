@@ -250,6 +250,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13r](../language-panel-messages.md) checks 512 whole shell/review/notice texts, protected tokens, bounded nonrecursive English expansion, invariant machine values and explicit human recovery, complete role/tone/layout/paint/row policies and refusal. Native tests additionally protect static English status-pointer lifetime and unchanged serialization; previous frame/transition and actual store/CLI/PTY checks remain separate from physical terminal, full UI and effective language qualification.
 
+[P-13s](../runtime-field-messages.md) checks 208 Runtime field/review texts, exact bounded English, protected key/CLI tokens, zero/maximum atomic wait units and complete role/tone/recovery/layout/paint/row transactions. Private fixed-predecessor comparison checks 122880 frames and 23040 transitions/frames/serialized defaults across representative waits and contexts including zero-valued CLI override, not the entire wait space, actual workers or physical terminals.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

@@ -4,6 +4,8 @@
 #include <functional>
 #include "dashboard.h"
 #include "runtime_preferences.h"
+#include "runtime_field_messages.h"
+#include "ui_field_messages.h"
 
 namespace om {
 
@@ -72,6 +74,7 @@ class RuntimeSettingsPanel {
     }
     std::string render(int columns, int rows, ColorLevel color) const {
         using namespace dash_detail;
+        using FieldKey=i18n::RuntimeFieldMessageKey;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
         if (rows > 0 && rows < 12) return "Terminal too short.\nResize to 12+ rows.\n[Ctrl+C] Stop [Esc] Back\n";
         const bool compact = width < 50 || (rows > 0 && rows < 20);
@@ -87,20 +90,20 @@ class RuntimeSettingsPanel {
             line("Review runtime-preferences.json only");
             line("Next explicit start only. Arrows scroll this review.");
             if (!dirty()) line("No changes.");
-            if (active.workWaitMs != draft.workWaitMs) line("Host wait: " + std::to_string(active.workWaitMs) + " -> " + std::to_string(draft.workWaitMs) + " ms");
-            if (active.historyEnabled != draft.historyEnabled) line("History collection: " + on(active.historyEnabled) + " -> " + on(draft.historyEnabled));
-            line("Activation: " + std::string(activationName(ChangeActivation::NextStart)));
+            if (active.workWaitMs != draft.workWaitMs) line(i18n::runtimeFieldEnglish(FieldKey::WaitChange,{{"before",std::to_string(active.workWaitMs)},{"after",std::to_string(draft.workWaitMs)+" ms"}}));
+            if (active.historyEnabled != draft.historyEnabled) line(i18n::runtimeFieldEnglish(FieldKey::HistoryChange,{{"before",on(active.historyEnabled)},{"after",on(draft.historyEnabled)}}));
+            line(i18n::runtimeFieldEnglish(FieldKey::Activation,{{"activation",activationName(ChangeActivation::NextStart)}}));
             line("Scope: next session's selected GPUs/local history. No deletion.");
             if (context.cliWorkWait || context.cliNoHistory) line("Existing CLI overrides still win on a future run using those flags.");
             line("UI drafts, credentials, donation and hardware are untouched.");
         } else {
-            line(std::string(field == 0 ? "> " : "  ") + (compact ? "Wait: " : "Configured host wait: ") + std::to_string(draft.workWaitMs) + (compact ? " ms" : " ms [Enter to edit]"));
-            line(std::string(field == 1 ? "> " : "  ") + (compact ? "History: " : "Configured history collection: ") + on(draft.historyEnabled) + (compact ? "" : " [Space to toggle]"));
+            line(std::string(field == 0 ? "> " : "  ") + i18n::runtimeFieldEnglish(compact?FieldKey::WaitCompact:FieldKey::WaitConfigured,{{"wait",std::to_string(draft.workWaitMs)+" ms"}}));
+            line(std::string(field == 1 ? "> " : "  ") + i18n::runtimeFieldEnglish(compact?FieldKey::HistoryCompact:FieldKey::HistoryConfigured,{{"history",on(draft.historyEnabled)}}));
             if (context.running) {
-                line("Current host wait: " + std::to_string(context.effective.workWaitMs) + " ms (" + (context.cliWorkWait ? "CLI override" : "startup defaults") + ")");
-                line("Current history: " + on(context.effective.historyEnabled) + (context.cliNoHistory ? " (CLI --no-history)" : " (startup defaults)"));
+                line(i18n::runtimeFieldEnglish(FieldKey::CurrentWait,{{"wait",std::to_string(context.effective.workWaitMs)+" ms"},{"source",i18n::runtimeFieldEnglish(context.cliWorkWait?FieldKey::SourceCli:FieldKey::SourceDefaults)}}));
+                line(i18n::runtimeFieldEnglish(context.cliNoHistory?FieldKey::CurrentHistoryCli:FieldKey::CurrentHistoryDefaults,{{"history",on(context.effective.historyEnabled)}}));
                 const auto next = effectiveRuntimePreferences(draft, context);
-                line("Next start with same flags: wait " + std::to_string(next.workWaitMs) + " ms; history " + on(next.historyEnabled));
+                line(i18n::runtimeFieldEnglish(FieldKey::NextSameFlags,{{"wait",std::to_string(next.workWaitMs)+" ms"},{"history",on(next.historyEnabled)}}));
             } else line("No active mining session. These are local defaults only.");
             line("Activation: next explicit start. No automatic reconnect/restart.");
             line("Zero wait is valid; no hardware tuning or automatic optimization.");
@@ -125,7 +128,7 @@ class RuntimeSettingsPanel {
         return text;
     }
    private:
-    static std::string on(bool value) { return value ? "on" : "off"; }
+    static std::string on(bool value) { return i18n::uiFieldEnglish(value?i18n::UiFieldMessageKey::On:i18n::UiFieldMessageKey::Off); }
 };
 
 }  // namespace om
