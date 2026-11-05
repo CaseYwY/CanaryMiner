@@ -268,6 +268,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13z](../pool-notice-messages.md) checks 160 literal pool draft/save/refusal texts and protected confirmation tokens, plus actual native memory-only selection for all ten notices, raw callback-error preservation, premature-consent/wrong-case-removal refusal and last-user/donation protection. Typed line/paint/wrap/refusal, fixed-predecessor frames/transition/declarations and native store/CLI/PTY tests remain separate from actual TLS/source/physical-terminal qualification.
 
+[P-13aa](../pool-panel-messages.md) checks 480 literal pool shell/editor/security-warning texts, exact English/key/review/RTL/parameter and protected token parity, typed line/paint/independent-wrap/refusal transactions and unchanged fixed-predecessor frames/transitions/declarations. Actual native store/CLI/PTY/fallback and transport tests remain separate; structural translation checks do not establish human security meaning, physical readability or real trust/failure qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

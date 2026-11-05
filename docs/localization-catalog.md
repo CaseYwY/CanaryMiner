@@ -51,6 +51,10 @@ terminal/human and real TLS qualification stay open.
 parser/consent/deletion rules and raw errors remain independent. Pool shell/dynamic/other domains/effective native/data-owner/
 terminal/human and actual TLS qualification stay open.
 
+[P-13aa](pool-panel-messages.md) adds thirty literal pool shell/editor/security-warning keys (480 texts), preserving native
+English enforcement and independent trust/fallback/consent/donation ownership. Dynamic/private-input/other domains and
+effective native/data-owner/terminal/human/actual TLS qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

@@ -36,3 +36,6 @@ quarantine/release gates are not supplied by display labels.
 
 [P-13z](pool-notice-messages.md) later extracts ten local mutation/save/refusal notices. These field-label historical
 results and their argument-free scope remain unchanged; neither batch activates translations or grants network authority.
+
+[P-13aa](pool-panel-messages.md) subsequently extracts literal shell/security-warning text, still without effective native
+translation or enforcement authority. Dynamic/private-input and real trust qualification remain separate.

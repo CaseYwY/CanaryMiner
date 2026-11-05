@@ -30,3 +30,6 @@ actual TLS transport tests remain independent. Exact evidence is in the [executi
 Pool shell/security warnings/dynamic values/private input, other domains, effective typed native/data-owner/deployment,
 human translation review and physical terminal/font/shaping/accessibility remain open. This does not qualify normal TLS/
 trust/auxiliary egress/fallback/donation/deployment, global helper quarantine or real GPU/game/financial/power/safety/release.
+
+[P-13aa](pool-panel-messages.md) later extracts thirty literal pool shell/editor/security limitations. This local-notice
+domain's historical evidence and action-versus-display distinction remain unchanged.
