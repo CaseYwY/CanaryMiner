@@ -296,6 +296,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13an](../electricity-tariff-messages.md) checks 144 complete current-tariff/off/presence templates and per-argument nonempty/invariant/control/UTF-8/original/recovery refusal across all wrappers. Native presence/running/collection/tariff/CLI matrices preserve exact original rows, blanks/braces and JSON; explicit developer-only states do not qualify tariff admission. Fixed-predecessor/store/owner/CLI/PTY checks stay separate from real rate/currency/version/source or physical-terminal facts.
 
+[P-13ao](../energy-authorization-field-messages.md) checks 224 literal persistence labels, exact English/order/unit/range/review/RTL parity and typed line/paint/independent-wrap/refusal. A fixed-predecessor before/after comparison retains 86016 frames / 28224 contextual transitions/resulting frames/draft-policy-limit-request serializations with empty submission access. Actual helper/owner/storage/crash/CLI/PTY checks remain separate from consent/identity/receipt/physical-durability/source or physical-terminal qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

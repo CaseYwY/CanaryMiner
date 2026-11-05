@@ -29,6 +29,7 @@
 #include "electricity_value_messages.h"
 #include "electricity_context_messages.h"
 #include "electricity_tariff_messages.h"
+#include "energy_authorization_field_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -308,4 +309,13 @@ bool layoutTerminalElectricityTariffMessage(const TerminalElectricityTariffMessa
 bool wrapTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalElectricityTariffMessage(const TerminalElectricityTariffMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalEnergyAuthorizationFieldMessageRequest {
+    std::string language="en";
+    i18n::EnergyAuthorizationFieldMessageKey key=i18n::EnergyAuthorizationFieldMessageKey::PersistHistory;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalEnergyAuthorizationFieldMessage(const TerminalEnergyAuthorizationFieldMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalEnergyAuthorizationFieldMessage(const TerminalEnergyAuthorizationFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalEnergyAuthorizationFieldMessage(const TerminalEnergyAuthorizationFieldMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalEnergyAuthorizationFieldMessage(const TerminalEnergyAuthorizationFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

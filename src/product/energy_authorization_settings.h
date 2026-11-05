@@ -2,6 +2,7 @@
 #pragma once
 #include "energy_authorization_owner.h"
 #include "dashboard.h"
+#include "energy_authorization_field_messages.h"
 namespace om {
 struct EnergyAuthorizationAccess {
     std::function<std::shared_ptr<const EnergyAuthorizationSnapshot>()> snapshot;
@@ -175,8 +176,10 @@ class EnergyAuthorizationPanel {
     }
     void scroll(int key){if(key==kKeyUp||key==kKeyPageUp){const size_t step=key==kKeyUp?1:5;offset=offset>step?offset-step:0;}
         else if(key==kKeyDown||key==kKeyPageDown)offset=(std::min)(size_t(2048),offset+(key==kKeyDown?1:5));}
-    static std::vector<const char *> labels(){return {"Persist board-energy history","Selection ms [500..60000]","Maximum gap ms [selection..60000]","Flush ms [50..60000]","Buffered readings [1..128]","Batch readings [1..buffer]",
-        "Raw batches [1..4096]","Raw readings [1..131072]","Lifetime sessions [1..1024]","Lifetime windows [1..4096]","Database bytes [1..128 MiB]","Exact compaction (new store)","Compact after batches [1..raw]","Exact segments [1..32768]"};}
+    static const std::array<std::string,14> &labels(){
+        static const std::array<std::string,14> names=[](){std::array<std::string,14> result;const auto &keys=i18n::energyAuthorizationFieldKeys();
+            for(std::size_t i=0;i<result.size();++i){result[i]=i18n::energyAuthorizationFieldEnglish(keys[i]);}return result;}();return names;
+    }
     static std::vector<std::string> values(const EnergyCapturePolicy &p,const EnergyHistoryLimits &l){return {p.persistenceAuthorized?"ON":"OFF",std::to_string(p.selectionMs),std::to_string(p.maximumGapMs),std::to_string(p.flushMs),std::to_string(p.bufferedReadings),std::to_string(p.batchReadings),
         std::to_string(l.maxBatches),std::to_string(l.maxReadings),std::to_string(l.maxSessions),std::to_string(l.maxWindows),std::to_string(l.maxDatabaseBytes),l.compaction?"ON":"OFF",l.compaction?std::to_string(l.compaction->afterBatches):"unavailable",l.compaction?std::to_string(l.compaction->maxSegments):"unavailable"};}
     std::vector<uint64_t> numbers()const{return {0,draftPolicy.selectionMs,draftPolicy.maximumGapMs,draftPolicy.flushMs,draftPolicy.bufferedReadings,draftPolicy.batchReadings,draftLimits.maxBatches,draftLimits.maxReadings,draftLimits.maxSessions,draftLimits.maxWindows,draftLimits.maxDatabaseBytes,0,draftLimits.compaction?draftLimits.compaction->afterBatches:0,draftLimits.compaction?draftLimits.compaction->maxSegments:0};}
