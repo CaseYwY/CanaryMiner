@@ -38,20 +38,20 @@ void boundedArray(const JsonValue &v,const std::string &path,size_t max,size_t &
 bool null(const JsonValue &v){return v.type==JsonValue::Type::Null;}
 JsonValue literal(const std::string &s){JsonValue v;parseJsonStrict(s,&v,nullptr);return v;}
 std::string child(const std::string &path,const std::string &name){return path.empty()?name:path+"."+name;}
-void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<std::string> &out){
+void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
     if(tariffJson(a)==tariffJson(b))return;
     if(a.isObject()&&b.isObject()){
         for(const auto &m:b.members){const auto *old=a.find(m.first);changes(old?*old:JsonValue{},m.second,child(path,m.first),out);}return;
     }
     if(a.isArray()||b.isArray()){
-        if(a.items.size()!=b.items.size())out.push_back(path+" rows: "+std::to_string(a.items.size())+" -> "+std::to_string(b.items.size()));
+        if(a.items.size()!=b.items.size())out.push_back({TariffDeclarationChange::Kind::RowCount,path,{},{},a.items.size(),b.items.size()});
         for(size_t i=0;i<(std::max)(a.items.size(),b.items.size());++i)
             changes(i<a.items.size()?a.items[i]:JsonValue{},i<b.items.size()?b.items[i]:JsonValue{},path+"["+std::to_string(i)+"]",out);
         return;
     }
     if(b.isObject()){for(const auto &m:b.members)changes({},m.second,child(path,m.first),out);return;}
     if(a.isObject()){for(const auto &m:a.members)changes(m.second,{},child(path,m.first),out);return;}
-    out.push_back(path+": "+tariffJson(a)+" -> "+tariffJson(b));
+    out.push_back({TariffDeclarationChange::Kind::Value,path,tariffJson(a),tariffJson(b),0,0});
 }
 } // namespace
 
@@ -162,5 +162,10 @@ bool parseTariffDeclaration(const std::string &text,JsonValue *root,TariffProble
     if(!decodeTariffDeclaration(v,&d,problem))return false;
     *root=std::move(v);return true;
 }
-std::vector<std::string> tariffDeclarationChanges(const JsonValue &a,const JsonValue &b){std::vector<std::string> result;changes(a,b,"",result);return result;}
+std::vector<TariffDeclarationChange> tariffDeclarationChangeRecords(const JsonValue &a,const JsonValue &b){std::vector<TariffDeclarationChange> result;changes(a,b,"",result);return result;}
+std::vector<std::string> tariffDeclarationChanges(const JsonValue &a,const JsonValue &b){std::vector<std::string> result;
+    for(const auto &record:tariffDeclarationChangeRecords(a,b))result.push_back(record.kind==TariffDeclarationChange::Kind::RowCount?
+        record.path+" rows: "+std::to_string(record.beforeRows)+" -> "+std::to_string(record.afterRows):record.path+": "+record.beforeJson+" -> "+record.afterJson);
+    return result;
+}
 } // namespace om

@@ -81,3 +81,7 @@ indices. Independent typed display bounds do not alter editor/parser/store admis
 
 [P-13ax](tariff-value-messages.md) later extracts complete browse rows without changing JSON tokens or fixed-field/prompt
 semantics. Opaque original tokens are not localized human quantities, disclosure authority or parser/model admission.
+
+[P-13ay](tariff-review-messages.md) later exposes display-neutral private change records without model UI imports, preserving
+legacy strings and native complete review. Original JSON/path and row counts remain distinct and grant no fact/disclosure
+authority; parser/store and offline-only save semantics are unchanged.

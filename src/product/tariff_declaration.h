@@ -2,6 +2,7 @@
 #pragma once
 #include "electricity.h"
 #include "json_dom.h"
+#include <cstddef>
 namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
 struct TariffDeclaration {
@@ -11,6 +12,13 @@ struct TariffDeclaration {
     BillOpening opening;
 };
 struct TariffProblem { std::string path, message; };
+// Display-neutral private source records. Row counts are not JSON strings; value tokens retain exact source serialization.
+struct TariffDeclarationChange {
+    enum class Kind { Value, RowCount };
+    Kind kind=Kind::Value;
+    std::string path,beforeJson,afterJson;
+    std::size_t beforeRows=0,afterRows=0;
+};
 // Templates intentionally leave unknown rates, quantities and identities EMPTY, not zero.
 JsonValue tariffDeclarationTemplate();
 JsonValue tariffRowTemplate(const std::string &collection);
@@ -20,4 +28,6 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
 bool parseTariffDeclaration(const std::string &text,JsonValue *root,TariffProblem *problem=nullptr);
 // Path/value lines for explicit local review. Never log these: they contain private declarations.
 std::vector<std::string> tariffDeclarationChanges(const JsonValue &before,const JsonValue &after);
+// Same traversal/order and raw originals, without UI catalogs or preformatted human row-count descriptions. Never log.
+std::vector<TariffDeclarationChange> tariffDeclarationChangeRecords(const JsonValue &before,const JsonValue &after);
 } // namespace om

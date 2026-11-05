@@ -316,6 +316,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ax](../tariff-value-messages.md) checks 112 complete browse-row templates, exact English/review/RTL/parameter/key/fixed-annotation parity, one-pass native raw preservation and independent typed role/nonempty/atomic/UTF-8/control/original/recovery refusals. Native primitive quoting/escape/null/bool/number, all fixed names and field-versus-row object/array vectors preserve old source without Save. Opaque not-json display bytes are not parser/model or disclosure admission; fixed-predecessor/store/model/CLI/PTY evidence remains separate from actual source/effective-native/physical qualification.
 
+[P-13ay](../tariff-review-messages.md) checks 64 root/nested review templates, distinct data-only JSON/path/count records, exact legacy lines/native diff-plus-complete review and typed role/nonempty/atomic/UTF-8/control/original/recovery refusals. An additional fixed-3fb30d7 serializer/traversal comparison covers 324 ordered shape pairs / 2318 raw rows before/after, without refreshing existing native vectors. Model import boundaries, actual store/model/CLI/PTY and numeric/path/disclosure/source/effective-native/physical qualification remain independent.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

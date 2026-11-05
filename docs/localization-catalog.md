@@ -147,6 +147,10 @@ other domains/effective native/data-owner/terminal/human and actual-source quali
 and fixed/field-versus-row predicates with independent invariant field/value and human atomic-LTR positions/counts. Raw review/
 errors/other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ay](tariff-review-messages.md) adds four root/nested private review keys (64 templates) and display-neutral change records,
+preserving legacy lines/native review while separating invariant JSON/path from human atomic-LTR row-count display. Model code
+imports no UI; raw errors/legacy/other domains/complete native/data-owner/terminal/human and actual-source gates remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

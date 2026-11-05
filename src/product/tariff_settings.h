@@ -6,6 +6,7 @@
 #include "tariff_hint_messages.h"
 #include "tariff_context_messages.h"
 #include "tariff_value_messages.h"
+#include "tariff_review_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -155,15 +156,24 @@ class TariffSettingsPanel {
         return false;
     }
     void focus(const std::string &wanted){std::vector<size_t> found;size_t f=0;if(findPath(draft,"",wanted,found,f)){route=std::move(found);field=f;}}
+    static std::vector<std::string> reviewLines(const JsonValue &before,const JsonValue &after){
+        using Key=i18n::TariffReviewMessageKey;std::vector<std::string> lines;
+        for(const auto &record:tariffDeclarationChangeRecords(before,after)){const bool rows=record.kind==TariffDeclarationChange::Kind::RowCount;i18n::MessageArguments arguments;
+            if(!record.path.empty())arguments.emplace_back("path",record.path);
+            arguments.emplace_back("before",rows?std::to_string(record.beforeRows):record.beforeJson);arguments.emplace_back("after",rows?std::to_string(record.afterRows):record.afterJson);
+            lines.push_back(i18n::tariffReviewEnglish(rows?(record.path.empty()?Key::RowsRoot:Key::Rows):(record.path.empty()?Key::ValueRoot:Key::Value),arguments));
+        }
+        return lines;
+    }
     void beginReview(){
         using PanelKey=i18n::TariffPanelMessageKey;
         review={i18n::tariffPanelEnglish(PanelKey::ReviewHeading),i18n::tariffPanelEnglish(PanelKey::NoActivation),
             i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),i18n::tariffPanelEnglish(PanelKey::ResetLimit),
             i18n::tariffPanelEnglish(PanelKey::Excludes),i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
-        const auto diff=tariffDeclarationChanges(active,draft);review.insert(review.end(),diff.begin(),diff.end());
+        const auto diff=reviewLines(active,draft);review.insert(review.end(),diff.begin(),diff.end());
         if(diff.empty())review.push_back(i18n::tariffPanelEnglish(PanelKey::NoChanges));
-        const auto complete=tariffDeclarationChanges({},draft);review.insert(review.end(),complete.begin(),complete.end());
+        const auto complete=reviewLines({},draft);review.insert(review.end(),complete.begin(),complete.end());
         review.push_back(i18n::tariffPanelEnglish(PanelKey::ConfirmationOnly));
         page=TariffSettingsPage::Review;reviewOffset=0;message.clear();
     }

@@ -41,3 +41,6 @@ access and pinned example vectors. Actual store/model/CLI/PTY regressions remain
 Tariff raw review/errors and other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human
 review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/safety/game/GPU/TLS/financial
 sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13ay](tariff-review-messages.md) subsequently extracts private change-row envelopes through display-neutral records with
+unchanged traversal/legacy lines/native review. These historical browse-row results and opaque-original boundaries remain.
