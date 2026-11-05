@@ -252,6 +252,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13s](../runtime-field-messages.md) checks 208 Runtime field/review texts, exact bounded English, protected key/CLI tokens, zero/maximum atomic wait units and complete role/tone/recovery/layout/paint/row transactions. Private fixed-predecessor comparison checks 122880 frames and 23040 transitions/frames/serialized defaults across representative waits and contexts including zero-valued CLI override, not the entire wait space, actual workers or physical terminals.
 
+[P-13t](../runtime-panel-messages.md) checks 480 Runtime shell/editor/notice texts, protected contextual keys, exact English, opaque empty/maximum/nonnumeric input, invariant original/recovery admission and complete layout/paint/row transactions. Prior fixed-predecessor frames/transitions, actual store/CLI/PTY/supervisor and numeric parser checks remain distinct from real terminal, activation-description, all-input-space or current-worker qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

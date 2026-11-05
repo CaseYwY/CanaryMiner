@@ -41,3 +41,6 @@ sanitizer/privacy evidence is in the [execution ledger](architecture/execution-p
 Remaining Runtime shell/editor/notices, other subpanels/dashboard/raw domains and effective typed native/data-owner/
 deployment integration are unfinished. Human review, physical terminal/font/shaping/accessibility and real GPU/game/pool/
 power/financial/release gates remain open; no production miner replacement or restart is authorized by these fixtures.
+
+[P-13t](runtime-panel-messages.md) subsequently extracts the thirty Runtime shell/editor/notice keys. The original
+thirteen-key field scope/evidence stays unchanged; activation descriptions and other-domain/native gates remain separate.

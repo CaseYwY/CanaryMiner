@@ -8,6 +8,7 @@
 #include "language_field_messages.h"
 #include "language_panel_messages.h"
 #include "runtime_field_messages.h"
+#include "runtime_panel_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -89,4 +90,14 @@ bool layoutTerminalRuntimeFieldMessage(const TerminalRuntimeFieldMessageRequest 
 bool wrapTerminalRuntimeFieldMessage(const TerminalRuntimeFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalRuntimeFieldMessage(const TerminalRuntimeFieldMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalRuntimeFieldMessage(const TerminalRuntimeFieldMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalRuntimePanelMessageRequest {
+    std::string language="en";
+    i18n::RuntimePanelMessageKey key=i18n::RuntimePanelMessageKey::TitleFull;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalRuntimePanelMessage(const TerminalRuntimePanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

@@ -20,6 +20,7 @@ def main(args):
     assert 'canary_terminal_settings_message' not in main_cmake
     for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h'):
         text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalRuntimePanelMessage', 'wrapTerminalRuntimePanelMessage', 'renderTerminalRuntimePanelMessage', 'renderWrappedTerminalRuntimePanelMessage'))
         assert all(marker not in text for marker in ('layoutTerminalRuntimeFieldMessage', 'wrapTerminalRuntimeFieldMessage', 'renderTerminalRuntimeFieldMessage', 'renderWrappedTerminalRuntimeFieldMessage'))
         assert all(marker not in text for marker in ('layoutTerminalLanguagePanelMessage', 'wrapTerminalLanguagePanelMessage', 'renderTerminalLanguagePanelMessage', 'renderWrappedTerminalLanguagePanelMessage'))
         assert all(marker not in text for marker in ('layoutTerminalLanguageFieldMessage', 'wrapTerminalLanguageFieldMessage', 'renderTerminalLanguageFieldMessage', 'renderWrappedTerminalLanguageFieldMessage'))

@@ -59,6 +59,10 @@ request serialization remain unchanged; other domains and effective native/data-
 units in independent typed rendering and unchanged native English current/configured/next-session projection. Runtime
 shell/editor/notices and other-domain/effective native/data-owner/terminal/human gates remain open.
 
+[P-13t](runtime-panel-messages.md) adds thirty Runtime shell/editor/notice keys (480 texts), preserving English native
+control flow and opaque invariant contextual input. Activation descriptions, raw errors/other domains and effective
+native/data-owner/terminal/human gates remain open.
+
 ## Executed test scope
 
 `test_localization` validates all 16 IDs/autonyms/review/RTL metadata and 208 current key translations, exact source/translation placeholder parity, explicit English fallback, output/metadata preservation, no printf/reparse, both exact 4096-byte template boundaries and alias-safe output. An exhaustive generated scalar corpus covers all values through U+10FFFF, plus malformed/truncated byte sequences and control negatives. That exhaustive scalar check still does not prove grapheme/cell/bidi/formatting behavior. Exact platform counts, sanitizer and privacy results are in the [execution ledger](architecture/execution-plan.md).
