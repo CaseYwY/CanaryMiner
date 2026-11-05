@@ -83,6 +83,10 @@ effective native/data-owner/terminal/human and actual-source qualification remai
 templates). Human state and invariant original price/time bytes remain distinct; missing literals invent no facts. Raw/
 other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ai](electricity-field-messages.md) adds seventeen electricity/session-energy field keys (272 texts) without receiving
+measurements/rates/identities or inferring supplier/currency/clock. Electricity shell/dynamic/other domains/effective native/
+data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

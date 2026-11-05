@@ -1,6 +1,7 @@
 #pragma once
 #include "dashboard.h"
 #include "electricity_preferences.h"
+#include "electricity_field_messages.h"
 #include <functional>
 namespace om {
 enum class ElectricitySettingsResult { None, Close, Quit };
@@ -102,7 +103,7 @@ class ElectricitySettingsPanel {
         const auto &p=context.effective;
         return "Current tariff: "+(context.running&&p.collectEnergy&&p.tariffEnabled&&!context.cliNoEnergy?p.ratePerKwh+" "+p.currency+"/kWh | "+p.version:std::string("off/no active collection"));
     }
-    static const char *label(unsigned f){static const char *names[]={"Collect session board energy","Show energy section","Record selection ms","Maximum hold gap ms","Use declared flat energy rate","Energy-only exclusions acknowledged","Country/jurisdiction","Region/territory","Supplier","Product/plan","Effective version key","Currency identifier","Flat rate per kWh","Reporting clock","Fixed standard offset seconds","Effective start UTC seconds","Effective end UTC seconds (exclusive)"};return names[f];}
+    static std::string label(unsigned f){const auto &keys=i18n::electricityFieldKeys();return i18n::electricityFieldEnglish(f<keys.size()?keys[f]:i18n::ElectricityFieldMessageKey::Count);}
     static std::string value(const ElectricityPreferences &p,unsigned f,bool display=true){
         std::string text;
         if(f==0||f==1||f==4||f==5)return (f==0?p.collectEnergy:f==1?p.showEnergy:f==4?p.tariffEnabled:p.exclusionsAcknowledged)?"on":"off";

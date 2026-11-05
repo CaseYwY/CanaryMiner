@@ -18,8 +18,9 @@ def main(args):
     assert 'canary_terminal_count' not in main_cmake
     assert 'canary_terminal_time' not in main_cmake
     assert 'canary_terminal_settings_message' not in main_cmake
-    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/game_settings.h', 'src/product/pool_security_settings.h', 'src/product/manual_market_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h', 'src/product/game_preferences.h', 'src/product/pool_security_preferences.h', 'src/product/manual_market_preferences.h', 'src/product/manual_market.cpp'):
+    for source in ('src/core/miner.cu', 'src/product/dashboard.h', 'src/product/supervisor.h', 'src/product/settings.h', 'src/product/language_settings.h', 'src/product/runtime_settings.h', 'src/product/game_settings.h', 'src/product/pool_security_settings.h', 'src/product/manual_market_settings.h', 'src/product/electricity_settings.h', 'src/product/language_preferences.h', 'src/product/runtime_preferences.h', 'src/product/game_preferences.h', 'src/product/pool_security_preferences.h', 'src/product/manual_market_preferences.h', 'src/product/manual_market.cpp', 'src/product/electricity_preferences.h', 'src/product/electricity.cpp', 'src/product/energy_owner.cpp'):
         text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('layoutTerminalElectricityFieldMessage', 'wrapTerminalElectricityFieldMessage', 'renderTerminalElectricityFieldMessage', 'renderWrappedTerminalElectricityFieldMessage'))
         assert all(marker not in text for marker in ('layoutTerminalManualMarketContextMessage', 'wrapTerminalManualMarketContextMessage', 'renderTerminalManualMarketContextMessage', 'renderWrappedTerminalManualMarketContextMessage'))
         assert all(marker not in text for marker in ('layoutTerminalManualMarketValueMessage', 'wrapTerminalManualMarketValueMessage', 'renderTerminalManualMarketValueMessage', 'renderWrappedTerminalManualMarketValueMessage'))
         assert all(marker not in text for marker in ('layoutTerminalManualMarketPanelMessage', 'wrapTerminalManualMarketPanelMessage', 'renderTerminalManualMarketPanelMessage', 'renderWrappedTerminalManualMarketPanelMessage'))
@@ -56,6 +57,9 @@ def main(args):
     for source in ('src/product/manual_market_preferences.h', 'src/product/manual_market.cpp'):
         text = (root / source).read_text(encoding='utf-8')
         assert all(marker not in text for marker in ('manual_market_field_messages.h', 'manual_market_notice_messages.h', 'manual_market_panel_messages.h', 'manual_market_value_messages.h', 'manual_market_context_messages.h', 'localization.h', 'manualMarketFieldMessage(', 'manualMarketNoticeMessage(', 'manualMarketPanelMessage(', 'manualMarketValueMessage(', 'manualMarketContextMessage('))
+    for source in ('src/product/electricity_preferences.h', 'src/product/electricity.cpp', 'src/product/energy_owner.cpp'):
+        text = (root / source).read_text(encoding='utf-8')
+        assert all(marker not in text for marker in ('electricity_field_messages.h', 'localization.h', 'electricityFieldMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:

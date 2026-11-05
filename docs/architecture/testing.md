@@ -284,6 +284,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ah](../manual-market-context-messages.md) checks 112 complete current-display/optional-PRL/UTC-N templates and each parameter's nonempty/role/original/recovery/UTF-8 refusal across all wrappers. Native optional-price/time/state matrices preserve original complete rows, context and CLI suppression, including explicit developer-only render states. Opaque non-time/invalid-UTC inputs remain display evidence only; fixed-predecessor/store/projector/CLI/PTY checks do not qualify actual numeric/time/source or physical-terminal facts.
 
+[P-13ai](../electricity-field-messages.md) checks 272 literal electricity labels, exact English/order/unit/review/RTL parity and typed line/paint/independent-wrap/refusal. A fixed-predecessor comparison retains 278528 frames / 87040 contextual transitions/resulting frames/serializations with empty save access and original non-ASCII-input rejection. Actual store/session-owner/CLI/PTY tests remain independent of human semantics, sensor/billing/utility/currency/clock facts or physical-terminal qualification.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
