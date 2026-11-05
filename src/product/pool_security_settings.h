@@ -3,6 +3,7 @@
 #include "dashboard.h"
 #include "pool_security_preferences.h"
 #include "pool_field_messages.h"
+#include "pool_notice_messages.h"
 #include <functional>
 namespace om {
 enum class PoolSecuritySettingsResult { None, Close, Quit };
@@ -17,6 +18,7 @@ class PoolSecuritySettingsPanel {
     void open(PoolSecurityPreferences value,PoolSecuritySettingsContext current={}){active=draft=std::move(value);context=current;visible=true;donation=false;slot=field=reviewOffset=0;page=PoolSecuritySettingsPage::Browse;message.clear();input.clear();}
     bool dirty()const{return active!=draft;}
     PoolSecuritySettingsResult key(int key,const Save &save={}){
+        using NoticeKey=i18n::PoolNoticeMessageKey;
         if(key==3)return PoolSecuritySettingsResult::Quit;
         if(page==PoolSecuritySettingsPage::Edit){
             if(key==27){page=PoolSecuritySettingsPage::Browse;message.clear();}
@@ -28,8 +30,8 @@ class PoolSecuritySettingsPanel {
                     if(ok)rule.plaintextConsent=true;}
                 else if(field==6){ok=input=="REMOVE POOL"&&!donation&&draft.users.size()>1;
                     if(ok){draft.users.erase(draft.users.begin()+slot);slot=std::min(slot,static_cast<unsigned>(draft.users.size()-1));}}
-                if(ok){page=PoolSecuritySettingsPage::Browse;message="Draft changed only; endpoint changes revoke prior plaintext consent.";}
-                else message=field==4?"Type ALLOW PLAINTEXT only after configuring prefer TLS and both endpoints.":field==6?"Type REMOVE POOL for a user slot; at least one must remain.":"Use an explicit DNS URL with the correct stratum scheme and port; no credentials or paths.";
+                if(ok){page=PoolSecuritySettingsPage::Browse;message=i18n::poolNoticeEnglish(NoticeKey::DraftChanged);}
+                else message=i18n::poolNoticeEnglish(field==4?NoticeKey::InvalidConsent:field==6?NoticeKey::InvalidRemove:NoticeKey::InvalidEndpoint);
             }else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;}
             else if(key>=32&&key<=126){if(replaceInput)input.clear();replaceInput=false;if(input.size()<300)input+=static_cast<char>(key);}
             return PoolSecuritySettingsResult::None;
@@ -43,7 +45,7 @@ class PoolSecuritySettingsPanel {
             else if(key==kKeyUp||key==kKeyPageUp)reviewOffset=reviewOffset>(key==kKeyUp?1u:5u)?reviewOffset-(key==kKeyUp?1u:5u):0;
             else if(key==kKeyDown||key==kKeyPageDown)reviewOffset=std::min(4096u,reviewOffset+(key==kKeyDown?1u:5u));
             else if(key=='\r'||key=='\n'||key==kKeyF2){if(!validate()){page=PoolSecuritySettingsPage::Browse;return PoolSecuritySettingsResult::None;}
-                std::string error;if(save&&save(draft,&error)){active=draft;page=PoolSecuritySettingsPage::Browse;message="Saved declarations only; no connection or runtime activation.";}else message=error.empty()?"Save failed; active declarations unchanged.":error;}
+                std::string error;if(save&&save(draft,&error)){active=draft;page=PoolSecuritySettingsPage::Browse;message=i18n::poolNoticeEnglish(NoticeKey::Saved);}else message=error.empty()?i18n::poolNoticeEnglish(NoticeKey::SaveFailed):error;}
         }else if(key==27){if(dirty())page=PoolSecuritySettingsPage::Leave;else{visible=false;return PoolSecuritySettingsResult::Close;}}
         else if(key=='v'||key=='V'||key==kKeyF2)review();
         else if(key==kKeyUp||key==kKeyBackTab)field=(field+6)%7;
@@ -52,9 +54,9 @@ class PoolSecuritySettingsPanel {
             message.clear();auto &rule=selected();
             if(field==0){if(donation){donation=false;slot=0;}else if(slot+1<draft.users.size())++slot;else donation=true;}
             else if(field==1){rule.mode=rule.mode==PoolSecurityMode::Unchanged?PoolSecurityMode::StrictTls:rule.mode==PoolSecurityMode::StrictTls?PoolSecurityMode::PreferTls:PoolSecurityMode::Unchanged;rule.plaintextConsent=false;}
-            else if(field==5){if(draft.users.size()>=8)message="At most eight independent user pools.";else{PoolSecurityRule added;added.mode=PoolSecurityMode::StrictTls;draft.users.push_back(added);donation=false;slot=static_cast<unsigned>(draft.users.size()-1);field=2;}}
-            else if(field==4&&rule.plaintextConsent){rule.plaintextConsent=false;message="Plaintext consent revoked in draft.";}
-            else if(field==6&&(donation||draft.users.size()==1))message="Cannot remove donation scope or the last user slot.";
+            else if(field==5){if(draft.users.size()>=8)message=i18n::poolNoticeEnglish(NoticeKey::AtMostEight);else{PoolSecurityRule added;added.mode=PoolSecurityMode::StrictTls;draft.users.push_back(added);donation=false;slot=static_cast<unsigned>(draft.users.size()-1);field=2;}}
+            else if(field==4&&rule.plaintextConsent){rule.plaintextConsent=false;message=i18n::poolNoticeEnglish(NoticeKey::ConsentRevoked);}
+            else if(field==6&&(donation||draft.users.size()==1))message=i18n::poolNoticeEnglish(NoticeKey::CannotRemove);
             else{input=field==2?rule.tlsUrl:field==3?rule.plaintextUrl:std::string{};replaceInput=true;page=PoolSecuritySettingsPage::Edit;}
         }
         return PoolSecuritySettingsResult::None;
@@ -100,7 +102,7 @@ class PoolSecuritySettingsPanel {
     static std::string label(unsigned n){const auto &keys=i18n::poolFieldKeys();return i18n::poolFieldEnglish(n<keys.size()?keys[n]:i18n::PoolFieldMessageKey::Invalid);}
     std::string value(const PoolSecurityRule &r,unsigned n)const{switch(n){case 0:return donation?"Donation (independent)":"User pool "+std::to_string(slot+1);case 1:return poolSecurityModeName(r.mode);
         case 2:return r.tlsUrl.empty()?"unset":r.tlsUrl;case 3:return r.plaintextUrl.empty()?"unset":r.plaintextUrl;case 4:return r.plaintextConsent?"YES (Enter revokes)":"off (explicit phrase required)";case 5:return "[Enter] strict TLS, no consent";default:return "[Enter] explicit confirmation";}}
-    bool validate(){if(draft.users.empty()||draft.users.size()>8){message="Invalid user slot count.";return false;}
+    bool validate(){if(draft.users.empty()||draft.users.size()>8){message=i18n::poolNoticeEnglish(i18n::PoolNoticeMessageKey::InvalidUserCount);return false;}
         unsigned bad=0;for(std::size_t i=0;i<draft.users.size();++i)if(!validPoolSecurityRule(draft.users[i],&message,&bad)){donation=false;slot=static_cast<unsigned>(i);field=bad+1;return false;}
         if(!validPoolSecurityRule(draft.donation,&message,&bad)){donation=true;field=bad+1;return false;}return true;}
     void review(){if(validate()){page=PoolSecuritySettingsPage::Review;reviewOffset=0;message.clear();}else page=PoolSecuritySettingsPage::Browse;}

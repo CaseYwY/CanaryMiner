@@ -47,6 +47,10 @@ unchanged; other domains/effective native/data-owner/terminal/human gates remain
 phrases and donation/fallback rules remain independent; pool shell/dynamic/other domains/effective native/data-owner/
 terminal/human and real TLS qualification stay open.
 
+[P-13z](pool-notice-messages.md) adds ten local pool draft/save/refusal keys (160 texts); fixed confirmation phrases,
+parser/consent/deletion rules and raw errors remain independent. Pool shell/dynamic/other domains/effective native/data-owner/
+terminal/human and actual TLS qualification stay open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

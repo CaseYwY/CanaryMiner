@@ -33,3 +33,6 @@ Pool shell/warnings/dynamic values/private editor input, other subpanels/dashboa
 data-owner/deployment binding, human translation review and physical terminal/font/shaping/accessibility remain open.
 Normal TLS/trust/auxiliary egress/fallback/donation/deployment qualification and real GPU/game/financial/power/safety/global
 quarantine/release gates are not supplied by display labels.
+
+[P-13z](pool-notice-messages.md) later extracts ten local mutation/save/refusal notices. These field-label historical
+results and their argument-free scope remain unchanged; neither batch activates translations or grants network authority.
