@@ -28,6 +28,10 @@ Replay and transport completeness are distinct: a completely delivered stream ca
 
 ## Verification scope
 
+The cached-safety failure retained in the historical evidence below is subsequently reproduced and addressed by
+[P-03j/P-11p](cached-run-renewal.md), with a native real-time identical-ceiling regression. That later result does not
+rewrite this raw-stream batch's failed parallel attempt or qualify physical scheduling.
+
 `test_worker_work_stream` exercises every frame split, canonical/maximal payloads, full original replay, exact lane totals, preserved boundary clocks, failed/cancelled publishers, every incarnation field, source discontinuity, terminal stop, native default-off refusal, queue overflow, background inbox overflow, incomplete EOF and buffered post-exit draining. Its actual native shared-loop CPU peer sends reconciled completed work with an applied 10-ms wait; the parent independently reconstructs the exact two-batch work. Owned peers and the background facade use the real OS channels, not stdout as a sample channel.
 
 All work sources are synthetic CPU algorithms. No installed miner, physical sensor, GPU, pool, game, production CUDA/toolchain or release qualification is exercised. Ordinary runtime activation and the fleet's conversion to qualified measurement samples remain open. Final platform/build/regression evidence is recorded in the execution ledger.

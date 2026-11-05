@@ -192,6 +192,9 @@ struct GameWorkerSession::Impl {
         if(!issue.settled||owner.state!=WorkerOwnerState::Running)return;
         const auto &previous=issue.settled->command;
         const auto directive=pause?WorkerDirective::Pause:WorkerDirective::Run;
+        // Cached evidence cannot extend this settled Run. Reissuing its identical deadline only occupies
+        // the single-flight channel and can defer the upcoming Pause behind a redundant Run receipt.
+        if(!pause&&previous.directive==WorkerDirective::Run&&previous.deadlineMonoMs==permittedUntil)return;
         // Renew before the existing lease expires, but never extend cached source validity by receipt/tick time.
         if(previous.directive==directive&&previous.deadlineMonoMs-now.monotonicMs>policy.commandLeaseMs/2&&
             (pause||permittedUntil>=previous.deadlineMonoMs))return;

@@ -148,6 +148,21 @@ void pendingRevoke(){
         CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked&&r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==1);
         r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);}
 }
+void cachedRenewal(){
+    for(bool fresh:{false,true}){Rig r(GameIntent::Off,"fixture-absent",4,2000,2000);CHECK(r.start());auto frozen=r.fresh(r.now());
+        CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos&&!r.view().commandPending;},&frozen));
+        const auto settled=r.view();CHECK(settled.commandRevision==2&&!settled.pauseRequested&&!settled.revoked);
+        while(workerControlNowMs()<settled.commandDeadlineMonoMs-500)sleep();
+        const auto inside=r.now();CHECK(inside.monotonicMs+100<settled.commandDeadlineMonoMs&&settled.commandDeadlineMonoMs-inside.monotonicMs<=r.policy.commandLeaseMs/2);
+        // Real native initial Pause/Run receipts are settled. Advance real time, not a synthetic future-issued
+        // native command: unchanged evidence has the exact same original ceiling, while fresh evidence may extend it.
+        const auto evidence=fresh?r.fresh(inside):frozen;r.session->tick(inside,evidence);
+        CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked&&!r.view().done&&!r.view().pauseRequested);
+        if(fresh)CHECK_MSG("a genuinely new safety observation may renew the Run ceiling",r.view().commandRevision==settled.commandRevision+1&&r.view().commandPending&&r.view().commandDeadlineMonoMs>settled.commandDeadlineMonoMs);
+        else CHECK_MSG("cached safety must not reissue a Run with the identical original deadline",r.view().commandRevision==settled.commandRevision&&!r.view().commandPending&&r.view().commandDeadlineMonoMs==settled.commandDeadlineMonoMs);
+        r.session->stop();
+    }
+}
 void cachedSafety(){Rig r;CHECK(r.start());auto frozen=r.fresh(r.now());
     CHECK(r.until([&]{return r.lines.find("FLEETRUN")!=r.lines.npos;},&frozen));
     CHECK(r.view().commandDeadlineMonoMs<=frozen.safety.observed.monotonicMs+r.policy.maximumSafetyAgeMs);
@@ -323,6 +338,7 @@ int main(int argc,char **argv){
     else if(argc==4&&std::string(argv[3])=="cases")exitCases();
     else if(argc==4&&std::string(argv[3])=="pending-revoke")pendingRevoke();
     else if(argc==4&&std::string(argv[3])=="cached-safety")cachedSafety();
+    else if(argc==4&&std::string(argv[3])=="cached-renewal")cachedRenewal();
     else if(argc==4&&std::string(argv[3])=="supervisor"){supervisor();supervisorRefusals();}
     else{cachedDeadline();deadlines();lifecycle();gameAndRestarts();exitCases();supervisor();supervisorRefusals();}
     platformShutdown();
