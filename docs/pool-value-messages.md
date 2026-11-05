@@ -38,3 +38,6 @@ evidence is in the [execution ledger](architecture/execution-plan.md).
 Full rule-summary/other domains, effective typed native/data-owner/deployment, human translation review and physical
 terminal/font/shaping/accessibility remain open. No TLS/trust/egress/fallback/donation/deployment, global quarantine or real
 GPU/game/financial/power/safety/release qualification is supplied by these display envelopes.
+
+[P-13ac](pool-rule-messages.md) subsequently extracts complete before/after rule summaries with explicit endpoint-presence
+forms. This earlier field/slot/input domain's scope and historical results remain unchanged.

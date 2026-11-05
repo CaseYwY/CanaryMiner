@@ -6,6 +6,7 @@
 #include "pool_notice_messages.h"
 #include "pool_panel_messages.h"
 #include "pool_value_messages.h"
+#include "pool_rule_messages.h"
 #include <functional>
 namespace om {
 enum class PoolSecuritySettingsResult { None, Close, Quit };
@@ -83,9 +84,9 @@ class PoolSecuritySettingsPanel {
             add(i18n::poolPanelEnglish(PanelKey::ReviewHeading));add(i18n::poolPanelEnglish(PanelKey::NoRuntime));
             add(i18n::poolPanelEnglish(PanelKey::NoDowngrade));
             add(i18n::poolPanelEnglish(PanelKey::PlaintextExposure));
-            for(std::size_t i=0;i<std::max(active.users.size(),draft.users.size());++i){add(userPool(i+1));if(i<active.users.size())add("Before: "+describe(active.users[i]));else add(i18n::poolPanelEnglish(PanelKey::BeforeAbsent));
-                if(i<draft.users.size())add("After: "+describe(draft.users[i]));else add(i18n::poolPanelEnglish(PanelKey::AfterRemoved));}
-            add(i18n::poolPanelEnglish(PanelKey::DonationIndependent));add("Before: "+describe(active.donation));add("After: "+describe(draft.donation));
+            for(std::size_t i=0;i<std::max(active.users.size(),draft.users.size());++i){add(userPool(i+1));if(i<active.users.size())add(reviewRule(active.users[i],true));else add(i18n::poolPanelEnglish(PanelKey::BeforeAbsent));
+                if(i<draft.users.size())add(reviewRule(draft.users[i],false));else add(i18n::poolPanelEnglish(PanelKey::AfterRemoved));}
+            add(i18n::poolPanelEnglish(PanelKey::DonationIndependent));add(reviewRule(active.donation,true));add(reviewRule(draft.donation,false));
             add(i18n::poolPanelEnglish(context.running?PanelKey::CurrentUnchanged:PanelKey::NoSessionNetwork));
             add(i18n::poolPanelEnglish(PanelKey::EndpointNotVerified));add(i18n::poolPanelEnglish(PanelKey::EndMarker));
         }else{
@@ -103,7 +104,15 @@ class PoolSecuritySettingsPanel {
    private:
     PoolSecurityRule &selected(){return donation?draft.donation:draft.users[slot];}
     const PoolSecurityRule &selected()const{return donation?draft.donation:draft.users[slot];}
-    static std::string describe(const PoolSecurityRule &r){return std::string(poolSecurityModeName(r.mode))+" | TLS: "+(r.tlsUrl.empty()?"unset":r.tlsUrl)+" | TCP: "+(r.plaintextUrl.empty()?"unset":r.plaintextUrl)+" | plaintext consent: "+(r.plaintextConsent?"YES":"off");}
+    static std::string reviewRule(const PoolSecurityRule &r,bool before){
+        using Key=i18n::PoolRuleMessageKey;const bool tls=!r.tlsUrl.empty(),tcp=!r.plaintextUrl.empty();
+        const auto key=before?(tls?(tcp?Key::BeforeBoth:Key::BeforeTls):(tcp?Key::BeforeTcp:Key::BeforeUnset)):
+            (tls?(tcp?Key::AfterBoth:Key::AfterTls):(tcp?Key::AfterTcp:Key::AfterUnset));
+        i18n::MessageArguments arguments={{"mode",poolSecurityModeName(r.mode)},{"consent",r.plaintextConsent?"YES":"off"}};
+        if(tls)arguments.emplace_back("tls",r.tlsUrl);
+        if(tcp)arguments.emplace_back("tcp",r.plaintextUrl);
+        return i18n::poolRuleEnglish(key,arguments);
+    }
     static std::string label(unsigned n){const auto &keys=i18n::poolFieldKeys();return i18n::poolFieldEnglish(n<keys.size()?keys[n]:i18n::PoolFieldMessageKey::Invalid);}
     static std::string userPool(std::size_t n){return i18n::poolValueEnglish(i18n::PoolValueMessageKey::UserPool,{{"slot",std::to_string(n)}});}
     std::string value(const PoolSecurityRule &r,unsigned n)const{using ValueKey=i18n::PoolValueMessageKey;switch(n){case 0:return donation?i18n::poolValueEnglish(ValueKey::Donation):userPool(slot+1);case 1:return poolSecurityModeName(r.mode);

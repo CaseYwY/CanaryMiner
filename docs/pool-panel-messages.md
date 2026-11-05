@@ -38,3 +38,6 @@ real GPU/game/financial/power/safety/release gates are not qualified by these wa
 
 [P-13ab](pool-value-messages.md) later extracts field/slot/input/action-description envelopes while full before/after rule
 summaries remain separate. This literal-domain historical evidence and no-trust-authority boundary remain unchanged.
+
+[P-13ac](pool-rule-messages.md) later extracts the complete rule summaries. That separate display contract still grants no
+trust, consent, network or downgrade authority and does not change this literal-domain evidence.

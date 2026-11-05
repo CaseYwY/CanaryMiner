@@ -59,6 +59,10 @@ effective native/data-owner/terminal/human/actual TLS qualification remain open.
 machine/private inputs from human values and recovery. Full rule summaries/other domains/effective native/data-owner/
 terminal/human and actual TLS qualification remain open.
 
+[P-13ac](pool-rule-messages.md) adds eight complete before/after pool-rule keys (128 templates), with explicit endpoint
+presence, invariant nonempty original tokens and literal human missing labels. Native enforcement remains separate; raw/
+other domains/effective native/data-owner/terminal/human and actual TLS/source qualification stay open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.
