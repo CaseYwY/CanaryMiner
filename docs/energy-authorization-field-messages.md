@@ -34,3 +34,6 @@ are in the [execution ledger](architecture/execution-plan.md).
 Authorization notices/shell/dynamic/private-original domains, other panels/dashboard/log/raw domains, effective typed native/
 data-owner/deployment, human review and physical terminal/font/shaping/accessibility remain open. Actual source/power/safety/
 game/GPU/TLS/financial evidence, global quarantine, physical durability and production release remain unqualified.
+
+[P-13ap](energy-authorization-notice-messages.md) later extracts local notices without changing these historical label results
+or granting authority to printed status descriptions, mock admissions or translated native rendering.

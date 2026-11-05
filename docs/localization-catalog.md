@@ -111,6 +111,10 @@ Raw/other domains/effective native/data-owner/terminal/human and actual-source q
 consent/enrollment/acknowledgement/budget/capture-plan authority. Authorization notices/shell/dynamic/other domains/effective
 native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13ap](energy-authorization-notice-messages.md) adds twenty-three local authorization notice keys (368 texts), without
+admission/receipt/consent/identity/plan authority or changed native guards. Shell/dynamic/private-original/other domains/
+effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

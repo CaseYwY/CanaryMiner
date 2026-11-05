@@ -3,6 +3,7 @@
 #include "energy_authorization_owner.h"
 #include "dashboard.h"
 #include "energy_authorization_field_messages.h"
+#include "energy_authorization_notice_messages.h"
 namespace om {
 struct EnergyAuthorizationAccess {
     std::function<std::shared_ptr<const EnergyAuthorizationSnapshot>()> snapshot;
@@ -33,66 +34,68 @@ class EnergyAuthorizationPanel {
     bool dirty()const{return baseline&&baseline->reply&&baseline->reply->document&&values(draftPolicy,draftLimits)!=values(baseline->reply->document->policy,baseline->reply->document->limits);}
     void resetDraft(){baseline=current;reviewed.reset();if(current&&current->reply&&current->reply->document){draftPolicy=current->reply->document->policy;draftLimits=current->reply->document->limits;}else{draftPolicy={};draftLimits={};}}
     void update(std::shared_ptr<const EnergyAuthorizationSnapshot> s){
+        using NoticeKey=i18n::EnergyAuthorizationNoticeMessageKey;
         if(page==EnergyAuthorizationPage::Review&&(!s||!reviewed||s->generation!=reviewed->generation||s->revision!=reviewed->revision)){
-            page=EnergyAuthorizationPage::Browse;reviewed.reset();acknowledged=ackReview=false;offset=0;message="Owner changed; review cancelled. Review current state again.";}
+            page=EnergyAuthorizationPage::Browse;reviewed.reset();acknowledged=ackReview=false;offset=0;message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::OwnerChanged);}
         const bool wasDirty=dirty();current=std::move(s);
         if(submittedTicket&&current&&current->generation==submittedGeneration&&!current->pending&&current->lastTicket==submittedTicket){
-            if(current->uncertain)message="UNKNOWN outcome. F loads current state; A reviews the retained request. No automatic retry.";
-            else if(current->reply&&current->reply->status==EnergyAuthorizationStatus::Ok){message="CONFIRMED saved. Next explicit parent only; current capture plan stays frozen.";resetDraft();}
+            if(current->uncertain)message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::UnknownOutcome);
+            else if(current->reply&&current->reply->status==EnergyAuthorizationStatus::Ok){message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::ConfirmedSaved);resetDraft();}
             else message="Request not confirmed: "+std::string(current&&current->reply?status(current->reply->status):"helper unavailable")+". Preserve local stores.";
             submittedTicket=submittedGeneration=0;
         }else if(!wasDirty&&page!=EnergyAuthorizationPage::Edit&&page!=EnergyAuthorizationPage::Review)resetDraft();
     }
     EnergyAuthorizationPanelResult key(int key,const EnergyAuthorizationAccess &access={}){
         using P=EnergyAuthorizationPage;using A=EnergyAuthorizationAction;
+        using NoticeKey=i18n::EnergyAuthorizationNoticeMessageKey;
         if(key==3||key=='q'||key=='Q')return EnergyAuthorizationPanelResult::Quit;
         if(page==P::Leave){if(key=='d'||key=='D'){resetDraft();visible=reveal=false;return EnergyAuthorizationPanelResult::Close;}if(key==27)page=P::Browse;return EnergyAuthorizationPanelResult::None;}
         if(page==P::Edit){
-            if(key==27){page=P::Browse;message="Edit cancelled.";}
-            else if(key=='\r'||key=='\n'){uint64_t n=0;if(input.empty()||input.size()>9)message="Enter a bounded whole number; blank is not zero.";
-                else{for(char c:input)n=n*10+static_cast<unsigned>(c-'0');setNumber(n);page=P::Browse;message="Draft only. V reviews; Esc can discard.";}}
+            if(key==27){page=P::Browse;message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::EditCancelled);}
+            else if(key=='\r'||key=='\n'){uint64_t n=0;if(input.empty()||input.size()>9)message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::InvalidInteger);
+                else{for(char c:input)n=n*10+static_cast<unsigned>(c-'0');setNumber(n);page=P::Browse;message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::DraftOnly);}}
             else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;}
             else if(key>='0'&&key<='9'){if(replaceInput)input.clear();replaceInput=false;if(input.size()<9)input+=static_cast<char>(key);}
             return EnergyAuthorizationPanelResult::None;
         }
         if(key=='i'||key=='I'){reveal=!reveal;acknowledged=false;offset=0;return EnergyAuthorizationPanelResult::None;}
         if(page==P::Review){
-            if(key==27){page=P::Browse;reviewed.reset();acknowledged=ackReview=false;offset=0;message="Review cancelled; nothing queued.";}
+            if(key==27){page=P::Browse;reviewed.reset();acknowledged=ackReview=false;offset=0;message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::ReviewCancelled);}
             else if(key==' ')acknowledged=reveal?!acknowledged:false;
             else if(key=='\r'||key=='\n'||key==kKeyF2){
                 const bool privateReview=ackReview||reviewedCommand.action!=A::Save;
-                if(privateReview&&(!reveal||!acknowledged))message="I reveals the selected/private original; Space acknowledges after review.";
-                else if(!reviewed)message="Review unavailable.";
+                if(privateReview&&(!reveal||!acknowledged))message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::NeedRevealAck);
+                else if(!reviewed)message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::ReviewUnavailable);
                 else{
                     const auto result=ackReview?(access.acknowledge?access.acknowledge(reviewed->generation,reviewed->revision):EnergyHistoryAdmission::NotReady):
                         (access.submit?access.submit(reviewed->generation,reviewed->revision,reviewedCommand):EnergyHistoryAdmission::NotReady);
                     if(result==EnergyHistoryAdmission::Queued&&!ackReview){submittedTicket=reviewed->lastTicket+1;submittedGeneration=reviewed->generation;}
-                    message=result==EnergyHistoryAdmission::Queued?(ackReview?"Inspection acknowledged. Nothing retried; no capture plan issued.":"QUEUED; waiting for the helper's persisted acknowledgement."):"Review changed or request invalid; nothing queued.";
+                    message=i18n::energyAuthorizationNoticeEnglish(result==EnergyHistoryAdmission::Queued?(ackReview?NoticeKey::InspectionAck:NoticeKey::Queued):NoticeKey::ReviewChanged);
                     page=P::Browse;reviewed.reset();acknowledged=ackReview=false;offset=0;
                 }
             }else scroll(key);
             return EnergyAuthorizationPanelResult::None;
         }
         if(key==27){if(dirty())page=P::Leave;else{visible=reveal=false;return EnergyAuthorizationPanelResult::Close;}}
-        else if(key=='d'||key=='D'){resetDraft();message="Draft discarded; saved state unchanged.";}
+        else if(key=='d'||key=='D'){resetDraft();message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::DraftDiscarded);}
         else if(key=='f'||key=='F'){
-            if(dirty())message="Discard the local draft with D before inspecting current saved state.";
+            if(dirty())message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::DiscardBeforeInspect);
             else if(current&&access.submit){EnergyAuthorizationCommand c;c.action=!current->uncertain&&current->reply&&current->reply->document&&current->reply->document->enrollment==EnergyEnrollment::Pending?A::Inspect:A::Load;
-                const auto result=access.submit(current->generation,current->revision,c);message=result==EnergyHistoryAdmission::Queued?"Inspection QUEUED; no save or creation requested.":"Inspection unavailable.";}
+                const auto result=access.submit(current->generation,current->revision,c);message=i18n::energyAuthorizationNoticeEnglish(result==EnergyHistoryAdmission::Queued?NoticeKey::InspectionQueued:NoticeKey::InspectionUnavailable);}
         }else if(key=='v'||key=='V'||key==kKeyF2)review(A::Save,access);
         else if(key=='e'||key=='E')review(A::Enroll,access);
         else if(key=='c'||key=='C')review(A::Confirm,access);
         else if(key=='a'||key=='A'){
             if(current&&current->uncertain&&current->inspectionAvailable&&access.acknowledge){reviewed=current;ackReview=true;page=P::Review;offset=0;acknowledged=false;}
-            else message="No inspected unknown request to acknowledge. F loads saved state first.";
+            else message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::NoUnknown);
         }else if(key==kKeyUp||key==kKeyDown){field=(field+(key==kKeyDown?1:13))%14;offset=field;manualScroll=false;}
         else if(key==kKeyPageUp||key==kKeyPageDown){manualScroll=true;scroll(key);}
         else if(key=='\r'||key=='\n'||key==' '){
-            if(!editable())message="No editable saved snapshot. Wait for the helper or reopen after resolving its error.";
-            else if(field>=6&&baseline->reply->document->enrollment!=EnergyEnrollment::None)message="Retention limits are fixed by this enrollment. Existing history is not reinterpreted.";
+            if(!editable())message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::NoEditable);
+            else if(field>=6&&baseline->reply->document->enrollment!=EnergyEnrollment::None)message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::RetentionFixed);
             else if(field==0)draftPolicy.persistenceAuthorized=!draftPolicy.persistenceAuthorized;
             else if(field==11){if(draftLimits.compaction)draftLimits.compaction.reset();else draftLimits.compaction=EnergyCompactionPolicy{};}
-            else if(field>=12&&!draftLimits.compaction)message="Enable exact compaction in this new-store draft before editing its budgets.";
+            else if(field>=12&&!draftLimits.compaction)message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::NeedCompaction);
             else{page=P::Edit;input=std::to_string(numbers()[field]);replaceInput=true;}
         }
         return EnergyAuthorizationPanelResult::None;
@@ -161,14 +164,15 @@ class EnergyAuthorizationPanel {
    private:
     bool editable()const{return current&&baseline&&current->reply&&baseline->reply&&baseline->reply->document&&current->reply->token==baseline->reply->token&&!current->pending&&!current->uncertain&&current->state==EnergyAuthorizationOwnerState::Ready;}
     void review(EnergyAuthorizationAction action,const EnergyAuthorizationAccess &access){
-        if(!editable()||!access.submit){message="Saved baseline unavailable or changed; discard/reload before review.";return;}
+        using NoticeKey=i18n::EnergyAuthorizationNoticeMessageKey;
+        if(!editable()||!access.submit){message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::BaselineUnavailable);return;}
         const auto &d=*baseline->reply->document;
         if(action==EnergyAuthorizationAction::Enroll){
             bool bounded=!access.selectedDevices.empty()&&access.selectedDevices.size()<=64;
             if(bounded)for(const auto &id:access.selectedDevices)if(id.size()!=40)bounded=false;
-            if(d.enrollment!=EnergyEnrollment::None||!bounded){message="Enrollment requires a bounded explicit selected set and no existing reservation.";return;}
+            if(d.enrollment!=EnergyEnrollment::None||!bounded){message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::EnrollmentRequired);return;}
         }
-        if(action==EnergyAuthorizationAction::Confirm&&(d.enrollment!=EnergyEnrollment::Pending||!current->reply->emptyStoreVerified)){message="F must inspect the exact Pending empty store before confirmation.";return;}
+        if(action==EnergyAuthorizationAction::Confirm&&(d.enrollment!=EnergyEnrollment::Pending||!current->reply->emptyStoreVerified)){message=i18n::energyAuthorizationNoticeEnglish(NoticeKey::PendingInspectRequired);return;}
         reviewed=current;reviewedCommand={};reviewedCommand.action=action;
         if(action==EnergyAuthorizationAction::Save||action==EnergyAuthorizationAction::Enroll){reviewedCommand.policy=draftPolicy;reviewedCommand.limits=draftLimits;}
         if(action==EnergyAuthorizationAction::Enroll){reviewedCommand.policy.persistenceAuthorized=false;reviewedCommand.devices=access.selectedDevices;}

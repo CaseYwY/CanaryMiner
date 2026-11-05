@@ -68,8 +68,9 @@ def main(args):
     for source in ('src/product/energy_authorization_settings.h', 'src/product/energy_authorization.h', 'src/product/energy_authorization.cpp', 'src/product/energy_authorization_owner.cpp', 'src/product/energy_capture.cpp', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
         text = (root / source).read_text(encoding='utf-8')
         assert all(marker not in text for marker in ('layoutTerminalEnergyAuthorizationFieldMessage', 'wrapTerminalEnergyAuthorizationFieldMessage', 'renderTerminalEnergyAuthorizationFieldMessage', 'renderWrappedTerminalEnergyAuthorizationFieldMessage'))
+        assert all(marker not in text for marker in ('layoutTerminalEnergyAuthorizationNoticeMessage', 'wrapTerminalEnergyAuthorizationNoticeMessage', 'renderTerminalEnergyAuthorizationNoticeMessage', 'renderWrappedTerminalEnergyAuthorizationNoticeMessage'))
         if source not in ('src/product/energy_authorization_settings.h', 'src/product/settings.h', 'src/product/supervisor.h', 'src/core/miner.cu'):
-            assert all(marker not in text for marker in ('energy_authorization_field_messages.h', 'localization.h', 'energyAuthorizationFieldMessage('))
+            assert all(marker not in text for marker in ('energy_authorization_field_messages.h', 'energy_authorization_notice_messages.h', 'localization.h', 'energyAuthorizationFieldMessage(', 'energyAuthorizationNoticeMessage('))
     assert all(marker not in style for marker in ('dashboard.h', 'platform.h', 'getenv', 'ubidi_', 'ubrk_', 'filesystem'))
     assert hashlib.sha256((root / 'LICENSES/ICU-79.1.txt').read_bytes()).hexdigest() == 'e09827667e0bb3c808b2a463548ba814a5e6249b67353234d70c8dfc2bcc417d'
     if args.disabled_library:
