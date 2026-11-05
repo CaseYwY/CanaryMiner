@@ -42,3 +42,6 @@ regressions remain independent; exact results are in the [execution ledger](arch
 Private-original/other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human review and
 physical terminal/font/shaping/accessibility remain open. Actual source/power/safety/game/GPU/TLS/financial evidence, global
 quarantine, physical durability and production release remain unqualified.
+
+[P-13as](energy-authorization-private-messages.md) subsequently extracts private-original display/presence envelopes behind
+the unchanged reveal/source/sanitizer gates. These historical request/state results and no-receipt-authority scope remain.

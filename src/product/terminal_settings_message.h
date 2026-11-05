@@ -33,6 +33,7 @@
 #include "energy_authorization_notice_messages.h"
 #include "energy_authorization_panel_messages.h"
 #include "energy_authorization_value_messages.h"
+#include "energy_authorization_private_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -349,4 +350,14 @@ bool layoutTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthoriza
 bool wrapTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalEnergyAuthorizationValueMessage(const TerminalEnergyAuthorizationValueMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalEnergyAuthorizationPrivateMessageRequest {
+    std::string language="en";
+    i18n::EnergyAuthorizationPrivateMessageKey key=i18n::EnergyAuthorizationPrivateMessageKey::SelectedUuid;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalEnergyAuthorizationPrivateMessage(const TerminalEnergyAuthorizationPrivateMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalEnergyAuthorizationPrivateMessage(const TerminalEnergyAuthorizationPrivateMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalEnergyAuthorizationPrivateMessage(const TerminalEnergyAuthorizationPrivateMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalEnergyAuthorizationPrivateMessage(const TerminalEnergyAuthorizationPrivateMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

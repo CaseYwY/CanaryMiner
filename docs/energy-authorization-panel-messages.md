@@ -41,3 +41,6 @@ TLS/financial evidence, global quarantine, physical durability and production re
 
 [P-13ar](energy-authorization-value-messages.md) subsequently extracts request/input and human status/capture/enrollment/
 acknowledgement rows without changing these historical shell results or qualifying private originals and actual owner facts.
+
+[P-13as](energy-authorization-private-messages.md) later extracts private-original display envelopes without changing these
+literal-shell results, native reveal controls or the distinction between bounded display and canonical private identities.

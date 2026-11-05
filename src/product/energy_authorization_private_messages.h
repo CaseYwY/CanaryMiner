@@ -1,0 +1,52 @@
+// Private display envelopes only, fed by the existing local reveal gate and sanitizer; not canonical identity/receipt facts.
+#pragma once
+#include "localization.h"
+namespace om { namespace i18n {
+enum class EnergyAuthorizationPrivateMessageKey { SelectedUuid, SelectedUuidEmpty, Namespace, NamespaceEmpty, Scope, ScopeEmpty, HistoryBegin, LastSession, LastSessionEmpty, Channel, ChannelEmpty, OriginalAction, OriginalCas, OriginalCasEmpty, Count };
+constexpr std::size_t energyAuthorizationPrivateMessageKeyCount=static_cast<std::size_t>(EnergyAuthorizationPrivateMessageKey::Count);
+struct EnergyAuthorizationPrivateLocalePack {std::string_view id;bool rtl;ReviewStatus review;std::array<std::string_view,energyAuthorizationPrivateMessageKeyCount> messages;};
+inline const std::array<EnergyAuthorizationPrivateLocalePack,16> &energyAuthorizationPrivateLocalePacks(){
+    static const std::array<EnergyAuthorizationPrivateLocalePack,16> packs={{
+        {"en",false,ReviewStatus::Source,{{"Selected UUID {position}: {identity}","Selected UUID {position}: ","Namespace {identity}","Namespace ","Scope {identity}","Scope ","History begin UTC ms {instant}","Last reserved session {identity}","Last reserved session ","Channel {identity}","Channel ","ORIGINAL action {action} | UTC ms {instant}","Original CAS {identity}","Original CAS "}}},
+        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"所选 UUID {position}：{identity}",u8"所选 UUID {position}： ",u8"命名空间 {identity}",u8"命名空间 ",u8"范围 {identity}",u8"范围 ",u8"历史起点 UTC ms {instant}",u8"最后预留会话 {identity}",u8"最后预留会话 ",u8"通道 {identity}",u8"通道 ",u8"ORIGINAL 操作 {action} | UTC ms {instant}",u8"原始 CAS {identity}",u8"原始 CAS "}}},
+        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"所選 UUID {position}：{identity}",u8"所選 UUID {position}： ",u8"命名空間 {identity}",u8"命名空間 ",u8"範圍 {identity}",u8"範圍 ",u8"歷史起點 UTC ms {instant}",u8"最後預留工作階段 {identity}",u8"最後預留工作階段 ",u8"通道 {identity}",u8"通道 ",u8"ORIGINAL 操作 {action} | UTC ms {instant}",u8"原始 CAS {identity}",u8"原始 CAS "}}},
+        {"es",false,ReviewStatus::MachineAssisted,{{"UUID seleccionado {position}: {identity}","UUID seleccionado {position}: ","Espacio de nombres {identity}","Espacio de nombres ",u8"Ámbito {identity}",u8"Ámbito ","Inicio de historial UTC ms {instant}",u8"Última sesión reservada {identity}",u8"Última sesión reservada ","Canal {identity}","Canal ",u8"Acción ORIGINAL {action} | UTC ms {instant}","CAS original {identity}","CAS original "}}},
+        {"pt-BR",false,ReviewStatus::MachineAssisted,{{"UUID selecionado {position}: {identity}","UUID selecionado {position}: ","Namespace {identity}","Namespace ","Escopo {identity}","Escopo ",u8"Início do histórico UTC ms {instant}",u8"Última sessão reservada {identity}",u8"Última sessão reservada ","Canal {identity}","Canal ",u8"Ação ORIGINAL {action} | UTC ms {instant}","CAS original {identity}","CAS original "}}},
+        {"fr",false,ReviewStatus::MachineAssisted,{{u8"UUID sélectionné {position} : {identity}",u8"UUID sélectionné {position} : ","Espace de noms {identity}","Espace de noms ",u8"Portée {identity}",u8"Portée ",u8"Début historique UTC ms {instant}",u8"Dernière session réservée {identity}",u8"Dernière session réservée ","Canal {identity}","Canal ","Action ORIGINAL {action} | UTC ms {instant}","CAS original {identity}","CAS original "}}},
+        {"de",false,ReviewStatus::MachineAssisted,{{u8"Gewählte UUID {position}: {identity}",u8"Gewählte UUID {position}: ","Namensraum {identity}","Namensraum ","Bereich {identity}","Bereich ","Verlaufsbeginn UTC ms {instant}","Zuletzt reservierte Sitzung {identity}","Zuletzt reservierte Sitzung ","Kanal {identity}","Kanal ","ORIGINAL-Aktion {action} | UTC ms {instant}","Original-CAS {identity}","Original-CAS "}}},
+        {"ru",false,ReviewStatus::MachineAssisted,{{u8"Выбранный UUID {position}: {identity}",u8"Выбранный UUID {position}: ",u8"Пространство имён {identity}",u8"Пространство имён ",u8"Область {identity}",u8"Область ",u8"Начало истории UTC ms {instant}",u8"Последний зарезервированный сеанс {identity}",u8"Последний зарезервированный сеанс ",u8"Канал {identity}",u8"Канал ",u8"Действие ORIGINAL {action} | UTC ms {instant}",u8"Исходный CAS {identity}",u8"Исходный CAS "}}},
+        {"ja",false,ReviewStatus::MachineAssisted,{{u8"選択 UUID {position}：{identity}",u8"選択 UUID {position}： ",u8"名前空間 {identity}",u8"名前空間 ",u8"範囲 {identity}",u8"範囲 ",u8"履歴開始 UTC ms {instant}",u8"最後の予約セッション {identity}",u8"最後の予約セッション ",u8"チャネル {identity}",u8"チャネル ",u8"ORIGINAL 操作 {action} | UTC ms {instant}",u8"原本 CAS {identity}",u8"原本 CAS "}}},
+        {"ko",false,ReviewStatus::MachineAssisted,{{u8"선택 UUID {position}: {identity}",u8"선택 UUID {position}: ",u8"네임스페이스 {identity}",u8"네임스페이스 ",u8"범위 {identity}",u8"범위 ",u8"기록 시작 UTC ms {instant}",u8"마지막 예약 세션 {identity}",u8"마지막 예약 세션 ",u8"채널 {identity}",u8"채널 ",u8"ORIGINAL 동작 {action} | UTC ms {instant}",u8"원본 CAS {identity}",u8"원본 CAS "}}},
+        {"ar",true,ReviewStatus::MachineAssisted,{{u8"UUID المختار {position}: {identity}",u8"UUID المختار {position}: ",u8"مساحة الأسماء {identity}",u8"مساحة الأسماء ",u8"النطاق {identity}",u8"النطاق ",u8"بداية التاريخ UTC ms {instant}",u8"آخر جلسة محجوزة {identity}",u8"آخر جلسة محجوزة ",u8"القناة {identity}",u8"القناة ",u8"إجراء ORIGINAL {action} | UTC ms {instant}",u8"CAS الأصلي {identity}",u8"CAS الأصلي "}}},
+        {"hi",false,ReviewStatus::MachineAssisted,{{u8"चयनित UUID {position}: {identity}",u8"चयनित UUID {position}: ",u8"नेमस्पेस {identity}",u8"नेमस्पेस ",u8"क्षेत्र {identity}",u8"क्षेत्र ",u8"इतिहास आरंभ UTC ms {instant}",u8"अंतिम आरक्षित सत्र {identity}",u8"अंतिम आरक्षित सत्र ",u8"चैनल {identity}",u8"चैनल ",u8"ORIGINAL क्रिया {action} | UTC ms {instant}",u8"मूल CAS {identity}",u8"मूल CAS "}}},
+        {"bn",false,ReviewStatus::MachineAssisted,{{u8"নির্বাচিত UUID {position}: {identity}",u8"নির্বাচিত UUID {position}: ",u8"নেমস্পেস {identity}",u8"নেমস্পেস ",u8"পরিধি {identity}",u8"পরিধি ",u8"ইতিহাস শুরু UTC ms {instant}",u8"শেষ সংরক্ষিত সেশন {identity}",u8"শেষ সংরক্ষিত সেশন ",u8"চ্যানেল {identity}",u8"চ্যানেল ",u8"ORIGINAL ক্রিয়া {action} | UTC ms {instant}",u8"মূল CAS {identity}",u8"মূল CAS "}}},
+        {"id",false,ReviewStatus::MachineAssisted,{{"UUID terpilih {position}: {identity}","UUID terpilih {position}: ","Namespace {identity}","Namespace ","Lingkup {identity}","Lingkup ","Awal riwayat UTC ms {instant}","Sesi terakhir yang direservasi {identity}","Sesi terakhir yang direservasi ","Saluran {identity}","Saluran ","Tindakan ORIGINAL {action} | UTC ms {instant}","CAS asli {identity}","CAS asli "}}},
+        {"tr",false,ReviewStatus::MachineAssisted,{{u8"Seçili UUID {position}: {identity}",u8"Seçili UUID {position}: ",u8"Ad alanı {identity}",u8"Ad alanı ","Kapsam {identity}","Kapsam ",u8"Geçmiş başlangıcı UTC ms {instant}",u8"Son ayrılmış oturum {identity}",u8"Son ayrılmış oturum ","Kanal {identity}","Kanal ",u8"ORIGINAL eylem {action} | UTC ms {instant}",u8"Özgün CAS {identity}",u8"Özgün CAS "}}},
+        {"vi",false,ReviewStatus::MachineAssisted,{{u8"UUID đã chọn {position}: {identity}",u8"UUID đã chọn {position}: ",u8"Không gian tên {identity}",u8"Không gian tên ",u8"Phạm vi {identity}",u8"Phạm vi ",u8"Bắt đầu lịch sử UTC ms {instant}",u8"Phiên đặt trước cuối {identity}",u8"Phiên đặt trước cuối ",u8"Kênh {identity}",u8"Kênh ",u8"Hành động ORIGINAL {action} | UTC ms {instant}",u8"CAS gốc {identity}",u8"CAS gốc "}}}
+    }};return packs;
+}
+inline std::string_view energyAuthorizationPrivateMessageKeyName(EnergyAuthorizationPrivateMessageKey key){
+    static constexpr std::array<std::string_view,energyAuthorizationPrivateMessageKeyCount> names={{"energy_authorization.private.selected_uuid","energy_authorization.private.selected_uuid_empty","energy_authorization.private.namespace","energy_authorization.private.namespace_empty","energy_authorization.private.scope","energy_authorization.private.scope_empty","energy_authorization.private.history_begin","energy_authorization.private.last_session","energy_authorization.private.last_session_empty","energy_authorization.private.channel","energy_authorization.private.channel_empty","energy_authorization.private.original_action","energy_authorization.private.original_cas","energy_authorization.private.original_cas_empty"}};
+    const auto index=static_cast<std::size_t>(key);return index<names.size()?names[index]:std::string_view{};
+}
+inline LocalizedMessage energyAuthorizationPrivateMessage(std::string_view language,EnergyAuthorizationPrivateMessageKey key){
+    const auto index=static_cast<std::size_t>(key);if(index>=energyAuthorizationPrivateMessageKeyCount)return {};
+    const auto &source=energyAuthorizationPrivateLocalePacks()[0];const auto *selected=&source;for(const auto &pack:energyAuthorizationPrivateLocalePacks())if(pack.id==language){selected=&pack;break;}
+    if(selected->id!=language||!validTemplateTranslation(source.messages[index],selected->messages[index]))return {source.messages[index],source.id,source.review,true,false};
+    return {selected->messages[index],selected->id,selected->review,false,selected->rtl};
+}
+inline std::string energyAuthorizationPrivateEnglish(EnergyAuthorizationPrivateMessageKey key,const MessageArguments &arguments={}){
+    if(arguments.size()>2)return {};
+    const auto text=energyAuthorizationPrivateMessage("en",key).text;std::vector<std::string_view> expected,supplied;
+    if(text.empty()||!templateParameters(text,&expected))return {};
+    for(const auto &arg:arguments){const std::size_t maximum=arg.first=="identity"?128:arg.first=="position"?256:64;
+        if(arg.first.size()>32||arg.second.empty()||arg.second.size()>maximum||!std::all_of(arg.second.begin(),arg.second.end(),[](unsigned char c){return c>=32&&c<=126;})){return {};}supplied.push_back(arg.first);}
+    std::sort(supplied.begin(),supplied.end());if(supplied!=expected)return {};
+    std::string result;std::size_t at=0;
+    while(at<text.size()){const auto start=text.find('{',at);if(start==text.npos){result.append(text.substr(at));break;}result.append(text.substr(at,start-at));const auto end=text.find('}',start);
+        const auto name=text.substr(start+1,end-start-1);const auto found=std::find_if(arguments.begin(),arguments.end(),[&](const auto &arg){return arg.first==name;});if(found==arguments.end())return {};
+        result+=found->second;if(result.size()>4096)return {};at=end+1;
+    }
+    return result.size()<=4096?result:std::string{};
+}
+} } // namespace om::i18n

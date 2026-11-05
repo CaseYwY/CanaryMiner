@@ -6,6 +6,7 @@
 #include "energy_authorization_notice_messages.h"
 #include "energy_authorization_panel_messages.h"
 #include "energy_authorization_value_messages.h"
+#include "energy_authorization_private_messages.h"
 namespace om {
 struct EnergyAuthorizationAccess {
     std::function<std::shared_ptr<const EnergyAuthorizationSnapshot>()> snapshot;
@@ -137,12 +138,13 @@ class EnergyAuthorizationPanel {
             out.push_back(std::string(page==P::Browse&&i==field?"> ":"  ")+i18n::energyAuthorizationValueEnglish(human?ValueKey::FieldHuman:ValueKey::FieldRequest,{{"field",labels()[i]},{"value",v[i]}}));}
         if(!reveal)out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::PrivateHidden));
         else{
+            using PrivateKey=i18n::EnergyAuthorizationPrivateMessageKey;
             const auto &ids=ackReview&&current->uncertain?current->uncertain->devices:access.selectedDevices;
-            for(size_t i=0;i<ids.size()&&i<64;++i)out.push_back("Selected UUID "+std::to_string(i+1)+": "+safe(ids[i]));
-            if(doc&&doc->enrollment!=EnergyEnrollment::None){out.push_back("Namespace "+safe(doc->privateNamespace));out.push_back("Scope "+safe(doc->binding.evidence.scope));
-                out.push_back("History begin UTC ms "+std::to_string(doc->binding.historyBeginUtcMs));out.push_back("Last reserved session "+safe(doc->lastSessionId));
-                for(const auto &channel:doc->binding.channels)out.push_back("Channel "+safe(channel));}
-            if(ackReview&&current->uncertain){const auto &r=*current->uncertain;out.push_back("ORIGINAL action "+std::to_string(static_cast<unsigned>(r.action))+" | UTC ms "+std::to_string(r.nowUtcMs));out.push_back("Original CAS "+safe(r.expected));}
+            for(size_t i=0;i<ids.size()&&i<64;++i)out.push_back(privateIdentityLine(PrivateKey::SelectedUuid,PrivateKey::SelectedUuidEmpty,ids[i],{{"position",std::to_string(i+1)}}));
+            if(doc&&doc->enrollment!=EnergyEnrollment::None){out.push_back(privateIdentityLine(PrivateKey::Namespace,PrivateKey::NamespaceEmpty,doc->privateNamespace));out.push_back(privateIdentityLine(PrivateKey::Scope,PrivateKey::ScopeEmpty,doc->binding.evidence.scope));
+                out.push_back(i18n::energyAuthorizationPrivateEnglish(PrivateKey::HistoryBegin,{{"instant",std::to_string(doc->binding.historyBeginUtcMs)}}));out.push_back(privateIdentityLine(PrivateKey::LastSession,PrivateKey::LastSessionEmpty,doc->lastSessionId));
+                for(const auto &channel:doc->binding.channels)out.push_back(privateIdentityLine(PrivateKey::Channel,PrivateKey::ChannelEmpty,channel));}
+            if(ackReview&&current->uncertain){const auto &r=*current->uncertain;out.push_back(i18n::energyAuthorizationPrivateEnglish(PrivateKey::OriginalAction,{{"action",std::to_string(static_cast<unsigned>(r.action))},{"instant",std::to_string(r.nowUtcMs)}}));out.push_back(privateIdentityLine(PrivateKey::OriginalCas,PrivateKey::OriginalCasEmpty,r.expected));}
         }
         if(page==P::Review&&(ackReview||reviewedCommand.action!=EnergyAuthorizationAction::Save))out.push_back(i18n::energyAuthorizationValueEnglish(acknowledged?ValueKey::AckChecked:ValueKey::AckUnchecked));
         out.push_back(i18n::energyAuthorizationPanelEnglish(PanelKey::NextParent));
@@ -196,6 +198,10 @@ class EnergyAuthorizationPanel {
         case 8:draftLimits.maxSessions=static_cast<size_t>(n);break;case 9:draftLimits.maxWindows=static_cast<size_t>(n);break;case 10:draftLimits.maxDatabaseBytes=n;break;
         case 12:if(draftLimits.compaction)draftLimits.compaction->afterBatches=static_cast<size_t>(n);break;case 13:if(draftLimits.compaction)draftLimits.compaction->maxSegments=static_cast<size_t>(n);break;default:break;}}
     static std::string safe(const std::string &s){std::string out;for(unsigned char c:s){if(out.size()==128)break;out+=c>=32&&c<=126?static_cast<char>(c):'?';}return out;}
+    static std::string privateIdentityLine(i18n::EnergyAuthorizationPrivateMessageKey key,i18n::EnergyAuthorizationPrivateMessageKey empty,const std::string &identity,i18n::MessageArguments arguments={}){
+        const auto display=safe(identity);if(!display.empty())arguments.emplace_back("identity",display);
+        return i18n::energyAuthorizationPrivateEnglish(display.empty()?empty:key,arguments);
+    }
     static std::string status(EnergyAuthorizationStatus s){using Key=i18n::EnergyAuthorizationValueMessageKey;auto key=Key::StatusUnknown;
         switch(s){case EnergyAuthorizationStatus::Ok:key=Key::StatusOk;break;case EnergyAuthorizationStatus::Missing:key=Key::StatusMissing;break;case EnergyAuthorizationStatus::Invalid:key=Key::StatusInvalid;break;case EnergyAuthorizationStatus::Conflict:key=Key::StatusConflict;break;case EnergyAuthorizationStatus::Storage:key=Key::StatusStorage;break;case EnergyAuthorizationStatus::Clock:key=Key::StatusClock;break;case EnergyAuthorizationStatus::Selection:key=Key::StatusSelection;break;case EnergyAuthorizationStatus::Disabled:key=Key::StatusDisabled;break;case EnergyAuthorizationStatus::NeedsReview:key=Key::StatusNeedsReview;break;case EnergyAuthorizationStatus::Entropy:key=Key::StatusEntropy;break;}return i18n::energyAuthorizationValueEnglish(key);}
 };

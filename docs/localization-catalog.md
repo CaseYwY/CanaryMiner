@@ -123,6 +123,10 @@ effective native/data-owner/terminal/human and actual-source qualification remai
 acknowledgement keys (496 texts/templates), separating opaque requests from descriptions and missing budgets. Private-original/
 other domains/effective native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13as](energy-authorization-private-messages.md) adds fourteen private persistence display/presence keys (224 templates),
+preserving reveal/source/selection/sanitizer boundaries and distinguishing human position from invariant bounded display.
+Formatting is not disclosure authority; other domains/effective native/data-owner/terminal/human and actual-source gates remain.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.
