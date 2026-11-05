@@ -75,6 +75,10 @@ dynamic/other domains/effective native/data-owner/terminal/human and actual-sour
 value/source/activation authority or changed native English. Dynamic manual/other domains/effective native/data-owner/
 terminal/human and actual-source qualification remain open.
 
+[P-13ag](manual-market-value-messages.md) adds twelve manual field/change/input/toggle keys (192 texts/templates), separating
+opaque invariant saved requests from human labels/toggles and literal missing prices. Complete context rows/other domains/
+effective native/data-owner/terminal/human and actual-source qualification remain open.
+
 [P-13o](settings-action-messages.md) adds thirty-four root action/notice keys (544 texts), retaining explicit privacy,
 capability/refusal and effective-language limitations. English native routes/bytes are unchanged; this does not cover
 control-opening/TTY diagnostics, subpanels or effective typed native activation.

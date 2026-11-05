@@ -188,6 +188,20 @@ bool prepare(const TerminalManualMarketPanelMessageRequest &request,TerminalMess
     for(const auto &pack:i18n::manualMarketPanelLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;return true;
 }
+bool prepare(const TerminalManualMarketValueMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments))return false;
+    using Key=i18n::ManualMarketValueMessageKey;const bool human=request.key==Key::HumanFieldValue||request.key==Key::HumanFieldChange;
+    for(const auto &argument:request.arguments){const auto &content=argument.value.content;
+        const bool humanValue=argument.name=="field"||(human&&(argument.name=="value"||argument.name=="before"||argument.name=="after"));
+        const std::size_t maximum=humanValue?256:64;
+        if(content.text.size()>maximum||content.ascii.size()>maximum||(argument.name!="input"&&content.text.empty()))return false;
+        if(humanValue?content.invariant:!content.invariant)return false;
+    }
+    templates.requested=i18n::manualMarketValueMessage(request.language,request.key);templates.english=i18n::manualMarketValueMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::manualMarketValueLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -439,6 +453,18 @@ bool renderTerminalManualMarketPanelMessage(const TerminalManualMarketPanelMessa
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalManualMarketPanelMessage(const TerminalManualMarketPanelMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

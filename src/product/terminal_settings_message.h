@@ -21,6 +21,7 @@
 #include "manual_market_field_messages.h"
 #include "manual_market_notice_messages.h"
 #include "manual_market_panel_messages.h"
+#include "manual_market_value_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -223,4 +224,14 @@ bool layoutTerminalManualMarketPanelMessage(const TerminalManualMarketPanelMessa
 bool wrapTerminalManualMarketPanelMessage(const TerminalManualMarketPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalManualMarketPanelMessage(const TerminalManualMarketPanelMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalManualMarketPanelMessage(const TerminalManualMarketPanelMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalManualMarketValueMessageRequest {
+    std::string language="en";
+    i18n::ManualMarketValueMessageKey key=i18n::ManualMarketValueMessageKey::FieldValue;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalManualMarketValueMessage(const TerminalManualMarketValueMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

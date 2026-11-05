@@ -4,6 +4,7 @@
 #include "manual_market_field_messages.h"
 #include "manual_market_notice_messages.h"
 #include "manual_market_panel_messages.h"
+#include "manual_market_value_messages.h"
 namespace om {
 enum class ManualMarketSettingsResult { None, Close, Quit };
 enum class ManualMarketSettingsPage { Browse, Edit, Review, Leave };
@@ -82,6 +83,7 @@ class ManualMarketSettingsPanel {
     std::string render(int columns,int rows,ColorLevel color) const {
         using namespace dash_detail;
         using PanelKey=i18n::ManualMarketPanelMessageKey;
+        using ValueKey=i18n::ManualMarketValueMessageKey;
         const size_t width=static_cast<size_t>(std::max(20,columns)-1);
         if(rows>0&&rows<12)return i18n::manualMarketPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::manualMarketPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::manualMarketPanelEnglish(PanelKey::ShortKeys)+"\n";
         const bool compact=width<70 || (rows>0&&rows<20);
@@ -92,13 +94,13 @@ class ManualMarketSettingsPanel {
         const size_t budget=rows>0?static_cast<size_t>(std::max(1,rows-static_cast<int>(footerLines.size()+messageLines.size())-1)):1000;
         std::vector<std::string> body={i18n::manualMarketPanelEnglish(PanelKey::Title)+(dirty()?i18n::manualMarketPanelEnglish(PanelKey::UnsavedSuffix):std::string{})};
         if(page==ManualMarketSettingsPage::Edit) {
-            body.push_back(std::string("Edit ")+label(field)); body.push_back("> "+input+"_");
+            body.push_back(i18n::manualMarketValueEnglish(ValueKey::EditHeading,{{"field",label(field)}})); body.push_back(i18n::manualMarketValueEnglish(ValueKey::EditInput,{{"input",input}}));
             body.push_back(i18n::manualMarketPanelEnglish(field==1||field==4?PanelKey::DecimalGuide:field==6?PanelKey::ValidityGuide:field==7?PanelKey::SkewGuide:PanelKey::ReferenceGuide));
             body.push_back(i18n::manualMarketPanelEnglish(PanelKey::EditorKeys));
         } else if(page==ManualMarketSettingsPage::Leave) {body.push_back(i18n::manualMarketPanelEnglish(PanelKey::LeaveTitle)); body.push_back(i18n::manualMarketPanelEnglish(PanelKey::LeaveKeys));}
         else if(page==ManualMarketSettingsPage::Review) {
             body.push_back(i18n::manualMarketPanelEnglish(PanelKey::ReviewHeading));
-            for(unsigned i=0;i<8;++i)if(value(active,i)!=value(draft,i))body.push_back(std::string(label(i))+": "+value(active,i)+" -> "+value(draft,i));
+            for(unsigned i=0;i<8;++i)if(value(active,i)!=value(draft,i))body.push_back(fieldChange(active,draft,i));
             if(!dirty())body.push_back(i18n::manualMarketPanelEnglish(PanelKey::NoChanges));
             body.push_back(i18n::manualMarketPanelEnglish(context.running?PanelKey::ActivationLive:PanelKey::ActivationNext));
             if(context.cliDisabled)body.push_back(i18n::manualMarketPanelEnglish(PanelKey::CliWins));
@@ -107,12 +109,12 @@ class ManualMarketSettingsPanel {
         } else {
             const size_t available=budget>1?std::min(size_t{8},budget-1):1;
             const size_t start=compact?field:0; // selected field precedes any wrapping/truncation in a short terminal
-            for(size_t i=start;i<8&&i<start+available;++i)body.push_back(std::string(i==field?"> ":"  ")+label(static_cast<unsigned>(i))+": "+value(draft,static_cast<unsigned>(i)));
+            for(size_t i=start;i<8&&i<start+available;++i)body.push_back(std::string(i==field?"> ":"  ")+fieldValue(draft,static_cast<unsigned>(i)));
             if(!compact){
                 body.push_back(i18n::manualMarketPanelEnglish(PanelKey::Identity));
                 body.push_back(context.cliDisabled?i18n::manualMarketPanelEnglish(PanelKey::CurrentOff):context.running?std::string("Current display: ")+on(context.effective.enabled):i18n::manualMarketPanelEnglish(PanelKey::NoSession));
                 if(context.running&&!context.cliDisabled&&context.effective!=active) {
-                    body.push_back("Current PRL input: "+(context.effective.prlUsdt.empty()?"not supplied":context.effective.prlUsdt)+" USDT/PRL | "+stamp(context.effective.prlAsOfUtc));
+                    body.push_back("Current PRL input: "+(context.effective.prlUsdt.empty()?i18n::manualMarketValueEnglish(ValueKey::NotSupplied):context.effective.prlUsdt)+" USDT/PRL | "+stamp(context.effective.prlAsOfUtc));
                     body.push_back(i18n::manualMarketPanelEnglish(PanelKey::ConfiguredBoundary));
                 }
                 body.push_back(i18n::manualMarketPanelEnglish(PanelKey::NoProvider));
@@ -130,9 +132,22 @@ class ManualMarketSettingsPanel {
     }
    private:
     static std::string label(unsigned i){const auto &keys=i18n::manualMarketFieldKeys();return i18n::manualMarketFieldEnglish(i<keys.size()?keys[i]:i18n::ManualMarketFieldMessageKey::Count);}
-    static std::string on(bool b){return b?"on":"off";}
-    static std::string stamp(uint64_t utc){return utc?utcIsoClock(static_cast<time_t>(utc)):"not supplied";}
-    static std::string value(const ManualMarketPreferences &p,unsigned i){return i==0?on(p.enabled):i==3?on(p.fxEnabled):i==1?(p.prlUsdt.empty()?"not supplied":p.prlUsdt):i==4?(p.usdtUsd.empty()?"not supplied":p.usdtUsd):i==2?std::to_string(p.prlAsOfUtc):i==5?std::to_string(p.fxAsOfUtc):i==6?std::to_string(p.validitySeconds):std::to_string(p.maxFxSkewSeconds);}
+    static std::string on(bool b){return i18n::manualMarketValueEnglish(b?i18n::ManualMarketValueMessageKey::On:i18n::ManualMarketValueMessageKey::Off);}
+    static std::string stamp(uint64_t utc){return utc?utcIsoClock(static_cast<time_t>(utc)):i18n::manualMarketValueEnglish(i18n::ManualMarketValueMessageKey::NotSupplied);}
+    static std::string value(const ManualMarketPreferences &p,unsigned i){return i==0?on(p.enabled):i==3?on(p.fxEnabled):i==1?(p.prlUsdt.empty()?i18n::manualMarketValueEnglish(i18n::ManualMarketValueMessageKey::NotSupplied):p.prlUsdt):i==4?(p.usdtUsd.empty()?i18n::manualMarketValueEnglish(i18n::ManualMarketValueMessageKey::NotSupplied):p.usdtUsd):i==2?std::to_string(p.prlAsOfUtc):i==5?std::to_string(p.fxAsOfUtc):i==6?std::to_string(p.validitySeconds):std::to_string(p.maxFxSkewSeconds);}
+    static bool missingPrice(const ManualMarketPreferences &p,unsigned i){return (i==1&&p.prlUsdt.empty())||(i==4&&p.usdtUsd.empty());}
+    static std::string fieldValue(const ManualMarketPreferences &p,unsigned i){using Key=i18n::ManualMarketValueMessageKey;
+        if(missingPrice(p,i))return i18n::manualMarketValueEnglish(Key::MissingFieldValue,{{"field",label(i)}});
+        return i18n::manualMarketValueEnglish(i==0||i==3?Key::HumanFieldValue:Key::FieldValue,{{"field",label(i)},{"value",value(p,i)}});
+    }
+    static std::string fieldChange(const ManualMarketPreferences &a,const ManualMarketPreferences &b,unsigned i){using Key=i18n::ManualMarketValueMessageKey;
+        const bool beforeMissing=missingPrice(a,i),afterMissing=missingPrice(b,i);
+        const auto key=i==0||i==3?Key::HumanFieldChange:beforeMissing?Key::FieldAfterOnly:afterMissing?Key::FieldBeforeOnly:Key::FieldChange;
+        i18n::MessageArguments arguments={{"field",label(i)}};
+        if(!beforeMissing)arguments.emplace_back("before",value(a,i));
+        if(!afterMissing)arguments.emplace_back("after",value(b,i));
+        return i18n::manualMarketValueEnglish(key,arguments);
+    }
     void focusProblem(uint64_t now){page=ManualMarketSettingsPage::Browse; if((draft.enabled||draft.prlAsOfUtc)&&draft.prlUsdt.empty())field=1; else if(!draft.prlUsdt.empty()&&(!draft.prlAsOfUtc||(draft.enabled&&draft.prlAsOfUtc>now)))field=2; else if((draft.fxEnabled||draft.fxAsOfUtc)&&draft.usdtUsd.empty())field=4; else if(!draft.usdtUsd.empty()&&(!draft.fxAsOfUtc||(draft.enabled&&draft.fxEnabled&&draft.fxAsOfUtc>now)))field=5;}
 };
 }  // namespace om

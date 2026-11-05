@@ -40,3 +40,6 @@ historical results and value-free scope remain unchanged; neither extraction act
 
 [P-13af](manual-market-panel-messages.md) subsequently extracts the literal shell/editor/limitations. This label domain's
 historical evidence remains unchanged; dynamic/value/source/effective native qualification stays separate.
+
+[P-13ag](manual-market-value-messages.md) later extracts saved-request/input/toggle/missing-price envelopes. Neither later
+extraction changes these eight-label historical results or makes a language request effective.

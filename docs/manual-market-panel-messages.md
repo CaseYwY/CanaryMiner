@@ -36,3 +36,6 @@ evidence is in the [execution ledger](architecture/execution-plan.md).
 Dynamic manual/other panels/dashboard/log/raw domains, effective typed native/data-owner/deployment, human review and
 physical terminal/font/shaping/accessibility remain open. Public feeds/rewards/credit attribution, real power/safety/game/
 GPU/TLS, global quarantine and production release gates remain unqualified.
+
+[P-13ag](manual-market-value-messages.md) subsequently extracts field/change/edit/toggle/missing-price text. Complete current-
+reference/UTC context rows remain separate; this literal-domain historical evidence and no-source-authority scope are unchanged.
