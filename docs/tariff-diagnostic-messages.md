@@ -45,3 +45,7 @@ exact platform/sanitizer/privacy results are in the [execution ledger](architect
 Model-status/raw error envelopes/legacy and other panels/dashboard/log/raw domains, complete effective typed native/data-
 owner/deployment, human review and physical terminal/font/shaping/accessibility remain open. Actual utility/rate/power/
 safety/game/GPU/TLS/financial sources, global quarantine, physical durability and production release remain unqualified.
+
+[P-13bb](electricity-status-messages.md) subsequently adds independent human electricity-status descriptions, using explicit
+typed ModelStatus payloads only under original source equality in UI. These historical classified-refusal results remain;
+unknown/missing/changed originals, pure-core APIs and supplier/source qualification stay separate.

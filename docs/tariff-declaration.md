@@ -93,3 +93,7 @@ or a translated/effective UI.
 [P-13ba](tariff-diagnostic-messages.md) later extracts classified refusal descriptions through explicit UI-only kind mapping
 and exact source equality. Native English/raw unknown/model/changed outcomes and parser/store/offline-save semantics remain;
 choice display supplies no enum admission or supplier/source truth.
+
+[P-13bb](electricity-status-messages.md) later adds human model-status descriptions behind explicit kind/payload/source
+equality in UI. Core raw strings and native path/message/validation/offline-save behavior remain; labels prove no arithmetic,
+coverage, supplier or source fact and do not activate translated native UI.

@@ -2,6 +2,7 @@
 #pragma once
 #include "tariff_declaration.h"
 #include "tariff_diagnostic_messages.h"
+#include "electricity_status_source.h"
 namespace om {
 inline std::optional<i18n::TariffDiagnosticMessageKey> tariffDiagnosticKey(TariffProblemKind kind){
     using Kind=TariffProblemKind;using Key=i18n::TariffDiagnosticMessageKey;
@@ -21,6 +22,7 @@ inline std::optional<i18n::TariffDiagnosticMessageKey> tariffDiagnosticKey(Tarif
     return std::nullopt;
 }
 inline std::string tariffDiagnosticReasonEnglish(const TariffProblem &problem){
+    if(problem.kind==TariffProblemKind::ModelStatus&&problem.modelStatus)return electricityStatusReasonEnglish(*problem.modelStatus,problem.message);
     const auto key=tariffDiagnosticKey(problem.kind);if(!key)return problem.message;
     i18n::MessageArguments arguments;
     if(*key==i18n::TariffDiagnosticMessageKey::Choice){

@@ -41,6 +41,7 @@
 #include "tariff_value_messages.h"
 #include "tariff_review_messages.h"
 #include "tariff_diagnostic_messages.h"
+#include "electricity_status_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -434,4 +435,13 @@ bool layoutTerminalTariffDiagnosticMessage(const TerminalTariffDiagnosticMessage
 bool wrapTerminalTariffDiagnosticMessage(const TerminalTariffDiagnosticMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalTariffDiagnosticMessage(const TerminalTariffDiagnosticMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalTariffDiagnosticMessage(const TerminalTariffDiagnosticMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalElectricityStatusMessageRequest {
+    std::string language="en";
+    i18n::ElectricityStatusMessageKey key=i18n::ElectricityStatusMessageKey::Unavailable;
+    Tone literalTone=Tone::Plain;
+};
+bool layoutTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om

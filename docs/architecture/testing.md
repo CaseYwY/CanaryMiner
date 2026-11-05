@@ -322,6 +322,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13ba](../tariff-diagnostic-messages.md) checks 320 refusal texts/templates, explicit kind mappings, exact original/unknown/model/changed/empty-choice preservation and typed line/paint/independent-wrap/choice-role/refusal. Actual invalid-country/native focus and injected raw store callback preserve active/draft/review/stop without storage. Synthetic defensive-key mappings are not runtime fault coverage, and opaque choice display is not admission. Fixed-native/validation/store/model/CLI/PTY evidence remains separate from actual source/effective-native/physical qualification.
 
+[P-13bb](../electricity-status-messages.md) checks 176 literal status texts, exact core-source/review/RTL/no-parameter parity and typed line/paint/independent-wrap/refusal. Memory-only known-enum/kind/payload/source-equality tests preserve unknown/missing/changed/non-model raw outcomes; pure invalid-opening/native review preserve output/path/message/active/draft/stop without Save. Synthetic status mappings are not actual arithmetic/coverage/supplier/source qualification; fixed-native/validation/store/model/CLI/PTY and physical/effective-native gates remain independent.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
