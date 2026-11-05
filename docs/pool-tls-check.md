@@ -40,6 +40,39 @@ The existing explicit synthetic generator now accepts an optional reference name
 
 Final platform/test results are recorded in the execution ledger. Native Schannel/Crypt32 and external OpenSSL remain uninstrumented. Persistent bidirectional helper IPC, retained socket/stream ownership, actual canonical-source Stratum on Windows, URL/settings/fallback/donation isolation, normal automatic-trust positives and production/GPU/game qualification are not delivered by this one-shot check.
 
+## Lifecycle fixture timing correction
+
+A later default-off full run failed the old combined 250-ms timeout/readiness assertion; its original output did not identify
+which conjunct failed. An isolated repeat and 200 bounded four-way replays passed, so they do not establish the original
+failure's exact cause. A test-only one-second pre-ready delay then deterministically demonstrates that a valid started-child
+Timeout/no-reply result can precede readiness. The production deadline already includes launch and IPC; requiring a marker
+inside that short budget was not a valid lifecycle contract. Timeout now checks child-started, Timeout, absent status/stage/
+TLS reply and the unchanged 1500-ms observed wall bound, without assuming phase entry.
+
+The first correction's repeat subsequently exposed a second launch-relative assumption: a 500-ms cancellation timer could
+fire before readiness, preventing the test from acquiring the live child identity it intended to observe. Adding the same
+delayed-startup case reproduces that failure deterministically. The test-only probe now accepts a private cancellation-file
+trigger. Python waits for a complete PID marker, obtains the actual process identity while alive, verifies it, then triggers
+cancellation. All three original labelled phases plus delayed startup still require Cancelled, child-started, no reply, the
+unchanged 2000-ms observed wall bound and observed child exit. Startup additionally proves at least one second elapsed before
+cancellation. The independent total budget remains 2500 ms; the private trigger does not reset or extend it.
+
+The monitor wakes and joins on completion or exception, including success/timeout with an absent trigger. The numeric-delay
+test interface remains available for real loopback handshake cancellation. Both seams and the startup host remain excluded
+from parent/native libraries. Only fixture, probe, assertions and this test-scope documentation change; production deadline,
+cancellation/reap, trust, fallback and ordinary activation do not. These are controlled owned-process observations, not hard
+OS/kernel termination bounds, actual resolver/trust stalls, global quarantine or physical/production qualification.
+
+Correction evidence: final Windows/MSVC default-off full **241/241 CTest** passes both serial and at concurrency four on the
+working tree containing the separately pending P-13ap notice test. An earlier serial wrapper stopped after 122 completed cases
+and is not counted as a complete run. The corrected lifecycle passes **20** serial repetitions and **80** full lifecycle runs
+with at most four concurrent probes; Windows enabled lifecycle and five-scenario real localhost TLS each pass **five** more
+repetitions. Linux strict-GCC ordinary and own-code/helper **ASan+UBSan with leak detection** rebuild/pass **1304** enabled
+contracts, corrected lifecycle and five-scenario real localhost TLS. External TLS libraries remain uninstrumented. Architecture,
+default-off artifact/import, whitespace and privacy checks pass; the four correction blobs are scanned independently from
+the pending notice batch. None of these synthetic/process/loopback results establishes production trust, physical termination,
+global quarantine or permission to alter an installed miner.
+
 Final evidence: Windows/MSVC default-off full serial **189/189 CTest**, then final rebuilt focused **7/7** after negative-enum/import-guard additions. Windows/Linux disabled contract suites pass **1305** checks; enabled contracts pass **1304** (the default-off capability refusal is intentionally skipped). The separate Windows enabled selection passes **6/6**, including the new native loopback checks, P-12d 18-scenario MemoryBIO regression and refreshed P-12c 43-check native inspection; it is not the entire enabled tree. The owned-process lifecycle suite passes five extra repetitions, and the **final five-scenario loopback suite** passes five extra complete repetitions after the ticket/peer-completion distinction.
 
 Linux strict-GCC ordinary and own-code/helper **ASan+UBSan with leak detection** rebuild/pass the final **1304** enabled contracts, owned lifecycle and five real loopback scenarios. Killing a timed-out helper does not instrument or certify native OS/library teardown. Six default-off option checks, native-network/TLS-symbol exclusion in the disabled connector, TLS-import exclusion in the parent and no ordinary worker activation pass. Final architecture/import/generator-import, staged/source/history privacy and whitespace checks pass. Earlier fixture count/late-PID observation mistakes and the native helper's NOMINMAX build omission were corrected without relaxing trust. The expired future-leaf fixture was regenerated rather than changing native validity policy. No public endpoint, user identity, root installation, miner deployment, GPU/driver or production qualification is claimed.

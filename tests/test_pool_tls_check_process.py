@@ -40,6 +40,21 @@ def run(probe, helper, request, cancel=None, env=None):
     return json.loads(result.stdout)
 
 
+def ready_pid(marker):
+    observed = []
+    def complete_marker():
+        try:
+            pid = int(marker.read_text(encoding='ascii'))
+        except (OSError, ValueError):
+            return False
+        if pid <= 0:
+            return False
+        observed.append(pid)
+        return True
+    assert wait(complete_marker), 'owned helper did not publish a complete ready marker'
+    return observed[-1]
+
+
 def lifecycle(args):
     with tempfile.TemporaryDirectory(prefix='tls-check-lifecycle-', dir=args.scratch) as directory:
         root = Path(directory)
@@ -51,20 +66,26 @@ def lifecycle(args):
         for host in ('malformed.test', 'trailing.test', 'overflow.test'):
             result = run(args.probe, helper, packet(host=host))
             assert result['started'] and result['transport'] == 3 and result['status'] == -1, (host, result)
-        for phase in ('resolve', 'connect', 'trust'):
+        for phase in ('resolve', 'connect', 'trust', 'startup'):
             marker = root / 'fixture-tls-ready'
             marker.unlink(missing_ok=True)
-            parent = subprocess.Popen([str(args.probe), str(helper), '500'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            cancel_file = root / 'cancel-owned-check'
+            cancel_file.unlink(missing_ok=True)
+            parent = subprocess.Popen([str(args.probe), str(helper), '--cancel-file', str(cancel_file)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             try:
                 parent.stdin.write(packet(host=f'stall-{phase}.test', total=2500))
                 parent.stdin.close()
-                assert wait(marker.exists)
-                alive, close = process_identity(int(marker.read_text()))
+                alive, close = process_identity(ready_pid(marker))
                 try:
                     assert alive()
+                    # Trigger only after real phase entry and a live owned-child identity. A launch-
+                    # relative timer could cancel before either observation on a slow scheduler.
+                    cancel_file.touch()
                     parent.wait(timeout=5)
                     result = json.loads(parent.stdout.read())
-                    assert result['transport'] == 4 and result['status'] == -1 and result['elapsedMs'] < 2000, (phase, result)
+                    assert result['started'] == 1 and result['transport'] == 4 and result['status'] == -1 and result['stage'] == -1 and result['tls'] == -1 and result['elapsedMs'] < 2000, (phase, result)
+                    if phase == 'startup':
+                        assert result['elapsedMs'] >= 1000, 'cancel did not wait for delayed phase entry'
                     assert not alive(), 'cancelled owned child remains alive'
                 finally:
                     close()
@@ -73,16 +94,27 @@ def lifecycle(args):
                     parent.kill()
                 parent.wait(timeout=5)
                 parent.stdout.close()
-        marker.unlink(missing_ok=True)
-        result = run(args.probe, helper, packet(host='stall-resolve.test', total=250))
-        assert marker.exists() and result['transport'] == 5 and result['status'] == -1 and result['elapsedMs'] < 1500
+        for host in ('stall-resolve.test', 'stall-startup.test'):
+            marker.unlink(missing_ok=True)
+            result = run(args.probe, helper, packet(host=host, total=250))
+            # The total deadline includes helper startup. It may expire before the owned child
+            # reads its request/writes readiness; the cancellation cases above separately
+            # require observed phase entry and reaping. Never turn a valid early timeout into
+            # an assumed readiness guarantee or relax the actual deadline/result assertions.
+            assert result['started'] == 1 and result['transport'] == 5 and result['status'] == -1 and result['stage'] == -1 and result['tls'] == -1 and result['elapsedMs'] < 1500, (host, marker.exists(), result)
+        # A file monitor with no trigger must exit/join after both success and total timeout.
+        # Neither path may hang waiting for a test-side action that will never arrive.
+        for host, total, transport, status in (('ok.test', 1000, 0, 9), ('stall-startup.test', 250, 5, -1)):
+            command = [str(args.probe), str(helper), '--cancel-file', str(root / 'never-triggered')]
+            completed = subprocess.run(command, input=packet(host=host, total=total), capture_output=True, timeout=8, check=True)
+            result = json.loads(completed.stdout)
+            assert result['started'] == 1 and result['transport'] == transport and result['status'] == status and result['elapsedMs'] < 1500, (host, result)
         marker.unlink(missing_ok=True)
         parent = subprocess.Popen([str(args.probe), str(helper)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
             parent.stdin.write(packet(host='stall-trust.test', total=60000))
             parent.stdin.close()
-            assert wait(marker.exists)
-            alive, close = process_identity(int(marker.read_text()))
+            alive, close = process_identity(ready_pid(marker))
             try:
                 assert alive()
                 parent.kill()
@@ -98,9 +130,9 @@ def lifecycle(args):
     for artifact in (args.parent_library, args.native_library):
         if artifact:
             data = artifact.read_bytes()
-            for name in (b'fixture-tls-ready', b'stall-resolve.test', b'stall-connect.test', b'stall-trust.test'):
+            for name in (b'fixture-tls-ready', b'stall-resolve.test', b'stall-connect.test', b'stall-trust.test', b'stall-startup.test', b'--cancel-file'):
                 assert name not in data
-    print('TLS check lifecycle: success framing, malformed/overflow refusal, three phase stalls, timeout, parent death and artifact separation passed')
+    print('TLS check lifecycle: success/malformed/overflow, three labelled phases plus delayed startup, live-child-triggered cancel/reap, pre-ready total timeout, monitor completion, parent death and artifact separation passed')
 
 
 def loopback(args):

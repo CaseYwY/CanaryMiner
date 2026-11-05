@@ -9,6 +9,7 @@ int main(int argc,char **argv){
     try{std::string wire;PoolTlsCheckRequest request;uint64_t parent=0;
         if(!readLocalTaskInput(argc,argv,&wire)||!decodePoolTlsCheckRequest(wire,&request,&parent)||!bindLocalTaskParent(parent))return 2;
         if(std::getenv("CANARY_SYNTHETIC_SECRET")||std::getenv("SSLKEYLOGFILE")||std::getenv("HTTPS_PROXY"))return 3;
+        if(request.host=="stall-startup.test")std::this_thread::sleep_for(std::chrono::seconds(1));
         if(request.host.rfind("stall-",0)==0){const auto marker=std::filesystem::absolute(std::filesystem::u8path(argv[0])).parent_path()/"fixture-tls-ready";
             {std::ofstream out(marker);out<<localTaskProcessId();}std::this_thread::sleep_for(std::chrono::seconds(30));}
         if(request.host=="malformed.test")return writeLocalTaskOutput("CMTLSA1\n9\n4\n4\n")?0:4;
