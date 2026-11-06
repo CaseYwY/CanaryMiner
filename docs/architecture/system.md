@@ -43,6 +43,10 @@ session. Supervisor callback/final-settlement boundaries revoke before continued
 creation-bound identities; legacy `ChildProcess`, other data-owner lifetime/queues and full deployment/physical qualification
 remain separate open work, not implied by this cooperative statically linked fence.
 
+[P-14c](../legacy-child-ownership.md) subsequently joins ordinary ChildProcess to the fence with fixed retained ownership,
+atomic pidfd identity, suspended Windows job binding, original stop checks and cooperative reader lifetime. Console/stdin
+drain remain. Other data-owner queues, older Linux compatibility and hard native/deployment/physical gates stay unqualified.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

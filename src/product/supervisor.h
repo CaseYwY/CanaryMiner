@@ -63,6 +63,7 @@
 #include "stats.h"
 #include "stats_server.h"
 #include "supervisor_sampling.h"
+#include "legacy_child_process.h"
 
 namespace om {
 
@@ -76,256 +77,15 @@ inline GameGuardTime supervisorControlTime(){
 /** Full path of this executable (the children are started from it). */
 inline std::string selfExecutablePath() {
 #if defined(_WIN32)
-    char buf[MAX_PATH * 4];
-    const DWORD n = GetModuleFileNameA(nullptr, buf, sizeof(buf));
-    return n == 0 || n >= sizeof(buf) ? std::string() : std::string(buf, n);
+    wchar_t buf[32768];
+    const DWORD n = GetModuleFileNameW(nullptr, buf, 32768);
+    return n == 0 || n >= 32768 ? std::string() : std::filesystem::path(std::wstring(buf, n)).u8string();
 #else
     char buf[4096];
     const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
     return n <= 0 ? std::string() : std::string(buf, static_cast<size_t>(n));
 #endif
 }
-
-/** Splits bytes into lines (LF or CRLF); a partial line waits for the rest. Long unterminated output is cut at 8 KiB. */
-inline void feedLines(std::string *pending, const char *data, size_t n, const std::function<void(const std::string &)> &sink) {
-    pending->append(data, n);
-    size_t start = 0, nl;
-    while ((nl = pending->find('\n', start)) != std::string::npos) {
-        std::string line = pending->substr(start, nl - start);
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (!line.empty()) sink(line);
-        start = nl + 1;
-    }
-    pending->erase(0, start);
-    if (pending->size() > 8192) {
-        sink(pending->substr(0, 8192));
-        pending->clear();
-    }
-}
-
-/**
- * One child process. Its stdin is a pipe (closing it is the stop request); its stdout and stderr share one pipe, read line by line
- * on a thread. The child inherits this console, so Ctrl-C reaches it directly.
- */
-class ChildProcess {
-   public:
-    using LineSink = std::function<void(const std::string &)>;
-
-    ChildProcess() = default;
-    ChildProcess(const ChildProcess &) = delete;
-    ChildProcess &operator=(const ChildProcess &) = delete;
-    ~ChildProcess() {
-        if (started_ && !done_) kill();
-        closeStdin();
-        joinReader();
-#if defined(_WIN32)
-        if (hProcess_) CloseHandle(hProcess_);
-#endif
-    }
-
-    /** Starts `exe` with `args` (argument 0 is `exe`). Returns false with *error set when the process cannot be created. */
-    bool start(const std::string &exe, const std::vector<std::string> &args, LineSink sink, std::string *error) {
-#if defined(_WIN32)
-        SECURITY_ATTRIBUTES sa{};
-        sa.nLength = sizeof(sa);
-        sa.bInheritHandle = TRUE;
-        HANDLE inR = nullptr, inW = nullptr, outR = nullptr, outW = nullptr;
-        if (!CreatePipe(&inR, &inW, &sa, 0) || !CreatePipe(&outR, &outW, &sa, 0)) {
-            if (error) *error = "cannot create pipes for the worker";
-            return false;
-        }
-        SetHandleInformation(inW, HANDLE_FLAG_INHERIT, 0);  // our ends are never inherited by the child
-        SetHandleInformation(outR, HANDLE_FLAG_INHERIT, 0);
-        std::string cmd = winQuote(exe);
-        for (const std::string &a : args) cmd += " " + winQuote(a);
-        std::vector<char> mutableCmd(cmd.begin(), cmd.end());
-        mutableCmd.push_back('\0');
-        // Only the two pipe ends are inherited: the attribute list names them, so no other inheritable handle of ours reaches the worker.
-        SIZE_T attrBytes = 0;
-        InitializeProcThreadAttributeList(nullptr, 1, 0, &attrBytes);
-        std::vector<char> attrBuf(attrBytes);
-        LPPROC_THREAD_ATTRIBUTE_LIST attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attrBuf.data());
-        HANDLE inherit[2] = {inR, outW};
-        const bool listReady = InitializeProcThreadAttributeList(attrs, 1, 0, &attrBytes) &&
-                               UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof(inherit), nullptr, nullptr);
-        STARTUPINFOEXA si{};
-        si.StartupInfo.cb = sizeof(si);
-        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        si.StartupInfo.hStdInput = inR;
-        si.StartupInfo.hStdOutput = outW;
-        si.StartupInfo.hStdError = outW;
-        si.lpAttributeList = attrs;
-        PROCESS_INFORMATION pi{};
-        const DWORD flags = listReady ? EXTENDED_STARTUPINFO_PRESENT : 0;
-        const BOOL ok = listReady && CreateProcessA(exe.c_str(), mutableCmd.data(), nullptr, nullptr, TRUE, flags, nullptr, nullptr, &si.StartupInfo, &pi);
-        const DWORD createError = GetLastError();
-        if (listReady) DeleteProcThreadAttributeList(attrs);
-        CloseHandle(inR);
-        CloseHandle(outW);
-        if (!ok) {
-            if (error) *error = "cannot start the worker (error " + std::to_string(createError) + ")";
-            CloseHandle(inW);
-            CloseHandle(outR);
-            return false;
-        }
-        CloseHandle(pi.hThread);
-        hProcess_ = pi.hProcess;
-        hIn_ = inW;
-        hOut_ = outR;
-        started_ = true;
-        reader_ = std::thread([this, sink] { readLoop(sink); });
-        return true;
-#else
-        int inp[2], outp[2];
-        if (pipe2(inp, O_CLOEXEC) != 0 || pipe2(outp, O_CLOEXEC) != 0) {
-            if (error) *error = "cannot create pipes for the worker";
-            return false;
-        }
-        std::vector<char *> argv;
-        argv.push_back(const_cast<char *>(exe.c_str()));
-        for (const std::string &a : args) argv.push_back(const_cast<char *>(a.c_str()));
-        argv.push_back(nullptr);
-        const pid_t pid = fork();
-        if (pid == 0) {
-            dup2(inp[0], STDIN_FILENO);
-            dup2(outp[1], STDOUT_FILENO);
-            dup2(outp[1], STDERR_FILENO);
-            execv(exe.c_str(), argv.data());
-            _exit(127);
-        }
-        close(inp[0]);
-        close(outp[1]);
-        if (pid < 0) {
-            if (error) *error = "cannot start the worker (fork failed)";
-            close(inp[1]);
-            close(outp[0]);
-            return false;
-        }
-        pid_ = pid;
-        inFd_ = inp[1];
-        outFd_ = outp[0];
-        started_ = true;
-        reader_ = std::thread([this, sink] { readLoop(sink); });
-        return true;
-#endif
-    }
-
-    bool started() const { return started_; }
-    bool finished() const { return done_; }
-
-    /** Non-blocking: true once the process has ended (*code is its exit status). */
-    bool exited(int *code) {
-        if (!started_) return false;
-        if (!done_) {
-#if defined(_WIN32)
-            if (WaitForSingleObject(hProcess_, 0) != WAIT_OBJECT_0) return false;
-            DWORD c = 0;
-            GetExitCodeProcess(hProcess_, &c);
-            exitCode_ = static_cast<int>(c);
-#else
-            int st = 0;
-            if (waitpid(pid_, &st, WNOHANG) != pid_) return false;
-            exitCode_ = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
-#endif
-            done_ = true;
-        }
-        if (code) *code = exitCode_;
-        return true;
-    }
-
-    /** Closing stdin is the graceful stop request: the child's stdin watcher sees end-of-file and drains. Idempotent. */
-    void closeStdin() {
-#if defined(_WIN32)
-        if (hIn_) {
-            CloseHandle(hIn_);
-            hIn_ = nullptr;
-        }
-#else
-        if (inFd_ >= 0) {
-            close(inFd_);
-            inFd_ = -1;
-        }
-#endif
-    }
-
-    /** Waits up to `ms` for the process to end. True when it has (*code is set). */
-    bool waitFor(uint64_t ms, int *code) {
-        const uint64_t until = supervisorNowMs() + ms;
-        while (!exited(code)) {
-            if (supervisorNowMs() >= until) return false;
-            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        }
-        return true;
-    }
-
-    void kill() {
-        if (!started_ || done_) return;
-#if defined(_WIN32)
-        TerminateProcess(hProcess_, 1);
-#else
-        ::kill(pid_, SIGKILL);
-#endif
-    }
-
-    void joinReader() {
-        if (reader_.joinable()) reader_.join();
-    }
-
-   private:
-    bool started_ = false, done_ = false;
-    int exitCode_ = -1;
-#if defined(_WIN32)
-    HANDLE hProcess_ = nullptr, hIn_ = nullptr, hOut_ = nullptr;
-
-    /** MSVCRT command-line quoting for one argument. */
-    static std::string winQuote(const std::string &s) {
-        std::string out = "\"";
-        for (size_t i = 0; i < s.size(); ++i) {
-            size_t bs = 0;
-            while (i < s.size() && s[i] == '\\') {
-                ++bs;
-                ++i;
-            }
-            if (i == s.size()) {
-                out.append(bs * 2, '\\');
-                break;
-            }
-            if (s[i] == '"') {
-                out.append(bs * 2 + 1, '\\');
-                out += '"';
-            } else {
-                out.append(bs, '\\');
-                out += s[i];
-            }
-        }
-        return out + "\"";
-    }
-
-    void readLoop(const LineSink &sink) {
-        std::string pending;
-        char buf[4096];
-        DWORD n = 0;
-        while (ReadFile(hOut_, buf, sizeof(buf), &n, nullptr) && n > 0) feedLines(&pending, buf, n, sink);
-        if (!pending.empty()) sink(pending);
-        CloseHandle(hOut_);
-    }
-#else
-    pid_t pid_ = -1;
-    int inFd_ = -1, outFd_ = -1;
-
-    void readLoop(const LineSink &sink) {
-        std::string pending;
-        char buf[4096];
-        ssize_t n = 0;
-        while ((n = read(outFd_, buf, sizeof(buf))) > 0 || (n < 0 && errno == EINTR)) {
-            if (n > 0) feedLines(&pending, buf, static_cast<size_t>(n), sink);
-        }
-        if (!pending.empty()) sink(pending);
-        close(outFd_);
-    }
-#endif
-    std::thread reader_;
-};
 
 /** One GPU as the supervisor knows it at start (from the device list). */
 struct WorkerSeed {
@@ -1013,12 +773,16 @@ class Supervisor {
                 std::lock_guard<std::mutex> g(mu_);
                 inbox_.push_back({slot, line});
             },
-            &err);
+            &err,[this]{if(opt_.stop&&*opt_.stop)intent_.stop();return !intent_.permits(sessionToken_);});
         w.view.haveStats = false;
         w.view.state = "Connecting";
         w.view.detail.clear();
         if (!ok) {
-            onExit(i, -1, now, false, err);
+            const bool requestedStop=opt_.stop&&*opt_.stop;
+            int nativeCode=0;const bool settled=!w.proc->started()||w.proc->exited(&nativeCode);
+            if(requestedStop)intent_.stop();
+            if(requestedStop&&settled)onExit(i,nativeCode,now,true,err);
+            else onExit(i,!settled||!intent_.permits(sessionToken_)?kExitFaultLatched:-1,now,false,err);
             return;
         }
         addEvent(workerLabel(w) + ": worker started" + (w.restarts ? " (restart " + std::to_string(w.restarts) + ")" : std::string()));

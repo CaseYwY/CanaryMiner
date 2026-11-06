@@ -15,6 +15,9 @@
 #include <spawn.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#if defined(OM_NATIVE_FAULT_LEGACY)
+#include "../src/core/platform.h"
+#endif
 #if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
 #if __GLIBC_PREREQ(2,40)
 #define OM_TEST_POSIX_ALLOCATION 1
@@ -57,6 +60,8 @@ bool canaryNativeAllocationFault(){return failNew.exchange(false);}
 #include "../src/product/worker_process.cpp"
 #elif defined(OM_NATIVE_FAULT_LOCAL)
 #include "../src/product/local_task_process.cpp"
+#elif defined(OM_NATIVE_FAULT_LEGACY)
+#include "../src/product/legacy_child_process.h"
 #else
 #include "../src/product/public_json_process.cpp"
 #endif
@@ -80,6 +85,8 @@ int main(int argc,char **argv){
             CHECK(!client.start(helper,{},initial,cancel));}
 #elif defined(OM_NATIVE_FAULT_LOCAL)
         {om::LocalTaskProcess client(helper);const auto r=client.run("SYNTHETIC\n",cancel,600);CHECK(r.status==om::LocalTaskStatus::Unavailable&&!r.childStarted&&r.response.empty());}
+#elif defined(OM_NATIVE_FAULT_LEGACY)
+        {om::ChildProcess client;std::string error;CHECK(!client.start(helper.string(),{},[](const std::string &){},&error)&&!client.started());}
 #else
         {om::PublicJsonProcessClient client(helper);const auto r=client.get({om::PublicFeed::GatePearlCandles,60,120},cancel,{300,600,8192,2048});
             CHECK(r.status==om::PublicHttpsStatus::Unavailable&&r.body.empty()&&!r.observedUtc&&!r.httpStatus&&!r.retryAfterSeconds);}

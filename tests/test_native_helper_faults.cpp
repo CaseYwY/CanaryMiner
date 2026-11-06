@@ -20,15 +20,19 @@
 #include <vector>
 #include <fcntl.h>
 #include <io.h>
+#if defined(OM_NATIVE_FAULT_LEGACY)
+#include "../src/core/platform.h"
+#endif
 
 namespace {
-enum class Fault { None, Allocation, AllocationAttributes, WaitError, ExitError, Pending, Assign, Resume, CancelCreated, Cross };
+enum class Fault { None, Allocation, AllocationAttributes, WaitError, ExitError, Pending, Assign, Resume, CancelCreated, Cross, ThreadAllocation };
 enum class Kind { Pipe, File, Job, Process, Thread, Mapping };
 struct Record {HANDLE handle;Kind kind;bool closed;};
 Record records[512]{};unsigned recordCount=0,trackingFault=0,spawns=0,resumes=0,waitErrors=0,exitErrors=0;
 struct Attribute {LPPROC_THREAD_ATTRIBUTE_LIST pointer;bool closed;};
 Attribute attributes[64]{};unsigned attributeCount=0;
 Fault fault=Fault::None;std::atomic<bool> failNew{false},cancel{false};
+[[maybe_unused]] unsigned unsafeCreationFlags=0;
 void (*crossCallback)()=nullptr;bool useHold=false;unsigned readyCalls=0;
 bool liveProcess(HANDLE h){for(unsigned i=recordCount;i;--i)if(records[i-1].handle==h&&!records[i-1].closed)return records[i-1].kind==Kind::Process;return false;}
 void track(HANDLE h,Kind k){if(!h||h==INVALID_HANDLE_VALUE)return;if(recordCount>=512){++trackingFault;return;}records[recordCount++]={h,k,false};}
@@ -64,12 +68,16 @@ VOID WINAPI faultDeleteAttributes(LPPROC_THREAD_ATTRIBUTE_LIST list){
     ::DeleteProcThreadAttributeList(list);
 }
 BOOL WINAPI faultCreateProcessW(LPCWSTR path,LPWSTR args,LPSECURITY_ATTRIBUTES process,LPSECURITY_ATTRIBUTES thread,BOOL inherit,DWORD flags,LPVOID environment,LPCWSTR directory,LPSTARTUPINFOW startup,LPPROCESS_INFORMATION info){
+#if defined(OM_NATIVE_FAULT_LEGACY)
+    if(!(flags&CREATE_SUSPENDED)||(flags&(CREATE_NEW_CONSOLE|DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP)))++unsafeCreationFlags;
+#endif
     const BOOL r=::CreateProcessW(path,args,process,thread,inherit,flags,environment,directory,startup,info);
     if(r){++spawns;track(info->hProcess,Kind::Process);track(info->hThread,Kind::Thread);if(fault==Fault::CancelCreated)cancel=true;}
     return r;
 }
 BOOL WINAPI faultAssignJob(HANDLE job,HANDLE process){if(fault==Fault::Assign){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}return ::AssignProcessToJobObject(job,process);}
-DWORD WINAPI faultResumeThread(HANDLE thread){++resumes;if(fault==Fault::Resume){SetLastError(ERROR_ACCESS_DENIED);return static_cast<DWORD>(-1);}return ::ResumeThread(thread);}
+DWORD WINAPI faultResumeThread(HANDLE thread){++resumes;if(fault==Fault::Resume){SetLastError(ERROR_ACCESS_DENIED);return static_cast<DWORD>(-1);}
+    const auto result=::ResumeThread(thread);if(result!=static_cast<DWORD>(-1)&&fault==Fault::ThreadAllocation)failNew=true;return result;}
 DWORD WINAPI faultWait(HANDLE h,DWORD ms){
     if(liveProcess(h)){
         if(fault==Fault::WaitError){++waitErrors;SetLastError(ERROR_INVALID_HANDLE);return WAIT_FAILED;}
@@ -103,6 +111,8 @@ bool canaryNativeAllocationFault(){return failNew.exchange(false);}
 #include "../src/product/worker_process.cpp"
 #elif defined(OM_NATIVE_FAULT_LOCAL)
 #include "../src/product/local_task_process.cpp"
+#elif defined(OM_NATIVE_FAULT_LEGACY)
+#include "../src/product/legacy_child_process.h"
 #else
 #include "../src/product/public_json_process.cpp"
 #endif
@@ -123,7 +133,7 @@ bool canaryNativeAllocationFault(){return failNew.exchange(false);}
 
 namespace {
 std::filesystem::path helper;
-#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
+#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER) || defined(OM_NATIVE_FAULT_LEGACY)
 // The stream APIs expose native state/proof, not LocalTaskResult. This test-only bridge keeps the same fault assertions.
 enum class Status {Ok,Unavailable,Cancelled,Unreaped};
 struct Result {Status status=Status::Unavailable;bool childStarted=false;std::string response;};
@@ -135,6 +145,8 @@ public:
         Result r;const auto before=spawns;bool started=false,exited=false,unknown=false;
 #if defined(OM_NATIVE_FAULT_DUPLEX)
         om::DuplexTaskProcess p;started=p.start(helper_,cancel);
+#elif defined(OM_NATIVE_FAULT_LEGACY)
+        om::ChildProcess p;std::string error;started=p.start(helper_.u8string(),{"--legacy-native-child"},[](const std::string &){},&error,[]{return cancel.load();});
 #else
         om::WorkerControlProcess p;const auto now=om::workerControlNowMs();
         om::WorkerCommand initial{{"11111111111111111111111111111111","22222222222222222222222222222222",1,1,0},1,now,now+3000,om::WorkerDirective::Pause};
@@ -142,16 +154,24 @@ public:
 #endif
         const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(600);
         if(started)do{
+#if defined(OM_NATIVE_FAULT_LEGACY)
+            int code=-1;exited=p.exited(&code);unknown=om::nativeProcessUnresolved();
+#else
             const auto v=p.poll();
 #if defined(OM_NATIVE_FAULT_DUPLEX)
             exited=v.state==om::DuplexTaskState::Exited;unknown=v.state==om::DuplexTaskState::Unreaped;
 #else
             exited=p.reaped();unknown=v.state==om::WorkerProcessState::Unreaped;
 #endif
+#endif
             if(exited||unknown||cancel.load())break;
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }while(std::chrono::steady_clock::now()<until);
+#if defined(OM_NATIVE_FAULT_LEGACY)
+        p.kill();int code=-1;if(p.started()&&!p.exited(&code))unknown=true;
+#else
         if(!p.terminate(250))unknown=true;
+#endif
         if(om::nativeProcessUnresolved())unknown=true;
         r.childStarted=spawns!=before;r.status=unknown?Status::Unreaped:cancel.load()?Status::Cancelled:started&&exited?Status::Ok:Status::Unavailable;
         return r;
@@ -179,7 +199,7 @@ void settleOwned(){
 }
 int child(int argc,char **argv){
     _setmode(_fileno(stdout),_O_BINARY);
-#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
+#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER) || defined(OM_NATIVE_FAULT_LEGACY)
     (void)argc;(void)argv;return 0; // no protocol/driver/device setup; lifecycle only
 #elif defined(OM_NATIVE_FAULT_LOCAL)
     std::string input;if(!om::readLocalTaskInput(argc,argv,&input)||input!="SYNTHETIC\n")return 2;
@@ -192,7 +212,9 @@ int child(int argc,char **argv){
 }
 }
 int main(int argc,char **argv){
-#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
+#if defined(OM_NATIVE_FAULT_LEGACY)
+    if(argc==2&&!std::strcmp(argv[1],"--legacy-native-child"))return child(argc,argv);
+#elif defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
     if(argc==5)return child(argc,argv);
 #elif defined(OM_NATIVE_FAULT_LOCAL)
     if(argc==4&&!std::strcmp(argv[1],"--local-task-v1"))return child(argc,argv);
@@ -218,15 +240,18 @@ int main(int argc,char **argv){
         fault=Fault::Pending;{Client client(helper);unknown(run(client),true);}
         {Client next(helper);unknown(run(next),false);CHECK(spawns==1);}
         fault=Fault::None;{Client after(helper);CHECK(run(after).status==Status::Ok);}CHECK(spawns==2&&active()==0);
-    }else if(mode=="assign-denied"||mode=="resume-denied"||mode=="cancel-created"){
-        fault=mode=="assign-denied"?Fault::Assign:mode=="resume-denied"?Fault::Resume:Fault::CancelCreated;
+    }else if(mode=="assign-denied"||mode=="resume-denied"||mode=="cancel-created"||mode=="thread-allocation"){
+        fault=mode=="assign-denied"?Fault::Assign:mode=="resume-denied"?Fault::Resume:mode=="thread-allocation"?Fault::ThreadAllocation:Fault::CancelCreated;
         {Client client(helper);const auto r=run(client);CHECK(r.status==(mode=="cancel-created"?Status::Cancelled:Status::Unavailable));empty(r,true);}
-        CHECK(spawns==1&&active()==0&&activeAttributes()==0);CHECK(resumes==(mode=="resume-denied"?1u:0u));
+        CHECK(spawns==1&&active()==0&&activeAttributes()==0);CHECK(resumes==(mode=="resume-denied"||mode=="thread-allocation"?1u:0u));
         fault=Fault::None;cancel=false;{Client client(helper);CHECK(run(client).status==Status::Ok);}CHECK(spawns==2&&active()==0);
     }else if(mode=="cross-client"){
         fault=Fault::Cross;crossCallback=cross;{Client client(helper);unknown(run(client),true);}
         Client next(helper);unknown(run(next),false);CHECK(spawns==2&&waitErrors==1);settleOwned();
     }else CHECK(false);
+#if defined(OM_NATIVE_FAULT_LEGACY)
+    CHECK(unsafeCreationFlags==0);
+#endif
     CHECK(trackingFault==0);
     return finishTests("native helper faults (owned Win32 objects only)");
 }

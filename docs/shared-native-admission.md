@@ -95,3 +95,7 @@ Primary APIs: [atomic pidfd spawn rationale](https://sourceware.org/pipermail/gl
 [dlsym/RTLD_NEXT](https://man7.org/linux/man-pages/man3/dlsym.3.html) and
 [pthread_create](https://man7.org/linux/man-pages/man3/pthread_create.3.html).
 The latter two are used by the Linux test barrier only; no external implementation is copied.
+
+[P-14c](legacy-child-ownership.md) subsequently adds ordinary ChildProcess to this boundary with preserved console/stdin
+drain. The original four-owner evidence does not retroactively qualify legacy ownership; other data-owner lifetime/queue,
+physical and deployment gates remain open.
