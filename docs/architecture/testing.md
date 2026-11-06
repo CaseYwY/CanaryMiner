@@ -363,6 +363,12 @@ separate. Six scenarios use only an owned CPU identity helper with no worker lau
 caught stop projection, not arbitrary allocator/lock-free/native latency qualification. All game/source/work inputs are synthetic;
 no real game/device/mining/public network or ordinary activation executes.
 
+[P-14l](../thermal-current-views.md) crosses core/extended passing profiles with native/intent current revocation, stale
+read/update/first-start denial, original earlier-clock recovery, unchanged historical observation and supplied late Unreaped.
+Two C++-new refusal controls prove interception before requiring zero attempts during getter revocation. The new fixture
+executes no helper/device/source/game/worker; existing actual owned-CPU source/thermal/native ABI/late-owner/lifecycle
+regressions stay separate from threshold, complete safety, physical and hard-native-latency qualification.
+
 [P-14f](../data-owner-native-lifetimes.md) checks six additional actual owned-thread queues, cached market/detection/safety revocation, current real synthetic financial preflight/candidate/posted-credit authority and callback-return refusal. Fresh/native controls remain required. Foreign stale callers must get unavailable views without canceling a healthy current owner; stop state and native transport remain separate. Test-only allocation replacement exercises fallback, not physical exhaustion. Synthetic self-helpers never execute storage, process discovery, sensors or HTTP. Real bounded financial helpers use only newly owned synthetic stores and preserve original bytes. Enclosing/remaining ownership, actual-source/deployment/physical/release qualification stays independent.
 
 [P-14e](../energy-native-lifetimes.md) checks actual energy thread barriers, stale Ready admission/restart, capture/Held cached authority, delayed runtime starts and five-layer caller-scope refusal/fresh explicit controls. Actual-created/no-child writes, creation and Provision preserve/clear only matching original uncertainty. Five allocation variants reject every calling-thread allocation during revocation; old authority/operations must remain unavailable without exception. Explicit stop-then-fault state differs from native transport. Strict self-helpers never execute storage, guard unknown modes and adopt their parent for held lifetime. Remaining owners, hard native bounds, source/storage/deployment/physical/release gates are independent.

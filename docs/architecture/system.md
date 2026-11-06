@@ -91,6 +91,11 @@ cancels all control children and queued input without a clock/source callback or
 cannot borrow reaping, and actual peer exit cannot hide an unresolved external ticket. Native/allocation/latency and
 real-source/export/deployment/physical/release qualification remain independent.
 
+[P-14l](../thermal-current-views.md) withdraws cached core/extended limiter deadlines at current reads and refuses foreign
+updates/first starts before changing source uncertainty, clocks or cooling. The pure current boundary performs no new
+allocation, callback, source/native operation or join; prior observations/revisions/late uncertainty remain distinct from
+complete safety or worker authority. Actual thresholds/source/fleet/physical and hard-latency/release gates remain separate.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

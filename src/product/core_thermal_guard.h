@@ -33,11 +33,12 @@ class CoreThermalGuard {
     CoreThermalGuard &operator=(const CoreThermalGuard &)=delete;
     bool start(GameGuardTime);
     const CoreThermalSnapshot &update(GameGuardTime,const SafetyTelemetrySnapshot &);
-    const CoreThermalSnapshot &snapshot()const{return view_;} // retain the original deadline; never assume freshness
+    const CoreThermalSnapshot &snapshot()const; // current parent revocation only; never refresh the original evidence/deadline
     void requestStop();
    private:
     CoreThermalPolicy policy_;const SessionIntent &intent_;SessionToken token_;
-    CoreThermalSnapshot view_;bool attempted_=false,terminal_=false,admitted_=false;
+    mutable CoreThermalSnapshot view_;CoreThermalSnapshot denied_;bool attempted_=false;
+    mutable bool terminal_=false,admitted_=false; // logical current-read revocation, not a timed source update
     GameGuardTime anchor_,last_;uint64_t sourceDeadline_=0;std::optional<GameGuardTime> previousFinished_;
     std::optional<SafetyTelemetryRequest> previousRequest_;
     std::optional<SafetyTelemetryReply> previousGood_;
@@ -45,6 +46,7 @@ class CoreThermalGuard {
     std::vector<std::vector<SafetyTelemetryField>> fieldCapabilities_; // original integral types and raw T.Limits, not manufactured defaults
     void hold(CoreThermalState);
     void halt(CoreThermalState);
+    void revoke()const;
     bool time(GameGuardTime);
 };
 } // namespace om

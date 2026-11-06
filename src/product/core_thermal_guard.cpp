@@ -24,15 +24,23 @@ bool validCoreThermalPolicy(const CoreThermalPolicy &p){
     }
     return validSafetyTelemetryRequest(request);
 }
-CoreThermalGuard::CoreThermalGuard(CoreThermalPolicy p,const SessionIntent &i,SessionToken token):policy_(std::move(p)),intent_(i),token_(token){}
+CoreThermalGuard::CoreThermalGuard(CoreThermalPolicy p,const SessionIntent &i,SessionToken token):policy_(std::move(p)),intent_(i),token_(token){denied_.state=S::Stopped;}
 void CoreThermalGuard::hold(S state){view_.state=state;view_.validUntilMonoMs=0;view_.coolSamples=0;view_.coolingSince.reset();admitted_=false;previousGood_.reset();}
 void CoreThermalGuard::halt(S state){hold(state);terminal_=true;}
 void CoreThermalGuard::requestStop(){attempted_=true;halt(S::Stopped);}
+void CoreThermalGuard::revoke()const{
+    view_.state=S::Stopped;view_.validUntilMonoMs=0;view_.coolSamples=0;view_.coolingSince.reset();terminal_=true;admitted_=false;
+}
+const CoreThermalSnapshot &CoreThermalGuard::snapshot()const{
+    if(intent_.foreignCaller(token_))return denied_;
+    if(!intent_.permits(token_))revoke();
+    return view_;
+}
 bool CoreThermalGuard::time(GameGuardTime now){
     if(!instant(now)||!ordered(last_,now)||!aligned(anchor_,now)){halt(S::ClockFault);return false;}last_=now;return true;
 }
 bool CoreThermalGuard::start(GameGuardTime now){
-    if(attempted_)return false;
+    if(intent_.foreignCaller(token_)||attempted_)return false;
     attempted_=true;
     if(!intent_.permits(token_)){requestStop();return false;}
     if(!instant(now)){halt(S::ClockFault);return false;}
@@ -42,6 +50,7 @@ bool CoreThermalGuard::start(GameGuardTime now){
     hold(S::Unavailable);return true;
 }
 const CoreThermalSnapshot &CoreThermalGuard::update(GameGuardTime now,const SafetyTelemetrySnapshot &source){
+    if(intent_.foreignCaller(token_))return denied_;
     view_.sourceUnreaped=view_.sourceUnreaped||source.unreaped||source.transport==T::Unreaped;
     if(!intent_.permits(token_)){requestStop();return view_;}
     if(!attempted_||terminal_)return view_;
