@@ -85,6 +85,12 @@ before they change clocks, overrides or owned detection. Every clock fault clear
 episode/loss/profit evidence stays distinct. Explicit logical const revocation never refreshes evidence or joins; the detector's
 existing caught projection allocation remains a runtime cancellation limit. Enclosing fleet and all real-source/physical/release gates stay open.
 
+[P-14k](../game-fleet-current.md) subsequently revokes the enclosing fleet at current reads/action boundaries and rejects
+foreign callers before first-start bookkeeping, timestamps, context, samples or external settlement. Actual parent loss
+cancels all control children and queued input without a clock/source callback or join. Cancelled never-created generations
+cannot borrow reaping, and actual peer exit cannot hide an unresolved external ticket. Native/allocation/latency and
+real-source/export/deployment/physical/release qualification remain independent.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

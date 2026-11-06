@@ -37,6 +37,7 @@ struct GameWorkerSession::Impl {
         std::vector<std::unique_ptr<Life>> lives; // retain retired owners until final join; no join/reconstruction inside tick
     };
     const SessionIntent &intent;SessionToken token;GameWorkerPolicy policy;NativeProcessLifetime nativeLife;
+    GameGuardSnapshot deniedGame;OptimizationScheduleSnapshot deniedSchedule;
     std::vector<GameEconomicPolicy> economics;
     GameRuntime game;WorkerIdentitySource identities;
     std::atomic<bool> cancel{false};std::thread identityThread;mutable std::mutex identityMutex;
@@ -48,7 +49,10 @@ struct GameWorkerSession::Impl {
     EvidenceDeadline safetyValidity;
     Impl(std::filesystem::path identity,std::filesystem::path detector,GameProcessTarget target,GameDetectionPolicy detection,
         GameGuardPolicy p,GameProfitBinding b,GameWorkerPolicy w,const SessionIntent &i,SessionToken t,std::vector<GameEconomicPolicy> e)
-        :intent(i),token(t),policy(w),economics(std::move(e)),game(std::move(detector),std::move(target),detection,p,std::move(b),i,t),identities(std::move(identity)){}
+        :intent(i),token(t),policy(w),economics(std::move(e)),game(std::move(detector),std::move(target),detection,p,std::move(b),i,t),identities(std::move(identity)){
+        deniedSchedule.state=OptimizationScheduleState::Stopped;
+    }
+    bool foreign()const{return intent.foreignCaller(token);}
     void halt(WorkerFleetState s){
         attempted=true;state=s;cancel=true;game.requestStop();
         for(auto &slot:slots){slot.view.revoked=true;slot.view.retryable=false;slot.view.paused=false;slot.view.pauseRequested=true;
@@ -59,7 +63,12 @@ struct GameWorkerSession::Impl {
             if(slot.budget)slot.budget->requestStop();
             if(slot.experimentBudget)slot.experimentBudget->requestStop();}
     }
+    void observe(){
+        if(attempted&&!foreign()&&(!intent.permits(token)||(nativeLife.bound()&&!nativeLife.current()))&&state!=WorkerFleetState::Stopped)
+            halt(WorkerFleetState::Stopped);
+    }
     bool time(GameGuardTime now){
+        if(foreign())return false;
         if(!intent.permits(token)){halt(WorkerFleetState::Stopped);return false;}
         if(now.utcMs<=0||now.utcMs>253402300799999LL||!now.monotonicMs||
             (clockStarted&&(now.utcMs<last.utcMs||now.monotonicMs<last.monotonicMs))){halt(WorkerFleetState::Faulted);return false;}
@@ -211,7 +220,7 @@ GameWorkerSession::GameWorkerSession(std::filesystem::path identity,std::filesys
     :impl_(new Impl(std::move(identity),std::move(detector),std::move(target),detection,game,std::move(binding),policy,intent,token,std::move(economics))){}
 GameWorkerSession::~GameWorkerSession(){stop();}
 bool GameWorkerSession::start(unsigned count,GameGuardTime now){
-    auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+    auto &p=*impl_;if(p.foreign()||p.attempted)return false;p.attempted=true;
     if(!p.nativeLife.begin()){p.halt(WorkerFleetState::Stopped);return false;}
     NativeProcessScope original(p.nativeLife.epoch());
     if(!p.time(now))return false;
@@ -240,7 +249,8 @@ bool GameWorkerSession::start(unsigned count,GameGuardTime now){
     return true;
 }
 bool GameWorkerSession::launch(unsigned index,std::filesystem::path exe,std::vector<std::string> args,unsigned drain,GameGuardTime now){
-    auto &p=*impl_;if((p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)||!p.time(now)||index>=p.slots.size())return false;
+    auto &p=*impl_;if(p.foreign())return false;p.observe();
+    if((p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)||!p.time(now)||index>=p.slots.size())return false;
     auto &slot=p.slots[index];if(slot.launchPending||(slot.view.requested&&(!slot.view.done||!slot.view.reaped||!slot.view.retryable)))return false;
     size_t bytes=0;if(!localTaskPath(exe)||args.size()>256||drain>65000)return false;
     for(const auto &arg:args){if(arg.empty()||arg.size()>4096||arg.find('\0')!=arg.npos||arg=="--worker-control-v1")return false;bytes+=arg.size();}
@@ -251,7 +261,8 @@ bool GameWorkerSession::launch(unsigned index,std::filesystem::path exe,std::vec
     return true;
 }
 void GameWorkerSession::tick(GameGuardTime now,const WorkerFleetEvidence &e){
-    auto &p=*impl_;if(p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)return;
+    auto &p=*impl_;if(p.foreign())return;p.observe();
+    if(p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)return;
     if(!p.time(now)||p.unresolved()){if(p.state!=WorkerFleetState::Stopped)p.halt(WorkerFleetState::Faulted);return;}
     try{
         const auto safetyUntil=p.safetyDeadline(now,e.safety);
@@ -282,9 +293,9 @@ void GameWorkerSession::tick(GameGuardTime now,const WorkerFleetEvidence &e){
         }
     }catch(...){p.halt(WorkerFleetState::Faulted);}
 }
-WorkerFleetState GameWorkerSession::state()const{return impl_->state;}
+WorkerFleetState GameWorkerSession::state()const{auto &p=*impl_;if(p.foreign())return WorkerFleetState::Stopped;p.observe();return p.state;}
 WorkerFleetSnapshot GameWorkerSession::snapshot(unsigned index)const{
-    const auto &p=*impl_;if(index>=p.slots.size())return {};
+    auto &p=*impl_;if(p.foreign())return {};p.observe();if(index>=p.slots.size())return {};
     const auto &slot=p.slots[index];auto view=slot.view;view.game=p.game.snapshot().state;
     view.forceResumeActive=p.game.forceResumeActive();view.forceResumeAvailable=gameForceResumeEligible(view.game);
     view.ownershipUnresolved=p.unresolved();
@@ -299,28 +310,36 @@ WorkerFleetSnapshot GameWorkerSession::snapshot(unsigned index)const{
     return view;
 }
 std::vector<std::string> GameWorkerSession::takeLines(unsigned index){
-    auto &p=*impl_;if(index>=p.slots.size()||p.slots[index].lives.empty())return {};
+    auto &p=*impl_;if(p.foreign())return {};p.observe();if(index>=p.slots.size()||p.slots[index].lives.empty())return {};
     return p.slots[index].lives.back()->owner.takeLines();
 }
-const GameGuardSnapshot &GameWorkerSession::gameSnapshot()const{return impl_->game.snapshot();}
+const GameGuardSnapshot &GameWorkerSession::gameSnapshot()const{auto &p=*impl_;if(p.foreign())return p.deniedGame;p.observe();return p.game.snapshot();}
 bool GameWorkerSession::requestForceResume(){auto &p=*impl_;
+    if(p.foreign())return false;
+    p.observe();
     if(p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)return false;
     if(!p.intent.permits(p.token)){p.halt(WorkerFleetState::Stopped);return false;}
     return p.game.requestForceResume();
 }
-void GameWorkerSession::cancelForceResume(){impl_->game.cancelForceResume();}
-bool GameWorkerSession::forceResumeActive()const{return impl_->game.forceResumeActive();}
-bool GameWorkerSession::forceResumeAvailable()const{return gameForceResumeEligible(impl_->game.snapshot().state);}
+void GameWorkerSession::cancelForceResume(){auto &p=*impl_;if(p.foreign())return;p.observe();p.game.cancelForceResume();}
+bool GameWorkerSession::forceResumeActive()const{auto &p=*impl_;if(p.foreign())return false;p.observe();return p.game.forceResumeActive();}
+bool GameWorkerSession::forceResumeAvailable()const{return gameForceResumeEligible(gameSnapshot().state);}
 bool GameWorkerSession::setEconomicContext(unsigned index,uint64_t revision,bool drift){auto &p=*impl_;
+    if(p.foreign())return false;
+    p.observe();
     if((p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)||index>=p.slots.size()||!p.slots[index].evaluation)return false;
     if(!p.intent.permits(p.token)){p.halt(WorkerFleetState::Stopped);return false;}
     auto &slot=p.slots[index];if(!revision||revision<slot.contextRevision){p.halt(WorkerFleetState::Faulted);return false;}
     slot.contextRevision=revision;slot.drift=drift;return true;
 }
-OptimizationScheduleSnapshot GameWorkerSession::economicSchedule(unsigned index)const{const auto &p=*impl_;
+OptimizationScheduleSnapshot GameWorkerSession::economicSchedule(unsigned index)const{auto &p=*impl_;
+    if(p.foreign())return p.deniedSchedule;
+    p.observe();
     return index<p.slots.size()&&p.slots[index].evaluation?p.slots[index].evaluation->schedule():OptimizationScheduleSnapshot{};
 }
 EconomicSubmission GameWorkerSession::submitEconomic(unsigned index,const OptimizationTicket &ticket,uint64_t revision,EconomicInput input,GameGuardTime now){auto &p=*impl_;
+    if(p.foreign())return EconomicSubmission::Inactive;
+    p.observe();
     if((p.state!=WorkerFleetState::Starting&&p.state!=WorkerFleetState::Active)||index>=p.slots.size()||!p.slots[index].evaluation)return EconomicSubmission::Inactive;
     if(!p.time(now))return EconomicSubmission::Inactive;
     if(revision!=p.slots[index].contextRevision)return EconomicSubmission::WrongContext;
@@ -336,6 +355,8 @@ EconomicSubmission GameWorkerSession::submitEconomic(unsigned index,const Optimi
     return result;
 }
 OptimizationCompletion GameWorkerSession::completeEconomic(unsigned index,const OptimizationTicket &ticket,OptimizationOutcome outcome,GameGuardTime now){auto &p=*impl_;
+    if(p.foreign())return OptimizationCompletion::WrongTicket;
+    p.observe();
     if(index>=p.slots.size()||!p.slots[index].evaluation)return OptimizationCompletion::WrongTicket;
     if(p.state==WorkerFleetState::Starting||p.state==WorkerFleetState::Active)p.time(now);
     const auto result=p.slots[index].evaluation->completeExternal(ticket,outcome,optimizationTime(now));
@@ -343,7 +364,9 @@ OptimizationCompletion GameWorkerSession::completeEconomic(unsigned index,const 
         p.slots[index].evaluation->snapshot().state!=EconomicEvaluationState::Running)p.halt(WorkerFleetState::Faulted);
     return result;
 }
-GameEconomicSnapshot GameWorkerSession::economicSnapshot(unsigned index)const{const auto &p=*impl_;GameEconomicSnapshot out;
+GameEconomicSnapshot GameWorkerSession::economicSnapshot(unsigned index)const{auto &p=*impl_;GameEconomicSnapshot out;
+    if(p.foreign())return out;
+    p.observe();
     if(index>=p.slots.size()||!p.slots[index].evaluation)return out;
     const auto &slot=p.slots[index];out.configured=true;out.contextRevision=slot.contextRevision;out.conditions=slot.conditions;
     out.evaluation=slot.evaluation->snapshot();out.budget=slot.budget->snapshot();
@@ -353,6 +376,8 @@ GameEconomicSnapshot GameWorkerSession::economicSnapshot(unsigned index)const{co
 }
 GameWorkSampleAdmission GameWorkerSession::submitExperimentSample(unsigned index,const WorkerControlBinding &binding,uint64_t sequence,WorkProfileSample sample,GameGuardTime now){
     auto &p=*impl_;using A=GameWorkSampleAdmission;
+    if(p.foreign())return A::Inactive;
+    p.observe();
     if(p.state!=WorkerFleetState::Active||index>=p.slots.size()||!p.slots[index].experimentBudget)return A::Inactive;
     if(!p.time(now))return A::Inactive;
     auto &slot=p.slots[index];if(binding.workerGeneration!=slot.view.generation)return A::WrongGeneration;
@@ -367,7 +392,9 @@ GameWorkSampleAdmission GameWorkerSession::submitExperimentSample(unsigned index
     try{life.sample=Impl::Life::Sample{sequence,std::move(sample)};return A::Accepted;}
     catch(...){p.halt(WorkerFleetState::Faulted);return A::Invalid;}
 }
-GameExperimentSnapshot GameWorkerSession::experimentSnapshot(unsigned index)const{const auto &p=*impl_;GameExperimentSnapshot out;
+GameExperimentSnapshot GameWorkerSession::experimentSnapshot(unsigned index)const{auto &p=*impl_;GameExperimentSnapshot out;
+    if(p.foreign())return out;
+    p.observe();
     if(index>=p.slots.size()||!p.slots[index].experimentBudget)return out;
     const auto &slot=p.slots[index];out.configured=true;out.workerGeneration=slot.view.generation;out.budget=slot.experimentBudget->snapshot();
     if(!slot.launchPending&&!slot.lives.empty()&&slot.lives.back()->generation==slot.view.generation){const auto &life=*slot.lives.back();

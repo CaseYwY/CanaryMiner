@@ -45,6 +45,8 @@ class GameWorkerSession final:public WorkerFleet {
     bool start(unsigned slots,GameGuardTime)override;
     bool launch(unsigned,std::filesystem::path,std::vector<std::string>,unsigned drainMs,GameGuardTime)override;
     void tick(GameGuardTime,const WorkerFleetEvidence &)override;
+    // Current reads revoke original-parent authority in memory, without clocks, source callbacks or joining.
+    // Foreign scoped callers get denied views and cannot consume/cancel a healthy newer controller.
     WorkerFleetState state()const override;
     WorkerFleetSnapshot snapshot(unsigned)const override;
     std::vector<std::string> takeLines(unsigned)override;
