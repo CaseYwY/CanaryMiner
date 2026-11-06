@@ -18,12 +18,16 @@ struct EconomicEvaluationOwner::Impl {
     struct Job {OptimizationTicket ticket;uint64_t revision;EconomicInput input;};
     struct Result {std::shared_ptr<const Job> job;EconomicStatus status=EconomicStatus::Unavailable;std::shared_ptr<const EconomicStudy> study;};
     EconomicEvaluationPolicy policy;const SessionIntent &intent;SessionToken token;OptimizationSchedule schedule;
-    EconomicEvaluationSnapshot view;std::unique_ptr<EconomicStudyUse> use;std::shared_ptr<const Job> flight;
+    NativeProcessLifetime nativeLife;
+    EconomicEvaluationSnapshot view,deniedView;OptimizationScheduleSnapshot deniedSchedule;
+    std::unique_ptr<EconomicStudyUse> use;std::shared_ptr<const Job> flight;
     bool attempted=false;OptimizationTime anchor,last;std::string planKey;WorkProfileConditions conditions;
     // Only this mailbox is shared. At most one queued/running/completed job, held until control-thread settlement.
     std::mutex mutex;std::condition_variable wake;std::thread thread;std::atomic<bool> cancel{false};
     bool stopping=false;std::shared_ptr<const Job> queued;std::optional<Result> completed;
-    Impl(EconomicEvaluationPolicy p,const SessionIntent &i,SessionToken t):policy(p),intent(i),token(t),schedule(p.schedule,i,t){}
+    Impl(EconomicEvaluationPolicy p,const SessionIntent &i,SessionToken t):policy(p),intent(i),token(t),schedule(p.schedule,i,t){
+        deniedView.state=S::Stopped;deniedSchedule.state=Q::Stopped;
+    }
     void clearRetained(){view.retainedResultSequence=view.retainedValidUntilMonoMs=0;}
     void revoke(){if(use)use->requestStop();use.reset();view.study.reset();view.resultSequence=0;view.use={};clearRetained();}
     void cancelFlight(){clearRetained();if(flight){cancel=true;view.cancellationRequested=true;}}
@@ -32,13 +36,20 @@ struct EconomicEvaluationOwner::Impl {
         if(state==S::Stopped||schedule.snapshot().state==Q::Running||schedule.snapshot().state==Q::Dormant)schedule.requestStop();
         {std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_all();
     }
+    // A stale caller has no authority over a healthy newer owner, including no authority to cancel it.
+    bool foreign()const{return nativeLife.current()&&!nativeLife.permitted();}
+    bool admitted(){
+        if(foreign())return false;
+        if((nativeLife.bound()&&!nativeLife.current())||!intent.permits(token)){halt(S::Stopped);return false;}
+        return true;
+    }
     void sync(){const auto q=schedule.snapshot().state;
-        if(!intent.permits(token)){halt(S::Stopped);return;}
+        if(!admitted())return;
         if(view.state!=S::Running)return;
         if(q==Q::Stopped)halt(S::Stopped);else if(q==Q::ClockFault)halt(S::ClockFault);else if(q==Q::Faulted)halt(S::Faulted);
     }
     bool time(OptimizationTime now){
-        if(!intent.permits(token)){halt(S::Stopped);return false;}
+        if(!admitted())return false;
         if(view.state!=S::Running)return false;
         if(now.utcMs<last.utcMs||now.utcMs>253402300799999LL||now.monotonicMs<last.monotonicMs){halt(S::ClockFault);return false;}
         const auto wall=static_cast<uint64_t>(now.utcMs-anchor.utcMs),mono=now.monotonicMs-anchor.monotonicMs;
@@ -54,16 +65,18 @@ struct EconomicEvaluationOwner::Impl {
         if(view.use.state!=EconomicUseState::Eligible&&view.use.state!=EconomicUseState::NoPositiveCandidate){view.study.reset();view.resultSequence=0;}
     }
     void run()noexcept{
+        const NativeProcessScope original(nativeLife.epoch());
         for(;;){std::shared_ptr<const Job> job;
             {std::unique_lock<std::mutex> lock(mutex);wake.wait(lock,[&]{return stopping||queued;});if(!queued)return;job=std::move(queued);}
             Result result;result.job=job;
-            try{
+            try{if(!nativeLife.permitted()||cancel)result.status=EconomicStatus::Cancelled;else{
 #if defined(CANARY_ECONOMIC_EVALUATION_TESTING)
                 result.study=economicEvaluationTestBuild(job->input,&result.status,&cancel);
 #else
                 result.study=buildEconomicStudy(job->input,&result.status,&cancel);
 #endif
-            }catch(...){result.status=EconomicStatus::Capacity;result.study.reset();}
+            }}catch(...){result.status=EconomicStatus::Capacity;result.study.reset();}
+            if(!nativeLife.permitted()||cancel){result.status=EconomicStatus::Cancelled;result.study.reset();}
             {std::lock_guard<std::mutex> lock(mutex);completed=std::move(result);if(stopping)return;}
         }
     }
@@ -91,12 +104,14 @@ bool EconomicEvaluationOwner::start(OptimizationTime now){auto &p=*impl_;if(p.at
     if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
     if(!p.policy.schedule.enabled||!p.policy.result.enabled||!p.policy.result.maximumResultAgeMs||p.policy.result.maximumResultAgeMs>86400000){p.halt(S::Faulted);return false;}
+    if(!p.nativeLife.begin()){p.halt(S::Stopped);return false;}
     if(!p.schedule.start(now)){p.view.state=p.schedule.snapshot().state==Q::ClockFault?S::ClockFault:S::Faulted;return false;}
     p.anchor=p.last=now;p.view.state=S::Running;
     try{p.thread=std::thread([&p]{p.run();});return true;}catch(...){p.halt(S::Faulted);return false;}
 }
 OptimizationSchedulePoll EconomicEvaluationOwner::poll(OptimizationTime now,uint64_t revision,const WorkProfilePlan &plan,const WorkProfileConditions &conditions){
     auto &p=*impl_;OptimizationSchedulePoll out;
+    if(p.foreign()){out.state=Q::Stopped;return out;}
     try{
         if(p.time(now)){
             const auto key=workProfilePlanFingerprint(plan);
@@ -116,7 +131,7 @@ OptimizationSchedulePoll EconomicEvaluationOwner::poll(OptimizationTime now,uint
     return out;
 }
 EconomicSubmission EconomicEvaluationOwner::submit(const OptimizationTicket &ticket,uint64_t revision,EconomicInput input,OptimizationTime now){auto &p=*impl_;
-    if(!p.intent.permits(p.token)){p.halt(S::Stopped);return A::Inactive;}
+    if(!p.admitted())return A::Inactive;
     if(p.view.state!=S::Running)return A::Inactive;
     if(ticket.lane!=OptimizationLane::Evaluation||!p.pending(ticket))return A::WrongTicket;
     if(p.flight)return A::Busy;
@@ -136,7 +151,8 @@ EconomicSubmission EconomicEvaluationOwner::submit(const OptimizationTicket &tic
     }catch(...){p.halt(S::Faulted);return A::Inactive;}
 }
 OptimizationCompletion EconomicEvaluationOwner::completeExternal(const OptimizationTicket &ticket,OptimizationOutcome outcome,OptimizationTime now){auto &p=*impl_;
-    if(!p.intent.permits(p.token))p.halt(S::Stopped);
+    if(p.foreign())return C::WrongTicket;
+    p.admitted(); // Stop revokes authority, but does not fabricate settlement of an external owned ticket.
     if(ticket.lane==OptimizationLane::Evaluation&&(p.flight||outcome==O::Complete))return C::WrongTicket;
     if(!p.pending(ticket))return C::WrongTicket;
     if(p.view.state==S::Running)p.time(now);
@@ -149,7 +165,15 @@ void EconomicEvaluationOwner::stop(){auto &p=*impl_;requestStop();if(p.thread.jo
     if(p.flight){p.schedule.complete(p.flight->ticket,O::Cancelled,p.last);p.flight.reset();}
     {std::lock_guard<std::mutex> lock(p.mutex);p.queued.reset();p.completed.reset();}p.view.pending=false;p.view.cancellationRequested=false;
 }
-const EconomicEvaluationSnapshot &EconomicEvaluationOwner::snapshot()const{return impl_->view;}
+const EconomicEvaluationSnapshot &EconomicEvaluationOwner::snapshot()const{auto &p=*impl_;
+    if(p.foreign())return p.deniedView;
+    if(p.attempted)p.admitted();
+    return p.view;
+}
 bool EconomicEvaluationOwner::boundTo(const SessionIntent &intent,SessionToken token)const{return &impl_->intent==&intent&&token.epoch&&impl_->token.epoch==token.epoch;}
-const OptimizationScheduleSnapshot &EconomicEvaluationOwner::schedule()const{return impl_->schedule.snapshot();}
+const OptimizationScheduleSnapshot &EconomicEvaluationOwner::schedule()const{auto &p=*impl_;
+    if(p.foreign())return p.deniedSchedule;
+    if(p.attempted)p.admitted();
+    return p.schedule.snapshot();
+}
 } // namespace om

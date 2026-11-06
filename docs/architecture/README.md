@@ -64,7 +64,7 @@ The native dashboard also reports durable accepted-share history, market informa
 
 ## Current implementation truth
 
-| Capability | Status: baseline plus display/history batches |
+| Capability | Current scope; exact batch evidence is in [the execution ledger](execution-plan.md) |
 |---|---|
 | S-entry settings, navigation, review/save/discard and idle settings command | Implemented; host/PTY evidence linked above |
 | Display refresh, terminal color, recent events and hiding worker label | Implemented, local presentation preferences only |
@@ -76,15 +76,16 @@ The native dashboard also reports durable accepted-share history, market informa
 | Configurable Details/Log pages and fields | Implemented after the baseline; see display settings source/tests |
 | Declared combined bill/time arithmetic | Offline-tested pure core and native combined-rule/declared-opening settings; no certified supplier adapter, measured persistent billing/reset state or runtime activation |
 | Native flat-energy defaults and session board energy | Default-off native review/save and bounded session-only model; typed power validity/coverage, not whole-PC/incremental energy or net income |
-| Persistent observed power and independent reset windows | Bounded audited core/helper/owner implemented; explicit windows only, no native persistence activation, long-run compaction or monetary bill state |
-| Automatic profitability selection | Not implemented |
+| Persistent observed power and independent reset windows | Bounded audited recovery/compaction/capture/authorization/collector and default-off development runtime implemented; real-source, automatic reset, deployment/capacity and physical qualification remain open |
+| Monetary bill continuation and today's forecast | Exact synthetic receipt/recovery/review/compute and calendar-forecast/query owners implemented; ordinary source/configuration/accrued-bill binding and real-source qualification remain open |
+| Automatic profitability selection | Exact synthetic study/schedule/result/choice/budget/command chain and opt-in native CPU-worker integration implemented; ordinary reviewed controls, qualified measurement/safety/source bindings and physical qualification remain open |
 | Tested game pause/coexist policies | CPU-tested episode/profit guard, native detector, cooperative pause and optional lifetime supervisor bridge; ordinary activation and real experience/economic qualification remain open |
-| Stratum TLS | Not implemented |
-| First internationalization language packs | Not implemented |
+| Stratum TLS | Default-off native OpenSSL/Schannel step/duplex/inspection and independent URL/mode/consent settings implemented; ordinary trust/fallback/donation routing, packaging and live qualification remain open |
+| First internationalization language packs | Sixteen declared packs with honest source/draft review status, separately tested typed Unicode/formatting primitives and multiple English-only native source domains; complete domain extraction, effective native translation and human/terminal qualification remain open |
 
 No personal prototype, local GPU curve, wallet observation or machine-specific deployment is evidence that a fork feature is implemented or universally safe. Disabled groups must stay explicitly unavailable until their backend and tests exist.
 
-The display batch adds a tested **read-only financial presentation contract**, not a live data provider or durable income ledger. Its default runtime state stays disabled until an integrated provider supplies validated data. Real-time market, actual income, forecasts and tariff computation remain unimplemented integrations. Accepted-counter history is now separate and must never supply fabricated token income.
+The display batch adds a tested **read-only financial presentation contract**, not a live data provider. Later fixture ledgers and forecast/tariff owners do not qualify real sources or activate ordinary financial rows. Real-time market, actual income, forecasts and tariff computation remain unimplemented ordinary integrations. Accepted-counter history is separate and must never supply fabricated token income.
 
 ## Document authority and maintenance
 

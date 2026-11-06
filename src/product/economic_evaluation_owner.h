@@ -20,7 +20,7 @@ struct EconomicEvaluationSnapshot {
     std::shared_ptr<const EconomicStudy> study; // present only after current control-thread admission
 };
 // All public methods, the borrowed intent and its lifetime belong to ONE control thread.
-// The CPU thread sees only a moved frozen input and independent atomic cancellation, never SessionIntent.
+// The CPU thread sees only a moved frozen input, original native lifetime and atomic cancellation, never SessionIntent.
 class EconomicEvaluationOwner {
    public:
     EconomicEvaluationOwner(EconomicEvaluationPolicy,const SessionIntent &,SessionToken);
@@ -37,6 +37,8 @@ class EconomicEvaluationOwner {
     OptimizationCompletion completeExternal(const OptimizationTicket &,OptimizationOutcome,OptimizationTime);
     void requestStop(); // revoke now, no join; pending remains true until actual completion/join
     void stop(); // revoke, join CPU thread, settle its ticket; external ownership remains visible
+    // Memory-only revocation checks; no clock refresh, callback, new allocation or join. Old scoped callers get
+    // a preallocated denied view, without cancelling a healthy newer owner. Copies already held are historical.
     const EconomicEvaluationSnapshot &snapshot()const;
     const OptimizationScheduleSnapshot &schedule()const;
    private:

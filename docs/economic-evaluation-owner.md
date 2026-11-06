@@ -24,6 +24,8 @@ New submission first withdraws the previous reference. After computation actuall
 
 Source/current-configuration revision notifications are an explicit integration obligation. A caller failing to report a changed input is not certified by this interface. Native runtime source binding and complete safety qualification remain prerequisites for actuation.
 
+[P-14h](economic-native-lifetime.md) adds memory-only parent/native revocation to current result/schedule reads and original scope propagation to the CPU thread. Reads still do not refresh clocks or eligibility. A stale scoped caller receives an empty denied view without cancelling a healthy newer owner; old copied studies remain historical. Revocation retains actual CPU/external ownership until settlement or join, not a fabricated completion.
+
 [P-10g](economic-choice-guard.md) adds an exact-parent `boundTo` check and previous-result retention metadata for a same-context replacement: only the prior sequence and its earliest admitted ceiling are exposed while the replacement is pending. Current `study` publication still withdraws at submit. A separately validating guard may retain only its already-held matching immutable result; cancellation/revocation/completion/stop clears this metadata. It is not a source of new study publication or mining permission. Evaluation-local projection of the future flat-cost horizon from unchanged declared assumptions is distinct from a changed actual tariff/opening source, which must advance context.
 
 ## Cancellation, retry and stop
