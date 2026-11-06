@@ -106,34 +106,37 @@ struct PublicJsonProcessClient::Impl {
 #if defined(_WIN32)
     HANDLE process = nullptr, output = nullptr, job = nullptr;
     bool jobBound = false;
+    static void closeHandle(HANDLE &h) { if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h); h = nullptr; }
     bool owned() const { return process != nullptr; }
     void close() {
-        if (process) { CloseHandle(process); process = nullptr; }
-        if (output) { CloseHandle(output); output = nullptr; }
-        if (job) { CloseHandle(job); job = nullptr; }
+        closeHandle(process); closeHandle(output); closeHandle(job);
         jobBound = false;
     }
     bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel) {
+        struct Temps {
+            HANDLE read = nullptr, write = nullptr, null = nullptr, thread = nullptr;
+            ~Temps() { closeHandle(read); closeHandle(write); closeHandle(null); closeHandle(thread); }
+        } temp;
         SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
-        HANDLE read = nullptr, write = nullptr, null = INVALID_HANDLE_VALUE;
-        if (!CreatePipe(&read, &write, &sa, 0)) return false;
-        if (!SetHandleInformation(read, HANDLE_FLAG_INHERIT, 0)) { CloseHandle(read); CloseHandle(write); return false; }
-        null = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+        if (!CreatePipe(&temp.read, &temp.write, &sa, 0)) return false;
+        if (!SetHandleInformation(temp.read, HANDLE_FLAG_INHERIT, 0)) return false;
+        temp.null = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
         job = CreateJobObjectW(nullptr, nullptr);
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION policy{};
         policy.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
         policy.BasicLimitInformation.ActiveProcessLimit = 1;
-        bool ready = null != INVALID_HANDLE_VALUE && job && SetInformationJobObject(job, JobObjectExtendedLimitInformation, &policy, sizeof(policy));
+        bool ready = temp.null != INVALID_HANDLE_VALUE && job && SetInformationJobObject(job, JobObjectExtendedLimitInformation, &policy, sizeof(policy));
         SIZE_T bytes = 0;
         InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
         std::vector<unsigned char> buffer(bytes);
         auto *attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buffer.data());
         const bool initialized = ready && InitializeProcThreadAttributeList(attributes, 1, 0, &bytes);
-        HANDLE inherit[] = {write, null};
+        struct AttributeCleanup { LPPROC_THREAD_ATTRIBUTE_LIST value; ~AttributeCleanup() { if (value) DeleteProcThreadAttributeList(value); } } cleanup{initialized ? attributes : nullptr};
+        HANDLE inherit[] = {temp.write, temp.null};
         ready = initialized && UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof(inherit), nullptr, nullptr);
         STARTUPINFOEXW si{};
         si.StartupInfo.cb = sizeof(si); si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        si.StartupInfo.hStdInput = null; si.StartupInfo.hStdOutput = write; si.StartupInfo.hStdError = null; si.lpAttributeList = attributes;
+        si.StartupInfo.hStdInput = temp.null; si.StartupInfo.hStdOutput = temp.write; si.StartupInfo.hStdError = temp.null; si.lpAttributeList = attributes;
         // Only fixed numeric args. No shell, PATH lookup, arbitrary quoting, inherited user environment or console.
         std::wstring command = L"\"" + helper.wstring() + L"\"";
         for (const auto &arg : args) command += L" " + std::wstring(arg.begin(), arg.end());
@@ -148,16 +151,12 @@ struct PublicJsonProcessClient::Impl {
         bool created = ready && !cancel.load() && !unresolved().load() && CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | CREATE_SUSPENDED,
             &environment[0], parent.c_str(), &si.StartupInfo, &pi);
-        if (initialized) DeleteProcThreadAttributeList(attributes);
-        CloseHandle(write);
-        if (null != INVALID_HANDLE_VALUE) CloseHandle(null);
         if (created) {
-            process = pi.hProcess; output = read;
+            process = pi.hProcess; output = temp.read; temp.read = nullptr; temp.thread = pi.hThread;
             jobBound = AssignProcessToJobObject(job, process) != 0;
             created = jobBound && !cancel.load() && !unresolved().load() && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
-            CloseHandle(pi.hThread);
             // The common cleanup retains both native handles until exit is actually observed.
-        } else { CloseHandle(read); if (job) { CloseHandle(job); job = nullptr; } }
+        }
         return created;
     }
     bool read(std::string *wire, size_t limit) {
@@ -195,30 +194,34 @@ struct PublicJsonProcessClient::Impl {
 #if !defined(OM_PUBLIC_PIDFD_SPAWN) || !defined(SYS_pidfd_send_signal)
         return false;
 #endif
-        int pipe[2];
-        if (pipe2(pipe, O_CLOEXEC) != 0) return false;
-        if (fcntl(pipe[0], F_SETFL, O_NONBLOCK) != 0) { ::close(pipe[0]); ::close(pipe[1]); return false; }
-        posix_spawn_file_actions_t actions;
-        posix_spawnattr_t attributes;
-        if (posix_spawn_file_actions_init(&actions) != 0) { ::close(pipe[0]); ::close(pipe[1]); return false; }
-        if (posix_spawnattr_init(&attributes) != 0) { posix_spawn_file_actions_destroy(&actions); ::close(pipe[0]); ::close(pipe[1]); return false; }
+        struct Pipes { int fd[2] = {-1, -1}; ~Pipes() { for (int value : fd) if (value >= 0) ::close(value); } } pipe;
+        if (pipe2(pipe.fd, O_CLOEXEC) != 0 || fcntl(pipe.fd[0], F_SETFL, O_NONBLOCK) != 0) return false;
+        struct Setup {
+            posix_spawn_file_actions_t actions; posix_spawnattr_t attributes;
+            bool actionsReady = false, attributesReady = false;
+            ~Setup() { if (attributesReady) posix_spawnattr_destroy(&attributes); if (actionsReady) posix_spawn_file_actions_destroy(&actions); }
+        } setup;
+        if (posix_spawn_file_actions_init(&setup.actions) != 0) return false;
+        setup.actionsReady = true;
+        if (posix_spawnattr_init(&setup.attributes) != 0) return false;
+        setup.attributesReady = true;
         sigset_t mask, defaults;
         sigemptyset(&mask); sigemptyset(&defaults); sigaddset(&defaults, SIGPIPE); sigaddset(&defaults, SIGINT); sigaddset(&defaults, SIGTERM);
-        bool ready = posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0 &&
-            posix_spawn_file_actions_adddup2(&actions, pipe[1], 1) == 0 &&
-            posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0) == 0;
+        bool ready = posix_spawn_file_actions_addopen(&setup.actions, 0, "/dev/null", O_RDONLY, 0) == 0 &&
+            posix_spawn_file_actions_adddup2(&setup.actions, pipe.fd[1], 1) == 0 &&
+            posix_spawn_file_actions_addopen(&setup.actions, 2, "/dev/null", O_WRONLY, 0) == 0;
 #if defined(__GLIBC__)
 #if __GLIBC_PREREQ(2, 34)
-        ready = ready && posix_spawn_file_actions_addclosefrom_np(&actions, 3) == 0;
+        ready = ready && posix_spawn_file_actions_addclosefrom_np(&setup.actions, 3) == 0;
 #else
         ready = false;  // cannot prove unrelated miner descriptors are closed on this platform
 #endif
 #else
         ready = false;
 #endif
-        ready = ready && posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF) == 0 &&
-            posix_spawnattr_setpgroup(&attributes, 0) == 0 && posix_spawnattr_setsigmask(&attributes, &mask) == 0 &&
-            posix_spawnattr_setsigdefault(&attributes, &defaults) == 0;
+        ready = ready && posix_spawnattr_setflags(&setup.attributes, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF) == 0 &&
+            posix_spawnattr_setpgroup(&setup.attributes, 0) == 0 && posix_spawnattr_setsigmask(&setup.attributes, &mask) == 0 &&
+            posix_spawnattr_setsigdefault(&setup.attributes, &defaults) == 0;
         const auto executable = helper.string();
         std::vector<char *> argv{const_cast<char *>(executable.c_str())};
         for (const auto &arg : args) argv.push_back(const_cast<char *>(arg.c_str()));
@@ -227,15 +230,13 @@ struct PublicJsonProcessClient::Impl {
         char *environment[] = {lang, locale, nullptr};
         // Obtain the kernel identity atomically with creation. A later pidfd_open(pid) is still a reuse race.
 #if defined(OM_PUBLIC_PIDFD_SPAWN)
-        const int result = ready && !cancel.load() && !unresolved().load() ? pidfd_spawn(&pidfd, executable.c_str(), &actions, &attributes, argv.data(), environment) : -1;
+        const int result = ready && !cancel.load() && !unresolved().load() ? pidfd_spawn(&pidfd, executable.c_str(), &setup.actions, &setup.attributes, argv.data(), environment) : -1;
 #else
         const int result = -1;
         (void)ready; (void)cancel; (void)environment;
 #endif
-        posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes);
-        ::close(pipe[1]);
-        if (result != 0) { ::close(pipe[0]); pidfd = -1; return false; }
-        output = pipe[0];
+        if (result != 0) { pidfd = -1; return false; }
+        output = pipe.fd[0]; pipe.fd[0] = -1;
         return true;
     }
     bool read(std::string *wire, size_t limit) {

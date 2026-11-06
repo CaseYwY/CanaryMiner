@@ -86,6 +86,8 @@ On older/non-glibc Linux builds, process-native CTest fixtures report an explici
 owned-process qualification; codec checks still execute first. Older runtime/kernel/dependency combinations have not been
 qualified by the current modern-glibc fixture runs.
 
-Application-wide helper/worker quarantine, Windows native wait-fault injection, genuinely uninterruptible kernel operations,
+The later [P-14a local-helper batch](local-helper-ownership.md) adds public/local native allocation cleanup and exercises
+Windows native wait-fault interposition. Those fixtures do not force actual kernel failures or qualify physical bounds.
+Application-wide helper/worker quarantine, genuinely uninterruptible kernel operations,
 parent-death/deployment/loader and auxiliary trust egress, qualified provider schema/terms and production sources remain
 open. No requirement is promoted to complete by these CPU-only fixtures.

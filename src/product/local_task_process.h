@@ -1,4 +1,6 @@
 // Bounded one-shot installed native helper. Local IPC only; no shell, provider executable or mining control.
+// Unknown native ownership is retained across destruction and blocks replacement clients in this module.
+// Linux helper capability requires atomic pidfd spawn; this is not application-wide quarantine or a sandbox.
 #pragma once
 #include <atomic>
 #include <cstdint>
