@@ -1,4 +1,5 @@
 #include "worker_process.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -17,8 +18,14 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 extern char **environ;
+#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2,40)
+#define OM_WORKER_PIDFD_SPAWN 1
+#endif
+#endif
 #endif
 namespace om {
 namespace {
@@ -71,6 +78,8 @@ IO writeBytes(Native fd,const char *bytes,size_t size,size_t &count){
     return errno==EAGAIN||errno==EWOULDBLOCK||errno==EINTR?IO::Pending:errno==EPIPE||errno==ECONNRESET?IO::Closed:IO::Failed;
 }
 #endif
+} // namespace
+namespace worker_process_detail {
 struct Channel {
     Native input=invalid,output=invalid;
     std::string pending;size_t offset=0;uint64_t deadline=0,last=0;
@@ -90,6 +99,8 @@ struct Channel {
         offset+=count;if(offset==pending.size()){pending.clear();offset=0;}return true;
     }
 };
+} // namespace worker_process_detail
+namespace {
 bool pathAllowed(const std::filesystem::path &p){
     if(!p.is_absolute()||p.native().empty()||p.native().size()>4096||p.native().find(static_cast<std::filesystem::path::value_type>(0))!=p.native().npos)return false;
 #if defined(_WIN32)
@@ -110,7 +121,7 @@ bool parseWorkerChannelHandles(const char *input,const char *output,const char *
 struct WorkerControlClient::Impl {
     mutable std::mutex mutex;std::unique_ptr<WorkerControlGate> gate;
     mutable bool fault=false;bool attempted=false,held=false;
-    std::atomic<bool> cancel{false};std::thread thread;Channel channel;WorkerControlFramer frames;
+    std::atomic<bool> cancel{false};std::thread thread;worker_process_detail::Channel channel;WorkerControlFramer frames;
     uint64_t startup=0;mutable uint64_t last=0;
     bool workEnabled=false,workFinished=false;uint64_t workSequence=0,workFlushed=0;
     struct WorkFrame {std::string wire;uint64_t deadline,sequence;};
@@ -224,14 +235,16 @@ WorkControlRequest WorkerControlClient::applyWorkWait(unsigned &ms)noexcept{std:
     const auto state=impl_->state();return state==WorkControlRequest::Run&&impl_->gate?impl_->gate->applyWorkWait(ms):state;}
 
 struct WorkerControlProcess::Impl {
-    bool attempted=false,owned=false,settled=false,unknown=false,reserved=false,blocked=false,controlFault=false;
+    bool attempted=false,owned=false,settled=false,unknown=false,reserved=false,blocked=false,controlFault=false,verified=false;
     WorkerProcessState state=WorkerProcessState::Dormant;int exit=-1;
-    WorkerControlBinding binding;Channel channel;Native logs=invalid;WorkerControlFramer frames;
+    WorkerControlBinding binding;worker_process_detail::Channel channel;Native logs=invalid;WorkerControlFramer frames;
     bool workEnabled=false,workFinished=false,workClosed=false;uint64_t workSequence=0;
+    NativeProcessAdmission admission;
 #if defined(_WIN32)
     Native process=invalid,job=invalid;
+    bool jobBound=false;
 #else
-    pid_t pid=-1;
+    int pidfd=-1;
 #endif
     static std::mutex &registryMutex(){static std::mutex mutex;return mutex;}
     static unsigned &reservations(){static unsigned count=0;return count;}
@@ -240,112 +253,131 @@ struct WorkerControlProcess::Impl {
     ~Impl(){channel.close();closeNative(logs);
 #if defined(_WIN32)
         closeNative(process);closeNative(job);
+#else
+        closeNative(pidfd);
 #endif
         if(reserved)--reservations(); // caller serializes registry operations
     }
-    void unreaped(){state=WorkerProcessState::Unreaped;if(!blocked){blocked=true;++unresolved();}}
+    void unreaped(){state=WorkerProcessState::Unreaped;if(!blocked){blocked=true;++unresolved();admission.markUnresolved();}}
     bool observe(){
         if(!owned||settled)return settled;
         if(unknown)return false; // lost reaping ownership is terminal; never probe a potentially reused PID
 #if defined(_WIN32)
         const auto wait=WaitForSingleObject(process,0);
-        if(wait==WAIT_TIMEOUT)return false;
+        if(wait==WAIT_TIMEOUT){verified=true;return false;}
         DWORD code=0;if(wait!=WAIT_OBJECT_0||!GetExitCodeProcess(process,&code)){unknown=true;unreaped();return false;}
         exit=static_cast<int>(code);
 #else
-        int status=0;const auto result=waitpid(pid,&status,WNOHANG);
-        if(result==0||(result<0&&errno==EINTR))return false;
-        if(result!=pid){unknown=true;unreaped();return false;} // no signalling a possibly reused PID after another reaper consumed it
-        exit=WIFEXITED(status)?WEXITSTATUS(status):128+(WIFSIGNALED(status)?WTERMSIG(status):0);
+#if defined(OM_WORKER_PIDFD_SPAWN)
+        siginfo_t info{};const int result=waitid(P_PIDFD,static_cast<id_t>(pidfd),&info,WEXITED|WNOHANG);
+        if(result<0&&errno==EINTR)return false;
+        if(result||(info.si_pid&&info.si_code!=CLD_EXITED&&info.si_code!=CLD_KILLED&&info.si_code!=CLD_DUMPED)){unknown=true;unreaped();return false;}
+        verified=true;if(!info.si_pid)return false;
+        exit=info.si_code==CLD_EXITED?info.si_status:128+info.si_status;
+#else
+        unknown=true;unreaped();return false;
 #endif
-        settled=true;if(blocked){blocked=false;--unresolved();}state=WorkerProcessState::Exited;
+#endif
+        settled=true;if(blocked){blocked=false;--unresolved();}admission.settled();state=WorkerProcessState::Exited;
         // An opted-in raw stream may still have buffered originals after actual reaping. Drain it with bounded later polls.
         if(!workEnabled||workClosed)channel.close();
         return true;
     }
-    static bool reserve(){
+    static bool reserve(Impl *p){
         std::lock_guard<std::mutex> lock(registryMutex());auto &held=quarantine();
+        if(held.capacity()<256)held.reserve(256); // retain without allocating during uncertain teardown
         for(auto i=held.begin();i!=held.end();){if((*i)->observe()){delete *i;i=held.erase(i);}else ++i;}
         if(!held.empty()||unresolved().load()||reservations()>=256)return false;
+        if(!p->admission.begin())return false;
         ++reservations();return true;
     }
     bool reap(unsigned ms){
         channel.close();if(!owned||observe())return true;
         if(unknown){unreaped();return false;}
+        const auto until=Clock::now()+std::chrono::milliseconds(ms);bool signalled=false;
+        do{
+        if(verified&&!signalled){
 #if defined(_WIN32)
-        if(job!=invalid)TerminateJobObject(job,8);else TerminateProcess(process,8);
+            if(jobBound)TerminateJobObject(job,8);else TerminateProcess(process,8);
 #else
-        ::kill(-pid,SIGKILL);
+#if defined(SYS_pidfd_send_signal)
+            ::syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,nullptr,0u);
 #endif
-        const auto until=Clock::now()+std::chrono::milliseconds(ms);
-        do{if(observe())return true;if(Clock::now()>=until)break;std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(true);
+#endif
+            signalled=true;
+        }
+        if(observe())return true;
+        if(unknown||Clock::now()>=until)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(true);
         unreaped();return false;
     }
     void fail(){channel.close();controlFault=true;state=WorkerProcessState::Failed;}
     bool launch(const std::filesystem::path &exe,const std::vector<std::string> &args,const std::atomic<bool> &cancel){
 #if defined(_WIN32)
-        SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};Native childIn=invalid,childOut=invalid,logWrite=invalid,null=invalid,parent=invalid;
-        auto clean=[&]{closeNative(childIn);closeNative(childOut);closeNative(logWrite);closeNative(null);closeNative(parent);};
-        if(!CreatePipe(&childIn,&channel.output,&sa,4096)||!CreatePipe(&channel.input,&childOut,&sa,4096)||!CreatePipe(&logs,&logWrite,&sa,8192)){clean();return false;}
+        struct Temps {Native childIn=invalid,childOut=invalid,logWrite=invalid,null=invalid,parent=invalid,thread=invalid;
+            ~Temps(){closeNative(childIn);closeNative(childOut);closeNative(logWrite);closeNative(null);closeNative(parent);closeNative(thread);}} temp;
+        SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};
+        if(!CreatePipe(&temp.childIn,&channel.output,&sa,4096)||!CreatePipe(&channel.input,&temp.childOut,&sa,4096)||!CreatePipe(&logs,&temp.logWrite,&sa,8192))return false;
         bool ready=inherit(channel.input,false)&&inherit(channel.output,false)&&inherit(logs,false)&&
-            nonblocking(childIn)&&nonblocking(childOut)&&nonblocking(channel.input)&&nonblocking(channel.output)&&nonblocking(logs);
-        null=CreateFileW(L"NUL",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,&sa,OPEN_EXISTING,0,nullptr);
-        ready=ready&&null!=invalid&&DuplicateHandle(GetCurrentProcess(),GetCurrentProcess(),GetCurrentProcess(),&parent,SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,TRUE,0);
+            nonblocking(temp.childIn)&&nonblocking(temp.childOut)&&nonblocking(channel.input)&&nonblocking(channel.output)&&nonblocking(logs);
+        temp.null=CreateFileW(L"NUL",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,&sa,OPEN_EXISTING,0,nullptr);
+        ready=ready&&temp.null!=invalid&&DuplicateHandle(GetCurrentProcess(),GetCurrentProcess(),GetCurrentProcess(),&temp.parent,SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,TRUE,0);
         job=CreateJobObjectW(nullptr,nullptr);JOBOBJECT_EXTENDED_LIMIT_INFORMATION policy{};
         policy.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE|JOB_OBJECT_LIMIT_ACTIVE_PROCESS;policy.BasicLimitInformation.ActiveProcessLimit=1;
         ready=ready&&job&&SetInformationJobObject(job,JobObjectExtendedLimitInformation,&policy,sizeof(policy));
         SIZE_T size=0;InitializeProcThreadAttributeList(nullptr,1,0,&size);std::vector<unsigned char> buffer(size);
         auto *attributes=reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(buffer.data());
         const bool initialized=ready&&InitializeProcThreadAttributeList(attributes,1,0,&size);
-        HANDLE handles[]={childIn,childOut,logWrite,null,parent};
+        struct AttributeCleanup {LPPROC_THREAD_ATTRIBUTE_LIST value;~AttributeCleanup(){if(value)DeleteProcThreadAttributeList(value);}} cleanup{initialized?attributes:nullptr};
+        HANDLE handles[]={temp.childIn,temp.childOut,temp.logWrite,temp.null,temp.parent};
         ready=initialized&&UpdateProcThreadAttribute(attributes,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,handles,sizeof(handles),nullptr,nullptr);
         std::wstring command=quote(exe.wstring());for(const auto &arg:args)command+=L" "+quote(std::filesystem::u8path(arg).wstring());
-        command+=L" --worker-control-v1 "+std::to_wstring(reinterpret_cast<uintptr_t>(childIn))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(childOut))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(parent));
+        command+=L" --worker-control-v1 "+std::to_wstring(reinterpret_cast<uintptr_t>(temp.childIn))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(temp.childOut))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(temp.parent));
         std::vector<wchar_t> cmd(command.begin(),command.end());cmd.push_back(0);
         STARTUPINFOEXW si{};si.StartupInfo.cb=sizeof(si);si.StartupInfo.dwFlags=STARTF_USESTDHANDLES;
-        si.StartupInfo.hStdInput=null;si.StartupInfo.hStdOutput=si.StartupInfo.hStdError=logWrite;si.lpAttributeList=attributes;
+        si.StartupInfo.hStdInput=temp.null;si.StartupInfo.hStdOutput=si.StartupInfo.hStdError=temp.logWrite;si.lpAttributeList=attributes;
         PROCESS_INFORMATION pi{};
-        const bool created=ready&&!cancel.load()&&!unresolved().load()&&CreateProcessW(exe.c_str(),cmd.data(),nullptr,nullptr,TRUE,
+        const bool created=ready&&!cancel.load()&&admission.permitted()&&CreateProcessW(exe.c_str(),cmd.data(),nullptr,nullptr,TRUE,
             EXTENDED_STARTUPINFO_PRESENT|CREATE_SUSPENDED,nullptr,nullptr,&si.StartupInfo,&pi);
-        if(initialized)DeleteProcThreadAttributeList(attributes);clean();if(!created)return false;
-        owned=true;process=pi.hProcess;
-        const bool bound=AssignProcessToJobObject(job,process)!=0;
-        const bool resumed=bound&&!cancel.load()&&ResumeThread(pi.hThread)!=static_cast<DWORD>(-1);
-        CloseHandle(pi.hThread);if(!resumed){TerminateProcess(process,8);reap(250);return false;}return true;
+        if(!created)return false;
+        owned=true;process=pi.hProcess;temp.thread=pi.hThread;jobBound=AssignProcessToJobObject(job,process)!=0;
+        return jobBound&&!cancel.load()&&admission.permitted()&&ResumeThread(temp.thread)!=static_cast<DWORD>(-1);
 #else
         struct sigaction action{};if(sigaction(SIGCHLD,nullptr,&action)!=0||action.sa_handler!=SIG_DFL||(action.sa_flags&SA_NOCLDWAIT))return false;
-        int pair[2]={-1,-1},output[2]={-1,-1};
-        if(socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,pair)!=0)return false;
-        if(pipe2(output,O_CLOEXEC)!=0){closeNative(pair[0]);closeNative(pair[1]);return false;}
-        // Move child sources above the destination descriptor 3 before composing spawn actions.
-        const int child=fcntl(pair[1],F_DUPFD_CLOEXEC,4),logWrite=fcntl(output[1],F_DUPFD_CLOEXEC,4);
-        closeNative(pair[1]);closeNative(output[1]);channel.input=channel.output=pair[0];logs=output[0];
-        auto clean=[&]{if(child>=0)::close(child);if(logWrite>=0)::close(logWrite);};
-        bool ready=child>=0&&logWrite>=0&&nonblocking(channel.input)&&nonblocking(child)&&nonblocking(logs);
-        posix_spawn_file_actions_t actions;posix_spawnattr_t attributes;
-        if(posix_spawn_file_actions_init(&actions)!=0){clean();return false;}
-        if(posix_spawnattr_init(&attributes)!=0){posix_spawn_file_actions_destroy(&actions);clean();return false;}
-        ready=ready&&posix_spawn_file_actions_addopen(&actions,0,"/dev/null",O_RDONLY,0)==0&&
-            posix_spawn_file_actions_adddup2(&actions,logWrite,1)==0&&posix_spawn_file_actions_adddup2(&actions,logWrite,2)==0&&
-            posix_spawn_file_actions_adddup2(&actions,child,3)==0;
-#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
-#if __GLIBC_PREREQ(2,34)
-        ready=ready&&posix_spawn_file_actions_addclosefrom_np(&actions,4)==0;
-#else
-        ready=false;
+#if !defined(OM_WORKER_PIDFD_SPAWN) || !defined(SYS_pidfd_send_signal)
+        return false;
 #endif
-#else
-        ready=false;
+        struct Pipes {int pair[2]={-1,-1},output[2]={-1,-1},child=-1,logWrite=-1;
+            ~Pipes(){for(int fd:{pair[0],pair[1],output[0],output[1],child,logWrite})if(fd>=0)::close(fd);}} pipe;
+        if(socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,pipe.pair)!=0||pipe2(pipe.output,O_CLOEXEC)!=0)return false;
+        // Move child sources above the destination descriptor 3 before composing spawn actions.
+        pipe.child=fcntl(pipe.pair[1],F_DUPFD_CLOEXEC,4);pipe.logWrite=fcntl(pipe.output[1],F_DUPFD_CLOEXEC,4);
+        closeNative(pipe.pair[1]);closeNative(pipe.output[1]);channel.input=channel.output=pipe.pair[0];pipe.pair[0]=-1;logs=pipe.output[0];pipe.output[0]=-1;
+        bool ready=pipe.child>=0&&pipe.logWrite>=0&&nonblocking(channel.input)&&nonblocking(pipe.child)&&nonblocking(logs);
+        struct Setup {posix_spawn_file_actions_t actions;posix_spawnattr_t attributes;bool actionsReady=false,attributesReady=false;
+            ~Setup(){if(attributesReady)posix_spawnattr_destroy(&attributes);if(actionsReady)posix_spawn_file_actions_destroy(&actions);}} setup;
+        if(posix_spawn_file_actions_init(&setup.actions)!=0)return false;
+        setup.actionsReady=true;
+        if(posix_spawnattr_init(&setup.attributes)!=0)return false;
+        setup.attributesReady=true;
+        ready=ready&&posix_spawn_file_actions_addopen(&setup.actions,0,"/dev/null",O_RDONLY,0)==0&&
+            posix_spawn_file_actions_adddup2(&setup.actions,pipe.logWrite,1)==0&&posix_spawn_file_actions_adddup2(&setup.actions,pipe.logWrite,2)==0&&
+            posix_spawn_file_actions_adddup2(&setup.actions,pipe.child,3)==0;
+#if defined(OM_WORKER_PIDFD_SPAWN)
+        ready=ready&&posix_spawn_file_actions_addclosefrom_np(&setup.actions,4)==0;
 #endif
         sigset_t mask,defaults;sigemptyset(&mask);sigemptyset(&defaults);for(int sig:{SIGPIPE,SIGINT,SIGTERM})sigaddset(&defaults,sig);
-        ready=ready&&posix_spawnattr_setflags(&attributes,POSIX_SPAWN_SETPGROUP|POSIX_SPAWN_SETSIGMASK|POSIX_SPAWN_SETSIGDEF)==0&&
-            posix_spawnattr_setpgroup(&attributes,0)==0&&posix_spawnattr_setsigmask(&attributes,&mask)==0&&posix_spawnattr_setsigdefault(&attributes,&defaults)==0;
+        ready=ready&&posix_spawnattr_setflags(&setup.attributes,POSIX_SPAWN_SETPGROUP|POSIX_SPAWN_SETSIGMASK|POSIX_SPAWN_SETSIGDEF)==0&&
+            posix_spawnattr_setpgroup(&setup.attributes,0)==0&&posix_spawnattr_setsigmask(&setup.attributes,&mask)==0&&posix_spawnattr_setsigdefault(&setup.attributes,&defaults)==0;
         std::vector<std::string> words{exe.string()};words.insert(words.end(),args.begin(),args.end());
         words.insert(words.end(),{"--worker-control-v1","3","3",std::to_string(getpid())});
         std::vector<char *> argv;for(auto &word:words)argv.push_back(&word[0]);argv.push_back(nullptr);
-        const int result=ready&&!cancel.load()&&!unresolved().load()?posix_spawn(&pid,exe.c_str(),&actions,&attributes,argv.data(),environ):-1;
-        posix_spawn_file_actions_destroy(&actions);posix_spawnattr_destroy(&attributes);clean();
-        if(result!=0){pid=-1;return false;}owned=true;return true;
+#if defined(OM_WORKER_PIDFD_SPAWN)
+        const int result=ready&&!cancel.load()&&admission.permitted()?pidfd_spawn(&pidfd,exe.c_str(),&setup.actions,&setup.attributes,argv.data(),environ):-1;
+#else
+        const int result=-1;(void)ready;(void)cancel;
+#endif
+        if(result!=0){pidfd=-1;return false;}owned=true;return true;
 #endif
     }
 };
@@ -358,10 +390,12 @@ bool WorkerControlProcess::start(const std::filesystem::path &exe,const std::vec
     auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
     size_t total=0;bool valid=args.size()<=256;
     for(const auto &arg:args){valid=valid&&!arg.empty()&&arg.size()<=4096&&arg.find('\0')==arg.npos&&arg!="--worker-control-v1";total+=arg.size();}
-    if(cancel.load()||!valid||total>24000||!pathAllowed(exe)||!live(initial,workerControlNowMs())||initial.revision!=1||initial.directive!=WorkerDirective::Pause||!Impl::reserve()){
+    if(cancel.load()||!valid||total>24000||!pathAllowed(exe)||!live(initial,workerControlNowMs())||initial.revision!=1||initial.directive!=WorkerDirective::Pause){
         p.state=WorkerProcessState::Failed;return false;}
-    p.reserved=true;p.binding=initial.binding;p.workEnabled=work;
-    try{if(!p.launch(exe,args,cancel)||cancel.load()){p.fail();p.reap(250);return false;}
+    try{
+        if(!Impl::reserve(&p)){p.state=nativeProcessUnresolved()?WorkerProcessState::Unreaped:WorkerProcessState::Failed;return false;}
+        p.reserved=true;p.binding=initial.binding;p.workEnabled=work;
+        if(!p.launch(exe,args,cancel)||cancel.load()||!p.admission.permitted()){p.fail();p.reap(250);return false;}
         p.state=WorkerProcessState::Running;
         if(!submit(initial)){p.fail();p.reap(250);return false;}
         return true;
@@ -369,11 +403,12 @@ bool WorkerControlProcess::start(const std::filesystem::path &exe,const std::vec
 }
 bool WorkerControlProcess::submit(const WorkerCommand &command){
     auto &p=*impl_;std::string wire;
-    if(p.state!=WorkerProcessState::Running||!sameBinding(command.binding,p.binding)||!live(command,workerControlNowMs())||!encodeWorkerCommand(command,&wire))return false;
+    if(p.state!=WorkerProcessState::Running||!p.admission.permitted()||!sameBinding(command.binding,p.binding)||!live(command,workerControlNowMs())||!encodeWorkerCommand(command,&wire))return false;
     return p.channel.queue(wire,command.deadlineMonoMs);
 }
 WorkerProcessPoll WorkerControlProcess::poll(){
     auto &p=*impl_;WorkerProcessPoll out;
+    if(p.state==WorkerProcessState::Running&&!p.admission.permitted())p.fail();
     if(p.state==WorkerProcessState::Running){
         if(!p.channel.flush(workerControlNowMs()))p.fail();}
     if(p.state==WorkerProcessState::Running||(p.state==WorkerProcessState::Exited&&p.workEnabled&&!p.workClosed&&p.channel.input!=invalid)){
@@ -394,6 +429,7 @@ WorkerProcessPoll WorkerControlProcess::poll(){
         if(result==IO::Closed||result==IO::Failed)closeNative(p.logs);}
     const bool streamEnded=p.state==WorkerProcessState::Running||p.state==WorkerProcessState::Disconnected||p.state==WorkerProcessState::Failed;
     if(p.owned)p.observe();
+    if(p.admission.invalidated()){p.controlFault=true;p.channel.close();out.receipts.clear();out.work.clear();if(p.state!=WorkerProcessState::Unreaped&&!p.settled)p.state=WorkerProcessState::Failed;}
     if(streamEnded&&p.settled&&(!p.workEnabled||p.workClosed)&&!p.frames.complete())p.controlFault=true; // actual exit cannot erase an incomplete/malformed receipt stream
     out.state=p.state;out.exitCode=p.exit;out.controlFault=p.controlFault;
     out.workStreamClosed=p.workClosed;out.workStreamComplete=p.workEnabled&&p.workClosed&&p.workFinished&&p.frames.complete()&&!p.controlFault;return out;

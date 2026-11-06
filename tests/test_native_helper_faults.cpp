@@ -8,6 +8,8 @@
 #include "product_test_util.h"
 #include "product/public_json_process.h"
 #include "product/local_task_process.h"
+#include "product/duplex_task_process.h"
+#include "product/worker_process.h"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -79,12 +81,7 @@ DWORD WINAPI faultWait(HANDLE h,DWORD ms){
 }
 BOOL WINAPI faultExitCode(HANDLE h,LPDWORD code){if(liveProcess(h)&&fault==Fault::ExitError){++exitErrors;SetLastError(ERROR_INVALID_HANDLE);return FALSE;}return ::GetExitCodeProcess(h,code);}
 }
-void *operator new(std::size_t n){if(failNew.exchange(false))throw std::bad_alloc();if(void *p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
-void *operator new[](std::size_t n){return ::operator new(n);}
-void operator delete(void *p)noexcept{std::free(p);}
-void operator delete[](void *p)noexcept{std::free(p);}
-void operator delete(void *p,std::size_t)noexcept{std::free(p);}
-void operator delete[](void *p,std::size_t)noexcept{std::free(p);}
+bool canaryNativeAllocationFault(){return failNew.exchange(false);}
 
 #define CreatePipe faultCreatePipe
 #define CreateFileW faultCreateFileW
@@ -100,7 +97,11 @@ void operator delete[](void *p,std::size_t)noexcept{std::free(p);}
 #define ResumeThread faultResumeThread
 #define WaitForSingleObject faultWait
 #define GetExitCodeProcess faultExitCode
-#if defined(OM_NATIVE_FAULT_LOCAL)
+#if defined(OM_NATIVE_FAULT_DUPLEX)
+#include "../src/product/duplex_task_process.cpp"
+#elif defined(OM_NATIVE_FAULT_WORKER)
+#include "../src/product/worker_process.cpp"
+#elif defined(OM_NATIVE_FAULT_LOCAL)
 #include "../src/product/local_task_process.cpp"
 #else
 #include "../src/product/public_json_process.cpp"
@@ -122,7 +123,43 @@ void operator delete[](void *p,std::size_t)noexcept{std::free(p);}
 
 namespace {
 std::filesystem::path helper;
-#if defined(OM_NATIVE_FAULT_LOCAL)
+#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
+// The stream APIs expose native state/proof, not LocalTaskResult. This test-only bridge keeps the same fault assertions.
+enum class Status {Ok,Unavailable,Cancelled,Unreaped};
+struct Result {Status status=Status::Unavailable;bool childStarted=false;std::string response;};
+class Client {
+    std::filesystem::path helper_;
+public:
+    explicit Client(std::filesystem::path path):helper_(std::move(path)){}
+    Result run(){
+        Result r;const auto before=spawns;bool started=false,exited=false,unknown=false;
+#if defined(OM_NATIVE_FAULT_DUPLEX)
+        om::DuplexTaskProcess p;started=p.start(helper_,cancel);
+#else
+        om::WorkerControlProcess p;const auto now=om::workerControlNowMs();
+        om::WorkerCommand initial{{"11111111111111111111111111111111","22222222222222222222222222222222",1,1,0},1,now,now+3000,om::WorkerDirective::Pause};
+        started=p.start(helper_,{},initial,cancel);
+#endif
+        const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(600);
+        if(started)do{
+            const auto v=p.poll();
+#if defined(OM_NATIVE_FAULT_DUPLEX)
+            exited=v.state==om::DuplexTaskState::Exited;unknown=v.state==om::DuplexTaskState::Unreaped;
+#else
+            exited=p.reaped();unknown=v.state==om::WorkerProcessState::Unreaped;
+#endif
+            if(exited||unknown||cancel.load())break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }while(std::chrono::steady_clock::now()<until);
+        if(!p.terminate(250))unknown=true;
+        if(om::nativeProcessUnresolved())unknown=true;
+        r.childStarted=spawns!=before;r.status=unknown?Status::Unreaped:cancel.load()?Status::Cancelled:started&&exited?Status::Ok:Status::Unavailable;
+        return r;
+    }
+};
+Result run(Client &client){return client.run();}
+void empty(const Result &r,bool started){CHECK(r.response.empty()&&r.childStarted==started);}
+#elif defined(OM_NATIVE_FAULT_LOCAL)
 using Client=om::LocalTaskProcess;using Result=om::LocalTaskResult;using Status=om::LocalTaskStatus;
 Result run(Client &client){return useHold?client.hold("SYNTHETIC\n",cancel,600,[](const std::string &){++readyCalls;return true;}):client.run("SYNTHETIC\n",cancel,600);}
 void empty(const Result &r,bool started){CHECK(r.response.empty()&&r.childStarted==started);}
@@ -142,7 +179,9 @@ void settleOwned(){
 }
 int child(int argc,char **argv){
     _setmode(_fileno(stdout),_O_BINARY);
-#if defined(OM_NATIVE_FAULT_LOCAL)
+#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
+    (void)argc;(void)argv;return 0; // no protocol/driver/device setup; lifecycle only
+#elif defined(OM_NATIVE_FAULT_LOCAL)
     std::string input;if(!om::readLocalTaskInput(argc,argv,&input)||input!="SYNTHETIC\n")return 2;
     return om::writeLocalTaskOutput("SYNTHETIC\n")?0:2;
 #else
@@ -153,7 +192,9 @@ int child(int argc,char **argv){
 }
 }
 int main(int argc,char **argv){
-#if defined(OM_NATIVE_FAULT_LOCAL)
+#if defined(OM_NATIVE_FAULT_DUPLEX) || defined(OM_NATIVE_FAULT_WORKER)
+    if(argc==5)return child(argc,argv);
+#elif defined(OM_NATIVE_FAULT_LOCAL)
     if(argc==4&&!std::strcmp(argv[1],"--local-task-v1"))return child(argc,argv);
 #else
     if(argc==8)return child(argc,argv);

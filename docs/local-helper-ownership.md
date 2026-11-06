@@ -60,7 +60,8 @@ See the [execution ledger](architecture/execution-plan.md) for exact platform, s
 The 250-ms cleanup attempt is not a kernel/driver/process-exit hard guarantee. Native API/loader/filesystem stalls,
 real PID reuse, uninterruptible kernels, malicious/replaced helpers, arbitrary descendant trees and physical durability are
 not qualified by interposition. Windows native wait-fault fixtures are now exercised; they do not force actual kernel faults.
-The public/local/duplex/worker registries remain separate. Application-wide uncertainty admission, the remaining native
+The P-14a public/local/duplex/worker retention registries are separate; later [P-14b](shared-native-admission.md) adds shared
+uncertainty admission without merging their native owners. Application-wide lifetime integration, the remaining native
 owners, deployment, actual sources/safety/telemetry and GPU/game/release qualification remain open. No requirement is marked
 complete by this slice.
 

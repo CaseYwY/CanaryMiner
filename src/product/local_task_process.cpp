@@ -1,4 +1,5 @@
 #include "local_task_process.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -65,13 +66,14 @@ struct LocalTaskProcess::Impl {
     explicit Impl(std::filesystem::path path) : helper(std::move(path)) {}
     std::filesystem::path helper;
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
+    NativeProcessAdmission admission;
     bool reaped=false,success=false,unknown=false,verified=false,blocked=false,reserved=false,created=false;
     static std::mutex &mutex(){static std::mutex value;return value;}
     static std::vector<Impl *> &quarantine(){static auto *value=new std::vector<Impl *>;return *value;}
     static unsigned &reservations(){static unsigned value=0;return value;}
     static std::atomic<unsigned> &unresolved(){static std::atomic<unsigned> value{0};return value;}
-    void unreaped(){if(!blocked){blocked=true;++unresolved();}}
-    void settled(){if(blocked){blocked=false;--unresolved();}}
+    void unreaped(){if(!blocked){blocked=true;++unresolved();admission.markUnresolved();}}
+    void settled(){if(blocked){blocked=false;--unresolved();}admission.settled();}
     static LocalTaskStatus reserve(Impl *p){
         std::lock_guard<std::mutex> lock(mutex());auto &held=quarantine();
         if(held.capacity()<64)held.reserve(64); // retain without allocating during teardown
@@ -79,9 +81,10 @@ struct LocalTaskProcess::Impl {
             if((*i)->exited(okay)){(*i)->close();delete *i;i=held.erase(i);}else ++i;}
         if(!held.empty()||unresolved().load())return LocalTaskStatus::Unreaped;
         if(reservations()>=64)return LocalTaskStatus::Busy;
+        if(!p->admission.begin())return LocalTaskStatus::Unreaped;
         ++reservations();p->reserved=true;return LocalTaskStatus::Ok;
     }
-    void release(){std::lock_guard<std::mutex> lock(mutex());if(reserved){reserved=false;--reservations();}}
+    void release(){std::lock_guard<std::mutex> lock(mutex());if(reserved){reserved=false;--reservations();}admission.settled();}
 #if defined(_WIN32)
     HANDLE process = nullptr, output = nullptr, job = nullptr;
     bool jobBound=false;
@@ -124,12 +127,12 @@ struct LocalTaskProcess::Impl {
         if (!length || length >= 32768) ready = false;
         std::wstring environment = L"SystemRoot="; environment += directory; environment.push_back(0); environment.push_back(0);
         PROCESS_INFORMATION pi{}; const auto parent = helper.parent_path().wstring();
-        const bool spawned = ready && !cancel.load() && !unresolved().load() && CreateProcessW(helper.c_str(),cmd.data(),nullptr,nullptr,TRUE,
+        const bool spawned = ready && !cancel.load() && admission.permitted() && CreateProcessW(helper.c_str(),cmd.data(),nullptr,nullptr,TRUE,
             EXTENDED_STARTUPINFO_PRESENT|CREATE_UNICODE_ENVIRONMENT|CREATE_NO_WINDOW|CREATE_SUSPENDED,&environment[0],parent.c_str(),&si.StartupInfo,&pi);
         if(!spawned)return false;
         created=true;process=pi.hProcess;temp.thread=pi.hThread;output=temp.read;temp.read=nullptr;
         jobBound=AssignProcessToJobObject(job,process)!=0;
-        return jobBound&&!cancel.load()&&!unresolved().load()&&ResumeThread(temp.thread)!=static_cast<DWORD>(-1);
+        return jobBound&&!cancel.load()&&admission.permitted()&&ResumeThread(temp.thread)!=static_cast<DWORD>(-1);
     }
     bool send(const std::string &) { return true; } // no potentially blocking parent pipe writes on Windows
     bool read(std::string &wire) {
@@ -189,7 +192,7 @@ struct LocalTaskProcess::Impl {
         char *argv[] = {const_cast<char *>(executable.c_str()),flag,nullptr};
         char lang[] = "LANG=C", locale[] = "LC_ALL=C"; char *environment[] = {lang,locale,nullptr};
 #if defined(OM_LOCAL_PIDFD_SPAWN)
-        const int result=ready&&!cancel.load()&&!unresolved().load()?pidfd_spawn(&pidfd,executable.c_str(),&setup.actions,&setup.attributes,argv,environment):-1;
+        const int result=ready&&!cancel.load()&&admission.permitted()?pidfd_spawn(&pidfd,executable.c_str(),&setup.actions,&setup.attributes,argv,environment):-1;
 #else
         const int result=-1;(void)ready;(void)cancel;(void)argv;(void)environment;
 #endif
@@ -267,7 +270,7 @@ LocalTaskResult LocalTaskProcess::run(const std::string &request, const std::ato
             if(impl_->start(request,cancel)){
                 std::string wire;
                 for (;;) {
-                    if(Impl::unresolved().load()){result.status=LocalTaskStatus::Unreaped;break;}
+                    if(!impl_->admission.permitted()){result.status=LocalTaskStatus::Unreaped;break;}
                     if (cancel.load()) { result.status = LocalTaskStatus::Cancelled; break; }
                     if (std::chrono::steady_clock::now() >= deadline) { result.status = LocalTaskStatus::Timeout; break; }
                     if (!impl_->send(request) || !impl_->read(wire)) break;
@@ -287,7 +290,7 @@ LocalTaskResult LocalTaskProcess::run(const std::string &request, const std::ato
         }
     } catch (...) { result.status = LocalTaskStatus::Unavailable; }
     result.childStarted=impl_->created;
-    if (!impl_->stop()||Impl::unresolved().load()) result.status = LocalTaskStatus::Unreaped;
+    if (!impl_->stop()||Impl::unresolved().load()||nativeProcessUnresolved()||impl_->admission.invalidated()) result.status = LocalTaskStatus::Unreaped;
     if (result.status != LocalTaskStatus::Ok) result.response.clear();
     return result;
 }
@@ -307,7 +310,7 @@ LocalTaskResult LocalTaskProcess::hold(const std::string &request,const std::ato
             if(impl_->start(request,cancel)){
                 std::string wire;bool accepted=false;size_t frameBytes=0;
                 for(;;){
-                    if(Impl::unresolved().load()){result.status=LocalTaskStatus::Unreaped;break;}
+                    if(!impl_->admission.permitted()){result.status=LocalTaskStatus::Unreaped;break;}
                     if(cancel.load()){result.status=LocalTaskStatus::Cancelled;break;}
                     if(!accepted&&std::chrono::steady_clock::now()>=deadline){result.status=LocalTaskStatus::Timeout;break;}
                     if(!impl_->send(request)||!impl_->read(wire))break;
@@ -318,7 +321,7 @@ LocalTaskResult LocalTaskProcess::hold(const std::string &request,const std::ato
                     else{const auto end=wire.find('\n');if(end!=std::string::npos){
                         if(!end||end+1!=wire.size()||std::chrono::steady_clock::now()>=deadline)break;
                         const bool admit=ready(wire.substr(0,end));
-                        if(Impl::unresolved().load()){result.status=LocalTaskStatus::Unreaped;break;}
+                        if(!impl_->admission.permitted()){result.status=LocalTaskStatus::Unreaped;break;}
                         if(!admit)break;
                         accepted=true;frameBytes=wire.size();}}
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -327,7 +330,7 @@ LocalTaskResult LocalTaskProcess::hold(const std::string &request,const std::ato
         }
     }catch(...){result.status=LocalTaskStatus::Unavailable;}
     result.childStarted=impl_->created;
-    if(!impl_->stop()||Impl::unresolved().load())result.status=LocalTaskStatus::Unreaped;
+    if(!impl_->stop()||Impl::unresolved().load()||nativeProcessUnresolved()||impl_->admission.invalidated())result.status=LocalTaskStatus::Unreaped;
     result.response.clear();
     return result;
 }

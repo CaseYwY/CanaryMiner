@@ -34,3 +34,13 @@ Final Windows focused CTest passes **12/12**. Windows/Linux ordinary and Linux A
 
 [P-03j/P-11p](cached-run-renewal.md) later fixes a separately reproduced redundant settled-Run renewal against an identical
 permission ceiling. It does not alter this pending-withdrawal/headroom distinction or its historical evidence.
+
+The later P-14b fresh all-own-code sanitizer rebuild exposes a fixture assumption: game entry was scheduled at the ninth
+helper probe, which can arrive after the original Run expires when each helper also starts under instrumentation. The
+isolated case fails **ten of ten** runs; split diagnostics show correct terminal revocation but an expired original deadline.
+An additional episode assertion is also red, proving no game-entry observation caused that revocation. The retained fixture
+now uses a unique parent-owned marker, created only after the native peer has received its pending Run. The synthetic detector
+reports entry on the next admitted probe. The test separately requires an actual episode and revocation before the unchanged
+original lease expires; it does not extend the lease, reduce instrumentation or change production control. A scoped owner
+removes only its own marker. The expanded **70-check** case passes ten isolated own-code sanitizer repetitions with no marker
+left behind; broader final-source evidence is recorded in the execution ledger.

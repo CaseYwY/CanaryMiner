@@ -1,6 +1,7 @@
 // Single-owner policy/intent contracts. No I/O, hardware access or implicit start.
 #pragma once
 
+#include "native_process_admission.h"
 #include <cstdint>
 #include <limits>
 
@@ -14,16 +15,20 @@ class SessionIntent {
    public:
     // Only an explicit run/start action calls this; price/game/config callbacks cannot.
     SessionToken explicitStart() {
-        if (active_ || epoch_ == std::numeric_limits<uint64_t>::max()) return {};
+        if (active_ || epoch_ == std::numeric_limits<uint64_t>::max() || nativeProcessUnresolved()) return {};
+        const auto nativeEpoch=nativeProcessEpoch();
+        if(!nativeProcessEpochCurrent(nativeEpoch))return {};
         ++epoch_;
+        nativeEpoch_=nativeEpoch;
         active_ = true;
         return {epoch_};
     }
     void stop() { active_ = false; }
-    bool permits(SessionToken token) const { return active_ && token.epoch != 0 && token.epoch == epoch_; }
+    bool permits(SessionToken token) const { return active_ && token.epoch != 0 && token.epoch == epoch_ && nativeProcessEpochCurrent(nativeEpoch_); }
 
    private:
     uint64_t epoch_ = 0;
+    uint64_t nativeEpoch_ = 0; // original explicit parent; clearing a transient process fault never renews it
     bool active_ = false;
 };
 

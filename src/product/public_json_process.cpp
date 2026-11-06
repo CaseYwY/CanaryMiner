@@ -1,4 +1,5 @@
 #include "public_json_process.h"
+#include "native_process_admission.h"
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -79,13 +80,14 @@ struct PublicJsonProcessClient::Impl {
     explicit Impl(std::filesystem::path path) : helper(std::move(path)) {}
     std::filesystem::path helper;
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
+    NativeProcessAdmission admission;
     bool reaped = false, success = false, unknown = false, verified = false, blocked = false, reserved = false;
     static std::mutex &mutex() { static std::mutex value; return value; }
     static std::vector<Impl *> &quarantine() { static auto *value = new std::vector<Impl *>; return *value; }
     static unsigned &reservations() { static unsigned value = 0; return value; }
     static std::atomic<unsigned> &unresolved() { static std::atomic<unsigned> value{0}; return value; }
-    void unreaped() { if (!blocked) { blocked = true; ++unresolved(); } }
-    void settled() { if (blocked) { blocked = false; --unresolved(); } }
+    void unreaped() { if (!blocked) { blocked = true; ++unresolved(); admission.markUnresolved(); } }
+    void settled() { if (blocked) { blocked = false; --unresolved(); } admission.settled(); }
     static PublicHttpsStatus reserve(Impl *p) {
         std::lock_guard<std::mutex> lock(mutex());
         auto &held = quarantine();
@@ -97,11 +99,13 @@ struct PublicJsonProcessClient::Impl {
         }
         if (!held.empty() || unresolved().load()) return PublicHttpsStatus::Unreaped;
         if (reservations() >= 64) return PublicHttpsStatus::Busy;
+        if (!p->admission.begin()) return PublicHttpsStatus::Unreaped;
         ++reservations(); p->reserved = true; return PublicHttpsStatus::Ok;
     }
     void release() {
         std::lock_guard<std::mutex> lock(mutex());
         if (reserved) { reserved = false; --reservations(); }
+        admission.settled();
     }
 #if defined(_WIN32)
     HANDLE process = nullptr, output = nullptr, job = nullptr;
@@ -148,13 +152,13 @@ struct PublicJsonProcessClient::Impl {
         environment += systemRoot; environment.push_back(0); environment.push_back(0);
         PROCESS_INFORMATION pi{};
         const auto parent = helper.parent_path().wstring();
-        bool created = ready && !cancel.load() && !unresolved().load() && CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
+        bool created = ready && !cancel.load() && admission.permitted() && CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | CREATE_SUSPENDED,
             &environment[0], parent.c_str(), &si.StartupInfo, &pi);
         if (created) {
             process = pi.hProcess; output = temp.read; temp.read = nullptr; temp.thread = pi.hThread;
             jobBound = AssignProcessToJobObject(job, process) != 0;
-            created = jobBound && !cancel.load() && !unresolved().load() && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
+            created = jobBound && !cancel.load() && admission.permitted() && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
             // The common cleanup retains both native handles until exit is actually observed.
         }
         return created;
@@ -230,7 +234,7 @@ struct PublicJsonProcessClient::Impl {
         char *environment[] = {lang, locale, nullptr};
         // Obtain the kernel identity atomically with creation. A later pidfd_open(pid) is still a reuse race.
 #if defined(OM_PUBLIC_PIDFD_SPAWN)
-        const int result = ready && !cancel.load() && !unresolved().load() ? pidfd_spawn(&pidfd, executable.c_str(), &setup.actions, &setup.attributes, argv.data(), environment) : -1;
+        const int result = ready && !cancel.load() && admission.permitted() ? pidfd_spawn(&pidfd, executable.c_str(), &setup.actions, &setup.attributes, argv.data(), environment) : -1;
 #else
         const int result = -1;
         (void)ready; (void)cancel; (void)environment;
@@ -324,13 +328,13 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
         response = {};
         if (!impl_->start(args, cancel)) {
             if (cancel.load()) response.status = PublicHttpsStatus::Cancelled;
-            else if (Impl::unresolved().load()) response.status = PublicHttpsStatus::Unreaped;
+            else if (nativeProcessUnresolved() || impl_->admission.invalidated()) response.status = PublicHttpsStatus::Unreaped;
             return response;
         }
         std::string wire;
         const size_t limit = limits.bodyBytes + kWireHeader;
         for (;;) {
-            if (Impl::unresolved().load()) { response = {}; response.status = PublicHttpsStatus::Unreaped; return response; }
+            if (!impl_->admission.permitted()) { response = {}; response.status = PublicHttpsStatus::Unreaped; return response; }
             if (cancel.load()) { response.status = PublicHttpsStatus::Cancelled; return response; }
             if (std::chrono::steady_clock::now() >= deadline) { response.status = PublicHttpsStatus::Timeout; return response; }
             if (!impl_->read(&wire, limit)) return response;
@@ -353,7 +357,7 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
         }();
     } catch (...) { response = {}; }
     // Cleanup is part of the result, not a destructor running after the return value was already copied.
-    if (!impl_->stop() || Impl::unresolved().load()) { response = {}; response.status = PublicHttpsStatus::Unreaped; }
+    if (!impl_->stop() || Impl::unresolved().load() || nativeProcessUnresolved() || impl_->admission.invalidated()) { response = {}; response.status = PublicHttpsStatus::Unreaped; }
     return response;
 }
 }  // namespace om

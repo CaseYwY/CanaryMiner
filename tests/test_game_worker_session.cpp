@@ -106,7 +106,17 @@ struct Rig {
     }
     WorkerFleetSnapshot view()const{return session->snapshot(0);}
 };
+// A unique, explicitly triggered synthetic event, not a fixed number of potentially slow helper startups.
+struct GameEntryTrigger {
+    const std::string mode="fixture-enter-"+std::to_string(localTaskProcessId())+"-"+std::to_string(workerControlNowMs());
+    const std::filesystem::path marker=detector.parent_path()/mode;
+    bool owned=false;
+    GameEntryTrigger(){std::error_code error;CHECK(!std::filesystem::exists(marker,error)&&!error);}
+    ~GameEntryTrigger(){if(owned){std::error_code error;std::filesystem::remove(marker,error);}}
+    void enter(){std::error_code error;owned=std::filesystem::create_directory(marker,error);CHECK(owned&&!error);}
+};
 void pendingRevoke(){
+    GameEntryTrigger entry;
     {Rig r(GameIntent::Off,"fixture-absent",4,2000,2000);CHECK(r.start("withheld-run"));
         const auto frozen=r.fresh(r.now());
         CHECK(r.until([&]{return r.lines.find("PENDINGRUN")!=r.lines.npos;},&frozen));const auto pending=r.view();
@@ -120,7 +130,7 @@ void pendingRevoke(){
         auto unsafe=r.fresh(headroom);unsafe.safety.safety.thermalSafe=false;r.session->tick(headroom,unsafe);
         CHECK(r.session->state()==WorkerFleetState::Faulted&&r.view().revoked&&r.view().commandRevision==pending.commandRevision);
         r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);}
-    for(unsigned mode=0;mode<8;++mode){Rig r(mode==7?GameIntent::Pause:GameIntent::Off,mode==7?"fixture-enter":"fixture-absent",4,mode==7?1500:2000,2000);
+    for(unsigned mode=0;mode<8;++mode){Rig r(mode==7?GameIntent::Pause:GameIntent::Off,mode==7?entry.mode:"fixture-absent",4,mode==7?1500:2000,2000);
         CHECK(r.start("withheld-run"));CHECK(r.until([&]{return r.lines.find("PENDINGRUN")!=r.lines.npos;}));const auto pending=r.view();
         CHECK_MSG(("pending fixture "+std::to_string(mode)+" revision "+std::to_string(pending.commandRevision)+
             " revoked "+std::to_string(pending.revoked)+" paused "+std::to_string(pending.paused)).c_str(),
@@ -134,11 +144,16 @@ void pendingRevoke(){
             CHECK(now.monotonicMs<pending.commandDeadlineMonoMs&&now.utcMs-evidence.safety.observed.utcMs<r.policy.maximumSafetyAgeMs);
             r.session->tick(now,evidence); // still-positive validity, shortened below the already-issued Run lease
         }else if(mode==6){r.intent.stop();r.step();}
-        else if(mode==7)CHECK(r.until([&]{return r.session->state()==WorkerFleetState::Faulted;}));
+        else if(mode==7){entry.enter();CHECK(r.until([&]{return r.session->state()==WorkerFleetState::Faulted;}));
+            CHECK_MSG("game-entry withdrawal must observe its synthetic episode, not merely expire the Run lease",!r.session->gameSnapshot().episodeKey.empty());}
         else r.step(&evidence);
         if(mode==5){CHECK(r.session->state()==WorkerFleetState::Active&&!r.view().revoked);r.session->requestStop();}
         else{const auto expected=mode==6?WorkerFleetState::Stopped:WorkerFleetState::Faulted;
-            CHECK_MSG("withdrawn pending Run must revoke before its original lease expires",r.session->state()==expected&&r.view().revoked&&workerControlNowMs()<pending.commandDeadlineMonoMs);
+            const auto observed=workerControlNowMs();const auto state=r.session->state();const auto view=r.view();
+            CHECK_MSG(("withdrawn pending Run mode "+std::to_string(mode)+" state "+std::to_string(static_cast<int>(state))+
+                " expected "+std::to_string(static_cast<int>(expected))+" revoked "+std::to_string(view.revoked)+
+                " original remaining ms "+std::to_string(static_cast<int64_t>(pending.commandDeadlineMonoMs)-static_cast<int64_t>(observed))).c_str(),
+                state==expected&&view.revoked&&observed<pending.commandDeadlineMonoMs);
             r.step();CHECK(r.session->state()==expected&&!r.session->launch(0,exe,{"--fleet-child","withheld-run"},300,r.now()));}
         CHECK(r.view().pauseRequested&&!r.view().paused&&r.view().commandRevision==pending.commandRevision);
         r.session->stop();CHECK(r.view().done&&r.view().reaped&&!r.view().retryable&&r.view().exitCode==0);

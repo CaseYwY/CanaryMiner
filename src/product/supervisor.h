@@ -559,16 +559,17 @@ class Supervisor {
     /** Returns kExitOk when every worker stopped on request, kExitRuntime when a worker could not be kept running. */
     int run() {
         if (opt_.stop && *opt_.stop) {settings_.stopBillingReview();return kExitOk;}
+        const auto nativeEpoch=nativeProcessEpoch();
         sessionToken_ = intent_.explicitStart();
         if (!intent_.permits(sessionToken_)) return kExitFaultLatched;
         if(opt_.workerFleetFactory){
             if(opt_.tuning||opt_.drainMs>60000){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
             try{fleet_=opt_.workerFleetFactory(intent_,sessionToken_);}catch(...){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
             if(opt_.stop&&*opt_.stop)intent_.stop();
-            if(!fleet_||!intent_.permits(sessionToken_)||!fleet_->start(static_cast<unsigned>(opt_.seeds.size()),supervisorControlTime())){
+            if(!fleet_||!intent_.permits(sessionToken_)||!fleet_->start(static_cast<unsigned>(opt_.seeds.size()),supervisorControlTime())||!nativeProcessEpochCurrent(nativeEpoch)){
                 intent_.stop();bool unresolved=false;
-                if(fleet_){fleet_->stop();for(unsigned i=0;i<opt_.seeds.size();++i)unresolved=unresolved||fleet_->snapshot(i).ownershipUnresolved;}
-                settings_.stopBillingReview();return !unresolved&&opt_.stop&&*opt_.stop?kExitOk:kExitFaultLatched;
+                if(fleet_){fleet_->requestStop();fleet_->stop();for(unsigned i=0;i<opt_.seeds.size();++i)unresolved=unresolved||fleet_->snapshot(i).ownershipUnresolved;}
+                settings_.stopBillingReview();return !unresolved&&nativeProcessEpochCurrent(nativeEpoch)&&opt_.stop&&*opt_.stop?kExitOk:kExitFaultLatched;
             }
         }
         const uint64_t t0 = supervisorNowMs();
@@ -689,8 +690,15 @@ class Supervisor {
         bool stopping = false, forced = false, quit = false, controlFault = false;
         uint64_t stopDeadline = 0, nextSummary = 0, nextSample = 0;
         bool samplingFaultReported=false;
+        const auto latchNativeFault=[&]{
+            if(nativeProcessEpochCurrent(nativeEpoch))return;
+            controlFault=true;
+            if(!stopping){beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;
+                addEvent("Native process ownership changed; explicit new session required.");}
+        };
         for (;;) {
             const uint64_t now = supervisorNowMs();
+            latchNativeFault();
             if (tty) {
                 for (int n = 0; n < 32; ++n) {
                     if(stopping||(opt_.stop&&*opt_.stop))break;
@@ -760,6 +768,7 @@ class Supervisor {
                 }
             }
             const bool stopRequested = quit || (opt_.stop && *opt_.stop);
+            latchNativeFault();
             if (!stopping && stopRequested) {
                 beginStop();
                 stopping = true;
@@ -768,9 +777,11 @@ class Supervisor {
             if(fleet_){
                 if(!stopping){WorkerFleetEvidence evidence;
                     try{if(opt_.workerFleetEvidence)evidence=opt_.workerFleetEvidence(sessionToken_.epoch);}catch(...){controlFault=true;beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}
+                    latchNativeFault();
                     if(!stopping&&opt_.stop&&*opt_.stop){beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}
                     if(!stopping)fleet_->tick(supervisorControlTime(),evidence);
-                    if(fleet_->state()==WorkerFleetState::Faulted){controlFault=true;beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}}
+                    latchNativeFault();
+                    if(!stopping&&fleet_->state()==WorkerFleetState::Faulted){controlFault=true;beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}}
                 for(size_t i=0;i<workers_.size();++i)for(auto &line:fleet_->takeLines(static_cast<unsigned>(i)))inbox_.emplace_back(i,std::move(line));
             }
             drainInbox(tty);
@@ -818,6 +829,7 @@ class Supervisor {
                 }
                 pending = pending || w.restartPending;
             }
+            latchNativeFault();
             if(energyCapture_&&intent_.permits(sessionToken_)){
                 const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
                 // A single ordered batch must be consumed before advancing the capture delivery clock.
@@ -827,6 +839,7 @@ class Supervisor {
                 settings_.updateEnergyAuthorization();
                 settings_.updateBillingReview();
             }
+            latchNativeFault();
             if (stopping) {
                 if (!alive) break;
                 if (now >= stopDeadline) {
@@ -897,6 +910,7 @@ class Supervisor {
         if (tty) printf("%s\n", summary.c_str());
         else printLine(summary);
         if (failed) intent_.stop();
+        controlFault=controlFault||!nativeProcessEpochCurrent(nativeEpoch); // late optional-helper settlement cannot erase the original fault epoch
         return controlFault ? kExitFaultLatched : forced ? kExitShutdownForced : failed && !quit && !(opt_.stop && *opt_.stop) ? kExitFaultLatched : kExitOk;
     }
 

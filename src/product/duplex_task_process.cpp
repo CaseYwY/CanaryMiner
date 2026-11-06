@@ -1,4 +1,5 @@
 #include "duplex_task_process.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <charconv>
 #include <mutex>
@@ -16,7 +17,13 @@
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/syscall.h>
 #include <unistd.h>
+#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2,40)
+#define OM_DUPLEX_PIDFD_SPAWN 1
+#endif
+#endif
 #endif
 namespace om {
 namespace {
@@ -39,61 +46,85 @@ B readBytes(Native fd,char *p,std::size_t n){const auto count=::read(fd,p,n);if(
 B writeBytes(Native fd,const char *p,std::size_t n){const auto count=::send(fd,p,n,MSG_DONTWAIT|MSG_NOSIGNAL);if(count>=0)return {count?IO::Bytes:IO::Closed,static_cast<std::size_t>(count)};
     return {errno==EAGAIN||errno==EWOULDBLOCK||errno==EINTR?IO::Pending:errno==EPIPE||errno==ECONNRESET?IO::Closed:IO::Error,0};}
 #endif
+} // namespace
+namespace duplex_task_detail {
 struct Channel {
     Native input=invalid,output=invalid;
     ~Channel(){close();}
     void close(){if(input==output)output=invalid;closeNative(input);closeNative(output);}
 };
+} // namespace duplex_task_detail
+namespace {
 bool integer(const char *s,uint64_t &out){if(!s)return false;const std::string_view v(s);if(v.empty()||v.size()>20||(v.size()>1&&v[0]=='0')||v[0]<'0'||v[0]>'9')return false;
     const auto r=std::from_chars(v.data(),v.data()+v.size(),out);return r.ec==std::errc{}&&r.ptr==v.data()+v.size()&&out;}
 }
 struct DuplexTaskProcess::Impl {
-    bool attempted=false,owned=false,reaped=false,unknown=false,reserved=false,eof=false,blocked=false,fault=false;
-    S state=S::Dormant;int exit=-1;Channel channel;std::string pending;std::size_t offset=0;
+    bool attempted=false,owned=false,reaped=false,unknown=false,reserved=false,eof=false,blocked=false,fault=false,verified=false;
+    S state=S::Dormant;int exit=-1;duplex_task_detail::Channel channel;std::string pending;std::size_t offset=0;
+    NativeProcessAdmission admission;
 #if defined(_WIN32)
     Native process=invalid,job=invalid;
+    bool jobBound=false;
 #else
-    pid_t pid=-1;
+    int pidfd=-1;
 #endif
     static std::mutex &mutex(){static std::mutex value;return value;}
     static std::vector<Impl *> &quarantine(){static auto *value=new std::vector<Impl *>;return *value;}
     static unsigned &reservations(){static unsigned value=0;return value;}
     static std::atomic<unsigned> &unresolved(){static std::atomic<unsigned> value{0};return value;}
-    void unreaped(){state=S::Unreaped;if(!blocked){blocked=true;++unresolved();}}
+    void unreaped(){state=S::Unreaped;if(!blocked){blocked=true;++unresolved();admission.markUnresolved();}}
     ~Impl(){channel.close();
 #if defined(_WIN32)
         closeNative(process);closeNative(job);
+#else
+        closeNative(pidfd);
 #endif
         if(reserved)--reservations(); // registry lock belongs to the deleting owner
     }
     bool observe(){if(!owned||reaped)return reaped;if(unknown)return false;
 #if defined(_WIN32)
-        const auto result=WaitForSingleObject(process,0);if(result==WAIT_TIMEOUT)return false;DWORD code=0;
+        const auto result=WaitForSingleObject(process,0);if(result==WAIT_TIMEOUT){verified=true;return false;}DWORD code=0;
         if(result!=WAIT_OBJECT_0||!GetExitCodeProcess(process,&code)){unknown=true;unreaped();return false;}exit=static_cast<int>(code);
 #else
-        int status=0;const auto result=waitpid(pid,&status,WNOHANG);if(result==0||(result<0&&errno==EINTR))return false;
-        if(result!=pid){unknown=true;unreaped();return false;}exit=WIFEXITED(status)?WEXITSTATUS(status):128+(WIFSIGNALED(status)?WTERMSIG(status):0);
+#if defined(OM_DUPLEX_PIDFD_SPAWN)
+        siginfo_t info{};const int result=waitid(P_PIDFD,static_cast<id_t>(pidfd),&info,WEXITED|WNOHANG);
+        if(result<0&&errno==EINTR)return false;
+        if(result||(info.si_pid&&info.si_code!=CLD_EXITED&&info.si_code!=CLD_KILLED&&info.si_code!=CLD_DUMPED)){unknown=true;unreaped();return false;}
+        verified=true;if(!info.si_pid)return false;
+        exit=info.si_code==CLD_EXITED?info.si_status:128+info.si_status;
+#else
+        unknown=true;unreaped();return false;
 #endif
-        reaped=true;if(blocked){blocked=false;--unresolved();}state=S::Exited;return true;
+#endif
+        reaped=true;if(blocked){blocked=false;--unresolved();}admission.settled();state=S::Exited;return true;
     }
-    static bool reserve(){std::lock_guard<std::mutex> lock(mutex());auto &held=quarantine();
+    static bool reserve(Impl *p){std::lock_guard<std::mutex> lock(mutex());auto &held=quarantine();
         if(held.capacity()<64)held.reserve(64); // allocate quarantine slots before any process launch, never while tearing one down
         for(auto i=held.begin();i!=held.end();){if((*i)->observe()){delete *i;i=held.erase(i);}else ++i;}
         if(!held.empty()||unresolved().load()||reservations()>=64)return false;
+        if(!p->admission.begin())return false;
         ++reservations();return true;}
     bool stop(unsigned ms){channel.close();if(!owned)return true;if(observe())return true;if(unknown){unreaped();return false;}
+        bool signalled=false;const auto end=Clock::now()+std::chrono::milliseconds(std::min(ms,2000u));
+        do{
+        if(verified&&!signalled){
 #if defined(_WIN32)
-        if(job!=invalid)TerminateJobObject(job,1);else TerminateProcess(process,1);
+            if(jobBound)TerminateJobObject(job,1);else TerminateProcess(process,1);
 #else
-        ::kill(-pid,SIGKILL);
+#if defined(SYS_pidfd_send_signal)
+            ::syscall(SYS_pidfd_send_signal,pidfd,SIGKILL,nullptr,0u);
 #endif
-        const auto end=Clock::now()+std::chrono::milliseconds(std::min(ms,2000u));
-        do{if(observe())return true;if(Clock::now()>=end)break;std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(true);
+#endif
+            signalled=true;
+        }
+        if(observe())return true;
+        if(unknown||Clock::now()>=end)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(true);
         unreaped();return false;
     }
     bool launch(const std::filesystem::path &exe,const std::atomic<bool> &cancel){
 #if defined(_WIN32)
-        struct Temps {Native input=invalid,output=invalid,parent=invalid,null=invalid;~Temps(){closeNative(input);closeNative(output);closeNative(parent);closeNative(null);}} child;
+        struct Temps {Native input=invalid,output=invalid,parent=invalid,null=invalid,thread=invalid;~Temps(){closeNative(input);closeNative(output);closeNative(parent);closeNative(null);closeNative(thread);}} child;
         SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};
         if(!CreatePipe(&child.input,&channel.output,&sa,8192)||!CreatePipe(&channel.input,&child.output,&sa,8192))return false;
         bool ready=inherit(channel.input,false)&&inherit(channel.output,false)&&nonblocking(channel.input)&&nonblocking(channel.output)&&nonblocking(child.input)&&nonblocking(child.output);
@@ -103,41 +134,47 @@ struct DuplexTaskProcess::Impl {
         ready=ready&&job&&SetInformationJobObject(job,JobObjectExtendedLimitInformation,&policy,sizeof(policy));
         SIZE_T size=0;InitializeProcThreadAttributeList(nullptr,1,0,&size);std::vector<unsigned char> storage(size);auto *attributes=reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
         const bool initialized=ready&&InitializeProcThreadAttributeList(attributes,1,0,&size);
+        struct AttributeCleanup {LPPROC_THREAD_ATTRIBUTE_LIST value;~AttributeCleanup(){if(value)DeleteProcThreadAttributeList(value);}} cleanup{initialized?attributes:nullptr};
         Native handles[]={child.input,child.output,child.parent,child.null};ready=initialized&&UpdateProcThreadAttribute(attributes,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,handles,sizeof(handles),nullptr,nullptr);
         std::wstring command=L"\""+exe.wstring()+L"\" --local-stream-v1 "+std::to_wstring(reinterpret_cast<uintptr_t>(child.input))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(child.output))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(child.parent));
         std::vector<wchar_t> words(command.begin(),command.end());words.push_back(0);wchar_t directory[32768]{};const auto n=GetWindowsDirectoryW(directory,32768);if(!n||n>=32768)ready=false;
         std::wstring environment=L"SystemRoot=";environment+=directory;environment.push_back(0);environment.push_back(0);const auto parent=exe.parent_path().wstring();
         STARTUPINFOEXW startup{};startup.StartupInfo.cb=sizeof(startup);startup.StartupInfo.dwFlags=STARTF_USESTDHANDLES;startup.StartupInfo.hStdInput=startup.StartupInfo.hStdOutput=startup.StartupInfo.hStdError=child.null;startup.lpAttributeList=attributes;
-        PROCESS_INFORMATION pi{};const bool created=ready&&!cancel.load()&&CreateProcessW(exe.c_str(),words.data(),nullptr,nullptr,TRUE,EXTENDED_STARTUPINFO_PRESENT|CREATE_UNICODE_ENVIRONMENT|CREATE_NO_WINDOW|CREATE_SUSPENDED,environment.data(),parent.c_str(),&startup.StartupInfo,&pi);
-        if(initialized)DeleteProcThreadAttributeList(attributes);if(!created)return false;
-        process=pi.hProcess;owned=true;const bool bound=AssignProcessToJobObject(job,process)&&!cancel.load()&&ResumeThread(pi.hThread)!=static_cast<DWORD>(-1);CloseHandle(pi.hThread);
-        if(!bound){TerminateProcess(process,1);stop(250);return false;}return true;
+        PROCESS_INFORMATION pi{};const bool created=ready&&!cancel.load()&&admission.permitted()&&CreateProcessW(exe.c_str(),words.data(),nullptr,nullptr,TRUE,EXTENDED_STARTUPINFO_PRESENT|CREATE_UNICODE_ENVIRONMENT|CREATE_NO_WINDOW|CREATE_SUSPENDED,environment.data(),parent.c_str(),&startup.StartupInfo,&pi);
+        if(!created)return false;
+        process=pi.hProcess;child.thread=pi.hThread;owned=true;jobBound=AssignProcessToJobObject(job,process)!=0;
+        return jobBound&&!cancel.load()&&admission.permitted()&&ResumeThread(child.thread)!=static_cast<DWORD>(-1);
 #else
         struct sigaction policy{};if(sigaction(SIGCHLD,nullptr,&policy)||policy.sa_handler!=SIG_DFL||(policy.sa_flags&SA_NOCLDWAIT))return false;
-        int pair[2];if(socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,pair))return false;
-        const int child=fcntl(pair[1],F_DUPFD_CLOEXEC,4);::close(pair[1]);channel.input=channel.output=pair[0];
-        if(child<0||!nonblocking(channel.input)||!nonblocking(child)){if(child>=0)::close(child);return false;}
-        posix_spawn_file_actions_t actions;posix_spawnattr_t attributes;
-        if(posix_spawn_file_actions_init(&actions)){::close(child);return false;}
-        if(posix_spawnattr_init(&attributes)){posix_spawn_file_actions_destroy(&actions);::close(child);return false;}
-        bool ready=posix_spawn_file_actions_addopen(&actions,0,"/dev/null",O_RDONLY,0)==0&&posix_spawn_file_actions_addopen(&actions,1,"/dev/null",O_WRONLY,0)==0&&
-            posix_spawn_file_actions_addopen(&actions,2,"/dev/null",O_WRONLY,0)==0&&posix_spawn_file_actions_adddup2(&actions,child,3)==0;
-#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
-#if __GLIBC_PREREQ(2,34)
-        ready=ready&&posix_spawn_file_actions_addclosefrom_np(&actions,4)==0;
-#else
-        ready=false;
+#if !defined(OM_DUPLEX_PIDFD_SPAWN) || !defined(SYS_pidfd_send_signal)
+        return false;
 #endif
-#else
-        ready=false;
+        struct Pipes {int pair[2]={-1,-1},child=-1;~Pipes(){for(int fd:{pair[0],pair[1],child})if(fd>=0)::close(fd);}} pipe;
+        if(socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,pipe.pair))return false;
+        pipe.child=fcntl(pipe.pair[1],F_DUPFD_CLOEXEC,4);closeNative(pipe.pair[1]);channel.input=channel.output=pipe.pair[0];pipe.pair[0]=-1;
+        if(pipe.child<0||!nonblocking(channel.input)||!nonblocking(pipe.child))return false;
+        struct Setup {posix_spawn_file_actions_t actions;posix_spawnattr_t attributes;bool actionsReady=false,attributesReady=false;
+            ~Setup(){if(attributesReady)posix_spawnattr_destroy(&attributes);if(actionsReady)posix_spawn_file_actions_destroy(&actions);}} setup;
+        if(posix_spawn_file_actions_init(&setup.actions))return false;
+        setup.actionsReady=true;
+        if(posix_spawnattr_init(&setup.attributes))return false;
+        setup.attributesReady=true;
+        bool ready=posix_spawn_file_actions_addopen(&setup.actions,0,"/dev/null",O_RDONLY,0)==0&&posix_spawn_file_actions_addopen(&setup.actions,1,"/dev/null",O_WRONLY,0)==0&&
+            posix_spawn_file_actions_addopen(&setup.actions,2,"/dev/null",O_WRONLY,0)==0&&posix_spawn_file_actions_adddup2(&setup.actions,pipe.child,3)==0;
+#if defined(OM_DUPLEX_PIDFD_SPAWN)
+        ready=ready&&posix_spawn_file_actions_addclosefrom_np(&setup.actions,4)==0;
 #endif
         sigset_t mask,defaults;sigemptyset(&mask);sigemptyset(&defaults);for(int sig:{SIGPIPE,SIGINT,SIGTERM})sigaddset(&defaults,sig);
-        ready=ready&&posix_spawnattr_setflags(&attributes,POSIX_SPAWN_SETPGROUP|POSIX_SPAWN_SETSIGMASK|POSIX_SPAWN_SETSIGDEF)==0&&
-            posix_spawnattr_setpgroup(&attributes,0)==0&&posix_spawnattr_setsigmask(&attributes,&mask)==0&&posix_spawnattr_setsigdefault(&attributes,&defaults)==0;
+        ready=ready&&posix_spawnattr_setflags(&setup.attributes,POSIX_SPAWN_SETPGROUP|POSIX_SPAWN_SETSIGMASK|POSIX_SPAWN_SETSIGDEF)==0&&
+            posix_spawnattr_setpgroup(&setup.attributes,0)==0&&posix_spawnattr_setsigmask(&setup.attributes,&mask)==0&&posix_spawnattr_setsigdefault(&setup.attributes,&defaults)==0;
         auto executable=exe.string(),parent=std::to_string(getpid());char flag[]="--local-stream-v1",fd[]="3",lang[]="LANG=C",locale[]="LC_ALL=C";
         char *argv[]={executable.data(),flag,fd,fd,parent.data(),nullptr};char *environment[]={lang,locale,nullptr};
-        const int result=ready&&!cancel.load()?posix_spawn(&pid,executable.c_str(),&actions,&attributes,argv,environment):-1;
-        posix_spawn_file_actions_destroy(&actions);posix_spawnattr_destroy(&attributes);::close(child);if(result){pid=-1;return false;}owned=true;return true;
+#if defined(OM_DUPLEX_PIDFD_SPAWN)
+        const int result=ready&&!cancel.load()&&admission.permitted()?pidfd_spawn(&pidfd,executable.c_str(),&setup.actions,&setup.attributes,argv,environment):-1;
+#else
+        const int result=-1;(void)ready;(void)argv;(void)environment;(void)cancel;
+#endif
+        if(result){pidfd=-1;return false;}owned=true;return true;
 #endif
     }
 };
@@ -146,21 +183,23 @@ DuplexTaskProcess::~DuplexTaskProcess(){if(!impl_->stop(250)){std::lock_guard<st
     else{std::lock_guard<std::mutex> lock(Impl::mutex());impl_.reset();}}
 bool DuplexTaskProcess::start(const std::filesystem::path &exe,const std::atomic<bool> &cancel){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
     if(cancel.load()){p.state=S::Stopped;return false;}
-    try{if(!localTaskPath(exe)||!Impl::reserve()){p.state=S::Failed;return false;}p.reserved=true;
-        if(!p.launch(exe,cancel)||cancel.load()){p.state=S::Failed;p.stop(250);return false;}p.state=S::Running;return true;}catch(...){p.state=S::Failed;p.stop(250);return false;}}
-bool DuplexTaskProcess::send(const std::string &wire){auto &p=*impl_;if(p.state!=S::Running||!p.pending.empty()||wire.empty()||wire.size()>duplexTaskFrameLimit)return false;p.pending=wire;p.offset=0;return true;}
+    try{if(!localTaskPath(exe)||!Impl::reserve(&p)){p.state=nativeProcessUnresolved()?S::Unreaped:S::Failed;return false;}p.reserved=true;
+        if(!p.launch(exe,cancel)||cancel.load()||!p.admission.permitted()){p.state=S::Failed;p.stop(250);return false;}p.state=S::Running;return true;}catch(...){p.state=S::Failed;p.stop(250);return false;}}
+bool DuplexTaskProcess::send(const std::string &wire){auto &p=*impl_;if(p.state!=S::Running||!p.admission.permitted()||!p.pending.empty()||wire.empty()||wire.size()>duplexTaskFrameLimit)return false;p.pending=wire;p.offset=0;return true;}
 DuplexTaskPoll DuplexTaskProcess::poll(){auto &p=*impl_;DuplexTaskPoll out;
+    if(p.state==S::Running&&!p.admission.permitted()){p.fault=true;p.channel.close();p.state=S::Failed;}
     if(p.state==S::Running&&!p.pending.empty()){const auto sent=writeBytes(p.channel.output,p.pending.data()+p.offset,std::min<std::size_t>(4096,p.pending.size()-p.offset));
         if(sent.status==IO::Closed||sent.status==IO::Error||sent.bytes>p.pending.size()-p.offset){p.fault=true;p.state=S::Failed;}
         else{p.offset+=sent.bytes;if(p.offset==p.pending.size()){p.pending.clear();p.offset=0;}}}
     if((p.state==S::Running||p.state==S::Exited)&&!p.eof&&p.channel.input!=invalid){char bytes[4096];const auto got=readBytes(p.channel.input,bytes,sizeof(bytes));
         if(got.status==IO::Error){p.fault=true;p.state=S::Failed;}else if(got.status==IO::Closed)p.eof=true;else if(got.status==IO::Bytes)out.bytes.assign(bytes,got.bytes);}
     if(p.owned)p.observe();
+    if(p.admission.invalidated()){p.fault=true;out.bytes.clear();p.channel.close();if(p.state!=S::Unreaped&&!p.reaped)p.state=S::Failed;}
     out.state=p.state;out.exitCode=p.exit;out.eof=p.eof;out.channelFault=p.fault;out.flushed=p.pending.empty();return out;
 }
 void DuplexTaskProcess::requestStop(){auto &p=*impl_;p.attempted=true;p.channel.close();if(p.state!=S::Exited&&p.state!=S::Unreaped)p.state=S::Stopped;}
 bool DuplexTaskProcess::terminate(unsigned ms){requestStop();return impl_->stop(ms);}
-struct DuplexTaskChannel::Impl {Channel channel;bool attempted=false;
+struct DuplexTaskChannel::Impl {duplex_task_detail::Channel channel;bool attempted=false;
 #if defined(_WIN32)
     Native parent=invalid;~Impl(){closeNative(parent);}bool alive()const{return parent!=invalid&&WaitForSingleObject(parent,0)==WAIT_TIMEOUT;}
 #else
