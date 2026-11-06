@@ -258,6 +258,11 @@ Owns message catalogues, fallback/review status, locale formatting and terminal 
 
 Owns collection limits, local retention/export previews, credential references and redacted diagnostic bundles. Sensitive values are not routed through a public stats/log channel merely because that channel already exists. Financial and game records need their own opt-in exposure controls.
 
+[P-14m](../credential-redaction.md) filters known quoted/compound credential options and incomplete JSON string values,
+while the stdout/stderr tee omits complete oversized raw lines instead of publishing independently filtered fragments.
+Original newline/EOF boundaries restore context; pipe draining and subsequent ordinary lines continue. This does not make
+unknown raw data anonymous, authorize exports, or complete collection/retention/disclosure/vault and hard native-write gates.
+
 ### M-RELEASE
 
 Owns host/production test matrices, packaged dependencies/licences, compatibility/migration notes and honest release status. Windows and Linux capabilities are reported separately. Existing device qualification and kernel admission are not broadened as an incidental convenience.

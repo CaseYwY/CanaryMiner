@@ -80,7 +80,17 @@ class Redactor {
         return out;
     }
 
-    static bool isValueEnd(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '"' || c == '\'' || c == ',' || c == ';'; }
+    static bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v'; }
+
+    // An unfinished quoted value is private through the end of the supplied text. Escaped quotes do not end it.
+    static size_t quotedEnd(const std::string &text, size_t begin, char quote) {
+        size_t end = begin;
+        while (end < text.size() && text[end] != quote) {
+            if (text[end] == '\\' && end + 1 < text.size()) ++end;
+            ++end;
+        }
+        return end;
+    }
 
     static std::string hideOptionValues(const std::string &text) {
         static const char *const opts[] = {"--pass", "--wallet", "--user", "--api-key", "--password"};
@@ -90,15 +100,31 @@ class Redactor {
             size_t pos = 0;
             while ((pos = out.find(key, pos)) != std::string::npos) {
                 size_t v = pos + key.size();
-                if (v < out.size() && out[v] != ' ' && out[v] != '=') { pos = v; continue; }
-                if (v < out.size()) ++v;  // the space or '='
-                size_t e = v;
-                while (e < out.size() && !isValueEnd(out[e])) ++e;
-                if (e > v && out.compare(v, e - v, "<redacted>") != 0) {
-                    out.replace(v, e - v, "<redacted>");
-                    e = v + 10;
+                if (v == out.size() || (!isSpace(out[v]) && out[v] != '=')) { pos = v; continue; }
+                if (out[v] == '=') ++v;
+                while (v < out.size() && isSpace(out[v])) ++v;
+                if (v == out.size()) break;
+                const bool quoted = out[v] == '"' || out[v] == '\'';
+                size_t end = v, firstClose = std::string::npos;
+                // Treat a compound/escaped command-line token as one private value. This is conservative
+                // text filtering, not shell execution or a claim to parse every platform's argument grammar.
+                while (end < out.size() && !isSpace(out[end])) {
+                    if (out[end] == '"' || out[end] == '\'') {
+                        const size_t close = quotedEnd(out, end + 1, out[end]);
+                        if (end == v) firstClose = close;
+                        if (close == out.size()) { end = close; break; }
+                        end = close + 1;
+                    } else if (out[end] == '\\' && end + 1 < out.size()) {
+                        end += 2;
+                    } else {
+                        ++end;
+                    }
                 }
-                pos = e;
+                const bool simpleQuoted = quoted && (firstClose == out.size() || firstClose + 1 == end);
+                const bool closed = simpleQuoted && firstClose < out.size();
+                const size_t begin = v + (simpleQuoted ? 1 : 0);
+                out.replace(begin, end - begin - (closed ? 1 : 0), "<redacted>");
+                pos = begin + 10 + (closed ? 1 : 0);
             }
         }
         return out;
@@ -112,23 +138,15 @@ class Redactor {
             size_t pos = 0;
             while ((pos = out.find(key, pos)) != std::string::npos) {
                 size_t v = pos + key.size();
-                while (v < out.size() && (out[v] == ' ' || out[v] == '\t')) ++v;
+                while (v < out.size() && isSpace(out[v])) ++v;
                 if (v >= out.size() || out[v] != ':') { pos = pos + key.size(); continue; }
                 ++v;
-                while (v < out.size() && (out[v] == ' ' || out[v] == '\t')) ++v;
+                while (v < out.size() && isSpace(out[v])) ++v;
                 if (v >= out.size() || out[v] != '"') { pos = v; continue; }
-                size_t e = v + 1;
-                while (e < out.size() && out[e] != '"') {
-                    if (out[e] == '\\' && e + 1 < out.size()) ++e;
-                    ++e;
-                }
-                if (e >= out.size()) { pos = v; continue; }
-                const std::string body = out.substr(v + 1, e - v - 1);
-                if (body != "<redacted>") {
-                    out.replace(v + 1, e - v - 1, "<redacted>");
-                    e = v + 1 + 10;
-                }
-                pos = e + 1;
+                const size_t begin = v + 1, end = quotedEnd(out, begin, '"');
+                const bool closed = end < out.size();
+                out.replace(begin, end - begin, "<redacted>");
+                pos = begin + 10 + (closed ? 1 : 0);
             }
         }
         return out;

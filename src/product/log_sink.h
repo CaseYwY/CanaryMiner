@@ -173,6 +173,7 @@ class OutputTee {
         int saved = -1;   // duplicate of the original descriptor
         int rd = -1;      // read end of the pipe
         std::string partial;
+        bool dropping = false; // never restart redaction midway through an oversized private value
     };
 
     LogSink *sink_;
@@ -237,19 +238,24 @@ class OutputTee {
         while ((n = readFd(c->rd, buf, sizeof(buf))) > 0) {
             for (long i = 0; i < n; ++i) {
                 if (buf[i] == '\n') {
-                    emit(c, c->partial);
+                    if (!c->dropping) emit(c, c->partial);
                     c->partial.clear();
-                } else if (buf[i] != '\r') {
+                    c->dropping = false;
+                } else if (buf[i] != '\r' && !c->dropping) {
                     c->partial += buf[i];
                     if (c->partial.size() >= 65536) {
-                        emit(c, c->partial);
+                        // A raw fragment loses its option/JSON context. Omit the complete line, keep draining,
+                        // and resume only at the next original newline; no credential suffix can escape alone.
                         c->partial.clear();
+                        c->dropping = true;
+                        emit(c, "[worker output omitted: oversized line]");
                     }
                 }
             }
         }
-        if (!c->partial.empty()) emit(c, c->partial);
+        if (!c->dropping && !c->partial.empty()) emit(c, c->partial);
         c->partial.clear();
+        c->dropping = false; // EOF ends this stream; a later explicit start has a new line context
     }
 };
 

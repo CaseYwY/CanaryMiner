@@ -346,6 +346,12 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
 
+[P-14m](../credential-redaction.md) reproduces known quoted/whitespace/compound/escaped/truncated credential disclosure
+through both pure filtering and the actual bounded rotating sink. Real stdout/stderr tee pipes must omit complete oversized
+lines, never emit a contextless private suffix, preserve following ordinary lines, handle oversized EOF and restart a fresh
+context on the same facade. All files/text are owned synthetic fixtures; these checks neither anonymize arbitrary raw data
+nor grant collection/export/retention/disclosure permission or qualify hard filesystem/console latency.
+
 ## T-RELEASE
 
 [P-14g](../background-native-lifetimes.md) checks actual deferred identity and display thread barriers, fixed CPU helper creation counts, source callback-return faults, foreign result consumption, session-energy original lifetime/current/stop/allocation refusal and unchanged-epoch explicit restart. Allocation failures affect every thread and assert engagement; native queue barriers and fixed-mode/unknown-mode guards are distinct from source/hardware qualification. The display fixture's unavailable-NVML shim prevents driver load even on accidental fallback. Remaining economic/enclosing views, hard native/driver bounds and source/deployment/physical/release gates stay independent.
