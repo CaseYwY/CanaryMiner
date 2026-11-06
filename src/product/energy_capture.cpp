@@ -1,6 +1,7 @@
 #include "energy_capture.h"
 #include "energy_history_model.h"
 #include "hash.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <mutex>
 
@@ -32,10 +33,13 @@ bool sameBinding(const EnergyHistoryBinding &a,const EnergyHistoryBinding &b){re
 class Capture final:public EnergyCaptureSink {
     EnergyCapturePlan plan_;
     EnergyHistoryOwner owner_;
+    NativeProcessLifetime nativeLife_;
+    bool nativeFaulted_=false;
     mutable std::mutex mutex_;
     std::mutex lifecycle_;
     EnergyCaptureSnapshot current_;
     std::shared_ptr<const EnergyCaptureSnapshot> published_=std::make_shared<const EnergyCaptureSnapshot>();
+    const std::shared_ptr<const EnergyCaptureSnapshot> emptyTerminal_=published_;
     std::vector<unsigned> mapping_;
     std::vector<std::optional<uint64_t>> selectedAt_,seenAt_;
     std::vector<EnergyHistoryReading> queue_;
@@ -53,6 +57,13 @@ class Capture final:public EnergyCaptureSink {
     void discard(){if(!queue_.empty()){const auto count=queue_.size();queue_.clear();gap(count);}}
     void fault(EnergyCaptureState state){
         current_.dropped+=queue_.size();queue_.clear();stopped_=true;current_.state=state;owner_.requestStop();current_.owner=owner_.snapshot();
+    }
+    bool nativeCurrent()noexcept{ // mutex held; revoke before fallible snapshot allocation
+        if(!nativeLife_.bound()||nativeLife_.current())return true;
+        if(!nativeFaulted_){nativeFaulted_=true;stopped_=true;current_.dropped+=queue_.size();queue_.clear();
+            if(current_.state!=EnergyCaptureState::Stopped)current_.state=EnergyCaptureState::Faulted;
+            try{owner_.requestStop();current_.owner=owner_.snapshot();publish();}catch(...){} }
+        return false;
     }
     bool sync(){
         const auto s=owner_.snapshot();const bool changed=!current_.owner||s->revision!=current_.owner->revision;
@@ -97,6 +108,8 @@ class Capture final:public EnergyCaptureSink {
         if(!generation||!sessionKey||!validPolicy(plan_.policy)||!validEnergyHistoryLimits(plan_.limits)||plan_.policy.batchReadings>plan_.limits.maxReadings||
             !makeEnergyCaptureBinding(plan_.privateNamespace,plan_.binding.historyBeginUtcMs,ids,plan_.binding.evidence.origin,&derived)||
             !sameBinding(derived,plan_.binding)||!mappedKeys(plan_.privateNamespace,ids,plan_.binding.evidence.origin,&keys))return false;
+        if(!nativeLife_.begin()){nativeCurrent();return false;}
+        NativeProcessScope original(nativeLife_.epoch());
         for(const auto &key:keys)mapping_.push_back(static_cast<unsigned>(std::lower_bound(derived.channels.begin(),derived.channels.end(),key)-derived.channels.begin()));
         selectedAt_.resize(keys.size());seenAt_.resize(keys.size());queue_.reserve(plan_.policy.bufferedReadings);
         plan_.privateNamespace.clear(); // no raw device IDs retained; binding keys remain private correlation identifiers
@@ -106,6 +119,8 @@ class Capture final:public EnergyCaptureSink {
     }
     EnergyCaptureAdmission submit(uint64_t generation,const SessionPowerInput &in)override{
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return EnergyCaptureAdmission::Stopped;
+        NativeProcessScope original(nativeLife_.epoch());
         if(generation!=current_.generation)return EnergyCaptureAdmission::StaleGeneration;
         if(stopped_)return EnergyCaptureAdmission::Stopped;
         sync();
@@ -134,11 +149,12 @@ class Capture final:public EnergyCaptureSink {
         publish();return EnergyCaptureAdmission::Buffered;
     }
     void markGap(uint64_t generation)override{
-        std::lock_guard<std::mutex> lock(mutex_);if(stopped_||generation!=current_.generation)return;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||stopped_||generation!=current_.generation)return;
         gap(0);publish();
     }
     void tick(int64_t wall,uint64_t mono)override{
-        std::lock_guard<std::mutex> lock(mutex_);if(stopped_)return;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||stopped_)return;
+        NativeProcessScope original(nativeLife_.epoch());
         const bool changed=sync();if(stopped_){publish();return;}
         if(!clock(wall,mono)){fault(EnergyCaptureState::ClockFault);publish();return;}
         if(current_.state!=EnergyCaptureState::Collecting||current_.owner->state!=EnergyHistoryOwnerState::Ready||queue_.empty()||
@@ -161,12 +177,15 @@ class Capture final:public EnergyCaptureSink {
     }
     EnergyHistoryAdmission inspect(uint64_t generation,uint64_t revision)override{
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());
         if(stopped_)return EnergyHistoryAdmission::NotReady;
         const bool changed=sync();if(!queue_.empty()){if(changed)publish();return EnergyHistoryAdmission::NotReady;}
         const auto result=owner_.refresh(generation,revision);sync();publish();return result;
     }
     EnergyHistoryAdmission retryReviewed(uint64_t generation,uint64_t revision)override{
-        std::lock_guard<std::mutex> lock(mutex_);if(stopped_)return EnergyHistoryAdmission::NotReady;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||stopped_)return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());
         const bool changed=sync();if(current_.state!=EnergyCaptureState::NeedsReview){if(changed)publish();return EnergyHistoryAdmission::NotReady;}
         const auto ticket=current_.owner->lastTicket+1;const auto result=owner_.retryReviewed(generation,revision);
         if(result==EnergyHistoryAdmission::Queued)retryTicket_=ticket;
@@ -177,7 +196,11 @@ class Capture final:public EnergyCaptureSink {
         stopped_=true;discard();owner_.requestStop();current_.owner=owner_.snapshot();current_.state=EnergyCaptureState::Stopped;publish();
     }
     void stop()override{std::lock_guard<std::mutex> life(lifecycle_);requestStop();owner_.stop();}
-    std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{std::lock_guard<std::mutex> lock(mutex_);return published_;}
+    std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{
+        std::lock_guard<std::mutex> lock(mutex_);auto &s=*const_cast<Capture *>(this);s.nativeCurrent();
+        if(nativeLife_.current()&&!nativeLife_.permitted())return emptyTerminal_;
+        return published_->revision!=current_.revision||published_->state!=current_.state?emptyTerminal_:published_;
+    }
 };
 }
 bool makeEnergyCaptureBinding(const std::string &space,int64_t begin,const std::vector<std::string> &ids,PowerOrigin origin,EnergyHistoryBinding *out){

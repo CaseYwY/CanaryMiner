@@ -1,5 +1,9 @@
 # Native development energy runtime (P-08i)
 
+[P-14e](energy-native-lifetimes.md) subsequently freezes the outer runtime's original native lifetime before capture and
+delayed authorization starts. Foreign uncertainty revokes both owners/current views without joining or borrowing a newly
+cleared epoch; already explicit stop and retained unknown originals stay separate from native-fault transport.
+
 This slice wires the existing [authorization controls](energy-authorization.md) and [lifetime-fenced collector](energy-collector.md) into the native entry point behind **`CANARY_ENABLE_ENERGY_RUNTIME=OFF` by default**. R-ENG-001, R-PRIV-001/002, R-SAFE-001/002 and R-REL-001 remain partial; M-ENERGY/M-PRIVACY/M-SUPERVISOR; T-ENERGY/T-CONFIG/T-INTENT/T-UI/T-PRIVACY/T-RELEASE; D-43.
 
 Build capability, saved consent and current collection are separate. Enabling the development build does not enroll devices or enable disk retention. A missing authorization record remains OFF and read-only startup creates no state directory, lock, identity or database. A saved ON requires the existing Ready enrollment, exact selected set and successful fresh lifetime handshake. This is host integration evidence, not a qualified production deployment or real-sensor measurement.

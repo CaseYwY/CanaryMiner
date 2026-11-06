@@ -1,5 +1,6 @@
 #include "energy_leased_capture.h"
 #include "energy_collector_process.h"
+#include "native_process_admission.h"
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -11,6 +12,8 @@ class LeasedCapture final:public EnergyCaptureSink {
     bool disabled_;
     unsigned timeout_;
     EnergyHistoryClock clock_;
+    NativeProcessLifetime nativeLife_;
+    bool nativeFaulted_=false;
     mutable std::mutex mutex_;
     std::mutex lifecycle_;
     std::thread thread_;
@@ -20,6 +23,7 @@ class LeasedCapture final:public EnergyCaptureSink {
     std::unique_ptr<EnergyCaptureSink> capture_;
     EnergyCaptureSnapshot current_;
     std::shared_ptr<const EnergyCaptureSnapshot> published_=std::make_shared<const EnergyCaptureSnapshot>();
+    const std::shared_ptr<const EnergyCaptureSnapshot> emptyTerminal_=published_;
     void publish(){++current_.revision;published_=std::make_shared<const EnergyCaptureSnapshot>(current_);}
     void sync(){
         if(capture_){const auto s=capture_->snapshot();if(s->revision!=innerRevision_){
@@ -34,13 +38,25 @@ class LeasedCapture final:public EnergyCaptureSink {
         if(capture_)capture_->requestStop();
         sync();current_.state=EnergyCaptureState::Faulted;publish();
     }
+    bool nativeCurrent()noexcept{ // mutex held; actual owned hold settles on its background thread
+        if(!nativeLife_.bound()||nativeLife_.current())return true;
+        if(!nativeFaulted_){nativeFaulted_=true;cancel_=true;stopped_=true;leaseHeld_=false;
+            const bool stopped=current_.leaseState==EnergyLeaseState::Stopped;
+            current_.leaseTransport=LocalTaskStatus::Unreaped;
+            if(provisionPending_)current_.provisioningOutcomeUnknown=true;
+            if(!stopped){current_.leaseState=EnergyLeaseState::Lost;current_.state=EnergyCaptureState::Faulted;}
+            try{if(capture_)capture_->requestStop();sync();publish();}catch(...){} }
+        return false;
+    }
     void run(uint64_t generation,std::vector<std::string> devices)noexcept{
+        NativeProcessScope original(nativeLife_.epoch());
         bool issued=false,started=false;
         try{
+            {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;}
             EnergyAuthorizationProcessClient client(authorizationHelper_);EnergyAuthorizationRequest load;
             load.generation=generation;load.ticket=1;load.file=file_;load.nowUtcMs=clock_();
             const auto result=client.transact(load,cancel_,timeout_);
-            {std::lock_guard<std::mutex> lock(mutex_);if(cancel_)return;
+            {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;
                 if(result.reply&&(result.reply->status==EnergyAuthorizationStatus::Missing||(result.reply->status==EnergyAuthorizationStatus::Ok&&result.reply->document&&!result.reply->document->policy.persistenceAuthorized))){
                     stopped_=true;cancel_=true;current_.state=EnergyCaptureState::Stopped;current_.leaseState=EnergyLeaseState::Disabled;current_.leaseTransport=result.transport;publish();return;}
                 if(!result.reply||result.reply->status!=EnergyAuthorizationStatus::Ok||!result.reply->document){lost(result.transport,false);return;}}
@@ -49,11 +65,11 @@ class LeasedCapture final:public EnergyCaptureSink {
             std::string wire;if(r.provision.nowUtcMs<load.nowUtcMs||!encodeEnergyCollectorLeaseRequest(r,&wire)){
                 std::lock_guard<std::mutex> lock(mutex_);if(!cancel_)lost(LocalTaskStatus::Invalid,false);return;}
             LocalTaskProcess process(collectorHelper_);
-            {std::lock_guard<std::mutex> lock(mutex_);if(cancel_)return;
+            {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;
                 current_.provisionRequest=std::make_shared<const EnergyAuthorizationRequest>(r.provision);provisionPending_=true;}
             const auto held=process.hold(wire,cancel_,timeout_,[&](const std::string &frame){
                 EnergyCollectorLeaseReply reply;if(!decodeEnergyCollectorLeaseReply(r,frame,&reply))return false;
-                std::lock_guard<std::mutex> lock(mutex_);if(cancel_)return false;
+                std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return false;
                 issued=true;provisionPending_=false;current_.provisionRequest.reset();
                 const auto &d=*reply.provision.document;EnergyCapturePlan plan;plan.policy=d.policy;plan.binding=d.binding;plan.limits=d.limits;plan.privateNamespace=d.privateNamespace;
                 plan.sessionId=d.lastSessionId;plan.mode=EnergyHistoryOpen::Existing;plan.fence=EnergyCollectorFence{file_,reply.epoch};
@@ -62,7 +78,11 @@ class LeasedCapture final:public EnergyCaptureSink {
                 leaseHeld_=true;current_.leaseState=EnergyLeaseState::Held;current_.leaseTransport=LocalTaskStatus::Ok;sync();publish();return true;
             });
             started=held.childStarted;
-            std::lock_guard<std::mutex> lock(mutex_);if(cancel_)return;
+            std::lock_guard<std::mutex> lock(mutex_);
+            if(!nativeLife_.current()){nativeCurrent();
+                if(!started&&!issued){provisionPending_=false;current_.provisionRequest.reset();current_.provisioningOutcomeUnknown=false;}
+                publish();return;}
+            if(cancel_)return;
             provisionPending_=false;if(!started)current_.provisionRequest.reset();lost(held.status,started&&!issued);
         }catch(...){try{std::lock_guard<std::mutex> lock(mutex_);if(!cancel_)lost(LocalTaskStatus::Unavailable,provisionPending_||(started&&!issued));}catch(...){cancel_=true;}}
     }
@@ -75,22 +95,28 @@ class LeasedCapture final:public EnergyCaptureSink {
         EnergyHistoryBinding dummy;
         if(disabled_||!generation||timeout_<50||timeout_>60000||!localTaskPath(file_)||!localTaskPath(authorizationHelper_)||!localTaskPath(collectorHelper_)||
             !makeEnergyCaptureBinding(std::string(32,'0'),1,devices,PowerOrigin::ObservedTelemetry,&dummy))return false;
-        try{cancel_=false;stopped_=false;current_.generation=generation;current_.state=EnergyCaptureState::Starting;current_.leaseState=EnergyLeaseState::Starting;publish();
+        try{if(!nativeLife_.begin()){nativeCurrent();return false;}cancel_=false;stopped_=false;current_.generation=generation;current_.state=EnergyCaptureState::Starting;current_.leaseState=EnergyLeaseState::Starting;publish();
             thread_=std::thread([this,generation,devices]{run(generation,devices);});return true;
         }catch(...){cancel_=true;stopped_=true;current_.state=EnergyCaptureState::Faulted;current_.leaseState=EnergyLeaseState::Lost;try{publish();}catch(...){}return false;}
     }
     EnergyCaptureAdmission submit(uint64_t generation,const SessionPowerInput &input)override{
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return EnergyCaptureAdmission::Stopped;
+        NativeProcessScope original(nativeLife_.epoch());
         if(generation!=current_.generation)return EnergyCaptureAdmission::StaleGeneration;
         if(stopped_)return EnergyCaptureAdmission::Stopped;
         if(!leaseHeld_||!capture_){++startupDropped_;current_.dropped=startupDropped_;publish();return EnergyCaptureAdmission::NotReady;}
         const auto result=capture_->submit(generation,input);sync();return result;
     }
-    void markGap(uint64_t generation)override{std::lock_guard<std::mutex> lock(mutex_);if(!stopped_&&leaseHeld_&&capture_){capture_->markGap(generation);sync();}}
-    void tick(int64_t utc,uint64_t mono)override{std::lock_guard<std::mutex> lock(mutex_);if(!stopped_&&leaseHeld_&&capture_){capture_->tick(utc,mono);sync();}}
-    EnergyHistoryAdmission inspect(uint64_t generation,uint64_t revision)override{std::lock_guard<std::mutex> lock(mutex_);if(stopped_||!leaseHeld_||!capture_)return EnergyHistoryAdmission::NotReady;
+    void markGap(uint64_t generation)override{std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted())return;
+        NativeProcessScope original(nativeLife_.epoch());if(!stopped_&&leaseHeld_&&capture_){capture_->markGap(generation);sync();}}
+    void tick(int64_t utc,uint64_t mono)override{std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted())return;
+        NativeProcessScope original(nativeLife_.epoch());if(!stopped_&&leaseHeld_&&capture_){capture_->tick(utc,mono);sync();}}
+    EnergyHistoryAdmission inspect(uint64_t generation,uint64_t revision)override{std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||stopped_||!leaseHeld_||!capture_)return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());
         const auto result=capture_->inspect(generation,revision);sync();return result;}
-    EnergyHistoryAdmission retryReviewed(uint64_t generation,uint64_t revision)override{std::lock_guard<std::mutex> lock(mutex_);if(stopped_||!leaseHeld_||!capture_)return EnergyHistoryAdmission::NotReady;
+    EnergyHistoryAdmission retryReviewed(uint64_t generation,uint64_t revision)override{std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||stopped_||!leaseHeld_||!capture_)return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());
         const auto result=capture_->retryReviewed(generation,revision);sync();return result;}
     void requestStop()override{std::lock_guard<std::mutex> lock(mutex_);attempted_=true;if(current_.leaseState==EnergyLeaseState::Stopped)return;
         stopped_=true;leaseHeld_=false;cancel_=true;current_.leaseState=EnergyLeaseState::Stopped;
@@ -98,7 +124,11 @@ class LeasedCapture final:public EnergyCaptureSink {
         if(capture_)capture_->requestStop();
         try{sync();current_.state=EnergyCaptureState::Stopped;publish();}catch(...){} }
     void stop()override{std::lock_guard<std::mutex> life(lifecycle_);requestStop();if(thread_.joinable())thread_.join();if(capture_)capture_->stop();}
-    std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{std::lock_guard<std::mutex> lock(mutex_);return published_;}
+    std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{
+        std::lock_guard<std::mutex> lock(mutex_);auto &s=*const_cast<LeasedCapture *>(this);s.nativeCurrent();
+        if(nativeLife_.current()&&!nativeLife_.permitted())return emptyTerminal_;
+        return published_->revision!=current_.revision||published_->state!=current_.state||published_->leaseState!=current_.leaseState||published_->leaseTransport!=current_.leaseTransport?emptyTerminal_:published_;
+    }
 };
 }
 std::unique_ptr<EnergyCaptureSink> makeLeasedEnergyCapture(std::filesystem::path auth,std::filesystem::path collector,std::filesystem::path file,bool disabled,unsigned timeout,EnergyHistoryClock clock){

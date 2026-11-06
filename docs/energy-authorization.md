@@ -1,5 +1,9 @@
 # Isolated persistence consent and private enrollment (P-08g)
 
+[P-14e](energy-native-lifetimes.md) subsequently binds authorization, held collection and enclosing runtime to their
+original native lifetimes. Old queued/current/review/plan authority cannot borrow a newly cleared epoch; unknown originals
+remain retained and unavailable fallback views cannot silently expose older Ready/Held authority after allocation failure.
+
 This adds a bounded private authorization store, system-random namespace/session provisioning, explicit selected-set enrollment and an injected native settings page to [P-08f capture](energy-capture.md). R-ENG-001, R-PRIV-001/002, R-SAFE-001/002 and R-REL-001 remain partial; M-ENERGY/M-PRIVACY/M-SUPERVISOR; T-CONFIG/T-UI/T-ENERGY/T-INTENT/T-PRIVACY/T-RELEASE; D-41.
 
 **Development integration.** At this batch boundary the ordinary miner left the capture factory and authorization access empty. Settings shows unavailable until a caller supplies the authorization owner and explicit selected UUIDs. The fixture exercises the actual native page/helper and hands a separately issued plan to the existing capture bridge. Later [P-08h](energy-collector.md) supplies cooperative lifetime fencing and [P-08i](energy-runtime.md) adds default-off development runtime/sibling-helper binding. Production deployment, global helper quarantine and real-cadence capacity qualification remain required.

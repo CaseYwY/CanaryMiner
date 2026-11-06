@@ -55,7 +55,7 @@ scope before consuming jobs. Admission, pre-pop work, result publication and sna
 Invalidation cancels future work, discards queued unacknowledged jobs and withdraws current Ready authority without I/O or
 joining. Old immutable replies remain **historical**, not renewed current financial facts.
 
-An in-flight batch is conservatively retained until the actual transaction result proves it was not issued. This
+An in-flight batch is conservatively retained until the actual transaction result establishes a definite outcome. This
 speculative retention cannot replace an older uncertain original. A possibly issued write survives stop and failed
 restart; neither an epoch change nor facade destruction proves rollback. An allocation failure while publishing the
 fault view returns a preallocated unavailable view rather than an older Ready view. Explicit durable reconstruction in a
@@ -114,3 +114,6 @@ changes only the scanner, not native symbols, GPU access, safety policy or drive
 Other data-owner original lifetimes, older Linux runtime compatibility, native hard bounds, actual sources/terms, helper
 deployment, physical storage, GPU/game, terminal/human and release qualification remain open. This slice completes none of
 those gates by implication and does not complete the roadmap.
+
+[P-14e](energy-native-lifetimes.md) subsequently carries original lifetimes through the five energy ownership layers;
+the remaining billing/forecast/market/detection/safety and enclosing lifetimes are not completed by that follow-up.

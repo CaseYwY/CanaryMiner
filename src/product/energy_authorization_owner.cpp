@@ -1,5 +1,6 @@
 #include "energy_authorization_owner.h"
 #include "energy_history_model.h"
+#include "native_process_admission.h"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -15,6 +16,7 @@ bool mutation(A a){return a==A::Save||a==A::Enroll||a==A::Confirm||a==A::Provisi
 }
 struct EnergyAuthorizationOwner::Impl {
     EnergyAuthorizationProcessClient client;
+    NativeProcessLifetime nativeLife;bool nativeFaulted=false;
     std::filesystem::path file;
     unsigned timeout;
     EnergyHistoryClock clock;
@@ -24,22 +26,34 @@ struct EnergyAuthorizationOwner::Impl {
     std::thread thread;
     std::atomic<bool> cancel{true};
     std::shared_ptr<const EnergyAuthorizationRequest> queued,inFlight;
+    std::shared_ptr<const EnergyAuthorizationRequest> nativeUncertain;
     std::optional<EnergyAuthorizedCapture> plan;
     EnergyAuthorizationSnapshot current;
     std::shared_ptr<const EnergyAuthorizationSnapshot> published=std::make_shared<const EnergyAuthorizationSnapshot>();
+    const std::shared_ptr<const EnergyAuthorizationSnapshot> emptyTerminal=published;
     bool attempted=false;
     int64_t lastUtc=0;
     Impl(std::filesystem::path helper,std::filesystem::path path,bool disabled,unsigned ms,EnergyHistoryClock c)
         :client(std::move(helper)),file(std::move(path)),timeout(ms),clock(c?std::move(c):EnergyHistoryClock(nowUtc)){current.cliNoEnergy=disabled;}
     void publish(){current.pending=static_cast<bool>(queued||inFlight);current.planAvailable=plan.has_value();++current.revision;published=std::make_shared<const EnergyAuthorizationSnapshot>(current);}
     void retain(){if(inFlight&&mutation(inFlight->action)&&!current.uncertain)current.uncertain=inFlight;}
+    bool nativeCurrent()noexcept{ // mutex held; no helper call, callback or join
+        if(!nativeLife.bound()||nativeLife.current())return true;
+        if(!nativeFaulted){nativeFaulted=true;cancel=true;queued.reset();plan.reset();current.inspectionAvailable=false;
+            if(inFlight&&mutation(inFlight->action)&&!current.uncertain){nativeUncertain=inFlight;retain();}
+            current.transport=LocalTaskStatus::Unreaped;if(current.state!=O::Stopped)current.state=O::Faulted;
+            wake.notify_all();try{publish();}catch(...){} }
+        return false;
+    }
     EnergyHistoryAdmission check(uint64_t g,uint64_t r){
+        if(!nativeCurrent()||!nativeLife.permitted())return EnergyHistoryAdmission::NotReady;
         if(g!=current.generation)return EnergyHistoryAdmission::StaleGeneration;
         if(!r||r!=current.revision)return EnergyHistoryAdmission::ReviewChanged;
         if(cancel||queued||inFlight)return EnergyHistoryAdmission::NotReady;
         return EnergyHistoryAdmission::Queued;
     }
     EnergyHistoryAdmission enqueue(const EnergyAuthorizationCommand &command){
+        if(!nativeCurrent()||!nativeLife.permitted())return EnergyHistoryAdmission::NotReady;
         if(current.lastTicket==UINT64_MAX||command.devices.size()>64)return EnergyHistoryAdmission::Invalid;
         for(const auto &id:command.devices)if(id.size()>40)return EnergyHistoryAdmission::Invalid;
         const auto now=clock();
@@ -57,12 +71,17 @@ struct EnergyAuthorizationOwner::Impl {
         wake.notify_one();return EnergyHistoryAdmission::Queued;
     }
     void run()noexcept{
+        NativeProcessScope original(nativeLife.epoch());
         try{
             for(;;){std::shared_ptr<const EnergyAuthorizationRequest> job;
-                {std::unique_lock<std::mutex> lock(mutex);wake.wait(lock,[&]{return cancel.load()||queued;});if(cancel)return;
+                {std::unique_lock<std::mutex> lock(mutex);wake.wait(lock,[&]{return cancel.load()||queued;});if(!nativeCurrent()||cancel)return;
                     inFlight=queued;queued.reset();job=inFlight;}
                 auto result=client.transact(*job,cancel,timeout);
                 std::lock_guard<std::mutex> lock(mutex);
+                if(!nativeLife.current()){nativeCurrent();
+                    if(result.writeOutcomeUnknown)retain();
+                    else if(nativeUncertain==job){if(current.uncertain==job)current.uncertain.reset();nativeUncertain.reset();}
+                    inFlight.reset();publish();return;}
                 if(cancel){inFlight.reset();return;}
                 current.transport=result.transport;current.reply=std::move(result.reply);
                 if(result.writeOutcomeUnknown)retain();
@@ -90,7 +109,7 @@ bool EnergyAuthorizationOwner::start(uint64_t generation){
     auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);std::lock_guard<std::mutex> lock(s.mutex);
     if(s.attempted)return false;
     s.attempted=true;if(!generation||!localTaskPath(s.file)||s.timeout<50||s.timeout>60000)return false;
-    try{s.current.generation=generation;s.cancel=false;
+    try{if(!s.nativeLife.begin()){s.nativeCurrent();return false;}s.current.generation=generation;s.cancel=false;
         if(s.enqueue({})!=EnergyHistoryAdmission::Queued)return false;
         s.thread=std::thread([p=&s]{p->run();});return true;
     }catch(...){s.cancel=true;s.queued.reset();s.current.state=O::Faulted;try{s.publish();}catch(...){}return false;}
@@ -117,5 +136,9 @@ void EnergyAuthorizationOwner::requestStop(){
 }
 void EnergyAuthorizationOwner::stop(){auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);requestStop();if(s.thread.joinable())s.thread.join();
     std::lock_guard<std::mutex> lock(s.mutex);s.inFlight.reset();try{s.publish();}catch(...){} }
-std::shared_ptr<const EnergyAuthorizationSnapshot> EnergyAuthorizationOwner::snapshot()const{std::lock_guard<std::mutex> lock(impl_->mutex);return impl_->published;}
+std::shared_ptr<const EnergyAuthorizationSnapshot> EnergyAuthorizationOwner::snapshot()const{
+    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);try{s.nativeCurrent();}catch(...){}
+    if(s.nativeLife.current()&&!s.nativeLife.permitted())return s.emptyTerminal;
+    return s.published->revision!=s.current.revision||s.published->state!=s.current.state||s.published->transport!=s.current.transport?s.emptyTerminal:s.published;
+}
 } // namespace om

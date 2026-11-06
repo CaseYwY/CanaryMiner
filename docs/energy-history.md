@@ -1,5 +1,9 @@
 # Isolated observed-power history and independent reset windows (P-05d / P-08c)
 
+[P-14e](energy-native-lifetimes.md) subsequently binds the history facade's original native lifetime before background
+work. A settled foreign fault cannot renew queued/current authority or a higher generation; unchanged-epoch explicit
+restart remains. Historical replies, definite no-child outcomes and possibly issued originals retain distinct meanings.
+
 **Development library/helper, not production persistence activation.** This adds an audited, bounded SQLite history of raw power observations and independently named reset windows. It supports exact window projections and explicit cross-session recovery. The ordinary supervisor still uses the [in-memory session collector](session-energy.md); its collection preference is not consent to retain raw observations on disk. [P-05f/P-08e](energy-compaction.md) adds separately opted-in v2 exact compaction. Native persistence consent, stable device binding, retention-duration qualification, recovery UI and production helper packaging remain integration work.
 
 [P-08f](energy-capture.md) supplies the optional producer/supervisor seam, private namespace-based selected-device mapping and native recovery page. [P-08g](energy-authorization.md) adds isolated saved consent/retention, private identity enrollment and injected native controls. The ordinary factory is still empty pending whole-collector admission, runtime binding and helper/workload qualification; mapping/review alone does not activate storage.

@@ -1,5 +1,6 @@
 #include "energy_runtime.h"
 #include "energy_leased_capture.h"
+#include "native_process_admission.h"
 #include <mutex>
 
 namespace om {
@@ -9,6 +10,8 @@ class Runtime final:public EnergyRuntime {
     bool mining_,disabled_,attempted_=false,stopped_=true,authorizationStarted_=false;
     unsigned timeout_;
     EnergyHistoryClock clock_;
+    NativeProcessLifetime nativeLife_;
+    bool nativeFaulted_=false,nativeStopped_=false;
     mutable std::mutex mutex_;
     std::mutex lifecycle_;
     uint64_t generation_=0;
@@ -17,9 +20,24 @@ class Runtime final:public EnergyRuntime {
     std::unique_ptr<EnergyCaptureSink> capture_;
     std::shared_ptr<const EnergyCaptureSnapshot> captureView_=std::make_shared<const EnergyCaptureSnapshot>();
     std::shared_ptr<const EnergyAuthorizationSnapshot> authorizationView_=std::make_shared<const EnergyAuthorizationSnapshot>();
+    const std::shared_ptr<const EnergyCaptureSnapshot> emptyCapture_=captureView_;
+    const std::shared_ptr<const EnergyAuthorizationSnapshot> emptyAuthorization_=authorizationView_;
 
+    bool nativeCurrent()noexcept{ // mutex held; revoke both inner owners before any fallible projection
+        if(!nativeLife_.bound()||nativeLife_.current())return true;
+        if(!nativeFaulted_){nativeFaulted_=true;nativeStopped_=stopped_;stopped_=true;
+            try{authorization_.requestStop();}catch(...){}
+            try{if(capture_)capture_->requestStop();}catch(...){}
+            try{auto a=*(authorizationStarted_?authorization_.snapshot():authorizationView_);a.state=nativeStopped_?EnergyAuthorizationOwnerState::Stopped:EnergyAuthorizationOwnerState::Faulted;
+                a.pending=a.startupPending=a.planAvailable=a.inspectionAvailable=false;a.transport=LocalTaskStatus::Unreaped;++a.revision;
+                authorizationView_=std::make_shared<const EnergyAuthorizationSnapshot>(std::move(a));}catch(...){}
+            try{auto c=*(capture_?capture_->snapshot():captureView_);c.state=nativeStopped_?EnergyCaptureState::Stopped:EnergyCaptureState::Faulted;c.leaseState=nativeStopped_?EnergyLeaseState::Stopped:EnergyLeaseState::Lost;
+                c.leaseTransport=LocalTaskStatus::Unreaped;++c.revision;captureView_=std::make_shared<const EnergyCaptureSnapshot>(std::move(c));}catch(...){} }
+        return false;
+    }
     void beginAuthorization(){
-        if(authorizationStarted_||stopped_)return;
+        if(!nativeCurrent()||!nativeLife_.permitted()||authorizationStarted_||stopped_)return;
+        NativeProcessScope original(nativeLife_.epoch());
         // The capture startup may write Provision. Do not expose an editable pre-Provision CAS snapshot.
         if(capture_&&capture_->snapshot()->leaseState==EnergyLeaseState::Starting)return;
         authorizationStarted_=true;
@@ -35,6 +53,8 @@ class Runtime final:public EnergyRuntime {
         if(attempted_)return false;
         attempted_=true;
         if(!generation||timeout_<50||timeout_>60000||!localTaskPath(file_)||!localTaskPath(authorizationHelper_)||!localTaskPath(collectorHelper_))return false;
+        if(!nativeLife_.begin()){nativeCurrent();return false;}
+        NativeProcessScope original(nativeLife_.epoch());
         generation_=generation;stopped_=false;
         EnergyHistoryBinding dummy;
         if(makeEnergyCaptureBinding(std::string(32,'0'),1,devices,PowerOrigin::ObservedTelemetry,&dummy))selected_=devices;
@@ -53,31 +73,40 @@ class Runtime final:public EnergyRuntime {
     }
     EnergyCaptureAdmission submit(uint64_t generation,const SessionPowerInput &input)override{
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return EnergyCaptureAdmission::Stopped;
+        NativeProcessScope original(nativeLife_.epoch());
         if(generation!=generation_)return EnergyCaptureAdmission::StaleGeneration;
         if(stopped_||!capture_)return EnergyCaptureAdmission::Stopped;
         return capture_->submit(generation,input);
     }
-    void markGap(uint64_t generation)override{std::lock_guard<std::mutex> lock(mutex_);if(!stopped_&&capture_)capture_->markGap(generation);}
+    void markGap(uint64_t generation)override{std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted())return;
+        NativeProcessScope original(nativeLife_.epoch());if(!stopped_&&capture_)capture_->markGap(generation);}
     void tick(int64_t utc,uint64_t mono)override{
-        std::lock_guard<std::mutex> lock(mutex_);if(stopped_)return;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||stopped_)return;
+        NativeProcessScope original(nativeLife_.epoch());
         if(capture_)capture_->tick(utc,mono);
         beginAuthorization();
     }
     EnergyHistoryAdmission inspect(uint64_t generation,uint64_t revision)override{
-        std::lock_guard<std::mutex> lock(mutex_);return !stopped_&&capture_?capture_->inspect(generation,revision):EnergyHistoryAdmission::NotReady;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted())return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());return !stopped_&&capture_?capture_->inspect(generation,revision):EnergyHistoryAdmission::NotReady;
     }
     EnergyHistoryAdmission retryReviewed(uint64_t generation,uint64_t revision)override{
-        std::lock_guard<std::mutex> lock(mutex_);return !stopped_&&capture_?capture_->retryReviewed(generation,revision):EnergyHistoryAdmission::NotReady;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted())return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());return !stopped_&&capture_?capture_->retryReviewed(generation,revision):EnergyHistoryAdmission::NotReady;
     }
     EnergyHistoryAdmission authorize(uint64_t generation,uint64_t revision,const EnergyAuthorizationCommand &command)override{
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());
         if(stopped_||!authorizationStarted_)return EnergyHistoryAdmission::NotReady;
         if(command.action==EnergyAuthorizationAction::Provision)return EnergyHistoryAdmission::Invalid;
         if(command.action==EnergyAuthorizationAction::Enroll&&(selected_.empty()||command.devices!=selected_))return EnergyHistoryAdmission::Invalid;
         return authorization_.submit(generation,revision,command);
     }
     EnergyHistoryAdmission acknowledge(uint64_t generation,uint64_t revision)override{
-        std::lock_guard<std::mutex> lock(mutex_);return !stopped_&&authorizationStarted_?authorization_.acknowledgeInspection(generation,revision):EnergyHistoryAdmission::NotReady;
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted())return EnergyHistoryAdmission::NotReady;
+        NativeProcessScope original(nativeLife_.epoch());return !stopped_&&authorizationStarted_?authorization_.acknowledgeInspection(generation,revision):EnergyHistoryAdmission::NotReady;
     }
     void requestStop()override{
         std::lock_guard<std::mutex> lock(mutex_);attempted_=true;if(stopped_)return;
@@ -98,10 +127,16 @@ class Runtime final:public EnergyRuntime {
         authorization_.stop();
     }
     std::shared_ptr<const EnergyCaptureSnapshot> snapshot()const override{
-        std::lock_guard<std::mutex> lock(mutex_);return !stopped_&&capture_?capture_->snapshot():captureView_;
+        std::lock_guard<std::mutex> lock(mutex_);auto &s=*const_cast<Runtime *>(this);s.nativeCurrent();
+        if(nativeLife_.current()&&!nativeLife_.permitted())return emptyCapture_;
+        if(nativeFaulted_&&(captureView_->state!=(nativeStopped_?EnergyCaptureState::Stopped:EnergyCaptureState::Faulted)||captureView_->leaseTransport!=LocalTaskStatus::Unreaped))return emptyCapture_;
+        NativeProcessScope original(nativeLife_.epoch());return !stopped_&&capture_?capture_->snapshot():captureView_;
     }
     std::shared_ptr<const EnergyAuthorizationSnapshot> authorizationSnapshot()const override{
-        std::lock_guard<std::mutex> lock(mutex_);return !stopped_&&authorizationStarted_?authorization_.snapshot():authorizationView_;
+        std::lock_guard<std::mutex> lock(mutex_);auto &s=*const_cast<Runtime *>(this);s.nativeCurrent();
+        if(nativeLife_.current()&&!nativeLife_.permitted())return emptyAuthorization_;
+        if(nativeFaulted_&&(authorizationView_->state!=(nativeStopped_?EnergyAuthorizationOwnerState::Stopped:EnergyAuthorizationOwnerState::Faulted)||authorizationView_->transport!=LocalTaskStatus::Unreaped))return emptyAuthorization_;
+        NativeProcessScope original(nativeLife_.epoch());return !stopped_&&authorizationStarted_?authorization_.snapshot():authorizationView_;
     }
     std::vector<std::string> selectedDevices()const override{std::lock_guard<std::mutex> lock(mutex_);return selected_;}
 };
