@@ -191,5 +191,44 @@ int main() {
     CHECK(text.find("Pearl 60/60 | FX 60/60") != std::string::npos && text.find("2.000000 USD/PRL") != std::string::npos);
     CHECK(marketWindow(*complete->pearlCandles, &*complete->fxCandles, E - 480 * 60, E).tokenUsd.has_value());
     allFeeds.stop();
+    MarketPollingPlan lifecycle;
+    CHECK(lifecycle.start(1,0,E+10,policy,false));
+    ticket=lifecycle.next(0,E+10);CHECK(ticket.has_value());
+    failure={};failure.status=PublicHttpsStatus::Unreaped;
+    auto wrongLoss=*ticket;++wrongLoss.serial;
+    CHECK(!lifecycle.complete(wrongLoss,failure,MarketDataStatus::Transport,0,E+10)&&lifecycle.active()&&!lifecycle.helperFault());
+    CHECK(lifecycle.complete(*ticket,failure,MarketDataStatus::Transport,0,E+9));  // a concurrent clock problem cannot hide ownership loss
+    CHECK(lifecycle.helperFault()&&!lifecycle.active()&&!lifecycle.next(0,E+10)&&!lifecycle.takeEconomicRequest(0,E+10));
+    CHECK(lifecycle.health()[0].transport==PublicHttpsStatus::Unreaped);
+    lifecycle.stop();CHECK(!lifecycle.start(2,0,E+10,policy,false));
+
+    ms=0;std::atomic<unsigned> lifecycleCalls{0};
+    MarketDataOwner lostHelper([&](const PublicJsonRequest &request,const std::atomic<bool> &,PublicHttpsLimits){
+        if(++lifecycleCalls>=3){PublicJsonResponse r;r.status=PublicHttpsStatus::Unreaped;r.httpStatus=200;r.observedUtc=clock().second;
+            r.body="[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"999\"}]";return r;}
+        auto r=okay();r.observedUtc=clock().second;
+        r.body=request.feed==PublicFeed::GatePearlTicker?"[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.5\"}]":
+            "{\"error\":[],\"result\":{\"USDTZUSD\":{\"c\":[\"0.98\",\"1\"]}}}";return r;
+    },policy,MarketOrigin::SyntheticFixture,false,clock);
+    CHECK(lostHelper.start(1));CHECK(waitUntil([&]{return lostHelper.snapshot()->pearlQuote&&lostHelper.snapshot()->fxQuote;}));
+    const auto beforeLoss=lostHelper.snapshot();ms=60000;
+    CHECK(waitUntil([&]{return !lostHelper.snapshot()->running;}));
+    lostHelper.stop();const auto lostView=lostHelper.snapshot();
+    CHECK(lifecycleCalls==3&&lostView->helperFault&&lostView->pearlQuote&&lostView->fxQuote);
+    CHECK(lostView->pearlQuote->last.text()=="2.5");
+    text=joined(marketSnapshotLines(*lostView,policy,E+70,60000));
+    CHECK(text.find("Latest PRL/USD reference: N/A")!=text.npos);
+    CHECK(text.find("helper ownership fault")!=text.npos);
+    CHECK(beforeLoss->running&&beforeLoss->pearlQuote->last.text()=="2.5");
+    CHECK(!lostHelper.start(2)&&lifecycleCalls==3&&lostHelper.snapshot()==lostView);
+
+    std::atomic<bool> lossEntered{false};
+    MarketDataOwner lateLoss([&](const PublicJsonRequest &,const std::atomic<bool> &cancelled,PublicHttpsLimits){
+        lossEntered=true;while(!cancelled.load())std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        PublicJsonResponse r;r.status=PublicHttpsStatus::Unreaped;return r;
+    },policy,MarketOrigin::SyntheticFixture,false,clock);
+    CHECK(lateLoss.start(1));CHECK(waitUntil([&]{return lossEntered.load();}));lateLoss.requestStop();lateLoss.stop();
+    CHECK(lateLoss.snapshot()->helperFault&&!lateLoss.snapshot()->running&&!lateLoss.snapshot()->pearlQuote);
+    CHECK(!lateLoss.start(2));
     return finishTests("market_owner");
 }

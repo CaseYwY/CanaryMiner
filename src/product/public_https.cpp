@@ -39,6 +39,7 @@ const char *publicHttpsStatusName(PublicHttpsStatus status) {
         case PublicHttpsStatus::InvalidHeaders: return "invalid/unsupported public response headers";
         case PublicHttpsStatus::BodyTooLarge: return "public response body limit exceeded";
         case PublicHttpsStatus::InvalidJson: return "invalid/over-budget public JSON";
+        case PublicHttpsStatus::Unreaped: return "public helper exit/ownership unconfirmed; admission blocked";
     }
     return "unsupported public response";
 }

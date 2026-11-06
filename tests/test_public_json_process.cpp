@@ -29,6 +29,10 @@ int main(int argc, char **argv) {
     CHECK(!decodePublicJsonResponse(wire, 1024, nullptr));
     input.status = PublicHttpsStatus::Network;
     CHECK(!encodePublicJsonResponse(input, &wire));
+    input={};input.status=PublicHttpsStatus::Unreaped;
+    wire="preserved";CHECK(!encodePublicJsonResponse(input,&wire)&&wire=="preserved");
+    CHECK(!decodePublicJsonResponse("CMJSON1 14 0 0 0 0\n",1024,&output));
+    CHECK(std::string(publicHttpsStatusName(PublicHttpsStatus::Unreaped)).find("unconfirmed")!=std::string::npos);
     std::atomic<bool> cancel{true};
     PublicJsonProcessClient missing(std::filesystem::path(argv[1]).parent_path() / "canary-missing-synthetic-helper");
     CHECK(missing.get({}, cancel).status == PublicHttpsStatus::Cancelled);
@@ -36,6 +40,13 @@ int main(int argc, char **argv) {
     CHECK(missing.get({}, cancel).status == PublicHttpsStatus::Unavailable);
     PublicJsonProcessClient relative("relative-helper");
     CHECK(relative.get({}, cancel).status == PublicHttpsStatus::Unavailable);
+#if defined(__linux__)
+#if !defined(__GLIBC__)
+    const int codec=finishTests("public JSON codec only; native helper requires glibc >= 2.40");return codec?codec:77;
+#elif !__GLIBC_PREREQ(2, 40)
+    const int codec=finishTests("public JSON codec only; native helper requires glibc >= 2.40");return codec?codec:77;
+#endif
+#endif
     PublicJsonProcessClient client(std::filesystem::absolute(argv[1]));
 #if defined(_WIN32)
     _putenv_s("CANARY_SYNTHETIC_SECRET", "must-not-inherit");

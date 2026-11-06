@@ -21,6 +21,10 @@ keep their original source/time and stale/invalid labels; a late successful repl
 `stop` joins separately. Injected callbacks must obey their bounded cancellation contract; this does not turn an arbitrary
 callback or native kernel/trust stall into a hard exit-time guarantee.
 
+[P-06e](public-helper-ownership.md) adds whole-owner terminal admission on a parent-only Unreaped fetch outcome, including
+one delivered during cancellation. Neither a second feed, an economic refresh nor a newer generation may revive that owner;
+retained original quotes remain stopped references, not current authority. The helper's retained quarantine is module-local.
+
 The supervisor constructs at most one optional sink for a dashboard parent, not one per GPU or child retry. `--no-market`,
 plain mode and an already requested stop prevent construction. A signal raised during factory/start admission prevents
 source activation/worker revival. Failed or thrown admission uses fixed non-private notices and never silently falls back

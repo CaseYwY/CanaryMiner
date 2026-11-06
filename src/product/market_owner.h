@@ -33,16 +33,18 @@ class MarketPollingPlan {
    public:
     bool start(uint64_t generation, uint64_t nowMs, uint64_t nowUtc, const MarketPollingPolicy &policy, bool fixtureCandles);
     void stop();
+    void helperUnreaped();  // trusted local lifecycle outcome; terminal across generations, even after cancellation
     std::optional<MarketFetchTicket> next(uint64_t nowMs, uint64_t nowUtc);
     bool complete(const MarketFetchTicket &ticket, const PublicJsonResponse &response, MarketDataStatus data, uint64_t nowMs, uint64_t nowUtc);
     bool takeEconomicRequest(uint64_t nowMs, uint64_t nowUtc);
     bool active() const { return active_; }
     bool clockFault() const { return clockFault_; }
+    bool helperFault() const { return helperFault_; }
     const std::array<MarketFeedHealth, 4> &health() const { return health_; }
    private:
     bool clock(uint64_t nowMs, uint64_t nowUtc);
     MarketPollingPolicy policy_;
-    bool active_ = false, fixtureCandles_ = false, clockFault_ = false;
+    bool active_ = false, fixtureCandles_ = false, clockFault_ = false, helperFault_ = false;
     uint64_t generation_ = 0, serial_ = 0, baseMs_ = 0, baseUtc_ = 0, lastMs_ = 0, lastUtc_ = 0, economicDue_ = 0;
     std::array<uint64_t, 2> providerDue_{};
     std::optional<MarketFetchTicket> current_;
@@ -50,7 +52,7 @@ class MarketPollingPlan {
 };
 struct MarketSnapshot {
     uint64_t generation = 0, revision = 0, economicRequests = 0;
-    bool running = false, clockFault = false;
+    bool running = false, clockFault = false, helperFault = false;
     MarketOrigin origin = MarketOrigin::ProviderResponse;
     std::array<MarketFeedHealth, 4> health;
     std::optional<MarketQuote> pearlQuote, fxQuote;

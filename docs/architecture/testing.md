@@ -36,6 +36,14 @@ guard fix and green afterward. A separate native PTY joins the actual owner/pars
 enabling before file writes, preserves source-conflict/CLI files and acknowledges a real controlling-terminal SIGINT. These
 remain synthetic responses/inert children with an unavailable-NVML shim, not actual source/terms/trust/GPU qualification.
 
+[P-06e](../public-helper-ownership.md) uses Linux linker interposition around the actual ordinary client, with numeric signals
+always suppressed and real pidfd signals limited to owned fixture children. Test stolen reaping/wait errors, no probing or
+signaling after terminal ownership loss, atomic-spawn capability refusal, incompatible SIGCHLD policies, blocked replacement
+clients, bounded withheld-proof timeout/cancel/overflow, destructor retention and proven-exit reclamation. CMJSON1 must reject
+the new parent-only outcome. Market scheduler/owner/adapter tests require whole-owner fault revocation and retained original
+snapshot immutability, including late Unreaped after stop. These are syscall-interposition/CPU fixtures, not true kernel stalls,
+Windows wait-fault injection, arbitrary descendants, application-wide quarantine, native sources or release qualification.
+
 ## T-LEDGER
 
 Test actual credits versus balance/payout/pending/share count; worker versus wallet attribution; inclusive/exclusive time boundaries; pagination/retries/revisions/reversals and late discoveries. Test that market updates preserve token facts while changing **latest-price production valuation**. Two differently priced credit events at the same latest price must value as their total tokens times that latest price, not the historical weighted sum. Optional historical estimates remain separate. Sale status stays unknown, even after a transfer/deposit; missing/partial data never becomes zero or complete lifetime revenue.

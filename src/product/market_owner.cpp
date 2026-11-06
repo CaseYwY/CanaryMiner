@@ -43,13 +43,22 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
     };
 }
 bool MarketPollingPlan::start(uint64_t generation, uint64_t ms, uint64_t utc, const MarketPollingPolicy &policy, bool fixture) {
-    if (active_ || !generation || generation <= generation_ || !utc || utc > 253402300799ULL || !validMarketPollingPolicy(policy)) return false;
+    if (active_ || helperFault_ || !generation || generation <= generation_ || !utc || utc > 253402300799ULL || !validMarketPollingPolicy(policy)) return false;
     generation_ = generation; policy_ = policy; fixtureCandles_ = fixture; baseMs_ = lastMs_ = ms; baseUtc_ = lastUtc_ = utc;
     economicDue_ = ms; providerDue_ = {ms, ms}; health_ = {}; current_.reset(); clockFault_ = false; active_ = true;
     for (auto &h : health_) h.nextDueMs = ms;
     return true;
 }
 void MarketPollingPlan::stop() { active_ = false; current_.reset(); for (auto &h : health_) h.inFlight = false; }
+void MarketPollingPlan::helperUnreaped() {
+    if (current_) {
+        auto &h = health_[index(current_->request.feed)];
+        h.transport = PublicHttpsStatus::Unreaped; h.data = MarketDataStatus::Transport;
+    }
+    helperFault_ = true;
+    stop();
+    for (auto &h : health_) { h.latched = true; h.nextDueMs = UINT64_MAX; }
+}
 bool MarketPollingPlan::clock(uint64_t ms, uint64_t utc) {
     if (!active_) return false;
     const uint64_t elapsed = ms >= baseMs_ ? (ms - baseMs_) / 1000 : 0;
@@ -87,6 +96,7 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
     current_ = ticket; return ticket;
 }
 bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJsonResponse &r, MarketDataStatus data, uint64_t ms, uint64_t utc) {
+    if (r.status == PublicHttpsStatus::Unreaped && current_ && sameTicket(*current_, ticket)) { helperUnreaped(); return true; }
     if (!clock(ms, utc) || !current_ || !sameTicket(*current_, ticket)) return false;
     auto &h = health_[index(ticket.request.feed)];
     current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
@@ -125,7 +135,7 @@ struct MarketDataOwner::Impl {
     MarketSnapshot current;
     std::shared_ptr<const MarketSnapshot> published = std::make_shared<const MarketSnapshot>();
     void publish() {
-        current.health = plan.health(); current.clockFault = plan.clockFault(); current.running = plan.active() && !cancel.load();
+        current.health = plan.health(); current.clockFault = plan.clockFault(); current.helperFault = plan.helperFault(); current.running = plan.active() && !cancel.load();
         ++current.revision;
         auto value = std::make_shared<const MarketSnapshot>(current);
         std::lock_guard<std::mutex> lock(mutex); published = std::move(value);
@@ -143,6 +153,11 @@ struct MarketDataOwner::Impl {
                     if (cancel.load()) break;
                     PublicJsonResponse response;
                     try { response = fetch(ticket->request, cancel, policy.https); } catch (...) { response.status = PublicHttpsStatus::Unavailable; }
+                    if (response.status == PublicHttpsStatus::Unreaped) {
+                        // Cleanup uncertainty survives a simultaneous stop; it publishes no quote facts.
+                        std::lock_guard<std::mutex> commit(commitMutex);
+                        plan.helperUnreaped(); publish(); break;
+                    }
                     now = clock();
                     if (cancel.load()) break;
                     const MarketParseContext context{ticket->request, ticket->startedUtc, now.first, ticket->generation, origin,
@@ -208,7 +223,7 @@ std::shared_ptr<const MarketSnapshot> MarketDataOwner::snapshot() const {
 
 std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const MarketPollingPolicy &policy, uint64_t utc, uint64_t ms) {
     std::vector<std::string> lines;
-    lines.push_back(std::string("Market references: ") + (s.clockFault ? "clock fault" : s.running ? "active" : "stopped") +
+    lines.push_back(std::string("Market references: ") + (s.helperFault ? "helper ownership fault" : s.clockFault ? "clock fault" : s.running ? "active" : "stopped") +
         (s.origin == MarketOrigin::SyntheticFixture ? " | SYNTHETIC FIXTURE - NOT LIVE" : " | public provider observations"));
     auto latest = latestMarketReference(s.pearlQuote ? &*s.pearlQuote : nullptr, s.fxQuote ? &*s.fxQuote : nullptr, utc, ms, policy.freshness);
     if (!s.running || s.clockFault) { latest.tokenUsdt.reset(); latest.tokenUsd.reset(); latest.usdtUsd.reset(); }

@@ -20,7 +20,8 @@ struct PublicHttpsLimits {
 };
 enum class PublicHttpsStatus {
     Ok, Unavailable, InvalidRequest, Busy, Cancelled, Timeout, DestinationBlocked,
-    TlsVerification, TlsProtocol, Network, HttpStatus, InvalidHeaders, BodyTooLarge, InvalidJson
+    TlsVerification, TlsProtocol, Network, HttpStatus, InvalidHeaders, BodyTooLarge, InvalidJson,
+    Unreaped  // parent-only ownership uncertainty; never accepted from CMJSON1 helper input
 };
 const char *publicHttpsStatusName(PublicHttpsStatus status);
 struct PublicJsonResponse {

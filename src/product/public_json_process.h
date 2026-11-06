@@ -7,6 +7,8 @@ namespace om {
 
 // The application supplies its installed sibling helper's absolute path, never a provider-supplied executable.
 // Call from the public-data worker, not the render/mining thread. One request/child at a time; no retries.
+// Unconfirmed cleanup returns parent-only Unreaped, retains the native owner and blocks this module's
+// new launches, including replacement clients. Destruction must not race get; this is not a global sandbox.
 class PublicJsonProcessClient {
    public:
     explicit PublicJsonProcessClient(std::filesystem::path helper);

@@ -50,5 +50,14 @@ void staleAndClock(){
     ms=999;CHECK(waitUntil([&]{return joined(runtime->view(epoch,999)).find("clock fault")!=std::string::npos;}));
     const auto fault=joined(runtime->view(epoch,999));CHECK(fault.find("Latest PRL/USD reference: N/A")!=fault.npos&&calls==2);runtime->stop();CHECK(!runtime->start(2));
 }
+void helperFault(){
+    std::atomic<unsigned> calls{0};
+    auto runtime=makeMarketReferenceRuntime([&](const PublicJsonRequest &,const std::atomic<bool> &,PublicHttpsLimits){
+        ++calls;PublicJsonResponse r;r.status=PublicHttpsStatus::Unreaped;return r;
+    },{},MarketOrigin::SyntheticFixture,false,[]{return std::make_pair(uint64_t(1000),epoch);});
+    CHECK(runtime->start(1));CHECK(waitUntil([&]{return joined(runtime->view(epoch,1000)).find("helper ownership fault")!=std::string::npos;}));
+    const auto text=joined(runtime->view(epoch,1000));CHECK(text.find("Latest PRL/USD reference: N/A")!=text.npos&&calls==1);
+    runtime->stop();CHECK(!runtime->start(2)&&calls==1);
 }
-int main(){lifecycle();late();staleAndClock();return finishTests("frozen native public-reference ownership with memory-only revocation and post-drain settlement");}
+}
+int main(){lifecycle();late();staleAndClock();helperFault();return finishTests("frozen native public-reference ownership with memory-only revocation and post-drain settlement");}

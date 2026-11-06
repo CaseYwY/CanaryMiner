@@ -5,6 +5,7 @@
 #include <sstream>
 #include <locale>
 #include <algorithm>
+#include <mutex>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -18,6 +19,14 @@
 #include <fcntl.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#if defined(__GLIBC__) && defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 40)
+#define OM_PUBLIC_PIDFD_SPAWN 1
+#endif
+#endif
+#endif
 #include <unistd.h>
 #endif
 
@@ -70,24 +79,41 @@ struct PublicJsonProcessClient::Impl {
     explicit Impl(std::filesystem::path path) : helper(std::move(path)) {}
     std::filesystem::path helper;
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
+    bool reaped = false, success = false, unknown = false, verified = false, blocked = false, reserved = false;
+    static std::mutex &mutex() { static std::mutex value; return value; }
+    static std::vector<Impl *> &quarantine() { static auto *value = new std::vector<Impl *>; return *value; }
+    static unsigned &reservations() { static unsigned value = 0; return value; }
+    static std::atomic<unsigned> &unresolved() { static std::atomic<unsigned> value{0}; return value; }
+    void unreaped() { if (!blocked) { blocked = true; ++unresolved(); } }
+    void settled() { if (blocked) { blocked = false; --unresolved(); } }
+    static PublicHttpsStatus reserve(Impl *p) {
+        std::lock_guard<std::mutex> lock(mutex());
+        auto &held = quarantine();
+        if (held.capacity() < 64) held.reserve(64);  // no allocation during unknown-owner teardown
+        for (auto i = held.begin(); i != held.end();) {
+            bool ok = false;
+            if ((*i)->exited(&ok)) { (*i)->close(); delete *i; i = held.erase(i); }
+            else ++i;
+        }
+        if (!held.empty() || unresolved().load()) return PublicHttpsStatus::Unreaped;
+        if (reservations() >= 64) return PublicHttpsStatus::Busy;
+        ++reservations(); p->reserved = true; return PublicHttpsStatus::Ok;
+    }
+    void release() {
+        std::lock_guard<std::mutex> lock(mutex());
+        if (reserved) { reserved = false; --reservations(); }
+    }
 #if defined(_WIN32)
     HANDLE process = nullptr, output = nullptr, job = nullptr;
-    bool stop() {
-        if (!process) return true;
-        // Job close kills this helper and any descendants, never a mining worker.
-        if (job) { CloseHandle(job); job = nullptr; }
-        else TerminateProcess(process, 1);
-        if (WaitForSingleObject(process, 250) != WAIT_OBJECT_0) return false;
-        CloseHandle(process); process = nullptr;
+    bool jobBound = false;
+    bool owned() const { return process != nullptr; }
+    void close() {
+        if (process) { CloseHandle(process); process = nullptr; }
         if (output) { CloseHandle(output); output = nullptr; }
-        return true;
+        if (job) { CloseHandle(job); job = nullptr; }
+        jobBound = false;
     }
-    ~Impl() {
-        stop();
-        if (process) CloseHandle(process);
-        if (output) CloseHandle(output);
-    }
-    bool start(const std::vector<std::string> &args) {
+    bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel) {
         SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
         HANDLE read = nullptr, write = nullptr, null = INVALID_HANDLE_VALUE;
         if (!CreatePipe(&read, &write, &sa, 0)) return false;
@@ -119,7 +145,7 @@ struct PublicJsonProcessClient::Impl {
         environment += systemRoot; environment.push_back(0); environment.push_back(0);
         PROCESS_INFORMATION pi{};
         const auto parent = helper.parent_path().wstring();
-        bool created = ready && CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
+        bool created = ready && !cancel.load() && !unresolved().load() && CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | CREATE_SUSPENDED,
             &environment[0], parent.c_str(), &si.StartupInfo, &pi);
         if (initialized) DeleteProcThreadAttributeList(attributes);
@@ -127,9 +153,10 @@ struct PublicJsonProcessClient::Impl {
         if (null != INVALID_HANDLE_VALUE) CloseHandle(null);
         if (created) {
             process = pi.hProcess; output = read;
-            created = AssignProcessToJobObject(job, process) && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
+            jobBound = AssignProcessToJobObject(job, process) != 0;
+            created = jobBound && !cancel.load() && !unresolved().load() && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
             CloseHandle(pi.hThread);
-            if (!created) { TerminateProcess(process, 1); stop(); }
+            // The common cleanup retains both native handles until exit is actually observed.
         } else { CloseHandle(read); if (job) { CloseHandle(job); job = nullptr; } }
         return created;
     }
@@ -146,33 +173,28 @@ struct PublicJsonProcessClient::Impl {
         return true;
     }
     bool exited(bool *ok) {
-        if (WaitForSingleObject(process, 0) != WAIT_OBJECT_0) return false;
+        if (reaped) { *ok = success; return true; }
+        if (!owned() || unknown) return false;
+        const auto result = WaitForSingleObject(process, 0);
+        if (result == WAIT_TIMEOUT) { verified = true; return false; }
         DWORD code = 1;
-        *ok = GetExitCodeProcess(process, &code) && code == 0;
-        return true;
+        if (result != WAIT_OBJECT_0 || !GetExitCodeProcess(process, &code)) { unknown = true; unreaped(); return false; }
+        reaped = true; success = code == 0; settled(); *ok = success; return true;
     }
+    void terminateOwned() { if (jobBound) TerminateJobObject(job, 1); else TerminateProcess(process, 1); }
 #else
-    pid_t pid = -1;
-    int output = -1;
-    bool reaped = false;
-    bool stop() {
-        if (pid < 0) return true;
-        if (!reaped) {
-            ::kill(-pid, SIGKILL);
-            const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
-            for (;;) {
-                int status = 0;
-                const auto result = waitpid(pid, &status, WNOHANG);
-                if (result == pid || (result < 0 && errno == ECHILD)) { reaped = true; break; }
-                if (std::chrono::steady_clock::now() >= until) return false;
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            }
-        }
+    int output = -1, pidfd = -1;
+    bool owned() const { return pidfd >= 0; }
+    void close() {
         if (output >= 0) { ::close(output); output = -1; }
-        pid = -1; reaped = false; return true;
+        if (pidfd >= 0) { ::close(pidfd); pidfd = -1; }
     }
-    ~Impl() { stop(); if (output >= 0) ::close(output); }
-    bool start(const std::vector<std::string> &args) {
+    bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel) {
+        struct sigaction policy{};
+        if (sigaction(SIGCHLD, nullptr, &policy) || policy.sa_handler != SIG_DFL || (policy.sa_flags & SA_NOCLDWAIT)) return false;
+#if !defined(OM_PUBLIC_PIDFD_SPAWN) || !defined(SYS_pidfd_send_signal)
+        return false;
+#endif
         int pipe[2];
         if (pipe2(pipe, O_CLOEXEC) != 0) return false;
         if (fcntl(pipe[0], F_SETFL, O_NONBLOCK) != 0) { ::close(pipe[0]); ::close(pipe[1]); return false; }
@@ -203,11 +225,18 @@ struct PublicJsonProcessClient::Impl {
         argv.push_back(nullptr);
         char lang[] = "LANG=C", locale[] = "LC_ALL=C";
         char *environment[] = {lang, locale, nullptr};
-        const int result = ready ? posix_spawn(&pid, executable.c_str(), &actions, &attributes, argv.data(), environment) : -1;
+        // Obtain the kernel identity atomically with creation. A later pidfd_open(pid) is still a reuse race.
+#if defined(OM_PUBLIC_PIDFD_SPAWN)
+        const int result = ready && !cancel.load() && !unresolved().load() ? pidfd_spawn(&pidfd, executable.c_str(), &actions, &attributes, argv.data(), environment) : -1;
+#else
+        const int result = -1;
+        (void)ready; (void)cancel; (void)environment;
+#endif
         posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes);
         ::close(pipe[1]);
-        if (result != 0) { ::close(pipe[0]); pid = -1; return false; }
-        output = pipe[0]; return true;
+        if (result != 0) { ::close(pipe[0]); pidfd = -1; return false; }
+        output = pipe[0];
+        return true;
     }
     bool read(std::string *wire, size_t limit) {
         for (unsigned chunks = 0; chunks < 8; ++chunks) {
@@ -221,15 +250,52 @@ struct PublicJsonProcessClient::Impl {
         return true;
     }
     bool exited(bool *ok) {
-        int status = 0;
-        if (waitpid(pid, &status, WNOHANG) != pid) return false;
-        reaped = true; *ok = WIFEXITED(status) && WEXITSTATUS(status) == 0; return true;
+        if (reaped) { *ok = success; return true; }
+        if (!owned() || unknown) return false;
+#if defined(OM_PUBLIC_PIDFD_SPAWN)
+        siginfo_t info{};
+        const int result = waitid(P_PIDFD, static_cast<id_t>(pidfd), &info, WEXITED | WNOHANG);
+        if (result < 0 && errno == EINTR) return false;
+        if (result != 0 || (info.si_pid && info.si_code != CLD_EXITED && info.si_code != CLD_KILLED && info.si_code != CLD_DUMPED)) {
+            unknown = true; unreaped(); return false;
+        }
+        verified = true;  // the pinned identity is a child, not merely a potentially reused PID
+        if (!info.si_pid) return false;
+        reaped = true; success = info.si_code == CLD_EXITED && info.si_status == 0; settled(); *ok = success; return true;
+#else
+        (void)ok; unknown = true; unreaped(); return false;
+#endif
+    }
+    void terminateOwned() {
+#if defined(__linux__) && defined(SYS_pidfd_send_signal)
+        // A competing reaper cannot turn this retained kernel identity into an unrelated signal target.
+        ::syscall(SYS_pidfd_send_signal, pidfd, SIGKILL, nullptr, 0u);
+#endif
     }
 #endif
+    ~Impl() { close(); if (reserved) --reservations(); }  // deleting owner holds the registry mutex
+    bool stop() {
+        if (!owned()) { close(); release(); return true; }
+        bool ok = false;
+        if (exited(&ok)) { close(); release(); reaped = success = verified = false; return true; }
+        if (unknown) { unreaped(); return false; }
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+        bool signalled = false;
+        for (;;) {
+            if (verified && !signalled) { terminateOwned(); signalled = true; }
+            if (exited(&ok)) { close(); release(); reaped = success = verified = false; return true; }
+            if (unknown || std::chrono::steady_clock::now() >= until) { unreaped(); return false; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
 };
 
 PublicJsonProcessClient::PublicJsonProcessClient(std::filesystem::path helper) : impl_(new Impl(std::move(helper))) {}
-PublicJsonProcessClient::~PublicJsonProcessClient() = default;
+PublicJsonProcessClient::~PublicJsonProcessClient() {
+    if (!impl_->stop()) {
+        std::lock_guard<std::mutex> lock(Impl::mutex()); Impl::quarantine().push_back(impl_.release());
+    } else { std::lock_guard<std::mutex> lock(Impl::mutex()); impl_.reset(); }
+}
 PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request, const std::atomic<bool> &cancel, PublicHttpsLimits limits) {
     PublicJsonResponse response;
     if (cancel.load()) { response.status = PublicHttpsStatus::Cancelled; return response; }
@@ -240,8 +306,9 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
         !limits.bodyBytes || limits.bodyBytes > 1024 * 1024 || limits.headerBytes < 64 || limits.headerBytes > 32768) {
         response.status = PublicHttpsStatus::InvalidRequest; return response;
     }
-    if (!impl_->stop()) return response;  // do not spawn another helper while a previous child has not exited
+    if (!impl_->stop()) { response.status = PublicHttpsStatus::Unreaped; return response; }
     try {
+        response = [&]() -> PublicJsonResponse {
 #if defined(_WIN32)
         // Installed local helper only. A UNC/device path could itself block on network I/O before spawn.
         const auto root = impl_->helper.root_name().native();
@@ -251,11 +318,18 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(limits.totalMs);
         const std::vector<std::string> args = {std::to_string(static_cast<unsigned>(request.feed)), std::to_string(request.fromUtc), std::to_string(request.toUtc),
             std::to_string(limits.connectMs), std::to_string(limits.totalMs), std::to_string(limits.bodyBytes), std::to_string(limits.headerBytes)};
-        if (!impl_->start(args)) return response;
-        struct Stop { Impl *p; ~Stop() { p->stop(); } } stop{impl_.get()};
+        response.status = Impl::reserve(impl_.get());
+        if (response.status != PublicHttpsStatus::Ok) return response;
+        response = {};
+        if (!impl_->start(args, cancel)) {
+            if (cancel.load()) response.status = PublicHttpsStatus::Cancelled;
+            else if (Impl::unresolved().load()) response.status = PublicHttpsStatus::Unreaped;
+            return response;
+        }
         std::string wire;
         const size_t limit = limits.bodyBytes + kWireHeader;
         for (;;) {
+            if (Impl::unresolved().load()) { response = {}; response.status = PublicHttpsStatus::Unreaped; return response; }
             if (cancel.load()) { response.status = PublicHttpsStatus::Cancelled; return response; }
             if (std::chrono::steady_clock::now() >= deadline) { response.status = PublicHttpsStatus::Timeout; return response; }
             if (!impl_->read(&wire, limit)) return response;
@@ -272,8 +346,13 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
                 else if (std::chrono::steady_clock::now() >= deadline) { response = {}; response.status = PublicHttpsStatus::Timeout; }
                 return response;
             }
+            if (impl_->unknown) { response = {}; response.status = PublicHttpsStatus::Unreaped; return response; }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
-    } catch (...) { return response; }
+        }();
+    } catch (...) { response = {}; }
+    // Cleanup is part of the result, not a destructor running after the return value was already copied.
+    if (!impl_->stop() || Impl::unresolved().load()) { response = {}; response.status = PublicHttpsStatus::Unreaped; }
+    return response;
 }
 }  // namespace om
