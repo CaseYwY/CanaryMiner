@@ -46,12 +46,14 @@ class GameSessionGuard {
     // False when there is no eligible pause or the session is terminal.
     bool requestForceResume();
     void cancelForceResume();
-    bool forceResumeActive()const{return forceActive_;}
-    const GameGuardSnapshot &snapshot()const{return view_;}
+    bool forceResumeActive()const{return snapshot().forceResumeActive;}
+    // Revocation only: no clock refresh or new evidence. A foreign caller cannot cancel a healthy episode.
+    const GameGuardSnapshot &snapshot()const;
    private:
     GameGuardPolicy policy_;GameProfitBinding binding_;const SessionIntent &intent_;SessionToken token_;
-    GameGuardSnapshot view_;bool terminal_=false,clockStarted_=false,qualified_=false;
-    bool forceArmed_=false,forceActive_=false;
+    mutable GameGuardSnapshot view_;GameGuardSnapshot denied_;
+    mutable bool terminal_=false;bool clockStarted_=false,qualified_=false;
+    mutable bool forceArmed_=false,forceActive_=false;
     GameGuardTime anchor_,last_;
     std::optional<GameDetection> detection_;
     std::optional<uint64_t> absentSince_;
@@ -60,5 +62,7 @@ class GameSessionGuard {
     bool time(GameGuardTime now);
     bool acceptProfit(const std::shared_ptr<const GameProfitWindow> &profit,GameGuardTime now);
     void clearEpisode();
+    void clearForce()const;
+    void revoke()const;
 };
 } // namespace om

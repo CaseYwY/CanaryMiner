@@ -17,20 +17,33 @@ GameSessionGuard::GameSessionGuard(GameGuardPolicy p,GameProfitBinding b,const S
         validCreditSourceContract(binding_.production)&&binding_.production.scope==CreditScope::Worker;
     view_.state=p.mode==GameIntent::Off?S::Off:S::PausedUnknown;
 }
-void GameSessionGuard::requestStop(){terminal_=true;forceArmed_=forceActive_=false;view_.forceResumeActive=false;view_.state=S::Stopped;}
+void GameSessionGuard::clearForce()const{forceArmed_=forceActive_=false;view_.forceResumeActive=false;}
+void GameSessionGuard::revoke()const{terminal_=true;clearForce();view_.state=S::Stopped;}
+void GameSessionGuard::requestStop(){revoke();}
 bool GameSessionGuard::requestForceResume(){
+    if(intent_.foreignCaller(token_))return false;
+    if(!intent_.permits(token_)){revoke();return false;}
     if(terminal_)return false;
     if(forceActive_||forceArmed_){cancelForceResume();return true;}
     if(!gameForceResumeEligible(view_.state))return false;
     forceArmed_=true;
     return true;
 }
-void GameSessionGuard::cancelForceResume(){forceArmed_=forceActive_=false;view_.forceResumeActive=false;}
+void GameSessionGuard::cancelForceResume(){
+    if(intent_.foreignCaller(token_))return;
+    if(!intent_.permits(token_)){revoke();return;}
+    clearForce();
+}
+const GameGuardSnapshot &GameSessionGuard::snapshot()const{
+    if(intent_.foreignCaller(token_))return denied_;
+    if(!intent_.permits(token_))revoke();
+    return view_;
+}
 bool GameSessionGuard::time(GameGuardTime now){
     if(!instant(now.utcMs)||(clockStarted_&&(now.utcMs<last_.utcMs||now.monotonicMs<last_.monotonicMs))){terminal_=true;cancelForceResume();view_.state=S::ClockFault;return false;}
     if(!clockStarted_){clockStarted_=true;anchor_=now;}
     const auto utc=static_cast<uint64_t>(now.utcMs-anchor_.utcMs),mono=now.monotonicMs-anchor_.monotonicMs;
-    if((utc>mono?utc-mono:mono-utc)>2000){terminal_=true;view_.state=S::ClockFault;return false;}
+    if((utc>mono?utc-mono:mono-utc)>2000){terminal_=true;clearForce();view_.state=S::ClockFault;return false;}
     return true;
 }
 void GameSessionGuard::clearEpisode(){view_.episodeKey.clear();view_.profitLocked=view_.profitCheckDue=false;view_.coexistBeginMonoMs.reset();view_.lastProfit.reset();
@@ -49,6 +62,7 @@ bool GameSessionGuard::acceptProfit(const std::shared_ptr<const GameProfitWindow
     return true;
 }
 const GameGuardSnapshot &GameSessionGuard::update(GameGuardTime now,const GameDetection &d,const GameSafety &s,std::shared_ptr<const GameProfitWindow> profit){
+    if(intent_.foreignCaller(token_))return denied_;
     if(!intent_.permits(token_)){requestStop();return view_;}
     if(terminal_)return view_;
     if(!time(now))return view_;

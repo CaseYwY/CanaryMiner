@@ -80,6 +80,11 @@ while foreign reads/actions/first starts cannot consume/cancel healthy clocks, c
 actual pending commands and nonrefundable reservations remain ownership facts, not authority or exit proof. Enclosing game/runtime
 and source/measurement/hard-bound/export/deployment/physical/release gates remain open.
 
+[P-14j](../game-current-views.md) revokes current guard/runtime views on original parent loss and refuses foreign mutations
+before they change clocks, overrides or owned detection. Every clock fault clears active/armed force flags; historical
+episode/loss/profit evidence stays distinct. Explicit logical const revocation never refreshes evidence or joins; the detector's
+existing caught projection allocation remains a runtime cancellation limit. Enclosing fleet and all real-source/physical/release gates stay open.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

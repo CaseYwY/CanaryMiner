@@ -4,7 +4,9 @@ namespace om {
 GameRuntime::GameRuntime(std::filesystem::path helper,GameProcessTarget target,GameDetectionPolicy detection,GameGuardPolicy policy,
     GameProfitBinding binding,const SessionIntent &intent,SessionToken token)
     :intent_(intent),token_(token),target_(std::move(target)),detectionPolicy_(detection),policy_(policy),bindingValid_(binding.gameKey==target_.gameKey),
-     guard_(policy,std::move(binding),intent,token),detector_(std::move(helper),target_,detection){}
+      guard_(policy,std::move(binding),intent,token),detector_(std::move(helper),target_,detection){
+    auto denied=std::make_shared<GameDetectionSnapshot>();denied->state=GameDetectionOwnerState::Stopped;deniedDetection_=std::move(denied);
+}
 GameRuntime::~GameRuntime(){stop();}
 void GameRuntime::fault(GameGuardTime now){
     state_=GameRuntimeState::Faulted;
@@ -25,6 +27,7 @@ bool GameRuntime::start(GameGuardTime now){
     return true;
 }
 const GameGuardSnapshot &GameRuntime::tick(GameGuardTime now,const GameSafety &safety,std::shared_ptr<const GameProfitWindow> profit){
+    if(intent_.foreignCaller(token_))return denied_;
     runUntil_=0;lastTick_=now;
     if(!intent_.permits(token_)){requestStop();return guard_.snapshot();}
     if(state_==GameRuntimeState::Dormant||state_==GameRuntimeState::Stopped||state_==GameRuntimeState::Faulted)return guard_.snapshot();
@@ -53,15 +56,39 @@ const GameGuardSnapshot &GameRuntime::tick(GameGuardTime now,const GameSafety &s
     return guard_.snapshot();
 }
 bool GameRuntime::requestForceResume(){
+    if(intent_.foreignCaller(token_))return false;
+    observe();
     if(state_!=GameRuntimeState::Active&&state_!=GameRuntimeState::Off)return false;
     return guard_.requestForceResume();
 }
-void GameRuntime::cancelForceResume(){guard_.cancelForceResume();}
+void GameRuntime::cancelForceResume(){if(intent_.foreignCaller(token_))return;observe();guard_.cancelForceResume();}
 uint64_t GameRuntime::runDeadline(GameGuardTime now,uint64_t upper)const{
+    if(intent_.foreignCaller(token_))return 0;
+    observe();
     if(!intent_.permits(token_)||(state_!=GameRuntimeState::Active&&state_!=GameRuntimeState::Off)||
         now.utcMs!=lastTick_.utcMs||now.monotonicMs!=lastTick_.monotonicMs||upper<=now.monotonicMs||runUntil_<=now.monotonicMs)return 0;
     return (std::min)(upper,runUntil_);
 }
-void GameRuntime::requestStop(){attempted_=true;runUntil_=0;state_=GameRuntimeState::Stopped;guard_.requestStop();detector_.requestStop();}
+void GameRuntime::revoke()const{attempted_=true;runUntil_=0;state_=GameRuntimeState::Stopped;guard_.requestStop();detector_.requestStop();}
+void GameRuntime::observe()const{
+    if(attempted_&&!intent_.foreignCaller(token_)&&!intent_.permits(token_)&&state_!=GameRuntimeState::Stopped)revoke();
+}
+GameRuntimeState GameRuntime::state()const{
+    if(intent_.foreignCaller(token_))return GameRuntimeState::Stopped;
+    observe();return state_;
+}
+const GameGuardSnapshot &GameRuntime::snapshot()const{
+    if(intent_.foreignCaller(token_))return denied_;
+    observe();return guard_.snapshot();
+}
+bool GameRuntime::forceResumeActive()const{
+    if(intent_.foreignCaller(token_))return false;
+    observe();return guard_.forceResumeActive();
+}
+std::shared_ptr<const GameDetectionSnapshot> GameRuntime::detection()const{
+    if(intent_.foreignCaller(token_))return deniedDetection_;
+    observe();return detector_.snapshot();
+}
+void GameRuntime::requestStop(){revoke();}
 void GameRuntime::stop(){requestStop();detector_.stop();}
 } // namespace om
