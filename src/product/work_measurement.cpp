@@ -13,14 +13,15 @@ ExactDecimal number(uint64_t n){ExactDecimal out;ExactDecimal::parse(std::to_str
 }
 struct WorkMeasurementOwner::Impl {
     WorkProfileInput input;WorkerControlBinding expected;WorkerControlIssuer &issuer;const SessionIntent &intent;SessionToken token;
-    WorkMeasurementSnapshot view;bool attempted=false;WorkMeasurementTime anchor,last;std::string fingerprint;
+    WorkMeasurementSnapshot view,denied;bool attempted=false;WorkMeasurementTime anchor,last;std::string fingerprint;
     std::optional<WorkerReceipt> observed;std::optional<unsigned> installed;
     std::optional<WorkerCommand> pending,carried; // exact pre-transition flight; timestamps alone cannot grant this exception
     std::vector<WorkerReceipt> receipts;
     EvidenceDeadline sourceExpiry;
     size_t trial=0;WorkProfileWindow window;
     Impl(WorkProfilePlan p,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t)
-        :expected(std::move(b)),issuer(w),intent(i),token(t){input.plan=std::move(p);}
+        :expected(std::move(b)),issuer(w),intent(i),token(t){input.plan=std::move(p);denied.state=S::Stopped;denied.status=R::Stopped;denied.revokeRequired=true;}
+    bool foreign()const{return intent.foreignCaller(token);}
     void halt(R r){attempted=true;
         if(view.state!=S::Stopped&&view.state!=S::Faulted){view.state=r==R::Stopped?S::Stopped:S::Faulted;view.status=r;}
         view.revokeRequired=true;view.requestedHostWaitMs.reset();view.sampleDueMonoMs=view.sourceValidUntilMonoMs=0;issuer.requestStop();}
@@ -99,6 +100,7 @@ WorkMeasurementOwner::~WorkMeasurementOwner(){if(active(impl_->view.state))reque
 bool WorkMeasurementOwner::start(WorkProfileSample baseline,WorkMeasurementTime now,const WorkProfileConditions &conditions){auto &p=*impl_;
     if(p.attempted)return false;
     p.attempted=true;
+    if(p.foreign()){p.view.state=S::Stopped;p.view.status=R::Stopped;p.view.revokeRequired=true;return false;}
     try{if(!p.conditions(conditions))return false;
         const auto valid=validateWorkProfilePlan(p.input.plan);
         if(valid!=R::Ok){p.halt(valid);return false;}
@@ -120,6 +122,7 @@ bool WorkMeasurementOwner::start(WorkProfileSample baseline,WorkMeasurementTime 
         p.view.state=S::AwaitingApplication;p.view.status=R::Ok;p.view.requestedHostWaitMs=p.input.plan.hostWaitMs[0];return true;
     }catch(...){p.halt(R::Capacity);return false;}}
 const WorkMeasurementSnapshot &WorkMeasurementOwner::poll(WorkMeasurementTime now,const WorkProfileConditions &conditions){auto &p=*impl_;
+    if(p.foreign())return p.denied;
     if(!p.intent.permits(p.token)){p.halt(R::Stopped);return p.view;}
     if(!active(p.view.state))return p.view;
     try{if(!p.conditions(conditions)||!p.time(now)||!p.control(now))return p.view;
@@ -130,6 +133,7 @@ const WorkMeasurementSnapshot &WorkMeasurementOwner::poll(WorkMeasurementTime no
     }catch(...){p.halt(R::Capacity);}return p.view;
 }
 bool WorkMeasurementOwner::append(uint64_t sequence,WorkProfileSample sample,WorkMeasurementTime now,const WorkProfileConditions &conditions){auto &p=*impl_;
+    if(p.foreign())return false;
     poll(now,conditions);if(!active(p.view.state))return false;
     try{if(!sequence||p.view.sequence==UINT64_MAX||sequence!=p.view.sequence+1){p.halt(R::Attribution);return false;}
         if(!p.source(sample,now))return false;
@@ -147,5 +151,9 @@ bool WorkMeasurementOwner::append(uint64_t sequence,WorkProfileSample sample,Wor
         p.view.latestSample=p.input.samples.back();p.freshness(now);return p.advance();
     }catch(...){p.halt(R::Capacity);return false;}}
 void WorkMeasurementOwner::requestStop(){impl_->halt(R::Stopped);}
-const WorkMeasurementSnapshot &WorkMeasurementOwner::snapshot()const{return impl_->view;}
+const WorkMeasurementSnapshot &WorkMeasurementOwner::snapshot()const{auto &p=*impl_;
+    if(p.foreign())return p.denied;
+    if(p.attempted&&!p.intent.permits(p.token))p.halt(R::Stopped);
+    return p.view;
+}
 } // namespace om

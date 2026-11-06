@@ -9,16 +9,19 @@ bool safe(const WorkProfileConditions &c){return c.safetyTelemetryValid&&c.therm
 }
 struct EconomicCommandOwner::Impl {
     EconomicCommandPolicy policy;const EconomicEvaluationOwner &evaluation;WorkerControlIssuer &issuer;
-    const SessionIntent &intent;SessionToken token;EconomicChoiceGuard guard;EconomicCommandSnapshot view;
+    const SessionIntent &intent;SessionToken token;EconomicChoiceGuard guard;EconomicCommandSnapshot view,denied;
     bool attempted=false;OptimizationTime anchor,last;std::string planKey;
     std::optional<WorkerCommand> flight;std::optional<WorkerReceipt> settled;
     std::unique_ptr<EconomicStudyUse> pendingUse;uint64_t pendingCeiling=0;
     Impl(EconomicCommandPolicy p,WorkerControlBinding b,const EconomicEvaluationOwner &e,WorkerControlIssuer &w,EconomicParentBudget &budget,const SessionIntent &i,SessionToken t)
-        :policy(std::move(p)),evaluation(e),issuer(w),intent(i),token(t),guard(policy.guard,std::move(b),e,w,i,t,&budget){}
+        :policy(std::move(p)),evaluation(e),issuer(w),intent(i),token(t),guard(policy.guard,std::move(b),e,w,i,t,&budget){denied.state=S::Stopped;denied.revokeRequired=true;}
+    bool foreign()const{return intent.foreignCaller(token);}
+    void denyStart(){view.state=S::Stopped;view.revokeRequired=true;} // no borrowed issuer/guard ownership was acquired
     void halt(S state){if(view.state==S::Retired)return;
         if(view.state!=S::Faulted&&view.state!=S::ClockFault&&view.state!=S::Stopped)view.state=state;
         attempted=true;view.revokeRequired=true;issuer.requestStop();guard.requestStop();}
     bool clock(OptimizationTime now){
+        if(foreign())return false;
         if(now.utcMs<0||now.utcMs>253402300799999LL||!now.monotonicMs||now.utcMs<last.utcMs||now.monotonicMs<last.monotonicMs){halt(S::ClockFault);return false;}
         const auto wall=static_cast<uint64_t>(now.utcMs-anchor.utcMs),mono=now.monotonicMs-anchor.monotonicMs;
         if((wall>mono?wall-mono:mono-wall)>2000){halt(S::ClockFault);return false;}
@@ -46,6 +49,7 @@ EconomicCommandOwner::EconomicCommandOwner(EconomicCommandPolicy p,WorkerControl
     EconomicParentBudget &budget,const SessionIntent &i,SessionToken t):impl_(new Impl(std::move(p),std::move(b),e,w,budget,i,t)){}
 EconomicCommandOwner::~EconomicCommandOwner(){if(impl_->view.state==S::Running)requestStop();}
 bool EconomicCommandOwner::start(OptimizationTime now,const WorkProfilePlan &plan){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+    if(p.foreign()){p.denyStart();return false;}
     if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
     p.anchor=p.last=now;
@@ -56,6 +60,7 @@ bool EconomicCommandOwner::start(OptimizationTime now,const WorkProfilePlan &pla
 bool EconomicCommandOwner::startAfterMeasurement(OptimizationTime now,const WorkProfilePlan &plan,WorkExperimentOwner &measurement){auto &p=*impl_;
     if(p.attempted)return false;
     p.attempted=true;
+    if(p.foreign()){p.denyStart();return false;}
     if(!p.intent.permits(p.token)){p.halt(S::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;return false;}
     try{WorkerReceipt paused;
@@ -68,6 +73,7 @@ bool EconomicCommandOwner::startAfterMeasurement(OptimizationTime now,const Work
         p.view.measurement=record;p.view.state=S::Running;return true;
     }catch(...){measurement.failedHandoff();p.halt(S::Faulted);return false;}}
 std::optional<WorkerCommand> EconomicCommandOwner::poll(OptimizationTime now,uint64_t revision,const WorkProfilePlan &plan,const WorkProfileConditions &conditions,uint64_t permission){auto &p=*impl_;
+    if(p.foreign())return {};
     if(p.view.state!=S::Running)return {};
     try{if(!p.clock(now)||p.view.state!=S::Running)return {};
         if(workProfilePlanFingerprint(plan)!=p.planKey){p.halt(S::Faulted);return {};}
@@ -107,6 +113,7 @@ std::optional<WorkerCommand> EconomicCommandOwner::poll(OptimizationTime now,uin
         return command;
     }catch(...){p.halt(S::Faulted);return {};}}
 WorkerReceiptResult EconomicCommandOwner::acknowledge(const WorkerReceipt &r,OptimizationTime now){auto &p=*impl_;
+    if(p.foreign())return WorkerReceiptResult::Rejected;
     if(!p.attempted||p.view.state==S::Dormant||p.view.state==S::Disabled||p.view.state==S::Retired)return WorkerReceiptResult::Rejected;
     try{if(!p.clock(now))return WorkerReceiptResult::Rejected;
         if(!(p.settled&&same(r,*p.settled))&&(!p.flight||!sameWorkerCommand(r.command,*p.flight))){p.halt(S::Faulted);return WorkerReceiptResult::Rejected;}
@@ -123,10 +130,15 @@ WorkerReceiptResult EconomicCommandOwner::acknowledge(const WorkerReceipt &r,Opt
 void EconomicCommandOwner::transportFailed(){impl_->halt(S::Faulted);}
 void EconomicCommandOwner::requestStop(){impl_->halt(S::Stopped);}
 bool EconomicCommandOwner::retire(OptimizationTime now){auto &p=*impl_;if(p.view.state!=S::Running)return false;
+    if(p.foreign())return false;
     try{if(!p.clock(now)||p.view.state!=S::Running)return false;
         const auto worker=p.issuer.snapshot(now.monotonicMs);
         if(p.view.pending||worker.state!=WorkerControlState::Stopped||!p.exact(worker)||!p.guard.retire(now)){p.halt(S::Faulted);return false;}
         p.view.state=S::Retired;p.view.revokeRequired=true;p.flight.reset();p.pendingUse.reset();return true;
     }catch(...){p.halt(S::Faulted);return false;}}
-const EconomicCommandSnapshot &EconomicCommandOwner::snapshot()const{return impl_->view;}
+const EconomicCommandSnapshot &EconomicCommandOwner::snapshot()const{auto &p=*impl_;
+    if(p.foreign())return p.denied;
+    if(p.attempted&&!p.intent.permits(p.token))p.halt(S::Stopped);
+    return p.view;
+}
 } // namespace om

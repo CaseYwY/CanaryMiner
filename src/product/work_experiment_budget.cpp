@@ -9,14 +9,16 @@ bool binding(const WorkerControlBinding &a,const WorkerControlBinding &b){return
     a.epoch==b.epoch&&a.slot==b.slot&&a.workerGeneration==b.workerGeneration;}
 }
 struct WorkExperimentBudget::Impl {
-    WorkExperimentBudgetPolicy policy;WorkProfilePlan plan;const SessionIntent &intent;SessionToken token;WorkExperimentBudgetSnapshot view;
+    WorkExperimentBudgetPolicy policy;WorkProfilePlan plan;const SessionIntent &intent;SessionToken token;WorkExperimentBudgetSnapshot view,denied;
     bool attempted=false;WorkMeasurementTime anchor,last;uint64_t retiredAt=0;
     const void *borrower=nullptr,*issuer=nullptr,*transferredOwner=nullptr;
     std::vector<std::shared_ptr<const WorkExperimentReservation>> originals;std::optional<WorkerReceipt> handedPause;
-    Impl(WorkExperimentBudgetPolicy p,WorkProfilePlan f,const SessionIntent &i,SessionToken t):policy(std::move(p)),plan(std::move(f)),intent(i),token(t){}
+    Impl(WorkExperimentBudgetPolicy p,WorkProfilePlan f,const SessionIntent &i,SessionToken t):policy(std::move(p)),plan(std::move(f)),intent(i),token(t){denied.state=S::Stopped;denied.status=R::Stopped;}
+    bool foreign()const{return intent.foreignCaller(token);}
     void halt(R r){attempted=true;if(view.state==S::Stopped||view.state==S::Faulted)return;
         view.state=r==R::Stopped?S::Stopped:S::Faulted;view.status=r;}
     bool time(WorkMeasurementTime now){
+        if(foreign())return false;
         if(!intent.permits(token)){halt(R::Stopped);return false;}
         if(view.state!=S::Running)return false;
         if(now.utcMs<last.utcMs||now.utcMs>253402300799999LL||now.monotonicMs<last.monotonicMs){halt(R::Clock);return false;}
@@ -39,6 +41,7 @@ bool WorkExperimentBudget::start(WorkMeasurementTime now){auto &p=*impl_;if(p.at
 }
 WorkProfileStatus WorkExperimentBudget::admit(const void *owner,WorkerControlIssuer &issuer,const SessionIntent &intent,SessionToken token,
     const WorkProfilePlan &plan,WorkMeasurementTime now){auto &p=*impl_;
+    if(p.foreign())return R::Stopped;
     try{if(!p.time(now))return p.view.status;
         const auto s=issuer.snapshot(now.monotonicMs);
         if(!owner||p.view.attached||&intent!=&p.intent||token.epoch!=p.token.epoch||!issuer.boundTo(p.intent,p.token)||
@@ -61,6 +64,7 @@ WorkProfileStatus WorkExperimentBudget::admit(const void *owner,WorkerControlIss
         p.view.attached=true;p.view.completed=p.view.transferred=false;p.borrower=owner;p.issuer=&issuer;p.transferredOwner=nullptr;p.handedPause.reset();return R::Ok;
     }catch(...){p.halt(R::Capacity);return p.view.status;}}
 WorkProfileStatus WorkExperimentBudget::check(const void *owner,WorkMeasurementTime now){auto &p=*impl_;
+    if(p.foreign())return R::Stopped;
     if(!p.time(now))return p.view.status;
     if(!p.view.attached||p.borrower!=owner||p.view.transferred){p.halt(R::Attribution);return p.view.status;}return R::Ok;
 }
@@ -92,5 +96,9 @@ bool WorkExperimentBudget::retire(WorkerControlIssuer &issuer,WorkMeasurementTim
         p.view.attached=false;p.issuer=p.borrower=p.transferredOwner=nullptr;p.retiredAt=now.monotonicMs;return true;
     }catch(...){p.halt(R::Capacity);return false;}}
 void WorkExperimentBudget::requestStop(){impl_->halt(R::Stopped);}
-const WorkExperimentBudgetSnapshot &WorkExperimentBudget::snapshot()const{return impl_->view;}
+const WorkExperimentBudgetSnapshot &WorkExperimentBudget::snapshot()const{auto &p=*impl_;
+    if(p.foreign())return p.denied;
+    if(p.attempted&&!p.intent.permits(p.token))p.halt(R::Stopped);
+    return p.view;
+}
 } // namespace om

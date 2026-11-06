@@ -24,6 +24,7 @@ struct EconomicCommandSnapshot {
 };
 // All methods and borrowed objects belong to one control thread. This is the sole issuer/acknowledgement caller
 // after the initial Pause. Poll the evaluator's current context/conditions first. The parent budget outlives this owner.
+// Current reads revoke stopped parent authority in memory; stale scoped calls deny without touching a healthy owner.
 class EconomicCommandOwner {
    public:
     EconomicCommandOwner(EconomicCommandPolicy,WorkerControlBinding,const EconomicEvaluationOwner &,WorkerControlIssuer &,

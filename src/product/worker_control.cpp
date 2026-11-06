@@ -133,6 +133,7 @@ bool WorkerControlIssuer::start(uint64_t now){
     lastMonoMs_=now;view_.state=S::Active;return true;
 }
 bool WorkerControlIssuer::time(uint64_t now){
+    if(intent_.foreignCaller(token_))return false;
     if(!intent_.permits(token_)){requestStop();return false;}
     if(view_.state!=S::Active)return false;
     if(!now||now<lastMonoMs_){view_.state=S::ClockFault;return false;}lastMonoMs_=now;
@@ -147,6 +148,7 @@ std::optional<WorkerCommand> WorkerControlIssuer::issue(D directive,uint64_t now
     view_.pending=c;acceptedMonoMs_.reset();deadline_=c.deadlineMonoMs;return c;
 }
 WorkerReceiptResult WorkerControlIssuer::acknowledge(const WorkerReceipt &r,uint64_t now){
+    if(intent_.foreignCaller(token_))return WorkerReceiptResult::Rejected;
     time(now);
     if(view_.settled&&sameReceipt(r,*view_.settled))return terminal(view_.state)?WorkerReceiptResult::Terminal:WorkerReceiptResult::Duplicate;
     if(!validReceipt(r)||r.observedMonoMs>now||!view_.pending||!sameWorkerCommand(r.command,*view_.pending)){fault();return WorkerReceiptResult::Rejected;}
@@ -157,7 +159,10 @@ WorkerReceiptResult WorkerControlIssuer::acknowledge(const WorkerReceipt &r,uint
     view_.settled=r;view_.pending.reset();acceptedMonoMs_.reset();if(r.kind==K::Paused)initialPauseConfirmed_=true;
     return terminal(view_.state)?WorkerReceiptResult::Terminal:WorkerReceiptResult::Settled;
 }
-WorkerControlIssuerSnapshot WorkerControlIssuer::snapshot(uint64_t now){time(now);return view_;}
+WorkerControlIssuerSnapshot WorkerControlIssuer::snapshot(uint64_t now){
+    if(intent_.foreignCaller(token_)){WorkerControlIssuerSnapshot denied;denied.state=S::Stopped;return denied;}
+    time(now);return view_;
+}
 bool WorkerControlIssuer::paused(uint64_t now){return time(now)&&!view_.pending&&view_.settled&&view_.settled->kind==K::Paused;}
 std::optional<WorkerReceipt> WorkerControlIssuer::appliedWait(uint64_t now){
     if(time(now)&&!view_.pending&&view_.settled&&view_.settled->kind==K::WaitApplied)return view_.settled;

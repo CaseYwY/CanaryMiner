@@ -77,6 +77,7 @@ struct WorkerControlIssuerSnapshot {
     std::optional<WorkerReceipt> settled;
 };
 // Single parent control thread. The borrowed intent must outlive this issuer; keep it across every command of this worker incarnation.
+// Stale scoped callers cannot read/consume/cancel a healthy current issuer. Actual late receipts after stop remain historical.
 class WorkerControlIssuer {
    public:
     WorkerControlIssuer(WorkerControlBinding,const SessionIntent &,SessionToken);

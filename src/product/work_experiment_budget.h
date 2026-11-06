@@ -27,6 +27,7 @@ struct WorkExperimentBudgetSnapshot {
 // Outlives all experiment owners of one logical slot, sharing their exact explicit parent. Admission reserves the
 // whole plan before Run, and retirement never refunds it. Only a completed/transferred attempt with the same
 // stopped/settled issuer can retire. The enclosing native owner MUST additionally prove eligible reaping/no overlap.
+// Current read revocation preserves every reservation/attachment; a stale caller receives only an empty denied view.
 class WorkExperimentBudget {
    public:
     WorkExperimentBudget(WorkExperimentBudgetPolicy,WorkProfilePlan,const SessionIntent &,SessionToken);

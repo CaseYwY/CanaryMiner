@@ -28,6 +28,7 @@ struct EconomicParentBudgetSnapshot {
 };
 // One logical slot's parent-lifetime reference budget; never a process-exit or replacement permission.
 // Outlives every attached guard. Only an exact stopped/settled issuer can retire a guard before replacement.
+// Current reads check parent revocation without renewing time/budgets; denied caller views are not ownership facts.
 class EconomicParentBudget {
    public:
     EconomicParentBudget(EconomicParentBudgetPolicy,const SessionIntent &,SessionToken);
@@ -57,6 +58,7 @@ bool validEconomicGuardPolicy(const EconomicGuardPolicy &);
 // Update evaluator context/conditions before check. Public start requires revision-1 proven Pause; the command
 // owner's private measured handoff preserves that original admission and sets a separate post-handoff study barrier.
 // The frozen worker/plan cannot be rebound; an optional parent budget survives explicit guard retirement/replacement.
+// A foreign scoped caller cannot consume or cancel a healthy guard/budget; current reads never refresh deadlines.
 class EconomicChoiceGuard {
    public:
     EconomicChoiceGuard(EconomicGuardPolicy,WorkerControlBinding,const EconomicEvaluationOwner &,WorkerControlIssuer &,const SessionIntent &,SessionToken,EconomicParentBudget *parentBudget=nullptr);

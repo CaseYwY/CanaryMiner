@@ -44,7 +44,7 @@ struct OptimizationSchedulePoll {
 };
 class OptimizationSchedule {
    public:
-    OptimizationSchedule(OptimizationSchedulePolicy policy,const SessionIntent &intent,SessionToken token):policy_(policy),intent_(intent),token_(token){}
+    OptimizationSchedule(OptimizationSchedulePolicy policy,const SessionIntent &intent,SessionToken token):policy_(policy),intent_(intent),token_(token){denied_.state=OptimizationScheduleState::Stopped;}
     OptimizationSchedule(const OptimizationSchedule &)=delete;
     OptimizationSchedule &operator=(const OptimizationSchedule &)=delete;
     bool start(OptimizationTime now); // single-use; caller must already own an explicit session token
@@ -52,10 +52,11 @@ class OptimizationSchedule {
     // Settles ownership even after expiry. Expired/Cancelled work cannot publish a result; an uncompleted slot is never replaced.
     OptimizationCompletion complete(const OptimizationTicket &ticket,OptimizationOutcome outcome,OptimizationTime now);
     void requestStop();
-    const OptimizationScheduleSnapshot &snapshot()const{return snapshot_;}
+    // Memory-only revocation; a foreign caller gets an empty denied view without settling/cancelling any ticket.
+    const OptimizationScheduleSnapshot &snapshot()const;
    private:
     OptimizationSchedulePolicy policy_;const SessionIntent &intent_;SessionToken token_;
-    OptimizationScheduleSnapshot snapshot_;
+    mutable OptimizationScheduleSnapshot snapshot_;OptimizationScheduleSnapshot denied_;
     bool attempted_=false;
     uint64_t sequence_=0;
     OptimizationTime anchor_,last_;
@@ -64,7 +65,7 @@ class OptimizationSchedule {
     bool time(OptimizationTime now);
     bool later(uint64_t now,uint64_t delay,uint64_t &out);
     uint64_t interval(size_t lane)const;
-    void halt(OptimizationScheduleState state);
+    void halt(OptimizationScheduleState state)const;
     void expire(OptimizationTime now);
     void reschedule(size_t lane,OptimizationTime now,bool retry);
 };

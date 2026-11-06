@@ -25,6 +25,10 @@ class SessionIntent {
     }
     void stop() { active_ = false; }
     bool permits(SessionToken token) const { return active_ && token.epoch != 0 && token.epoch == epoch_ && nativeProcessEpochCurrent(nativeEpoch_) && nativeProcessAdmissionEpoch()==nativeEpoch_; }
+    // Denial only, never authority: distinguish an old task borrowing a healthy current parent from revocation
+    // of that parent itself. Control owners must not cancel/consume the healthy parent's work on such a call.
+    bool foreignCaller(SessionToken token) const { return active_ && token.epoch != 0 && token.epoch == epoch_ &&
+        nativeProcessEpochCurrent(nativeEpoch_) && nativeProcessAdmissionEpoch()!=nativeEpoch_; }
 
    private:
     uint64_t epoch_ = 0;

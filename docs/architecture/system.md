@@ -74,6 +74,12 @@ original scope into CPU work. Current result/schedule reads revoke in memory wit
 or join. Stale callers cannot cancel a healthy newer owner; historical studies and genuinely pending CPU/external tickets
 remain separate from present authority. Enclosing/remaining owners and real-source/hard-bound/deployment/release gates stay open.
 
+[P-14i](../control-native-views.md) distinguishes a stale caller from revocation of a healthy explicit parent via a denial-only
+intent query. Eight memory-control owners revoke current views without clock refresh, external callbacks, allocation or join,
+while foreign reads/actions/first starts cannot consume/cancel healthy clocks, channels, tickets or budgets. Historical receipts,
+actual pending commands and nonrefundable reservations remain ownership facts, not authority or exit proof. Enclosing game/runtime
+and source/measurement/hard-bound/export/deployment/physical/release gates remain open.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

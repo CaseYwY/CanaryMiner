@@ -13,12 +13,13 @@ bool validOptimizationSchedulePolicy(const OptimizationSchedulePolicy &p){
         p.operationTimeoutMs>=500&&p.operationTimeoutMs<=60000&&p.maximumRetries<=3;
 }
 uint64_t OptimizationSchedule::interval(size_t lane)const{return lane==0?policy_.marketRefreshMs:lane==1?policy_.evaluationMs:policy_.retestReviewMs;}
-void OptimizationSchedule::halt(State state){snapshot_.state=state;for(auto &lane:snapshot_.lanes)if(lane.pending)lane.cancellationRequested=true;}
+void OptimizationSchedule::halt(State state)const{snapshot_.state=state;for(auto &lane:snapshot_.lanes)if(lane.pending)lane.cancellationRequested=true;}
 void OptimizationSchedule::requestStop(){attempted_=true;halt(State::Stopped);}
 bool OptimizationSchedule::later(uint64_t now,uint64_t delay,uint64_t &out){
     if(delay>std::numeric_limits<uint64_t>::max()-now){halt(State::ClockFault);return false;}out=now+delay;return true;
 }
 bool OptimizationSchedule::time(OptimizationTime now){
+    if(intent_.foreignCaller(token_))return false;
     if(!intent_.permits(token_)){halt(State::Stopped);return false;}
     if(snapshot_.state!=State::Running)return false;
     if(!instant(now.utcMs)||now.utcMs<last_.utcMs||now.monotonicMs<last_.monotonicMs){halt(State::ClockFault);return false;}
@@ -41,6 +42,7 @@ bool OptimizationSchedule::start(OptimizationTime now){
 void OptimizationSchedule::expire(OptimizationTime now){for(auto &lane:snapshot_.lanes)if(lane.pending&&now.monotonicMs>=lane.pending->deadlineMonoMs)lane.cancellationRequested=true;}
 OptimizationSchedulePoll OptimizationSchedule::poll(OptimizationTime now){
     OptimizationSchedulePoll out;
+    if(intent_.foreignCaller(token_)){out.state=State::Stopped;return out;}
     if(attempted_&&!intent_.permits(token_))halt(State::Stopped);
     if(snapshot_.state==State::Running&&time(now)){
         expire(now);
@@ -63,6 +65,7 @@ void OptimizationSchedule::reschedule(size_t i,OptimizationTime now,bool retry){
     else{lane.retriesUsed=0;if(regularDue_[i]>now.monotonicMs)lane.dueMonoMs=regularDue_[i];else later(now.monotonicMs,interval(i),lane.dueMonoMs);}
 }
 C OptimizationSchedule::complete(const OptimizationTicket &ticket,O outcome,OptimizationTime now){
+    if(intent_.foreignCaller(token_))return C::WrongTicket;
     const auto i=static_cast<size_t>(ticket.lane);
     if(i>=3||!snapshot_.lanes[i].pending||!same(ticket,*snapshot_.lanes[i].pending))return C::WrongTicket;
     auto &lane=snapshot_.lanes[i];
@@ -77,5 +80,10 @@ C OptimizationSchedule::complete(const OptimizationTicket &ticket,O outcome,Opti
     reschedule(i,now,expired||outcome==O::Retryable);
     if(snapshot_.state!=State::Running)return C::Faulted;
     return expired?C::Expired:C::Accepted;
+}
+const OptimizationScheduleSnapshot &OptimizationSchedule::snapshot()const{
+    if(intent_.foreignCaller(token_))return denied_;
+    if(attempted_&&!intent_.permits(token_))halt(State::Stopped);
+    return snapshot_;
 }
 } // namespace om

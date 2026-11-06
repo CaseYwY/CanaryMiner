@@ -12,13 +12,16 @@ GameGuardTime time(WorkMeasurementTime t){return {t.utcMs,t.monotonicMs};}
 }
 struct WorkExperimentOwner::Impl {
     WorkExperimentPolicy policy;std::shared_ptr<const WorkProfilePlan> plan;WorkerControlIssuer &issuer;
-    const SessionIntent &intent;SessionToken token;WorkMeasurementOwner capture;WorkExperimentSnapshot view;
+    const SessionIntent &intent;SessionToken token;WorkMeasurementOwner capture;WorkExperimentSnapshot view,denied;
     bool attempted=false;WorkMeasurementTime anchor,last,baseline;std::optional<WorkerCommand> flight;
     EvidenceDeadline budgetExpiry,runExpiry,handoffExpiry;
     std::vector<std::shared_ptr<const WorkExperimentRunBinding>> runs;
     WorkExperimentBudget *budget=nullptr;
     Impl(WorkExperimentPolicy p,WorkProfilePlan f,WorkerControlBinding b,WorkerControlIssuer &w,const SessionIntent &i,SessionToken t,WorkExperimentBudget *parent)
-        :policy(p),plan(std::make_shared<const WorkProfilePlan>(std::move(f))),issuer(w),intent(i),token(t),capture(*plan,std::move(b),w,i,t),budget(parent){}
+        :policy(p),plan(std::make_shared<const WorkProfilePlan>(std::move(f))),issuer(w),intent(i),token(t),capture(*plan,std::move(b),w,i,t),budget(parent){
+        denied.state=S::Stopped;denied.status=R::Stopped;denied.revokeRequired=true;
+    }
+    bool foreign()const{return intent.foreignCaller(token);}
     void halt(R r){if(view.state==S::Transferred)return;
         attempted=true;if(view.state!=S::Stopped&&view.state!=S::Faulted){view.state=r==R::Stopped?S::Stopped:S::Faulted;view.status=r;}
         view.revokeRequired=true;view.handoffUntilMonoMs=0;capture.requestStop();issuer.requestStop();if(budget)budget->fail(this,r);}
@@ -32,6 +35,7 @@ struct WorkExperimentOwner::Impl {
             (view.pending?(s.pending&&flight&&sameWorkerCommand(*s.pending,*flight)):!s.pending);
     }
     bool check(WorkMeasurementTime now,const WorkProfileConditions &c,uint64_t permission){
+        if(foreign())return false;
         if(!live(view.state))return false;
         if(!intent.permits(token)){halt(R::Stopped);return false;}
         if(!clock(now))return false;
@@ -66,6 +70,7 @@ bool validWorkExperimentPolicy(const WorkExperimentPolicy &p){return p.enabled&&
 bool WorkExperimentOwner::start(WorkProfileSample sample,WorkMeasurementTime now,const WorkProfileConditions &c,uint64_t permission){auto &p=*impl_;
     if(p.attempted)return false;
     p.attempted=true;
+    if(p.foreign()){p.view.state=S::Stopped;p.view.status=R::Stopped;p.view.revokeRequired=true;return false;}
     if(!p.intent.permits(p.token)){p.halt(R::Stopped);return false;}
     if(!p.policy.enabled){p.view.state=S::Disabled;p.view.status=R::Disabled;return false;}
     try{if(!validWorkExperimentPolicy(p.policy)){p.halt(R::Invalid);return false;}
@@ -76,6 +81,7 @@ bool WorkExperimentOwner::start(WorkProfileSample sample,WorkMeasurementTime now
         return p.check(now,c,permission);
     }catch(...){p.halt(R::Capacity);return false;}}
 bool WorkExperimentOwner::append(uint64_t sequence,WorkProfileSample sample,WorkMeasurementTime now,const WorkProfileConditions &c,uint64_t permission){auto &p=*impl_;
+    if(p.foreign())return false;
     if(p.view.state!=S::Running)return false;
     try{if(!p.check(now,c,permission))return false;
         if(!p.capture.append(sequence,std::move(sample),now,c)){p.halt(p.capture.snapshot().status);return false;}
@@ -113,6 +119,7 @@ std::optional<WorkerCommand> WorkExperimentOwner::poll(WorkMeasurementTime now,c
         return command;
     }catch(...){p.halt(R::Capacity);return {};}}
 WorkerReceiptResult WorkExperimentOwner::acknowledge(const WorkerReceipt &r,WorkMeasurementTime now,const WorkProfileConditions &c,uint64_t permission){auto &p=*impl_;
+    if(p.foreign())return WorkerReceiptResult::Rejected;
     if(!p.attempted||p.view.state==S::Dormant||p.view.state==S::Disabled||p.view.state==S::Transferred)return WorkerReceiptResult::Rejected;
     try{if(!p.clock(now))return WorkerReceiptResult::Rejected;
         if(live(p.view.state))p.check(now,c,permission);
@@ -126,10 +133,15 @@ WorkerReceiptResult WorkExperimentOwner::acknowledge(const WorkerReceipt &r,Work
     }catch(...){p.halt(R::Capacity);return WorkerReceiptResult::Rejected;}}
 void WorkExperimentOwner::transportFailed(){impl_->halt(R::Unsafe);}
 void WorkExperimentOwner::requestStop(){impl_->halt(R::Stopped);}
-const WorkExperimentSnapshot &WorkExperimentOwner::snapshot()const{return impl_->view;}
-const WorkMeasurementSnapshot &WorkExperimentOwner::measurement()const{return impl_->capture.snapshot();}
+const WorkExperimentSnapshot &WorkExperimentOwner::snapshot()const{auto &p=*impl_;
+    if(p.foreign())return p.denied;
+    if(p.attempted&&!p.intent.permits(p.token))p.halt(R::Stopped);
+    return p.view;
+}
+const WorkMeasurementSnapshot &WorkExperimentOwner::measurement()const{snapshot();return impl_->capture.snapshot();}
 std::shared_ptr<const WorkExperimentRecord> WorkExperimentOwner::release(WorkerControlIssuer &issuer,const SessionIntent &intent,SessionToken token,
     WorkMeasurementTime now,const WorkProfilePlan &plan,WorkerReceipt *receipt){auto &p=*impl_;
+    if(p.foreign())return {};
     if(p.view.state!=S::Holding)return {};
     try{if(!p.clock(now))return {};
         const auto current=p.issuer.snapshot(now.monotonicMs);const auto completed=p.view.record->measurement->completed;
