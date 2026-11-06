@@ -12,6 +12,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -688,7 +689,7 @@ void testChildPipes() {
 }
 
 /** Runs the supervisor over `workers` fake workers and stops it after `stopAfterMs` unless it ends first. */
-int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}, ForecastSinkFactory forecast = {}, BillingReviewAccess billing = {}) {
+int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}, ForecastSinkFactory forecast = {}, BillingReviewAccess billing = {}, MarketReferenceFactory market = {}, bool noMarket = false, bool dashboard = false) {
     volatile sig_atomic_t stop = 0;
     SupervisorOptions o = baseOptions();
     o.exe = selfExecutablePath();
@@ -697,12 +698,13 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     o.workerPortBase = 18990;
     o.drainMs = 1000;
     o.stop = &stop;
-    o.dashboard = false;
+    o.dashboard = dashboard;
     o.tuning = tuning;
     o.energyCaptureFactory=std::move(capture);o.noEnergy=noEnergy;
     o.energyRuntimeFactory=std::move(runtime);
     o.forecastFactory=std::move(forecast);
     o.billingReviewAccess=std::move(billing);
+    o.marketReferenceFactory=std::move(market);o.noMarket=noMarket;
     std::atomic<bool> finished{false};
     std::thread timer([&] {
         for (uint64_t t = 0; t < stopAfterMs / 20 && !finished.load(); ++t) std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -807,6 +809,7 @@ void testStopAlreadyRequested() {
     unsigned factories=0;options.energyCaptureFactory=[&]()->std::unique_ptr<EnergyCaptureSink>{++factories;return {};};
     options.energyRuntimeFactory=[&](bool,bool)->std::unique_ptr<EnergyRuntime>{++factories;return {};};
     options.forecastFactory=[&](bool,bool)->std::unique_ptr<ForecastSink>{++factories;return {};};
+    options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++factories;return {};};
     unsigned billingStops=0;options.billingReviewAccess.requestStop=[&]{++billingStops;};
     Supervisor supervisor(std::move(options));
     CHECK(supervisor.run() == kExitOk);
@@ -871,9 +874,70 @@ void testForecastBridge(){
     options.forecastFactory=[&](bool,bool)->std::unique_ptr<ForecastSink>{++state.factories;stop=1;return std::make_unique<ForecastProbe>(state);};
     Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&state.factories==1&&state.starts==0&&state.revoked);
 }
+class MarketProbe final:public MarketReferenceSink {
+    CaptureProbeState &state_;bool admit_;volatile sig_atomic_t *signal_;const bool *fleetJoined_;
+   public:
+    explicit MarketProbe(CaptureProbeState &s,bool admit=true,volatile sig_atomic_t *signal=nullptr,const bool *fleetJoined=nullptr):state_(s),admit_(admit),signal_(signal),fleetJoined_(fleetJoined){}
+    bool start(uint64_t generation)override{CHECK(generation>0);++state_.starts;if(signal_)*signal_=1;return admit_;}
+    PublicMarketView view(uint64_t utc,uint64_t mono)const override{CHECK(utc>0&&mono>0);++state_.samples;state_.late=state_.late||state_.revoked;
+        PublicMarketView view;view.enabled=true;view.lines={"SYNTHETIC REFERENCE SINK - NOT LIVE; not income or mining authority"};return view;}
+    void requestStop()override{state_.revoked=true;}
+    void stop()override{CHECK(state_.revoked&&(!fleetJoined_||*fleetJoined_));++state_.stops;}
+};
+class MarketJoinOrderFleet final:public WorkerFleet {
+    bool &joined_,revoked_=false;
+   public:
+    explicit MarketJoinOrderFleet(bool &joined):joined_(joined){}
+    bool start(unsigned slots,GameGuardTime)override{return slots==1;}
+    bool launch(unsigned,std::filesystem::path,std::vector<std::string>,unsigned,GameGuardTime)override{return true;}
+    void tick(GameGuardTime,const WorkerFleetEvidence &)override{}
+    WorkerFleetState state()const override{return WorkerFleetState::Active;}
+    WorkerFleetSnapshot snapshot(unsigned)const override{WorkerFleetSnapshot view;view.requested=view.done=true;view.reaped=joined_;view.exitCode=0;return view;}
+    std::vector<std::string> takeLines(unsigned)override{return {};}
+    void requestStop()override{revoked_=true;}
+    void stop()override{CHECK(revoked_);joined_=true;}
+};
+void testMarketReferenceBridge(){
+    {CaptureProbeState state;bool fleetJoined=false;auto options=baseOptions();options.dashboard=true;options.seeds={seed(0)};options.exe="must-not-be-executed";
+        options.workerFleetFactory=[&](const SessionIntent &,SessionToken)->std::unique_ptr<WorkerFleet>{return std::make_unique<MarketJoinOrderFleet>(fleetJoined);};
+        options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++state.factories;return std::make_unique<MarketProbe>(state,true,nullptr,&fleetJoined);};
+        Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&fleetJoined&&state.factories==1&&state.starts==1&&state.stops==1&&state.revoked&&!state.late);}
+    {CaptureProbeState state;auto options=baseOptions();options.dashboard=true;
+        options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++state.factories;return std::make_unique<MarketProbe>(state);};
+        Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&state.factories==1&&state.starts==1&&state.samples==0&&state.stops==1&&state.revoked&&!state.late);}
+    for(bool dashboard:{false,true})for(bool disabled:{false,true}){CaptureProbeState state;
+        auto factory=[&]()->std::unique_ptr<MarketReferenceSink>{++state.factories;return std::make_unique<MarketProbe>(state);};
+        CHECK(supervisedRun({kFakeChild},2,500,nullptr,{},false,{},{},{},factory,disabled,dashboard)==kExitOk);
+        const bool active=dashboard&&!disabled;CHECK(state.factories==(active?1u:0u)&&state.starts==(active?1u:0u)&&state.stops==(active?1u:0u)&&!state.late);
+        CHECK(active?(state.samples>0&&state.revoked):state.samples==0);}
+    {volatile sig_atomic_t stop=0;CaptureProbeState state;auto options=baseOptions();options.exe="must-not-be-executed";options.stop=&stop;options.dashboard=true;
+        options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++state.factories;stop=1;return std::make_unique<MarketProbe>(state);};
+        Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&state.factories==1&&state.starts==0&&state.samples==0&&state.revoked&&state.stops==1);}
+    {volatile sig_atomic_t stop=0;CaptureProbeState state;auto options=baseOptions();options.exe="must-not-be-executed";options.stop=&stop;options.dashboard=true;
+        options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++state.factories;return std::make_unique<MarketProbe>(state,true,&stop);};
+        Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&state.factories==1&&state.starts==1&&state.samples==0&&state.revoked&&state.stops==1);}
+    {CaptureProbeState state;auto failed=[&]()->std::unique_ptr<MarketReferenceSink>{++state.factories;return std::make_unique<MarketProbe>(state,false);};
+        CHECK(supervisedRun({kFakeChild},1,500,nullptr,{},false,{},{},{},failed,false,true)==kExitOk);
+        CHECK(state.factories==1&&state.starts==1&&state.samples==0&&state.revoked&&state.stops==1);}
+    {unsigned factories=0;auto missing=[&]()->std::unique_ptr<MarketReferenceSink>{++factories;return {};};
+        CHECK(supervisedRun({kFakeChild},1,500,nullptr,{},false,{},{},{},missing,false,true)==kExitOk&&factories==1);}
+    {unsigned factories=0;auto throwing=[&]()->std::unique_ptr<MarketReferenceSink>{++factories;throw std::runtime_error("synthetic private exception text must not enter events");};
+        CHECK(supervisedRun({kFakeChild},1,500,nullptr,{},false,{},{},{},throwing,false,true)==kExitOk&&factories==1);}
+    {const auto dir=std::filesystem::path(makeScratchDir("market-source-conflict"));const auto path=dir/"manual-market.json";
+        ManualMarketPreferences manual;manual.enabled=true;manual.prlUsdt="2.5";manual.prlAsOfUtc=manual.confirmedUtc=1800000000;
+        std::ofstream(path,std::ios::binary)<<manualMarketJson(manual);unsigned factories=0;auto options=baseOptions();options.dashboard=true;
+        options.manualMarketPreferencesPath=path.u8string();options.manualMarketFactory=makeManualMarketProjector;
+        options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++factories;return {};};
+        Supervisor supervisor(std::move(options));CHECK(supervisor.run()==kExitOk&&factories==0);
+        std::ifstream original(path,std::ios::binary);const std::string bytes{std::istreambuf_iterator<char>(original),{}};original.close();CHECK(bytes==manualMarketJson(manual));std::filesystem::remove_all(dir);}
+}
 }  // namespace
 
 int main(int argc, char **argv) {
+    if(argc==2&&std::string(argv[1])=="--market-reference-bridge-test"){
+        if(!platformInit())return 83;
+        testStopAlreadyRequested();testMarketReferenceBridge();const auto result=finishTests("native market-reference factory, projection, revocation and actual-fleet-join ordering");platformShutdown();return result;
+    }
     if (argc >= 2 && std::string(argv[1]) == "--fake-history-child") return fakeHistoryChild(argc, argv);
 #if defined(_WIN32)
     if (argc >= 3 && std::string(argv[1]) == kHandleProbe) return handleProbeChild(argv[2]);
@@ -941,6 +1005,7 @@ int main(int argc, char **argv) {
     testStopAlreadyRequested();
     testCaptureBridge();
     testForecastBridge();
+    testMarketReferenceBridge();
     CHECK(supervisedRun({kFakeLatched}, 1, 120000) == kExitFaultLatched);
     testWorkerArgs();
     testStatsRoundTrip();

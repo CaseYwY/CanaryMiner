@@ -68,6 +68,7 @@ class MarketDataOwner {
     MarketDataOwner(const MarketDataOwner &) = delete;
     MarketDataOwner &operator=(const MarketDataOwner &) = delete;
     bool start(uint64_t generation);  // explicit public-data start, never mining authorization
+    void requestStop(); // revoke cache commits and notify cancellation without joining an in-flight callback
     void stop();
     std::shared_ptr<const MarketSnapshot> snapshot() const;
    private:

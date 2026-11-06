@@ -54,6 +54,7 @@
 #include "restart_budget.h"
 #include "settings.h"
 #include "forecast_owner.h"
+#include "market_reference_sink.h"
 #include "energy_owner.h"
 #include "energy_capture.h"
 #include "session_intent.h"
@@ -389,6 +390,7 @@ struct SupervisorOptions {
     RuntimeContext runtimeContext;
     std::string manualMarketPreferencesPath;
     ManualMarketFactory manualMarketFactory;
+    MarketReferenceFactory marketReferenceFactory; // default empty; explicit caller-owned source/consent/qualification
     bool noMarket = false;
     std::string electricityPreferencesPath;
     SessionEnergyFactory energyFactory;
@@ -587,6 +589,23 @@ class Supervisor {
                 else if (opt_.manualMarketFactory) manualProjection_=opt_.manualMarketFactory(manualEffective_,static_cast<uint64_t>(time(nullptr)),t0);
             }
         }
+        if(opt_.stop&&*opt_.stop)intent_.stop();
+        if(opt_.dashboard&&!opt_.noMarket&&opt_.marketReferenceFactory&&intent_.permits(sessionToken_)){
+            if(manualEffective_.enabled){
+                manualProjection_={};addEvent("Public and manual market sources both requested; references withheld. Choose one source for a new explicit session.");
+            }else{
+                try{
+                    marketReference_=opt_.marketReferenceFactory();
+                    if(opt_.stop&&*opt_.stop)intent_.stop();
+                    const bool admitted=marketReference_&&intent_.permits(sessionToken_)&&marketReference_->start(sessionToken_.epoch);
+                    if(opt_.stop&&*opt_.stop)intent_.stop();
+                    if(!admitted||!intent_.permits(sessionToken_)){
+                        if(marketReference_)marketReference_->requestStop();
+                        addEvent("Public market references unavailable; no manual fallback, income or mining change.");
+                    }else marketReferenceStarted_=true;
+                }catch(...){if(marketReference_)marketReference_->requestStop();addEvent("Public market reference admission failed; no source fallback or mining change.");}
+            }
+        }
         if (!opt_.historyPath.empty()) history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
             std::unique_ptr<Worker> w(new Worker());
@@ -691,6 +710,7 @@ class Supervisor {
                             return runtimeStore_ && runtimeStore_->save(p, error);
                         }, [this,now](ManualMarketPreferences &p, std::string *error) {
                             if (!manualStore_) { if(error)*error="Offline-market target unavailable."; return false; }
+                            if(p.enabled&&opt_.marketReferenceFactory&&!opt_.noMarket){if(error)*error="Public references requested for this parent; manual activation requires a separately selected new session.";return false;}
                             if (p.enabled && !opt_.manualMarketFactory) { if(error)*error="Manual reference projection unavailable in this build."; return false; }
                             const auto utc=static_cast<uint64_t>(time(nullptr));
                             if (!confirmManualMarket(&p,utc,error)) return false;
@@ -839,6 +859,7 @@ class Supervisor {
         settings_.stopBillingReview();
         if(energyCapture_)energyCapture_->requestStop();
         if(forecast_)forecast_->requestStop();
+        if(marketReference_){marketReferenceStarted_=false;marketReference_->requestStop();}
         if(fleet_)fleet_->requestStop();
         sampling_.requestStop();
         for (auto &w : workers_) {
@@ -863,6 +884,7 @@ class Supervisor {
         if (forecast_) forecast_->stop();
         if(fleet_){fleet_->stop();for(unsigned i=0;i<workers_.size();++i){const auto control=fleet_->snapshot(i);
             controlFault=controlFault||control.ownershipUnresolved;forced=forced||control.exitCode==kExitShutdownForced;}}
+        if (marketReference_) marketReference_->stop(); // optional data joining cannot delay controlled-worker settlement
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -919,6 +941,8 @@ class Supervisor {
     std::unique_ptr<ManualMarketStore> manualStore_;
     ManualMarketPreferences manualEffective_;
     ManualMarketProjector manualProjection_;
+    std::unique_ptr<MarketReferenceSink> marketReference_;
+    bool marketReferenceStarted_=false;
     std::unique_ptr<ElectricityPreferencesStore> electricityStore_;
     std::unique_ptr<TariffDeclarationStore> tariffStore_;
     ElectricityPreferences electricityEffective_;
@@ -993,6 +1017,7 @@ class Supervisor {
         sampling_.requestStop();
         settings_.stopBillingReview();
         if(forecast_)forecast_->requestStop();
+        if(marketReference_){marketReferenceStarted_=false;marketReference_->requestStop();}
         if(energy_)energy_->requestStop();
         if(energyCapture_)energyCapture_->requestStop();
         addEvent("stopping: draining every GPU");
@@ -1172,6 +1197,7 @@ class Supervisor {
         if(forecast_&&intent_.permits(sessionToken_))model.finances=forecast_->snapshot()->view;
         if (history_) for (const auto &worker : workers_) if (!worker->historySeen || worker->historyOutage) model.history.gaps = true;
         if (opt_.dashboard && !opt_.noMarket && manualProjection_ && intent_.permits(sessionToken_)) model.publicMarket=manualProjection_(static_cast<uint64_t>(time(nullptr)),now);
+        if(opt_.dashboard&&!opt_.noMarket&&marketReferenceStarted_&&intent_.permits(sessionToken_))model.publicMarket=marketReference_->view(static_cast<uint64_t>(time(nullptr)),now);
         if(energy_&&intent_.permits(sessionToken_)) {
             const auto energy=energy_->snapshot();model.energy=energy->view;
             if(model.energy.enabled&&now>=energy->throughMonoMs&&now-energy->throughMonoMs>electricityEffective_.maximumGapMs)

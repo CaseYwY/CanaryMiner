@@ -3,7 +3,8 @@ add_library(canary_market STATIC
   "${CMAKE_SOURCE_DIR}/src/product/exact_decimal.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/market_data.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/manual_market.cpp"
-  "${CMAKE_SOURCE_DIR}/src/product/market_owner.cpp")
+  "${CMAKE_SOURCE_DIR}/src/product/market_owner.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/market_reference_runtime.cpp")
 target_compile_features(canary_market PUBLIC cxx_std_17)
 target_include_directories(canary_market PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(canary_market PUBLIC canary_public_https)

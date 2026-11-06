@@ -27,7 +27,7 @@ For the offline dialect:
 
 `MarketPollingPlan` is deterministic and has no I/O. `MarketDataOwner` is one explicit-start background owner, with one in-flight request and four bounded cache slots. It publishes immutable snapshots; the renderer does no network/JSON/accounting work. Construction or settings rendering never starts a request/miner. The application must use one owner for installation-wide feeds, **not a separate owner per GPU**.
 
-Production fetch wiring is supplied by `marketProcessFetch(installedHelper)`, which calls the [P-06a process client](public-https.md), not the potentially blocking low-level TLS client inside the miner. The owner is not yet constructed by the production supervisor. Injected test callbacks must obey the same bounded cancellation contract; joining an arbitrary callback that ignores cancellation is not a promised hard deadline. Start/stop are single-controller lifecycle calls; snapshots are thread-safe.
+Production fetch wiring is supplied by `marketProcessFetch(installedHelper)`, which calls the [P-06a process client](public-https.md), not the potentially blocking low-level TLS client inside the miner. The owner is not yet constructed by the ordinary production supervisor. [P-06d](market-reference-runtime.md) later adds a default-empty native sink/frozen owner adapter, with memory-only revocation before separate post-worker-drain joining; it installs no ordinary CLI source. Injected test callbacks must obey the same bounded cancellation contract; joining an arbitrary callback that ignores cancellation is not a promised hard deadline. Start/stop are single-controller lifecycle calls; snapshots are thread-safe.
 
 Independent defaults/bounds:
 

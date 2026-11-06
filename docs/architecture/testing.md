@@ -28,6 +28,14 @@ Executed transport-only slice: [P-06a](../public-https.md), including separate d
 
 [P-06c](../manual-market.md) adds manual decimal/identity/schema/clock/expiry/skew, storage and native editor/render tests. Actual POSIX CLI/synthetic-supervisor PTY tests cover independent saves, timestamp preservation, terminal-only live replacement/off, CLI suppression and unchanged child-start counts. Manual declarations cannot qualify a provider or create income; a small synchronous save is not hard disk-stall/stop-deadline evidence.
 
+[P-06d](../market-reference-runtime.md) checks frozen one-parent market ownership, no constructor/render fetching, original
+source/time/stale/clock behavior, invalid/one-use admission and non-joining revocation across a deliberately retained callback.
+Native fake-worker tests cover CLI/plain/pre-stop suppression, one factory for multiple slots, failed/throwing/signal admission,
+manual-source conflict and no source reads after revocation. A minimal zero-worker final-frame regression goes red before its
+guard fix and green afterward. A separate native PTY joins the actual owner/parser to the supervisor, rejects live manual
+enabling before file writes, preserves source-conflict/CLI files and acknowledges a real controlling-terminal SIGINT. These
+remain synthetic responses/inert children with an unavailable-NVML shim, not actual source/terms/trust/GPU qualification.
+
 ## T-LEDGER
 
 Test actual credits versus balance/payout/pending/share count; worker versus wallet attribution; inclusive/exclusive time boundaries; pagination/retries/revisions/reversals and late discoveries. Test that market updates preserve token facts while changing **latest-price production valuation**. Two differently priced credit events at the same latest price must value as their total tokens times that latest price, not the historical weighted sum. Optional historical estimates remain separate. Sale status stays unknown, even after a transfer/deposit; missing/partial data never becomes zero or complete lifetime revenue.

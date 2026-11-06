@@ -194,9 +194,12 @@ bool MarketDataOwner::start(uint64_t generation) {
         impl_->thread = std::thread([this] { impl_->run(); }); return true;
     } catch (...) { impl_->cancel = true; impl_->plan.stop(); try { impl_->publish(); } catch (...) {} return false; }
 }
-void MarketDataOwner::stop() {
+void MarketDataOwner::requestStop() {
     { std::lock_guard<std::mutex> commit(impl_->commitMutex); impl_->cancel = true; }
     impl_->wait.notify_all();
+}
+void MarketDataOwner::stop() {
+    requestStop();
     if (impl_->thread.joinable()) impl_->thread.join();
 }
 std::shared_ptr<const MarketSnapshot> MarketDataOwner::snapshot() const {
