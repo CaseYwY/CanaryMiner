@@ -388,6 +388,19 @@ bool prepare(const TerminalElectricityStatusMessageRequest &request,TerminalMess
     for(const auto &pack:i18n::electricityStatusLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;return true;
 }
+bool prepare(const TerminalTariffErrorMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments))return false;
+    using Key=i18n::TariffErrorMessageKey;
+    const bool human=request.key==Key::HumanPath||request.key==Key::HumanRoot;
+    for(const auto &argument:request.arguments){const auto &content=argument.value.content;const bool prose=human&&argument.name=="reason";
+        const std::size_t maximum=argument.name=="path"?512:request.key==Key::Raw?4096:1024;
+        if(content.text.empty()||content.text.size()>maximum||content.ascii.size()>maximum||(prose?content.invariant:!content.invariant))return false;
+    }
+    templates.requested=i18n::tariffErrorMessage(request.language,request.key);templates.english=i18n::tariffErrorMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::tariffErrorLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 }
 bool layoutTerminalSettingsMessage(const TerminalSettingsMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
@@ -891,6 +904,18 @@ bool renderTerminalElectricityStatusMessage(const TerminalElectricityStatusMessa
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 } // namespace om

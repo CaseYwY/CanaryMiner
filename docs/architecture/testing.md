@@ -324,6 +324,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 [P-13bb](../electricity-status-messages.md) checks 176 literal status texts, exact core-source/review/RTL/no-parameter parity and typed line/paint/independent-wrap/refusal. Memory-only known-enum/kind/payload/source-equality tests preserve unknown/missing/changed/non-model raw outcomes; pure invalid-opening/native review preserve output/path/message/active/draft/stop without Save. Synthetic status mappings are not actual arithmetic/coverage/supplier/source qualification; fixed-native/validation/store/model/CLI/PTY and physical/effective-native gates remain independent.
 
+[P-13bc](../tariff-error-messages.md) checks 80 path/root/raw templates, one-pass empty/oversized/unsafe source preservation and actual root/path/native failed-callback behavior without storage. Independent original/human roles, bounded paths/reasons, all layout/paint orders/directions, provenance, human wrap versus invariant omission/refusal, maximum raw input and transactional invalid-input outcomes are separate from source-only compatibility. Fixed-native/validation/store/model/CLI/PTY evidence does not qualify private disclosure, actual sources or effective native/physical rendering.
+
 ## T-PRIVACY
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

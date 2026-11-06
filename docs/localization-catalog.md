@@ -159,6 +159,10 @@ complete native/data-owner/terminal/human and actual-source qualification remain
 mapping, unchanged native English/raw recovery and bounded invariant choice display. Model-status/raw envelopes/legacy/other
 domains/complete native/data-owner/terminal/human and actual-source qualification remain open.
 
+[P-13bc](tariff-error-messages.md) adds five whole path/root/raw error keys (80 templates), distinguishing invariant originals
+from human prose while preserving exact native source bytes and unparsed callback errors. Formatting supplies no error
+classification, disclosure or model/action authority; effective native/data-owner/terminal/human/source gates stay open.
+
 [P-13bb](electricity-status-messages.md) adds eleven human arithmetic/coverage status keys (176 texts) with explicit UI-only
 known-enum/kind/payload/source-equality binding. The core legacy API stays unchanged; raw envelopes/legacy/other domains/
 complete native/data-owner/terminal/human and actual-source qualification remain open.

@@ -8,6 +8,7 @@
 #include "tariff_value_messages.h"
 #include "tariff_review_messages.h"
 #include "tariff_diagnostic_source.h"
+#include "tariff_error_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -62,9 +63,15 @@ class TariffSettingsPanel {
             else if(key=='\r'||key=='\n'||key==kKeyF2){
                 auto candidate=draft;for(auto &m:candidate.members)if(m.first=="confirmed_utc"){m.second.type=JsonValue::Type::Number;m.second.text=std::to_string(now);}
                 TariffDeclaration checked;TariffProblem error;
-                if(!decodeTariffDeclaration(candidate,&checked,&error)){message=error.path+": "+tariffDiagnosticReasonEnglish(error);focus(error.path);page=TariffSettingsPage::Browse;}
+                if(!decodeTariffDeclaration(candidate,&checked,&error)){
+                    using ErrorKey=i18n::TariffErrorMessageKey;
+                    i18n::MessageArguments arguments={{"reason",tariffDiagnosticReasonEnglish(error)}};
+                    if(!error.path.empty())arguments.emplace_back("path",error.path);
+                    message=i18n::tariffErrorEnglish(error.path.empty()?ErrorKey::OriginalRoot:ErrorKey::OriginalPath,arguments);focus(error.path);page=TariffSettingsPage::Browse;
+                }
                 else if(save&&save(candidate,&message)){active=draft=std::move(candidate);page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::SavedOffline);}
                 else if(message.empty())message=i18n::tariffNoticeEnglish(NoticeKey::SaveUnavailable);
+                else message=i18n::tariffErrorEnglish(i18n::TariffErrorMessageKey::Raw,{{"reason",message}});
             }
         }else if(key==27){
             if(!route.empty()){field=route.back();route.pop_back();}

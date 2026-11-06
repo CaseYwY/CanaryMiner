@@ -42,6 +42,7 @@
 #include "tariff_review_messages.h"
 #include "tariff_diagnostic_messages.h"
 #include "electricity_status_messages.h"
+#include "tariff_error_messages.h"
 #include "terminal_message.h"
 namespace om {
 struct TerminalSettingsMessageRequest {
@@ -444,4 +445,15 @@ bool layoutTerminalElectricityStatusMessage(const TerminalElectricityStatusMessa
 bool wrapTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalElectricityStatusMessage(const TerminalElectricityStatusMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+// Human prose is explicitly distinct from opaque original reasons; neither role classifies an error.
+struct TerminalTariffErrorMessageRequest {
+    std::string language="en";
+    i18n::TariffErrorMessageKey key=i18n::TariffErrorMessageKey::Raw;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalTariffErrorMessage(const TerminalTariffErrorMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 } // namespace om
