@@ -1,4 +1,5 @@
 #include "game_worker_session.h"
+#include "native_process_admission.h"
 #include "worker_identity.h"
 #include "worker_process_owner.h"
 #include <algorithm>
@@ -35,7 +36,7 @@ struct GameWorkerSession::Impl {
         std::unique_ptr<WorkExperimentBudget> experimentBudget;
         std::vector<std::unique_ptr<Life>> lives; // retain retired owners until final join; no join/reconstruction inside tick
     };
-    const SessionIntent &intent;SessionToken token;GameWorkerPolicy policy;
+    const SessionIntent &intent;SessionToken token;GameWorkerPolicy policy;NativeProcessLifetime nativeLife;
     std::vector<GameEconomicPolicy> economics;
     GameRuntime game;WorkerIdentitySource identities;
     std::atomic<bool> cancel{false};std::thread identityThread;mutable std::mutex identityMutex;
@@ -211,6 +212,8 @@ GameWorkerSession::GameWorkerSession(std::filesystem::path identity,std::filesys
 GameWorkerSession::~GameWorkerSession(){stop();}
 bool GameWorkerSession::start(unsigned count,GameGuardTime now){
     auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+    if(!p.nativeLife.begin()){p.halt(WorkerFleetState::Stopped);return false;}
+    NativeProcessScope original(p.nativeLife.epoch());
     if(!p.time(now))return false;
     if(!count||count>256||p.policy.maximumIncarnations<count||p.policy.maximumIncarnations>256||p.policy.commandLeaseMs<100||p.policy.commandLeaseMs>workerControlMaxLeaseMs||
         p.policy.maximumSafetyAgeMs<100||p.policy.maximumSafetyAgeMs>workerControlMaxLeaseMs||(!p.economics.empty()&&p.economics.size()!=count)){p.halt(WorkerFleetState::Faulted);return false;}
@@ -229,9 +232,10 @@ bool GameWorkerSession::start(unsigned count,GameGuardTime now){
         }
         if(!p.game.start(now)){p.halt(WorkerFleetState::Faulted);return false;}
         p.state=WorkerFleetState::Starting;
-        p.identityThread=std::thread([&p]{WorkerIdentityResult result;
+        p.identityThread=std::thread([&p]{NativeProcessScope original(p.nativeLife.epoch());WorkerIdentityResult result;
             try{result=p.identities.request(p.policy.maximumIncarnations+1,p.cancel);}catch(...){result.status=LocalTaskStatus::Unavailable;}
             std::lock_guard<std::mutex> lock(p.identityMutex);p.identityResult=std::move(result);p.identityDone=true;});
+        if(!p.nativeLife.permitted()||!p.intent.permits(p.token)){p.halt(WorkerFleetState::Stopped);return false;}
     }catch(...){p.halt(WorkerFleetState::Faulted);return false;}
     return true;
 }

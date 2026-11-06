@@ -7,7 +7,7 @@
 #include <memory>
 #include <optional>
 namespace om {
-enum class SessionEnergyState { Stopped, Running, ClockFault, Capacity };
+enum class SessionEnergyState { Stopped, Running, ClockFault, Capacity, NativeFault };
 enum class EnergyAdmission { Queued, Stopped, Invalid, Full, StaleGeneration };
 struct SessionPowerInput { unsigned channel=0; uint64_t utcMs=0, monotonicMs=0; std::optional<uint32_t> milliwatts; };
 struct SessionEnergySnapshot {

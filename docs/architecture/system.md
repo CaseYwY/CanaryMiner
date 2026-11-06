@@ -63,6 +63,12 @@ Historical proofs/candidates/quotes remain distinct from review/current valuatio
 snapshot masking never mutates the background-only polling plan. Enclosing/remaining ownership, actual sources and
 hard native/deployment/physical/release gates remain separate.
 
+[P-14g](../background-native-lifetimes.md) scopes the fleet's deferred identity thread, the session-only energy estimator
+and display factories/readers. Input/current/callback-return/native-reader boundaries revoke after a settled foreign
+fault; stale callers cannot consume healthy batches. Native reader cleanup remains on its background thread. Preallocated
+energy views mask failed stop/fault projections without deleting historical totals or ordinary same-valid-epoch restart.
+Economic/enclosing/remaining views and source/driver/hard-bound/deployment/physical/release qualification remain separate.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

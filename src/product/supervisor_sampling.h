@@ -5,6 +5,7 @@
 #include "accepted_history.h"
 #include "stats.h"
 #include "stats_server.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -46,15 +47,17 @@ class NativeDisplaySampleReader final:public DisplaySampleReader {
     struct Device {Nvml nvml;bool attempted=false,opened=false;};
     std::vector<DisplaySampleTarget> targets_;
     std::vector<Device> devices_;
+    const uint64_t nativeEpoch_=nativeProcessAdmissionEpoch();
+    bool current(const std::atomic<bool> &cancel)const noexcept{return !cancel&&nativeProcessEpochCurrent(nativeEpoch_)&&nativeProcessAdmissionEpoch()==nativeEpoch_;}
    public:
     explicit NativeDisplaySampleReader(std::vector<DisplaySampleTarget> targets):targets_(std::move(targets)),devices_(targets_.size()){}
     ~NativeDisplaySampleReader()override{for(auto &device:devices_)device.nvml.close();}
     DisplaySampleReading read(size_t slot,const std::atomic<bool> &cancel)override{
-        DisplaySampleReading out;if(cancel||slot>=targets_.size())return out;
+        DisplaySampleReading out;if(!current(cancel)||slot>=targets_.size())return out;
         int status=0;std::string body,error;
         const bool received=httpGetLocal("127.0.0.1",targets_[slot].port,"/api/v1/stats",&status,&body,&error,1);
         out.statsObserved=displaySampleTime();
-        if(cancel)return out;
+        if(!current(cancel))return {};
         if(received&&status==200){JsonValue root;StatsSnapshot stats;
             if(parseJsonStrict(body,&root,&error)&&statsFromJson(root,&stats,&error)){
                 uint64_t accepted=0;if(acceptedHistoryCounter(root,&accepted))out.accepted=accepted;
@@ -62,9 +65,10 @@ class NativeDisplaySampleReader final:public DisplaySampleReader {
             }
         }
         auto &device=devices_[slot];out.powerBegan=displaySampleTime();
-        if(!cancel&&!device.attempted){device.attempted=true;device.opened=device.nvml.openByUuid(targets_[slot].uuid);}
-        if(!cancel&&device.opened)out.telemetry=device.nvml.sample();
-        out.powerFinished=displaySampleTime();return out;
+        if(current(cancel)&&!device.attempted){device.attempted=true;device.opened=device.nvml.openByUuid(targets_[slot].uuid);}
+        if(current(cancel)&&device.opened)out.telemetry=device.nvml.sample();
+        out.powerFinished=displaySampleTime();if(!current(cancel))return {};
+        return out;
     }
 };
 struct DisplaySampleBatch {
@@ -77,25 +81,36 @@ struct DisplaySampleBatch {
 class SupervisorSampling {
     std::vector<DisplaySampleTarget> targets_;DisplaySampleFactory factory_;
     mutable std::mutex mutex_;std::condition_variable ready_;std::thread thread_;
+    NativeProcessLifetime nativeLife_;
     std::atomic<bool> cancel_{true};bool attempted_=false,outstanding_=false,faulted_=false;
     uint64_t revision_=0;
     std::unique_ptr<DisplaySampleBatch> request_;
     std::shared_ptr<const DisplaySampleBatch> result_;
+    bool nativeCurrent()noexcept{ // mutex held; no source callback, driver call, I/O or join
+        if(!nativeLife_.bound()||nativeLife_.current())return true;
+        faulted_=true;cancel_=true;outstanding_=false;request_.reset();result_.reset();ready_.notify_all();return false;
+    }
     void run()noexcept{
+        NativeProcessScope original(nativeLife_.epoch());
         try{
             std::unique_ptr<DisplaySampleReader> reader;
             for(;;){std::unique_ptr<DisplaySampleBatch> job;
-                {std::unique_lock<std::mutex> lock(mutex_);ready_.wait(lock,[&]{return cancel_.load()||request_!=nullptr;});
-                    if(cancel_)return;
+                {std::unique_lock<std::mutex> lock(mutex_);ready_.wait_for(lock,std::chrono::milliseconds(25),[&]{return cancel_.load()||request_!=nullptr;});
+                    if(!nativeCurrent()||cancel_)return;
+                    if(!request_)continue;
                     job=std::move(request_);}
                 if(cancel_)return;
                 if(!reader)reader=factory_?factory_(targets_):std::make_unique<NativeDisplaySampleReader>(targets_);
+                {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;}
                 if(!reader)throw 1;
                 job->began=displaySampleTime();job->readings.resize(targets_.size());
-                for(size_t i=0;i<targets_.size()&&!cancel_;++i)if(job->generations[i])job->readings[i]=reader->read(i,cancel_);
+                for(size_t i=0;i<targets_.size()&&!cancel_;++i)if(job->generations[i]){
+                    {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;}
+                    job->readings[i]=reader->read(i,cancel_);
+                    {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;}}
                 job->finished=displaySampleTime();
                 if(!displaySampleOrdered(job->began,job->finished))throw 1;
-                {std::lock_guard<std::mutex> lock(mutex_);if(cancel_)return;result_=std::move(job);}
+                {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;result_=std::move(job);}
             }
         }catch(...){std::lock_guard<std::mutex> lock(mutex_);if(!cancel_)faulted_=true;
             cancel_=true;outstanding_=false;request_.reset();result_.reset();}
@@ -109,11 +124,13 @@ class SupervisorSampling {
         std::lock_guard<std::mutex> lock(mutex_);if(attempted_)return false;attempted_=true;
         if(targets.empty()||targets.size()>256)return false;
         for(const auto &target:targets)if(target.uuid.empty()||target.uuid.size()>128||target.uuid.find('\0')!=target.uuid.npos||target.port<1||target.port>65535)return false;
+        if(!nativeLife_.begin()){nativeCurrent();return false;}
         targets_=std::move(targets);factory_=std::move(factory);cancel_=false;
-        try{thread_=std::thread([this]{run();});return true;}catch(...){cancel_=true;faulted_=true;return false;}
+        try{thread_=std::thread([this]{run();});return nativeCurrent()&&nativeLife_.permitted();}catch(...){cancel_=true;faulted_=true;return false;}
     }
     bool request(const std::vector<uint64_t> &generations){
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return false;
         if(cancel_||outstanding_||generations.size()!=targets_.size()||revision_==UINT64_MAX||
             std::none_of(generations.begin(),generations.end(),[](uint64_t value){return value!=0;}))return false;
         try{auto job=std::make_unique<DisplaySampleBatch>();job->revision=++revision_;job->generations=generations;
@@ -121,11 +138,11 @@ class SupervisorSampling {
         }catch(...){faulted_=true;cancel_=true;ready_.notify_one();return false;}
     }
     std::shared_ptr<const DisplaySampleBatch> take(){
-        std::lock_guard<std::mutex> lock(mutex_);if(!result_||cancel_)return {};
+        std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||!nativeLife_.permitted()||!result_||cancel_)return {};
         auto result=std::move(result_);outstanding_=false;return result;
     }
-    bool pending()const{std::lock_guard<std::mutex> lock(mutex_);return outstanding_;}
-    bool faulted()const{std::lock_guard<std::mutex> lock(mutex_);return faulted_;}
+    bool pending()const{auto &s=*const_cast<SupervisorSampling *>(this);std::lock_guard<std::mutex> lock(s.mutex_);return s.nativeCurrent()&&s.nativeLife_.permitted()&&s.outstanding_;}
+    bool faulted()const{auto &s=*const_cast<SupervisorSampling *>(this);std::lock_guard<std::mutex> lock(s.mutex_);s.nativeCurrent();return s.faulted_;}
     void requestStop(){
         std::lock_guard<std::mutex> lock(mutex_);attempted_=true;cancel_=true;outstanding_=false;request_.reset();result_.reset();ready_.notify_one();
     }

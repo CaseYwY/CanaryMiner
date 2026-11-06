@@ -1,5 +1,6 @@
 #include "energy_owner.h"
 #include "electricity.h"
+#include "native_process_admission.h"
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -40,11 +41,21 @@ class EnergyOwner final: public SessionEnergySink {
     std::condition_variable ready_;
     std::deque<Job> queue_;
     std::thread worker_;
+    NativeProcessLifetime nativeLife_;bool nativeFaulted_=false;
     std::atomic<bool> cancel_{true};
     bool accepting_=false;
     std::shared_ptr<const SessionEnergySnapshot> published_=std::make_shared<const SessionEnergySnapshot>();
+    const std::shared_ptr<const SessionEnergySnapshot> empty_=published_;
     uint64_t generation_=0, epoch_=0, dropped_=0;
     unsigned channels_=0;
+    bool nativeCurrent()noexcept{ // mutex held; preserve historical totals, never current sampling authority
+        if(!nativeLife_.bound()||nativeLife_.current())return true;
+        if(!nativeFaulted_){nativeFaulted_=true;accepting_=false;cancel_=true;dropped_+=queue_.size();queue_.clear();ready_.notify_all();
+            try{auto fault=std::make_shared<SessionEnergySnapshot>(*published_);if(fault->state!=SessionEnergyState::Stopped)fault->state=SessionEnergyState::NativeFault;
+                ++fault->revision;fault->dropped=dropped_;fault->view.lines.push_back("STOPPED: original native ownership lifetime invalid; no automatic restart.");published_=std::move(fault);
+            }catch(...){} }
+        return false;
+    }
     static EnergyView view(const Model &m) {
         EnergyView v; v.enabled=m.preferences.showEnergy;
         if(!v.enabled)return v;
@@ -101,27 +112,30 @@ class EnergyOwner final: public SessionEnergySink {
         return true;
     }
     void run(Model model) noexcept {
+        NativeProcessScope original(nativeLife_.epoch());
         try {
             for(;;) {
                 Job job;
-                { std::unique_lock<std::mutex> lock(mutex_);ready_.wait(lock,[&]{return cancel_.load()||!queue_.empty();});if(cancel_)return;job=queue_.front();queue_.pop_front(); }
+                { std::unique_lock<std::mutex> lock(mutex_);ready_.wait_for(lock,std::chrono::milliseconds(25),[&]{return cancel_.load()||!queue_.empty();});if(!nativeCurrent()||cancel_)return;
+                    if(queue_.empty())continue;
+                    job=queue_.front();queue_.pop_front(); }
                 if(!advance(model,job))model.snapshot.state=SessionEnergyState::ClockFault;
                 model.snapshot.knownEnergyNumerator=model.energy.text();model.snapshot.knownCostNumerator=model.cost.text();
-                {std::lock_guard<std::mutex> lock(mutex_);if(cancel_)return;
+                {std::lock_guard<std::mutex> lock(mutex_);if(!nativeCurrent()||cancel_)return;
                     if(model.snapshot.state!=SessionEnergyState::Running){accepting_=false;dropped_+=queue_.size();queue_.clear();}
                     model.snapshot.dropped=dropped_;}
                 model.snapshot.view=view(model);
                 auto next=std::make_shared<SessionEnergySnapshot>(model.snapshot);
-                { std::lock_guard<std::mutex> lock(mutex_); if(cancel_)return;
+                { std::lock_guard<std::mutex> lock(mutex_); if(!nativeCurrent()||cancel_)return;
                   next->revision=published_->revision+1;published_=std::move(next);
                   if(model.snapshot.state!=SessionEnergyState::Running){cancel_=true;return;} }
             }
         } catch(...) {
-            try { std::lock_guard<std::mutex> lock(mutex_); if(cancel_)return;
-                accepting_=false;dropped_+=queue_.size();queue_.clear();
+            try { std::lock_guard<std::mutex> lock(mutex_); if(!nativeCurrent()||cancel_)return;
+                accepting_=false;cancel_=true;dropped_+=queue_.size();queue_.clear();ready_.notify_all();
                 auto fault=std::make_shared<SessionEnergySnapshot>(*published_);fault->state=SessionEnergyState::Capacity;fault->revision++;fault->dropped=dropped_;
                 fault->view.lines.push_back("STOPPED: processing capacity; known prior snapshot retained, no automatic retry.");
-                published_=std::move(fault);cancel_=true;
+                published_=std::move(fault);
             } catch(...) {cancel_=true;}
         }
     }
@@ -129,20 +143,23 @@ class EnergyOwner final: public SessionEnergySink {
     ~EnergyOwner()override{stop();}
     bool start(uint64_t generation,uint64_t utc,uint64_t mono,unsigned channels,const ElectricityPreferences &p,PowerOrigin origin)override {
         std::lock_guard<std::mutex> life(lifecycle_);std::lock_guard<std::mutex> lock(mutex_);
-        if(worker_.joinable()||!generation||generation<=generation_||!utc||utc>lastUtcMs||!channels||channels>64||!p.collectEnergy||!electricityPreferencesValid(p)||
+        try{if(!nativeCurrent()||worker_.joinable()||!generation||generation<=generation_||!utc||utc>lastUtcMs||!channels||channels>64||!p.collectEnergy||!electricityPreferencesValid(p)||
             (origin!=PowerOrigin::ObservedTelemetry&&origin!=PowerOrigin::SyntheticFixture))return false;
         if(p.tariffEnabled&&p.confirmedUtc>utc/1000)return false;
+        if(!nativeLife_.begin()){nativeCurrent();return false;}
         Model m;m.preferences=p;m.baseMono=m.lastMono=mono;m.lastWall=utc;m.channels.resize(channels);
         if(p.tariffEnabled&&!ExactDecimal::parse(p.ratePerKwh,&m.rate))return false;
         m.snapshot.state=SessionEnergyState::Running;m.snapshot.generation=generation;m.snapshot.channels=channels;
         m.snapshot.evidence={PowerBasis::GpuBoard,origin,"selected-gpu-boards/session-"+std::to_string(generation),origin==PowerOrigin::SyntheticFixture?"fixture.milliwatts":"native-nvml-milliwatts"};
         m.snapshot.beginUtcMs=m.snapshot.throughUtcMs=utc;m.snapshot.throughMonoMs=mono;m.snapshot.view=view(m);
-        try {generation_=generation;channels_=channels;epoch_=dropped_=0;cancel_=false;accepting_=true;published_=std::make_shared<const SessionEnergySnapshot>(m.snapshot);
-            worker_=std::thread([this,m=std::move(m)]()mutable{run(std::move(m));});return true;
+        if(!nativeCurrent()||!nativeLife_.permitted())return false;
+        generation_=generation;channels_=channels;epoch_=dropped_=0;cancel_=false;accepting_=true;published_=std::make_shared<const SessionEnergySnapshot>(m.snapshot);
+            worker_=std::thread([this,m=std::move(m)]()mutable{run(std::move(m));});return nativeCurrent()&&nativeLife_.permitted();
         } catch(...){accepting_=false;cancel_=true;return false;}
     }
     EnergyAdmission submit(uint64_t generation,SessionPowerInput input)override {
         std::lock_guard<std::mutex> lock(mutex_);
+        if(!nativeCurrent()||!nativeLife_.permitted())return EnergyAdmission::Stopped;
         if(generation!=generation_)return EnergyAdmission::StaleGeneration;
         if(cancel_||!accepting_)return EnergyAdmission::Stopped;
         if(input.channel>=channels_)return EnergyAdmission::Invalid;
@@ -155,7 +172,11 @@ class EnergyOwner final: public SessionEnergySink {
         ready_.notify_all();
     }
     void stop()override {std::lock_guard<std::mutex> life(lifecycle_);requestStop();if(worker_.joinable())worker_.join();}
-    std::shared_ptr<const SessionEnergySnapshot> snapshot()const override{std::lock_guard<std::mutex> lock(mutex_);return published_;}
+    std::shared_ptr<const SessionEnergySnapshot> snapshot()const override{
+        auto &s=*const_cast<EnergyOwner *>(this);std::lock_guard<std::mutex> lock(s.mutex_);s.nativeCurrent();
+        if(s.nativeLife_.current()&&!s.nativeLife_.permitted())return s.empty_;
+        return s.cancel_&&s.published_->state==SessionEnergyState::Running?s.empty_:s.published_;
+    }
 };
 }
 std::unique_ptr<SessionEnergySink> makeSessionEnergyOwner(){return std::make_unique<EnergyOwner>();}

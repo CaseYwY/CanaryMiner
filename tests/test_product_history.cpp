@@ -233,7 +233,7 @@ static void recovery(const std::filesystem::path &path) {
     }
 }
 
-static void asynchronous(const std::filesystem::path &path) {
+static void asynchronous(const std::filesystem::path &path, bool crossStopBoundary = false) {
     AcceptedHistory history(path);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (!history.snapshot().ready && history.snapshot().error.empty() && std::chrono::steady_clock::now() < deadline)
@@ -242,14 +242,24 @@ static void asynchronous(const std::filesystem::path &path) {
     const auto utc = static_cast<int64_t>(time(nullptr));
     history.observe(0, 1, 5, utc);
     history.observe(0, 1, 5, utc);
+    if (crossStopBoundary) {
+        const auto boundary = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (time(nullptr) <= utc && std::chrono::steady_clock::now() < boundary)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        CHECK(time(nullptr) > utc);
+    }
     history.stop();
-    CHECK(history.snapshot().ready && history.snapshot().all == 5);
+    const auto closed = history.snapshot();
+    CHECK(closed.ready && closed.all == 5 && closed.error.empty());
+    const auto closedUtc = static_cast<int64_t>(closed.asOfUtc);
+    CHECK(closedUtc >= utc + (crossStopBoundary ? 1 : 0));
     AcceptedHistoryStore store;
     std::string error;
-    CHECK(store.open(path, utc + 1, &error));
+    CHECK(store.open(path, closedUtc + 1, &error));
     AcceptedHistoryView value;
-    CHECK(store.snapshot(utc + 1, &value, &error) && value.all == 5 && value.gaps && value.gapFromUtc == static_cast<uint64_t>(utc));
-    CHECK(store.finish(utc + 2, &error));
+    CHECK(store.snapshot(closedUtc + 1, &value, &error) && value.all == 5 && value.day == 5 && value.week == 5 && value.month == 5 &&
+          value.gaps && !value.clockAdjusted && value.gapFromUtc == closed.asOfUtc && value.gapToUtc == closed.asOfUtc + 1);
+    CHECK(store.finish(closedUtc + 2, &error));
 }
 
 static void rendering() {
@@ -295,6 +305,12 @@ int main(int argc, char **argv) {
         std::_Exit(0);
     }
     const auto dir = std::filesystem::path(makeScratchDir("accepted-history"));
+    if (argc == 2 && std::string(argv[1]) == "--async-clock-boundary") {
+        asynchronous(dir / "async-clock-boundary.sqlite3", true);
+        std::error_code ignored;
+        std::filesystem::remove_all(dir, ignored);
+        return finishTests("product_history explicit UTC stop boundary");
+    }
     counters(dir / "counters.sqlite3");
     windows(dir / "windows.sqlite3");
     limitsAndClock(dir / "limits.sqlite3");
