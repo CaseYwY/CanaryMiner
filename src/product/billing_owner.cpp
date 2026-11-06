@@ -2,6 +2,7 @@
 #include "billing_input_model.h"
 #include "billing_retry_process.h"
 #include "hash.h"
+#include "native_process_admission.h"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -47,6 +48,7 @@ struct BillingOwner::Impl {
         bool resolved=false;
     };
     BillingOwnerHelpers helpers;
+    NativeProcessLifetime nativeLife;bool nativeFaulted=false;
     std::shared_ptr<const BillingOwnerBinding> context;
     BillingOwnerPolicy policy;BillingOwnerClock clock;
     BillingInputQueryClient stageClient;BillingQueryProcessClient moneyClient;BillingInputProcessClient inputClient;BillingRetryProcessClient retryClient;
@@ -57,6 +59,7 @@ struct BillingOwner::Impl {
 #endif
     BillingOwnerTime base,last;std::optional<BillingSnapshot> highWater;
     std::shared_ptr<Job> queued,flight;
+    std::shared_ptr<const BillingOwnerIntent> nativeUncertain;
     BillingOwnerSnapshot current;
     std::shared_ptr<const BillingOwnerSnapshot> published=std::make_shared<const BillingOwnerSnapshot>();
     const std::shared_ptr<const BillingOwnerSnapshot> emptyTerminal=published;
@@ -67,7 +70,16 @@ struct BillingOwner::Impl {
     void retain(){if(flight&&flight->issued&&!current.uncertain)current.uncertain=flight->issued;}
     void cancelJobs(){retain();if(queued)queued->cancel=true;if(flight)flight->cancel=true;queued.reset();}
     void halt(O state,S status){stopped=true;cancelJobs();current.state=state;current.status=status;current.reviewable=false;publish();wake.notify_all();}
-    bool time(){const auto now=clock();
+    bool nativeCurrent()noexcept{ // mutex held; keep private originals, withdraw only current authority
+        if(!nativeLife.bound()||nativeLife.current())return true;
+        if(!nativeFaulted){nativeFaulted=true;
+            if(flight&&flight->issued&&!current.uncertain)nativeUncertain=flight->issued;
+            stopped=true;cancelJobs();current.transport=LocalTaskStatus::Unreaped;current.status=S::Storage;current.reviewable=false;
+            if(current.state!=O::Stopped)current.state=O::Faulted;
+            wake.notify_all();try{publish();}catch(...){} }
+        return false;
+    }
+    bool time(){const auto now=clock();if(!nativeCurrent()||!nativeLife.permitted())return false;
         if(!instant(now.utcMs)||now.utcMs<last.utcMs||now.monotonicMs<last.monotonicMs||now.monotonicMs-base.monotonicMs>static_cast<uint64_t>(lastUtc)){
             halt(O::ClockFault,S::Clock);return false;}
         const auto elapsed=static_cast<int64_t>(now.monotonicMs-base.monotonicMs),wall=now.utcMs-base.utcMs;
@@ -75,6 +87,7 @@ struct BillingOwner::Impl {
         last=now;return true;
     }
     D check(uint64_t generation,uint64_t revision){
+        if(!nativeCurrent()||!nativeLife.permitted())return D::Stopped;
         if(stopped)return D::Stopped;
         if(generation!=current.generation)return D::StaleGeneration;
         if(!revision||revision!=current.revision)return D::ReviewChanged;
@@ -103,6 +116,7 @@ struct BillingOwner::Impl {
         }
     }
     D enqueue(A action,std::shared_ptr<const BillingChunk> original={}){
+        if(!nativeCurrent()||!nativeLife.permitted())return D::Stopped;
         if(!eligible(action)||current.lastTicket>=UINT64_MAX/4-1)return D::NotReady;
         auto job=std::make_shared<Job>();job->action=action;job->ticket=current.lastTicket+1;job->epoch=epoch;job->now=last.utcMs;job->review=current.view;job->original=std::move(original);
         auto next=current;next.lastTicket=job->ticket;next.state=O::Busy;next.pending=true;next.reviewable=false;next.action=action;next.actionProof.reset();++next.revision;
@@ -114,6 +128,7 @@ struct BillingOwner::Impl {
     }
     unsigned budget(const std::shared_ptr<Job> &job,std::chrono::steady_clock::time_point deadline,Result &r){
         std::lock_guard<std::mutex> lock(mutex);
+        if(!nativeCurrent()){r.transport=LocalTaskStatus::Unreaped;return 0;}
         if(stopped||job->cancel||job->epoch!=epoch||!time()){r.transport=LocalTaskStatus::Cancelled;return 0;}
         const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
         if(left<50){r.transport=LocalTaskStatus::Timeout;return 0;}return static_cast<unsigned>(left);
@@ -148,7 +163,7 @@ struct BillingOwner::Impl {
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(policy.operationTimeoutMs);
         auto r=read(job,deadline);
         if(r.transport==LocalTaskStatus::Unreaped)return r;
-        {std::lock_guard<std::mutex> lock(mutex);if(stopped||job->cancel||job->epoch!=epoch)return r;
+        {std::lock_guard<std::mutex> lock(mutex);if(!nativeCurrent()||stopped||job->cancel||job->epoch!=epoch)return r;
             if(r.view&&!observe(*r.view))return r;}
         if(std::chrono::steady_clock::now()>=deadline){r.transport=LocalTaskStatus::Timeout;r.view.reset();return r;}
         if(job->action==A::Refresh||!r.view)return r;
@@ -164,7 +179,7 @@ struct BillingOwner::Impl {
             intent->manifest=stage.manifest;if(stage.original)intent->original=std::shared_ptr<const BillingChunk>(job->review->stage,&*stage.original);
         }else if(job->action==A::Retry){intent->original=std::shared_ptr<const BillingChunk>(intent->monetary,&*intent->monetary->original);}
         auto ms=budget(job,deadline,r);if(!ms)return r;
-        {std::lock_guard<std::mutex> lock(mutex);if(stopped||job->cancel||job->epoch!=epoch)return r;job->issued=intent;}
+        {std::lock_guard<std::mutex> lock(mutex);if(!nativeCurrent()||stopped||job->cancel||job->epoch!=epoch)return r;job->issued=intent;}
         r.view.reset(); // a pre-write read is never published as a post-write current snapshot
         if(job->action==A::CreateNew||job->action==A::Submit){
             const auto result=inputClient.transact(plan,stage.present?stage.revision:"",job->cancel,ms);r.transport=result.transport;
@@ -196,8 +211,9 @@ struct BillingOwner::Impl {
         return u.action==A::Retry&&u.original&&v.monetary&&v.monetary->status==S::Ok&&v.monetary->state==R::Confirmed&&v.monetary->original&&sameOriginal(*u.original,*v.monetary->original);
     }
     void run()noexcept{
+        NativeProcessScope original(nativeLife.epoch());
         try{for(;;){std::shared_ptr<Job> job;
-            {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopped||queued;});if(stopped||!time())return;
+            {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopped||queued;});if(!nativeCurrent()||stopped||!time())return;
                 if(!queued)continue;
                 flight=queued;queued.reset();job=flight;}
             auto result=execute(job);
@@ -205,6 +221,9 @@ struct BillingOwner::Impl {
             if(unreapedNext.exchange(false))result.transport=LocalTaskStatus::Unreaped;
 #endif
             std::lock_guard<std::mutex> lock(mutex);
+            if(!nativeLife.current()){nativeCurrent();
+                if(result.resolved&&nativeUncertain==job->issued){if(current.uncertain==nativeUncertain)current.uncertain.reset();nativeUncertain.reset();}
+                flight.reset();publish();return;}
             if(stopped){flight.reset();return;}
             if(result.transport==LocalTaskStatus::Unreaped){current.transport=result.transport;halt(O::Faulted,S::Storage);flight.reset();return;}
             if(job->cancel||job->epoch!=epoch){flight.reset();publish();continue;}
@@ -231,7 +250,7 @@ bool BillingOwner::start(uint64_t generation){
     auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);std::lock_guard<std::mutex> lock(s.mutex);if(s.attempted)return false;s.attempted=true;
     if(!generation||!s.policy.enabled||s.policy.operationTimeoutMs<500||s.policy.operationTimeoutMs>60000||!localTaskPath(s.context->file)||
         !localTaskPath(s.helpers.stageQuery)||!localTaskPath(s.helpers.monetaryQuery)||!localTaskPath(s.helpers.input)||!localTaskPath(s.helpers.retry))return false;
-    try{s.base=s.last=s.clock();if(!instant(s.base.utcMs))return false;
+    try{if(!s.nativeLife.begin()){s.nativeCurrent();return false;}s.base=s.last=s.clock();if(!s.nativeCurrent()||!s.nativeLife.permitted()||!instant(s.base.utcMs))return false;
         s.current.generation=generation;s.current.context=s.context;s.stopped=false;
         if(s.enqueue(A::Refresh)!=D::Queued){s.stopped=true;return false;}
         s.thread=std::thread([p=&s]{p->run();});return true;
@@ -265,7 +284,7 @@ BillingOwnerAdmission BillingOwner::submitReviewed(uint64_t g,uint64_t r,const B
     }catch(...){return D::Invalid;}
 }
 bool BillingOwner::invalidate(uint64_t generation){
-    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(s.stopped||generation!=s.current.generation||s.epoch==UINT64_MAX)return false;
+    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(!s.nativeCurrent()||!s.nativeLife.permitted()||s.stopped||generation!=s.current.generation||s.epoch==UINT64_MAX)return false;
     ++s.epoch;s.cancelJobs();s.current.state=O::NeedsReview;s.current.reviewable=false;s.current.status=S::Conflict;
     try{s.publish();}catch(...){}s.wake.notify_all();return true;
 }
@@ -275,7 +294,8 @@ void BillingOwner::requestStop(){
 }
 void BillingOwner::stop(){auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);requestStop();if(s.thread.joinable())s.thread.join();std::lock_guard<std::mutex> lock(s.mutex);s.flight.reset();}
 std::shared_ptr<const BillingOwnerSnapshot> BillingOwner::snapshot()const{
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->nativeCurrent();
+    if(impl_->nativeLife.current()&&!impl_->nativeLife.permitted())return impl_->emptyTerminal;
     return impl_->published->revision!=impl_->current.revision||impl_->published->reviewable!=impl_->current.reviewable||impl_->published->state!=impl_->current.state?impl_->emptyTerminal:impl_->published;
 }
 #ifdef CANARY_BILLING_OWNER_TESTING

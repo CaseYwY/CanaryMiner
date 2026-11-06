@@ -1,4 +1,5 @@
 #include "forecast_owner.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -54,6 +55,7 @@ struct IncomeForecastOwner::Impl {
         std::optional<ForecastCurrencyFx> tariffFx;
     };
     ForecastQueryProcessClient client;
+    NativeProcessLifetime nativeLife;bool nativeFaulted=false;
     std::filesystem::path helper,file;
     CreditSourceContract binding;
     ForecastOwnerPolicy policy;
@@ -84,7 +86,15 @@ struct IncomeForecastOwner::Impl {
     void unavailable(ForecastStatus status){current.status=status;current.result.reset();IncomeForecast empty;empty.status=status;
         empty.electricityConfigured=current.view.electricityConfigured;current.view=projection(empty);}
     void cancelJobs(){if(queued)queued->cancel=true;if(flight)flight->cancel=true;queued.reset();cached.reset();}
+    bool nativeCurrent()noexcept{ // mutex held; no old report/valuation remains current through a native fault
+        if(!nativeLife.bound()||nativeLife.current())return true;
+        if(!nativeFaulted){nativeFaulted=true;stopped=true;cancelJobs();current.result.reset();current.transport=LocalTaskStatus::Unreaped;
+            current.status=ForecastStatus::Unavailable;if(current.state!=ForecastOwnerState::Stopped)current.state=ForecastOwnerState::Faulted;
+            wake.notify_all();try{unavailable(ForecastStatus::Unavailable);publish();}catch(...){} }
+        return false;
+    }
     bool time(ForecastTime now){
+        if(!nativeCurrent()||!nativeLife.permitted())return false;
         if(!instant(now.utcMs)||now.utcMs<last.utcMs||now.monotonicMs<last.monotonicMs||now.monotonicMs-base.monotonicMs>static_cast<uint64_t>(lastUtc)){
             stopped=true;cancelJobs();current.state=ForecastOwnerState::ClockFault;unavailable(ForecastStatus::Clock);publish();wake.notify_all();return false;}
         const auto elapsed=static_cast<int64_t>(now.monotonicMs-base.monotonicMs),wall=now.utcMs-base.utcMs;
@@ -102,6 +112,7 @@ struct IncomeForecastOwner::Impl {
         return v.electricityUsd&&in.electricity.fx&&static_cast<uint64_t>(now.utcMs-in.electricity.fx->observedUtcMs)>in.electricity.fx->maxAgeMs;
     }
     ForecastAdmission enqueue(std::shared_ptr<Job> job){
+        if(!nativeCurrent()||!nativeLife.permitted())return ForecastAdmission::Stopped;
         if(stopped)return ForecastAdmission::Stopped;
         if(queued||flight)return ForecastAdmission::NotReady;
         if(current.lastTicket>=UINT64_MAX/32-1)return ForecastAdmission::Invalid;
@@ -121,7 +132,9 @@ struct IncomeForecastOwner::Impl {
         std::vector<CreditTotals> totals;const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(policy.readBudgetMs);
         for(size_t begin=0;begin<queries.size();begin+=4){
             if(job->cancel)return result;
-            ForecastTime now;{std::lock_guard<std::mutex> lock(mutex);if(stopped||job->epoch!=epoch)return result;now=clock();if(!time(now))return result;}
+            ForecastTime now;{std::lock_guard<std::mutex> lock(mutex);if(!nativeCurrent()){result.transport=LocalTaskStatus::Unreaped;return result;}
+                if(stopped||job->epoch!=epoch)return result;
+                now=clock();if(!time(now))return result;}
             if(s.reportUtcMs>now.utcMs){result.status=ForecastStatus::Clock;return result;}
             const auto remaining=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
             if(remaining<50){result.transport=LocalTaskStatus::Timeout;return result;}
@@ -151,9 +164,10 @@ struct IncomeForecastOwner::Impl {
         result.input=std::move(in);result.status=ForecastStatus::Ok;return result;
     }
     void run()noexcept{
+        NativeProcessScope original(nativeLife.epoch());
         try{
             for(;;){std::shared_ptr<Job> job;
-                {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopped||queued;});if(stopped)return;
+                {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopped||queued;});if(!nativeCurrent()||stopped)return;
                     const auto now=clock();if(!time(now))return;
                     if(!queued&&cached&&(expired(now)||now.monotonicMs-lastProjectionMono>=policy.projectionRefreshMs)){
                         auto next=std::make_shared<Job>();next->cached=cached;next->token=cached->tokenQuote;next->fx=cached->fxQuote;next->tariffFx=cached->electricity.fx;
@@ -167,11 +181,11 @@ struct IncomeForecastOwner::Impl {
                 else{result.status=ForecastStatus::Ok;result.transport=LocalTaskStatus::Ok;result.input=std::make_shared<IncomeForecastInput>(*job->cached);
                     result.input->tokenQuote=job->token;result.input->fxQuote=job->fx;result.input->electricity.fx=job->tariffFx;}
                 ForecastTime valuation;
-                {std::lock_guard<std::mutex> lock(mutex);if(stopped)return;valuation=clock();if(!time(valuation))return;}
+                {std::lock_guard<std::mutex> lock(mutex);if(!nativeCurrent()||stopped)return;valuation=clock();if(!time(valuation))return;}
                 std::shared_ptr<const IncomeForecast> computed;
                 FinancialView formatted;
                 if(result.input&&!job->cancel){result.input->valuationUtcMs=valuation.utcMs;result.input->nowMonoMs=valuation.monotonicMs;computed=std::make_shared<const IncomeForecast>(incomeForecast(*result.input));formatted=projection(*computed);}
-                std::lock_guard<std::mutex> lock(mutex);flight.reset();if(stopped)return;
+                std::lock_guard<std::mutex> lock(mutex);flight.reset();if(!nativeCurrent()||stopped)return;
                 if(job->cancel||job->epoch!=epoch){current.state=ForecastOwnerState::Waiting;unavailable(ForecastStatus::Stale);publish();continue;}
                 if(!time(clock()))return;
                 current.helperReads+=result.reads;current.transport=result.transport;current.completedTicket=job->ticket;
@@ -197,23 +211,23 @@ bool IncomeForecastOwner::start(uint64_t generation){
     auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);std::lock_guard<std::mutex> lock(s.mutex);if(s.attempted)return false;s.attempted=true;
     if(!generation||!s.policy.enabled||!localTaskPath(s.helper)||!localTaskPath(s.file)||!validCreditSourceContract(s.binding)||!s.binding.cursor||
         s.policy.projectionRefreshMs<100||s.policy.projectionRefreshMs>60000||s.policy.helperTimeoutMs<50||s.policy.helperTimeoutMs>10000||s.policy.readBudgetMs<500||s.policy.readBudgetMs>60000)return false;
-    try{s.base=s.last=s.clock();if(!instant(s.base.utcMs))return false;
+    try{if(!s.nativeLife.begin()){s.nativeCurrent();return false;}s.base=s.last=s.clock();if(!s.nativeCurrent()||!s.nativeLife.permitted()||!instant(s.base.utcMs))return false;
         CreditProcessRequest probe;probe.generation=generation;probe.ticket=1;probe.file=s.file;probe.binding=s.binding;probe.limits=s.policy.ledger;probe.nowUtcMs=s.base.utcMs;probe.recovery=CreditRecoveryMode::Inspect;probe.queries={{true,0,s.base.utcMs}};
         if(!validForecastQuery(probe))return false;
         s.stopped=false;s.current.generation=generation;s.current.state=ForecastOwnerState::Waiting;s.unavailable(ForecastStatus::Unavailable);s.publish();
         s.thread=std::thread([p=&s]{p->run();});return true;}catch(...){s.stopped=true;s.current.state=ForecastOwnerState::Faulted;try{s.publish();}catch(...){}return false;}
 }
 ForecastAdmission IncomeForecastOwner::submit(uint64_t generation,const ForecastScenario &scenario){
-    auto &s=*impl_;if(!boundedScenario(scenario,s.binding))return ForecastAdmission::Invalid;
+    auto &s=*impl_;try{if(!boundedScenario(scenario,s.binding))return ForecastAdmission::Invalid;}catch(...){return ForecastAdmission::Invalid;}
     std::lock_guard<std::mutex> lock(s.mutex);if(generation!=s.current.generation)return ForecastAdmission::StaleGeneration;
-    if(s.stopped)return ForecastAdmission::Stopped;
+    if(!s.nativeCurrent()||!s.nativeLife.permitted()||s.stopped)return ForecastAdmission::Stopped;
     if(s.queued||s.flight)return ForecastAdmission::NotReady;
     try{if(!s.time(s.clock()))return ForecastAdmission::Stopped;auto job=std::make_shared<Impl::Job>();job->scenario=scenario;
         const auto result=s.enqueue(std::move(job));if(result==ForecastAdmission::Queued)s.cached.reset();return result;}catch(...){return ForecastAdmission::Invalid;}
 }
 ForecastAdmission IncomeForecastOwner::updateMarket(uint64_t generation,std::optional<MarketQuote> token,std::optional<MarketQuote> fx,ForecastFxUpdate tariffFx){
     auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(generation!=s.current.generation)return ForecastAdmission::StaleGeneration;
-    if(s.stopped)return ForecastAdmission::Stopped;
+    if(!s.nativeCurrent()||!s.nativeLife.permitted()||s.stopped)return ForecastAdmission::Stopped;
     if(s.policy.suppressMarket)return ForecastAdmission::NotReady;
     if(!s.cached)return ForecastAdmission::NotReady;
     if(!boundedFx(tariffFx.value)||(!tariffFx.replace&&tariffFx.value))return ForecastAdmission::Invalid;
@@ -221,7 +235,7 @@ ForecastAdmission IncomeForecastOwner::updateMarket(uint64_t generation,std::opt
         job->tariffFx=tariffFx.replace?std::move(tariffFx.value):s.cached->electricity.fx;return s.enqueue(std::move(job));}catch(...){return ForecastAdmission::Invalid;}
 }
 bool IncomeForecastOwner::invalidate(uint64_t generation){
-    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(s.stopped||generation!=s.current.generation||s.epoch==UINT64_MAX)return false;
+    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(!s.nativeCurrent()||!s.nativeLife.permitted()||s.stopped||generation!=s.current.generation||s.epoch==UINT64_MAX)return false;
     ++s.epoch;s.cancelJobs();s.current.state=ForecastOwnerState::Waiting;
     try{s.unavailable(ForecastStatus::Stale);s.publish();}catch(...){s.current.result.reset();}
     s.wake.notify_all();return true;
@@ -232,9 +246,11 @@ void IncomeForecastOwner::requestStop(){
 }
 void IncomeForecastOwner::stop(){auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);requestStop();if(s.thread.joinable())s.thread.join();std::lock_guard<std::mutex> lock(s.mutex);s.flight.reset();}
 std::shared_ptr<const ForecastOwnerSnapshot> IncomeForecastOwner::snapshot()const{
-    std::lock_guard<std::mutex> lock(impl_->mutex);
+    std::lock_guard<std::mutex> lock(impl_->mutex);impl_->nativeCurrent();
+    if(impl_->nativeLife.current()&&!impl_->nativeLife.permitted())return impl_->emptyTerminal;
     // Revocation cannot expose the old numeric report even if allocating its replacement snapshot failed.
-    if(impl_->publishedEpoch!=impl_->epoch||(impl_->stopped&&impl_->published->state!=impl_->current.state))return impl_->emptyTerminal;
+    if(impl_->publishedEpoch!=impl_->epoch||impl_->published->transport!=impl_->current.transport||impl_->published->result!=impl_->current.result||
+        (impl_->stopped&&impl_->published->state!=impl_->current.state))return impl_->emptyTerminal;
     return impl_->published;
 }
 } // namespace om

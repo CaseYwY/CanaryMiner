@@ -1,5 +1,6 @@
 #include "billing_compute_owner.h"
 #include "billing_model.h"
+#include "native_process_admission.h"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -26,6 +27,7 @@ struct BillingComputeOwner::Impl {
         std::optional<EnergyHistoryAnchor> source;std::shared_ptr<const BillingCandidate> candidate;};
     std::filesystem::path helper;std::shared_ptr<const BillingOwnerBinding> context;BillingComputePolicy policy;BillingOwnerClock clock;
     EnergyTraceProcessClient client;mutable std::mutex mutex;std::mutex lifecycle;std::condition_variable wake;std::thread thread;
+    NativeProcessLifetime nativeLife;bool nativeFaulted=false;
     bool attempted=false,stopped=true;uint64_t epoch=0,lastMonetaryRevision=0;BillingOwnerTime base,last;
     std::shared_ptr<Job> queued,flight;std::optional<BillingSourceNotice> lastNotice;uint64_t lastNoticeRevision=0;
     std::optional<EnergyHistoryAnchor> sourceWater,moneyWater;
@@ -39,13 +41,21 @@ struct BillingComputeOwner::Impl {
     void publish(){current.pending=!stopped&&static_cast<bool>(queued||flight);++current.revision;published=std::make_shared<const BillingComputeSnapshot>(current);}
     void cancel(){if(queued)queued->cancel=true;if(flight)flight->cancel=true;queued.reset();current.reviewable=false;}
     void halt(O state,S status){stopped=true;cancel();current.state=state;current.status=status;publish();wake.notify_all();}
-    bool time(){const auto now=clock();
+    bool nativeCurrent()noexcept{ // mutex held; candidates stay historical, never claimable after invalidation
+        if(!nativeLife.bound()||nativeLife.current())return true;
+        if(!nativeFaulted){nativeFaulted=true;stopped=true;cancel();current.transport=LocalTaskStatus::Unreaped;current.status=S::Storage;
+            if(current.state!=O::Stopped)current.state=O::Faulted;
+            wake.notify_all();try{publish();}catch(...){} }
+        return false;
+    }
+    bool time(){const auto now=clock();if(!nativeCurrent()||!nativeLife.permitted())return false;
         if(!billing_detail::instant(now.utcMs)||now.utcMs<last.utcMs||now.monotonicMs<last.monotonicMs||now.monotonicMs-base.monotonicMs>static_cast<uint64_t>(billing_detail::lastUtc)){
             halt(O::ClockFault,S::Clock);return false;}
         const auto elapsed=static_cast<int64_t>(now.monotonicMs-base.monotonicMs),wall=now.utcMs-base.utcMs;
         if(elapsed>wall+2000||wall>elapsed+2000){halt(O::ClockFault,S::Clock);return false;}last=now;return true;
     }
     A check(uint64_t g,uint64_t r){
+        if(!nativeCurrent()||!nativeLife.permitted())return A::Stopped;
         if(stopped)return A::Stopped;
         if(g!=current.generation)return A::StaleGeneration;
         if(!r||r!=current.revision)return A::ReviewChanged;
@@ -53,6 +63,7 @@ struct BillingComputeOwner::Impl {
         return time()?A::Queued:A::Stopped;
     }
     A enqueue(const BillingSourceNotice &notice,bool explicitRefresh){
+        if(!nativeCurrent()||!nativeLife.permitted())return A::Stopped;
         const auto &m=current.monetary->view->monetary->committed;
         if(!notice.checkpoint.sequence||!hash(notice.checkpoint.digest)||!billing_detail::instant(notice.observedUtcMs)||notice.observedUtcMs>last.utcMs||
             notice.throughUtcMs<=m.opening.throughUtcMs||notice.throughUtcMs>notice.observedUtcMs||older(notice.checkpoint,m.source->checkpoint))return A::Invalid;
@@ -76,7 +87,8 @@ struct BillingComputeOwner::Impl {
         q.source.file=source.file;q.source.binding=source.binding;q.source.limits=source.limits;q.source.recovery=EnergyRecoveryMode::Inspect;q.source.nowUtcMs=j->now;
         q.source.queries={{m.opening.throughUtcMs,end,"",""}};q.anchor=m.source->checkpoint;q.maxIntervals=policy.maxIntervals;
         unsigned remaining=0;
-        {std::lock_guard<std::mutex> lock(mutex);if(stopped||j->cancel||j->epoch!=epoch||!time()){out.transport=LocalTaskStatus::Cancelled;return out;}
+        {std::lock_guard<std::mutex> lock(mutex);if(!nativeCurrent()){out.transport=LocalTaskStatus::Unreaped;return out;}
+            if(stopped||j->cancel||j->epoch!=epoch||!time()){out.transport=LocalTaskStatus::Cancelled;return out;}
             const auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
             if(left<50){out.transport=LocalTaskStatus::Timeout;return out;}remaining=static_cast<unsigned>(left);}
         out.status=S::Storage;const auto read=client.transact(q,j->cancel,remaining);out.transport=read.transport;
@@ -93,8 +105,8 @@ struct BillingComputeOwner::Impl {
         if(std::chrono::steady_clock::now()>=deadline){out.transport=LocalTaskStatus::Timeout;out.status=S::Storage;return out;}
         result->reviewed=j->review;result->notice=j->notice;result->queriedUtcMs=j->now;out.candidate=std::move(result);return out;
     }
-    void run()noexcept{try{for(;;){std::shared_ptr<Job> j;
-        {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopped||queued;});if(stopped||!time())return;
+    void run()noexcept{NativeProcessScope original(nativeLife.epoch());try{for(;;){std::shared_ptr<Job> j;
+        {std::unique_lock<std::mutex> lock(mutex);wake.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopped||queued;});if(!nativeCurrent()||stopped||!time())return;
             if(!queued)continue;
             flight=queued;queued.reset();j=flight;}
         auto out=compute(j);
@@ -102,6 +114,7 @@ struct BillingComputeOwner::Impl {
         if(unreapedNext.exchange(false))out.transport=LocalTaskStatus::Unreaped;
 #endif
         std::lock_guard<std::mutex> lock(mutex);
+        if(!nativeCurrent()){flight.reset();return;}
         if(stopped){flight.reset();return;}
         if(out.transport==LocalTaskStatus::Unreaped){current.transport=out.transport;halt(O::Faulted,S::Storage);flight.reset();return;}
         if(j->cancel||j->epoch!=epoch){flight.reset();publish();continue;}
@@ -119,13 +132,14 @@ bool BillingComputeOwner::start(uint64_t generation){auto &s=*impl_;std::lock_gu
     if(s.attempted)return false;
     s.attempted=true;
     if(!generation||!s.policy.enabled||s.policy.operationTimeoutMs<500||s.policy.operationTimeoutMs>60000||!s.policy.maxIntervals||s.policy.maxIntervals>512||!localTaskPath(s.helper)||!s.context||!s.context->binding.source)return false;
-    try{s.base=s.last=s.clock();if(!billing_detail::instant(s.base.utcMs))return false;s.current.generation=generation;s.current.state=O::Waiting;s.stopped=false;s.publish();s.thread=std::thread([p=&s]{p->run();});return true;}
+    try{if(!s.nativeLife.begin()){s.nativeCurrent();return false;}s.base=s.last=s.clock();if(!s.nativeCurrent()||!s.nativeLife.permitted()||!billing_detail::instant(s.base.utcMs))return false;s.current.generation=generation;s.current.state=O::Waiting;s.stopped=false;s.publish();s.thread=std::thread([p=&s]{p->run();});return true;}
     catch(...){s.stopped=true;s.current.state=O::Faulted;try{s.publish();}catch(...){}return false;}
 }
 bool BillingComputeOwner::observe(uint64_t generation,std::shared_ptr<const BillingOwnerSnapshot> monetary){
     auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
+    if(!s.nativeCurrent()||!s.nativeLife.permitted())return false;
     if(s.stopped||generation!=s.current.generation||!monetary||monetary->generation!=generation||!monetary->revision||monetary->context!=s.context||s.epoch==UINT64_MAX)return false;
-    try{if(!s.time())return false;
+    try{if(!s.time()||!s.nativeCurrent()||!s.nativeLife.permitted())return false;
         if(monetary==s.current.monetary)return true;
         if(monetary->revision<=s.lastMonetaryRevision)return false;
         s.lastMonetaryRevision=monetary->revision;
@@ -150,12 +164,13 @@ bool BillingComputeOwner::claimReviewed(uint64_t g,uint64_t r,uint64_t mg,uint64
         auto published=std::make_shared<const BillingComputeSnapshot>(next);s.current=std::move(next);s.published=std::move(published);return true;
     }catch(...){return false;}
 }
-bool BillingComputeOwner::invalidate(uint64_t g){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(s.stopped||g!=s.current.generation||s.epoch==UINT64_MAX)return false;
+bool BillingComputeOwner::invalidate(uint64_t g){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(!s.nativeCurrent()||!s.nativeLife.permitted()||s.stopped||g!=s.current.generation||s.epoch==UINT64_MAX)return false;
     ++s.epoch;s.cancel();s.current.monetary.reset();s.lastNotice.reset();s.current.state=O::Waiting;try{s.publish();}catch(...){}s.wake.notify_all();return true;}
 void BillingComputeOwner::requestStop(){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);s.attempted=true;if(s.current.state==O::Stopped)return;
     try{s.halt(O::Stopped,s.current.status);}catch(...){s.stopped=true;s.cancel();s.current.state=O::Stopped;s.current.reviewable=false;}s.wake.notify_all();}
 void BillingComputeOwner::stop(){auto &s=*impl_;std::lock_guard<std::mutex> life(s.lifecycle);requestStop();if(s.thread.joinable())s.thread.join();std::lock_guard<std::mutex> lock(s.mutex);s.flight.reset();}
 std::shared_ptr<const BillingComputeSnapshot> BillingComputeOwner::snapshot()const{std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->nativeCurrent();if(impl_->nativeLife.current()&&!impl_->nativeLife.permitted())return impl_->emptyTerminal;
     return impl_->published->revision!=impl_->current.revision||impl_->published->state!=impl_->current.state||impl_->published->reviewable!=impl_->current.reviewable?impl_->emptyTerminal:impl_->published;}
 #ifdef CANARY_BILLING_COMPUTE_TESTING
 void BillingComputeTestPeer::unreapedNext(BillingComputeOwner &owner){owner.impl_->unreapedNext=true;}

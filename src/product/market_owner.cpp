@@ -1,5 +1,6 @@
 #include "market_owner.h"
 #include "public_json_process.h"
+#include "native_process_admission.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -122,6 +123,7 @@ bool MarketPollingPlan::takeEconomicRequest(uint64_t ms, uint64_t utc) {
 }
 
 struct MarketDataOwner::Impl {
+    NativeProcessLifetime nativeLife;std::atomic<bool> nativeFaulted{false};
     MarketFetch fetch;
     MarketPollingPolicy policy;
     MarketOrigin origin;
@@ -129,35 +131,47 @@ struct MarketDataOwner::Impl {
     MarketClock clock;
     std::atomic<bool> cancel{true};
     std::thread thread;
-    std::mutex mutex, waitMutex, commitMutex;
+    std::mutex mutex, waitMutex, commitMutex,lifecycle;
     std::condition_variable wait;
     MarketPollingPlan plan;
     MarketSnapshot current;
     std::shared_ptr<const MarketSnapshot> published = std::make_shared<const MarketSnapshot>();
+    const std::shared_ptr<const MarketSnapshot> emptyTerminal=published;
+    const std::shared_ptr<const MarketSnapshot> emptyNativeFault=[] {MarketSnapshot value;value.helperFault=true;return std::make_shared<const MarketSnapshot>(std::move(value));}();
+    std::shared_ptr<const MarketSnapshot> maskedSource,masked;
+    bool nativeCurrent()noexcept{ // commitMutex held; snapshot revocation never mutates the background-only plan/cache
+        if(!nativeLife.bound()||nativeLife.current())return true;
+        nativeFaulted=true;cancel=true;wait.notify_all();return false;
+    }
     void publish() {
-        current.health = plan.health(); current.clockFault = plan.clockFault(); current.helperFault = plan.helperFault(); current.running = plan.active() && !cancel.load();
+        current.health = plan.health(); current.clockFault = plan.clockFault(); current.helperFault = plan.helperFault()||nativeFaulted.load(); current.running = plan.active() && !cancel.load()&&nativeLife.current();
         ++current.revision;
         auto value = std::make_shared<const MarketSnapshot>(current);
         std::lock_guard<std::mutex> lock(mutex); published = std::move(value);
     }
     void run() noexcept {
+        NativeProcessScope original(nativeLife.epoch());
         try {
             while (!cancel.load()) {
+                {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                 auto now = clock();
+                {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                 const bool economicRequest = plan.takeEconomicRequest(now.first, now.second);
                 if (economicRequest) ++current.economicRequests;
                 auto ticket = plan.next(now.first, now.second);
                 if (!plan.active()) break;
                 if (ticket) {
                     publish();
-                    if (cancel.load()) break;
+                    {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                     PublicJsonResponse response;
                     try { response = fetch(ticket->request, cancel, policy.https); } catch (...) { response.status = PublicHttpsStatus::Unavailable; }
                     if (response.status == PublicHttpsStatus::Unreaped) {
                         // Cleanup uncertainty survives a simultaneous stop; it publishes no quote facts.
                         std::lock_guard<std::mutex> commit(commitMutex);
+                        nativeCurrent();
                         plan.helperUnreaped(); publish(); break;
                     }
+                    {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                     now = clock();
                     if (cancel.load()) break;
                     const MarketParseContext context{ticket->request, ticket->startedUtc, now.first, ticket->generation, origin,
@@ -171,7 +185,7 @@ struct MarketDataOwner::Impl {
                     {
                         // Serialize cancellation with cache commit, not with network/parse work. No late fact commits after stop.
                         std::lock_guard<std::mutex> commit(commitMutex);
-                        if (cancel.load()) break;
+                        if (!nativeCurrent()||cancel.load()) break;
                         if (plan.complete(*ticket, response, status, now.first, now.second)) {
                             if (quote.value) {
                                 if (ticket->request.feed == PublicFeed::GatePearlTicker) current.pearlQuote = std::move(quote.value);
@@ -189,7 +203,7 @@ struct MarketDataOwner::Impl {
                 wait.wait_for(lock, std::chrono::milliseconds(20), [&] { return cancel.load(); });
             }
         } catch (...) { /* no provider exception escapes into mining; final snapshot is stopped/unavailable */ }
-        plan.stop();
+        if(nativeFaulted.load())plan.helperUnreaped();else plan.stop();
         try { publish(); } catch (...) {}
     }
 };
@@ -199,10 +213,14 @@ MarketDataOwner::MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy, 
 }
 MarketDataOwner::~MarketDataOwner() { stop(); }
 bool MarketDataOwner::start(uint64_t generation) {
+    std::lock_guard<std::mutex> life(impl_->lifecycle);
     if (impl_->thread.joinable() || !impl_->fetch || (impl_->fixture && impl_->origin != MarketOrigin::SyntheticFixture) ||
         (impl_->origin != MarketOrigin::SyntheticFixture && impl_->origin != MarketOrigin::ProviderResponse)) return false;
     try {
+        {std::lock_guard<std::mutex> commit(impl_->commitMutex);if(!impl_->nativeLife.begin()){impl_->nativeCurrent();return false;}}
         const auto now = impl_->clock();
+        std::lock_guard<std::mutex> commit(impl_->commitMutex);
+        if(!impl_->nativeCurrent()||!impl_->nativeLife.permitted())return false;
         if (!impl_->plan.start(generation, now.first, now.second, impl_->policy, impl_->fixture)) return false;
         impl_->current = {}; impl_->current.generation = generation; impl_->current.origin = impl_->origin;
         impl_->cancel = false; impl_->publish();
@@ -214,11 +232,22 @@ void MarketDataOwner::requestStop() {
     impl_->wait.notify_all();
 }
 void MarketDataOwner::stop() {
+    std::lock_guard<std::mutex> life(impl_->lifecycle);
     requestStop();
     if (impl_->thread.joinable()) impl_->thread.join();
 }
 std::shared_ptr<const MarketSnapshot> MarketDataOwner::snapshot() const {
-    std::lock_guard<std::mutex> lock(impl_->mutex); return impl_->published;
+    auto &s=*impl_;bool foreignScope=false;
+    {std::lock_guard<std::mutex> commit(s.commitMutex);s.nativeCurrent();foreignScope=s.nativeLife.current()&&!s.nativeLife.permitted();}
+    std::lock_guard<std::mutex> lock(s.mutex);
+    if(foreignScope)return s.emptyTerminal;
+    if(!s.nativeFaulted.load())return s.published;
+    if(s.published->helperFault&&!s.published->running)return s.published;
+    if(s.maskedSource!=s.published){try{auto value=*s.published;value.running=false;value.helperFault=true;
+            for(auto &health:value.health){health.inFlight=false;health.latched=true;health.transport=PublicHttpsStatus::Unreaped;health.data=MarketDataStatus::Transport;health.nextDueMs=UINT64_MAX;}
+            auto masked=std::make_shared<const MarketSnapshot>(std::move(value));s.masked=std::move(masked);s.maskedSource=s.published;
+        }catch(...){return s.emptyNativeFault;}}
+    return s.masked?s.masked:s.emptyNativeFault;
 }
 
 std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const MarketPollingPolicy &policy, uint64_t utc, uint64_t ms) {
