@@ -47,6 +47,11 @@ remain separate open work, not implied by this cooperative statically linked fen
 atomic pidfd identity, suspended Windows job binding, original stop checks and cooperative reader lifetime. Console/stdin
 drain remain. Other data-owner queues, older Linux compatibility and hard native/deployment/physical gates stay unqualified.
 
+[P-14d](../native-process-scopes.md) explicitly carries original memory-only task scopes into background native work.
+The actual credit facade binds once before queue execution; stale current views/admission revoke while historical replies
+and uncertain write originals survive. Existing session/worker boundaries honor the caller scope. Scope alone supplies no
+OS ownership or automatic thread propagation; remaining data-owner/enclosing lifetime and deployment gates stay open.
+
 Owns explicit session intent, worker generation and lifecycle, safe transitions, host throttle requests, fault/thermal handling and state publication. Extend the existing supervisor instead of nesting an independent watchdog that can resurrect an intentionally stopped miner. The optional privileged helper has an allow-listed protocol and no network work; its process/PID identity must include creation/generation evidence.
 
 [P-03d/P-11i](../safety-telemetry.md) supplies a separate default-off raw telemetry owner, strict private selected-UUID batch protocol and parent-bound read-only NVML helper. Driver load/read/shutdown/unload stays off the control thread; any failed field withdraws the complete batch. Immutable original times, checked cleanup and late-Unreaped retention preserve uncertainty. This is not a complete critical-safety provider: threshold/cooling/capability qualification and source-to-fleet admission remain unbound.

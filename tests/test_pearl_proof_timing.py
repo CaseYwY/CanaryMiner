@@ -122,7 +122,7 @@ class ProofTimingTests(unittest.TestCase):
             self.assertEqual(int(r['end_ns']) - int(r['start_ns']), int(r['total_ns']))
 
     def test_native_hooks_enclose_existing_stages_without_new_device_waits(self):
-        text = (ROOT / 'src/algos/pearl-pow/algo.cu').read_text()
+        text = (ROOT / 'src/algos/pearl-pow/algo.cu').read_text(encoding='utf8')
         body = text.split('    bool openWin(', 1)[1].split('    bool recheck(', 1)[0]
         self.assertEqual(body.count('timing.boundary();'), 6)
         self.assertEqual(body.count('timing.completeOnExit();'), 1)
@@ -135,7 +135,7 @@ class ProofTimingTests(unittest.TestCase):
                          ['cudaGetErrorString', 'cudaMemcpy', 'cudaMemcpy', 'cudaMemcpy', 'cudaMemcpy'])
         # (the fourth trailing copy is the retained-transcript association check of the SM120 TMA scan mode; it only
         # executes when that mode is active and was SM120-lineage-only before the host paths were unified)
-        pool = (ROOT / 'src/core/pearl_pool.h').read_text().split('    bool submit(const Job &job', 1)[1]
+        pool = (ROOT / 'src/core/pearl_pool.h').read_text(encoding='utf8').split('    bool submit(const Job &job', 1)[1]
         self.assertLess(pool.index('timing.finish();'), pool.index('sendLineUntil(body, operationDeadline)'))
 
 

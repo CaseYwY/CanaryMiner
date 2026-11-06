@@ -4,6 +4,12 @@
 
 Follow-up: [P-07d](credit-review.md) adds native immutable-snapshot review and `retryReviewed(generation, revision)` to bind the user's final admission atomically to the reviewed state. It does not qualify a real source or start a production credit collector.
 
+Lifecycle follow-up: [P-14d](native-process-scopes.md) binds the facade's original native epoch once before background work.
+Intervening native uncertainty permanently revokes that facade's queued/current authority, including after actual fault
+settlement; normal unchanged-epoch stop/higher-generation restart remains. Historical replies and possibly issued originals
+are preserved, not presented as current income or rollback proof. A different explicit qualified owner must perform durable
+reconstruction/review; other data-owner lifetimes and production activation remain separate.
+
 **Offline/synthetic host integration only.** This batch adds a real native ledger helper, serialized bounded background jobs and immutable results; no production supervisor starts them. `FinancialView.enabled` remains false, no real source is qualified, and there is no new mining authorization, account/credential connector, manual income importer or today's forecast. [P-07a](credit-ledger.md) remains the durable-fact/schema contract; accepted-share history and its owner are unchanged.
 
 This document records the initial P-07b volatile contract. The later [P-07c durable intent/receipt layer](credit-recovery.md) is now the owner's default; explicit `persistentRecovery=false` retains this compatibility behavior. Its smaller persistent IPC bound, restart inspection, read-only receipt verification and failed-retry rules have their own evidence and do not qualify a real source or production activation.

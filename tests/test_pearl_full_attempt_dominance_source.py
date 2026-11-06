@@ -3,8 +3,8 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-ALGO = (ROOT/'src/algos/pearl-pow/algo.cu').read_text()
-STATS = (ROOT/'src/algos/pearl-pow/tuner_stats.h').read_text()
+ALGO = (ROOT/'src/algos/pearl-pow/algo.cu').read_text(encoding='utf8')
+STATS = (ROOT/'src/algos/pearl-pow/tuner_stats.h').read_text(encoding='utf8')
 
 class ScopeTests(unittest.TestCase):
     def test_explicit_full_attempt_entry_only(self):

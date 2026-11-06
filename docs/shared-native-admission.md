@@ -99,3 +99,7 @@ The latter two are used by the Linux test barrier only; no external implementati
 [P-14c](legacy-child-ownership.md) subsequently adds ordinary ChildProcess to this boundary with preserved console/stdin
 drain. The original four-owner evidence does not retroactively qualify legacy ownership; other data-owner lifetime/queue,
 physical and deployment gates remain open.
+
+[P-14d](native-process-scopes.md) adds explicit memory-only original task scopes and a once-bound actual credit-owner
+lifetime, plus caller-scope checks at the existing session/worker boundaries. Five native owners reject stale scoped
+creation even after a fault clears. This is not implicit propagation or completion of the other data-owner lifetimes.

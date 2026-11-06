@@ -28,6 +28,7 @@ struct WorkerProcessOwner::Impl {
         view.reaped=reaped;view.revoked=true;view.done=true;
     }
     void run(std::filesystem::path exe,std::vector<std::string> args,WorkerCommand initial,unsigned drain,bool collectWork){
+        NativeProcessScope original(nativeEpoch);
         WorkerControlProcess process;bool fault=false,stopping=false;
         auto deadline=std::chrono::steady_clock::time_point::max();
         try{
@@ -93,7 +94,7 @@ bool WorkerProcessOwner::start(std::filesystem::path exe,std::vector<std::string
     auto &p=*impl_;std::lock_guard<std::mutex> lock(p.mutex);
     if(p.attempted||p.cancel.load())return false;
     p.attempted=true;
-    p.nativeEpoch=nativeProcessEpoch();
+    p.nativeEpoch=nativeProcessAdmissionEpoch();
     size_t bytes=0;for(const auto &arg:args)bytes+=arg.size();
     if(args.size()>256||bytes>24000||exe.native().size()>4096||!validWorkerCommand(initial)||initial.revision!=1||initial.directive!=WorkerDirective::Pause||drain>65000||!nativeProcessEpochCurrent(p.nativeEpoch)){p.view.state=WorkerOwnerState::Faulted;p.view.revoked=true;p.view.done=true;p.view.exitCode=8;return false;}
     p.binding=initial.binding;p.view.state=WorkerOwnerState::Starting;
@@ -102,18 +103,19 @@ bool WorkerProcessOwner::start(std::filesystem::path exe,std::vector<std::string
 }
 bool WorkerProcessOwner::submit(const WorkerCommand &command){
     auto &p=*impl_;std::lock_guard<std::mutex> lock(p.mutex);const auto now=workerControlNowMs();
-    if(p.cancel.load()||!nativeProcessEpochCurrent(p.nativeEpoch)||p.view.state!=WorkerOwnerState::Running||p.pending||!validWorkerCommand(command)||command.issuedMonoMs>now||now>=command.deadlineMonoMs)return false;
+    if(p.cancel.load()||!nativeProcessEpochCurrent(p.nativeEpoch)||nativeProcessAdmissionEpoch()!=p.nativeEpoch||p.view.state!=WorkerOwnerState::Running||p.pending||!validWorkerCommand(command)||command.issuedMonoMs>now||now>=command.deadlineMonoMs)return false;
     const auto &a=p.binding,&b=command.binding;
     if(a.sessionKey!=b.sessionKey||a.workerKey!=b.workerKey||a.epoch!=b.epoch||a.slot!=b.slot||a.workerGeneration!=b.workerGeneration)return false;
     p.pending=command;return true;
 }
 WorkerOwnerSnapshot WorkerProcessOwner::snapshot()const{std::lock_guard<std::mutex> lock(impl_->mutex);auto out=impl_->view;
-    if(impl_->nativeEpoch&&!nativeProcessEpochCurrent(impl_->nativeEpoch)){out.revoked=true;out.workStreamComplete=false;
+    if(impl_->nativeEpoch&&(!nativeProcessEpochCurrent(impl_->nativeEpoch)||nativeProcessAdmissionEpoch()!=impl_->nativeEpoch)){out.revoked=true;out.workStreamComplete=false;
         if(out.state!=WorkerOwnerState::Unreaped){out.state=WorkerOwnerState::Faulted;out.exitCode=8;}}
     return out;}
 std::vector<std::string> WorkerProcessOwner::takeLines(){std::lock_guard<std::mutex> lock(impl_->mutex);
     std::vector<std::string> out;out.reserve(impl_->lines.size());for(auto &line:impl_->lines)out.push_back(std::move(line));impl_->lines.clear();impl_->bytes=0;return out;}
 std::vector<WorkerWorkEvent> WorkerProcessOwner::takeWork(){std::lock_guard<std::mutex> lock(impl_->mutex);
+    if(!nativeProcessEpochCurrent(impl_->nativeEpoch)||nativeProcessAdmissionEpoch()!=impl_->nativeEpoch)return {};
     std::vector<WorkerWorkEvent> out;out.reserve(impl_->work.size());for(auto &e:impl_->work)out.push_back(std::move(e));impl_->work.clear();return out;}
 void WorkerProcessOwner::requestStop(){
     auto &p=*impl_;p.cancel=true;std::lock_guard<std::mutex> lock(p.mutex);p.attempted=true;p.view.revoked=true;

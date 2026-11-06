@@ -18,5 +18,9 @@ int main(){
     CHECK(unrelated.begin());unrelated.markUnresolved();
     CHECK(arbitrateMining(intent,final,forced)==MiningDecision::Stopped);
     unrelated.settled();CHECK(arbitrateMining(intent,final,forced)==MiningDecision::Stopped);
+    const auto oldNative=nativeProcessEpoch();NativeProcessAdmission later;CHECK(later.begin());later.markUnresolved();later.settled();
+    SessionIntent fresh;const auto freshToken=fresh.explicitStart();CHECK(fresh.permits(freshToken));
+    {NativeProcessScope oldScope(oldNative);CHECK(!fresh.permits(freshToken));SessionIntent denied;CHECK(!denied.explicitStart().epoch);}
+    CHECK(fresh.permits(freshToken));
     return finishTests("original session/native uncertainty fencing (memory only)");
 }

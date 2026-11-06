@@ -1,4 +1,5 @@
 #include "credit_owner.h"
+#include "native_process_admission.h"
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -13,6 +14,7 @@ bool accepted(CreditLedgerStatus s) { return s == CreditLedgerStatus::Ok || s ==
 struct CreditLedgerOwner::Impl {
     struct Job { CreditProcessRequest request; size_t bytes = 0; bool recovery = false; };
     CreditProcessClient client;
+    NativeProcessLifetime nativeLife;bool nativeFaulted=false;
     std::filesystem::path file;
     CreditSourceContract binding;
     CreditOwnerPolicy policy;
@@ -25,8 +27,10 @@ struct CreditLedgerOwner::Impl {
     std::deque<std::shared_ptr<const Job>> jobs;
     std::shared_ptr<const Job> inFlight;
     std::shared_ptr<const Job> uncertain;
+    std::shared_ptr<const Job> nativeUncertain;
     CreditOwnerSnapshot current;
     std::shared_ptr<const CreditOwnerSnapshot> published = std::make_shared<const CreditOwnerSnapshot>();
+    const std::shared_ptr<const CreditOwnerSnapshot> emptyTerminal=published;
     bool opened = false;
     uint64_t greatestGeneration = 0;
     int64_t lastUtc = 0;
@@ -44,9 +48,20 @@ struct CreditLedgerOwner::Impl {
         for (const auto &j : jobs) current.reservedWireBytes -= j->bytes;
         jobs.clear();
     }
+    bool nativeCurrent(){ // mutex held; no native calls, callbacks or joining
+        if(!nativeLife.bound()||nativeLife.current())return true;
+        if(!nativeFaulted){
+            nativeFaulted=true;cancel=true;opened=false;
+            if(inFlight&&inFlight->request.batch&&!uncertain){uncertain=inFlight;nativeUncertain=inFlight;}
+            discard();current.transport=LocalTaskStatus::Unreaped;
+            if(current.state!=CreditOwnerState::Stopped)current.state=CreditOwnerState::Faulted;
+            wait.notify_all();publish();
+        }
+        return false;
+    }
     CreditEnqueueResult enqueue(const CreditBatch *batch, const std::vector<CreditQuerySpec> &queries, bool recovery, bool initial = false) {
         CreditEnqueueResult result;
-        if (cancel.load() || (!initial && !opened)) return result;
+        if (!nativeCurrent() || !nativeLife.permitted() || cancel.load() || (!initial && !opened)) return result;
         if (queries.size() > 4) { result.status = CreditEnqueueStatus::Invalid; return result; }
         if (uncertain && batch && !recovery) { result.status = CreditEnqueueStatus::NeedsReconciliation; return result; }
         if(binding.cursor&&(!jobs.empty()||inFlight)){result.status=CreditEnqueueStatus::Full;return result;}
@@ -73,6 +88,7 @@ struct CreditLedgerOwner::Impl {
         result.status = CreditEnqueueStatus::Queued; result.ticket = r.ticket; return result;
     }
     void run() noexcept {
+        NativeProcessScope original(nativeLife.epoch());
         std::shared_ptr<const Job> executing;
         try {
             for (;;) {
@@ -80,7 +96,7 @@ struct CreditLedgerOwner::Impl {
                 {
                     std::unique_lock<std::mutex> lock(mutex);
                     wait.wait(lock,[&]{return cancel.load() || !jobs.empty();});
-                    if (cancel.load()) return;
+                    if (!nativeCurrent() || cancel.load()) return;
                     inFlight = jobs.front(); jobs.pop_front(); job = inFlight; executing = job;
                     if (opened) current.state = CreditOwnerState::Busy;
                     publish();
@@ -88,6 +104,11 @@ struct CreditLedgerOwner::Impl {
                 auto result = client.transact(job->request,cancel,policy.operationTimeoutMs);
                 std::lock_guard<std::mutex> lock(mutex);
                 current.reservedWireBytes -= job->bytes; inFlight.reset();
+                if(!nativeLife.current()){
+                    if(result.writeOutcomeUnknown&&job->request.batch&&!uncertain)uncertain=job;
+                    else if(!result.writeOutcomeUnknown&&nativeUncertain==job){if(uncertain==job)uncertain.reset();nativeUncertain.reset();}
+                    nativeCurrent();publish();return;
+                }
                 if (cancel.load()) return; // requestStop already revoked publication; storage may nevertheless have committed
                 current.transport = result.transport; current.reply = std::move(result.reply);
                 bool ok = current.transport == LocalTaskStatus::Ok && current.reply && current.reply->opened == CreditLedgerStatus::Ok;
@@ -139,6 +160,7 @@ bool CreditLedgerOwner::start(uint64_t generation) {
         (s.binding.cursor&&!s.policy.persistentRecovery) ||
         !s.policy.maxJobs || s.policy.maxJobs > 32 || s.policy.maxWireBytes < 1024 || s.policy.maxWireBytes > 8*1024*1024 || s.policy.operationTimeoutMs < 50 || s.policy.operationTimeoutMs > 60000) return false;
     try {
+        if(!s.nativeLife.begin()){s.nativeCurrent();return false;}
         s.greatestGeneration = generation;
         s.current = {}; s.current.binding = s.binding; s.current.generation = generation; s.current.state = CreditOwnerState::Starting;
         s.current.persistentRecovery=s.policy.persistentRecovery;
@@ -194,5 +216,10 @@ void CreditLedgerOwner::stop() {
     requestStop(); if (s.thread.joinable()) s.thread.join();
     std::lock_guard<std::mutex> lock(s.mutex); s.current.reservedWireBytes = 0; s.inFlight.reset(); try {s.publish();} catch (...) {}
 }
-std::shared_ptr<const CreditOwnerSnapshot> CreditLedgerOwner::snapshot() const { std::lock_guard<std::mutex> lock(impl_->mutex); return impl_->published; }
+std::shared_ptr<const CreditOwnerSnapshot> CreditLedgerOwner::snapshot() const {
+    auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);
+    try{s.nativeCurrent();}catch(...){}
+    // Allocating a fault snapshot must never be required to withdraw an older Ready view.
+    return s.published->revision!=s.current.revision||s.published->state!=s.current.state||s.published->transport!=s.current.transport?s.emptyTerminal:s.published;
+}
 }  // namespace om

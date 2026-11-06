@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
-SOURCE=(ROOT/'src/algos/pearl-pow/algo.cu').read_text()
+SOURCE=(ROOT/'src/algos/pearl-pow/algo.cu').read_text(encoding='utf8')
 
 class FullAttemptSourceTests(unittest.TestCase):
     def test_complete_matrix_is_new_inside_each_epoch(self):

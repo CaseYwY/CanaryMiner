@@ -7,6 +7,10 @@ PEER = None
 
 
 class OriginalStartupIntent(unittest.TestCase):
+    def setUp(self):
+        if PEER is None:
+            self.skipTest('requires an explicitly supplied CPU supervisor fixture')
+
     def trace(self, mode):
         result = subprocess.run([PEER, mode], capture_output=True, text=True, timeout=20)
         if result.returncode == 77:
@@ -19,12 +23,12 @@ class OriginalStartupIntent(unittest.TestCase):
         return result.stdout
 
     def test_created_cancel_is_stop_not_a_retry(self):
-        self.assertNotIn('fault latched', self.trace('cancel-created'))
+        self.assertNotIn('worker fault', self.trace('cancel-created'))
 
     def test_created_foreign_epoch_fault_is_not_a_retry(self):
         self.assertIn('explicit new session required', self.trace('fault-created'))
 
 
 if __name__ == '__main__':
-    PEER = sys.argv.pop(1)
+    PEER = sys.argv.pop(1) if len(sys.argv) > 1 else None
     unittest.main()

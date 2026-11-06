@@ -34,9 +34,16 @@ extern "C" int __wrap_pidfd_spawn(int *fd,const char *path,const posix_spawn_fil
 }
 int main(int argc,char **argv){
     if(argc==5&&!std::strcmp(argv[1],"--worker-control-v1"))return 0;
+    const std::string mode=argc==1?"queued":argc==2?argv[1]:"";if(mode!="queued"&&mode!="scope-start")return 4;
     const auto exe=std::filesystem::absolute(argv[0]);om::WorkerProcessOwner owner;
     const auto now=om::workerControlNowMs();
     om::WorkerCommand initial{{"11111111111111111111111111111111","22222222222222222222222222222222",1,1,0},1,now,now+3000,om::WorkerDirective::Pause};
+    if(mode=="scope-start"){
+        const auto original=om::nativeProcessEpoch();om::NativeProcessAdmission foreign;CHECK(foreign.begin());foreign.markUnresolved();foreign.settled();
+        {om::NativeProcessScope old(original);CHECK(!owner.start(exe,{},initial));CHECK(armed.load()&&spawns.load()==0);}
+        releaseThread=true;owner.stop();const auto view=owner.snapshot();CHECK(view.done&&view.revoked&&!view.reaped&&view.state==om::WorkerOwnerState::Faulted&&view.exitCode==8);
+        CHECK(spawns.load()==0);return finishTests("queued worker cannot capture a fresh epoch from a stale caller scope");
+    }
     CHECK(owner.start(exe,{},initial));CHECK(!armed.load()&&spawns.load()==0);
     om::NativeProcessAdmission foreign;CHECK(foreign.begin());foreign.markUnresolved();foreign.settled();
     releaseThread=true;

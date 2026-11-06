@@ -28,7 +28,8 @@ class NativeAdmissionArtifacts(unittest.TestCase):
         owner = (ROOT / 'src/product/worker_process_owner.cpp').read_text(encoding='utf8')
         supervisor = (ROOT / 'src/product/supervisor.h').read_text(encoding='utf8')
         self.assertIn('nativeProcessEpochCurrent(nativeEpoch_)', intent)
-        self.assertIn('p.nativeEpoch=nativeProcessEpoch()', owner)
+        self.assertIn('p.nativeEpoch=nativeProcessAdmissionEpoch()', owner)
+        self.assertIn('NativeProcessScope original(nativeEpoch)', owner)
         self.assertIn('!nativeProcessEpochCurrent(nativeEpoch)', owner)
         self.assertGreaterEqual(supervisor.count('latchNativeFault();'), 5)
 

@@ -16,7 +16,7 @@ class SessionIntent {
     // Only an explicit run/start action calls this; price/game/config callbacks cannot.
     SessionToken explicitStart() {
         if (active_ || epoch_ == std::numeric_limits<uint64_t>::max() || nativeProcessUnresolved()) return {};
-        const auto nativeEpoch=nativeProcessEpoch();
+        const auto nativeEpoch=nativeProcessAdmissionEpoch();
         if(!nativeProcessEpochCurrent(nativeEpoch))return {};
         ++epoch_;
         nativeEpoch_=nativeEpoch;
@@ -24,7 +24,7 @@ class SessionIntent {
         return {epoch_};
     }
     void stop() { active_ = false; }
-    bool permits(SessionToken token) const { return active_ && token.epoch != 0 && token.epoch == epoch_ && nativeProcessEpochCurrent(nativeEpoch_); }
+    bool permits(SessionToken token) const { return active_ && token.epoch != 0 && token.epoch == epoch_ && nativeProcessEpochCurrent(nativeEpoch_) && nativeProcessAdmissionEpoch()==nativeEpoch_; }
 
    private:
     uint64_t epoch_ = 0;
