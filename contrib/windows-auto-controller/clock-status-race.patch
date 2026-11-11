@@ -1,0 +1,53 @@
+--- a/auto_controller.py
++++ b/auto_controller.py
+@@ -129,7 +129,16 @@
+         self.apply("unlock")
+ 
+     def check(self):
+-        ack = read_json(self.directory / "clock-status.json")
++        deadline = time.monotonic() + 0.5
++        while True:
++            try:
++                ack = read_json(self.directory / "clock-status.json")
++                break
++            except (FileNotFoundError, PermissionError):
++                # Windows can briefly deny opens while the helper replaces its status.
++                if time.monotonic() >= deadline:
++                    raise
++                time.sleep(0.025)
+         if (ack.get("session") != self.session or not ack.get("success")
+                 or not 0 <= time.time() - ack.get("updated_at", 0) < 15):
+             raise RuntimeError("GPU helper heartbeat failed; stopping mining")
+--- a/gpu-clock-helper.ps1
++++ b/gpu-clock-helper.ps1
+@@ -14,6 +14,8 @@
+ $applied = $null
+ $lastOutput = ''
+ 
++Add-Type -AssemblyName Microsoft.VisualBasic
++
+ function Write-Status([string]$mode, [bool]$success, [string]$errorText) {
+     $value = @{
+         session = $script:session
+@@ -25,7 +27,20 @@
+     }
+     $temp = $statusFile + '.helper.tmp'
+     $value | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $temp -Encoding utf8
+-    Move-Item -LiteralPath $temp -Destination $statusFile -Force
++    $replaceTimer = [System.Diagnostics.Stopwatch]::StartNew()
++    while ($true) {
++        try {
++            # This uses MoveFileEx with replacement on Windows PowerShell 5.1.
++            [Microsoft.VisualBasic.FileIO.FileSystem]::MoveFile($temp, $statusFile, $true)
++            break
++        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
++            $errorCode = $_.Exception.HResult -band 0xFFFF
++            if ($errorCode -notin @(5, 32, 33) -or $replaceTimer.ElapsedMilliseconds -ge 500) {
++                throw
++            }
++            Start-Sleep -Milliseconds 25
++        }
++    }
+ }
+ 
+ try {

@@ -12,3 +12,6 @@ docs/sustained-public-wrapper-cpu-tests-20260905.txt text eol=lf
 
 # Preserve exact upstream notice bytes in source archives.
 LICENSES/NVIDIA-CUDA-13.1.1/*.txt -text
+
+# Keep unified patches applicable after Windows checkout.
+contrib/windows-auto-controller/*.patch text eol=lf whitespace=-blank-at-eol
