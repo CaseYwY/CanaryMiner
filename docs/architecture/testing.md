@@ -8,6 +8,8 @@ Test S entry, all keyboard contexts, focus, supported edit/toggle/select, review
 
 ## T-CONFIG
 
+[P-14w](../startup-config.md) uses the actual inert entry and genuine fixed sibling with an owned FIFO to distinguish foreground stop from a released read. Test ordinary/idle Q/SIGINT, Escape, redirected idle refusal, version bypass, missing helper, malformed files and exact 1-MiB/oversized transport without configuration writes. Native tests cover canonical private headers, exact originals, Unicode/path resolution, original epoch/budget denial and separate wrong-ticket/truncated/extra/malformed/nonzero helper replies. These CPU/software fixtures do not qualify real devices, console/kernel hard bounds, broad schema-diagnostic privacy or physical storage.
+
 [P-14v](../prerun-preferences.md) locks the actual inert CLI's ordered Language/Runtime/Game/Pool inspection, Q/SIGINT at each held phase, complete admission, idle-language stop, missing helper, malformed-original preservation, fallback and bypass distinctions. A native CPU helper test covers stop/argument/original-epoch denial, read-only defaults, pool-only isolation and preserved rejected outputs. CPU sentinels, synthetic epochs and software bounds do not qualify real devices, console/native hard deadlines or physical storage.
 
 [P-14u](../idle-preferences.md) exercises the actual idle command with observed held reads/writes, signal stop, real lost commit acknowledgement, missing helper and malformed private original. Existing eight-domain idle PTYs preserve positive saves, separate drafts, frozen clocks/contexts and originals on conflict while expecting conservative UNKNOWN instead of raw helper errors. Structural module/layout checks do not establish physical/native latency or source qualification.

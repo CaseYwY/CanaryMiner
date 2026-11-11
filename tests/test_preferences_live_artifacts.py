@@ -6,6 +6,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PreferencesLiveArtifactTests(unittest.TestCase):
+    def test_startup_config_reads_only_in_fixed_helper_and_preserves_original_admission(self):
+        source = (ROOT / 'src/product/startup_config.h').read_text(encoding='utf8')
+        for forbidden in ('ifstream', 'fopen(', 'PreferencesStore', 'getenv(', 'argv[', 'canonical(', 'exists(', 'startup_config_service.h'):
+            self.assertNotIn(forbidden, source)
+        self.assertIn('selfExecutablePath()', source)
+        self.assertIn('"canary_preferences_worker"', source)
+        self.assertLess(source.index('requiresTerminal&&!terminal'), source.index('thread=std::thread'))
+        self.assertLess(source.index('path.empty()'), source.index('selfExecutablePath()'))
+        self.assertLess(source.index('!current()||!encodeStartupConfigRequest'), source.index('process.start('))
+        self.assertIn('wire.size()!=body+header.bytes', source)
+        self.assertIn('view.state==DuplexTaskState::Exited', source)
+        service = (ROOT / 'src/product/startup_config_service.h').read_text(encoding='utf8')
+        self.assertIn('std::ifstream input(target,std::ios::binary)', service)
+        for forbidden in ('ofstream', 'Store', 'canonical(', 'exists(', 'create_directories', 'remove(', 'getenv('):
+            self.assertNotIn(forbidden, service)
+        main = (ROOT / 'src/core/miner.cu').read_text(encoding='utf8')
+        self.assertNotIn('loadProductConfig(', main)
+        self.assertLess(main.index('signal(SIGINT,onSignal);signal(SIGTERM,onSignal);', main.index('if (cli.command == Command::Version)')), main.index('inspectStartupConfig('))
+        self.assertLess(main.index('NativeProcessScope originalStartup('), main.index('// ---- devices: identity'))
+        device = main.index('// ---- devices: identity')
+        self.assertLess(main.index('if(!nativeProcessEpochCurrent(inspectedConfig.nativeEpoch))', device), main.index('if (!queryDevices(&present))', device))
+
     def test_prerun_inspection_is_read_only_and_original_epoch_reaches_device_admission(self):
         source = (ROOT / 'src/product/prerun_preferences.h').read_text(encoding='utf8')
         for forbidden in ('PreferencesStore', 'MarketStore', 'DeclarationStore', 'owner->save(', 'getenv(', 'argv[', 'canonical(', 'exists('):

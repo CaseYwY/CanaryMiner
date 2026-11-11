@@ -118,7 +118,7 @@ def main():
         config.write_text(json.dumps({'schema_version': 1, 'state_dir': str(state)}))
         command = [str(binary), '--config', str(config)]
         result = subprocess.run(command, capture_output=True, timeout=8)
-        assert result.returncode == 3 and b'Pre-run preferences unavailable' in result.stderr
+        assert result.returncode == 3 and b'Startup configuration unavailable' in result.stderr
         assert b'FORBIDDEN_DEVICE_SETUP' not in result.stdout+result.stderr and not list(state.iterdir())
         checks += 1
         shutil.copy2(ordinary, root/'canary_preferences_worker')

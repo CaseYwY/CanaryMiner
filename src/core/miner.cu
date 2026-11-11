@@ -37,6 +37,7 @@
 #include "../product/supervisor.h"
 #include "../product/settings_command.h"
 #include "../product/prerun_preferences.h"
+#include "../product/startup_config.h"
 #include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
@@ -129,10 +130,22 @@ int main(int argc, char **argv) {
         printf("%s\n", versionText().c_str());
         return kExitOk;
     }
-    ProductConfig cfg;
+    signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
+    StartupConfig inspectedConfig;
+    std::string startupConfigError;
+    const auto configAdmission=inspectStartupConfig(cli.ov.configPath,&g_stop,cli.command==Command::Settings&&!cli.help,&inspectedConfig,&startupConfigError);
+    if(configAdmission!=StartupConfigStatus::Ready){
+        if(configAdmission==StartupConfigStatus::Stopped)return kExitOk;
+        fprintf(stderr,"%s\n",startupConfigError.c_str());
+        return configAdmission==StartupConfigStatus::RequiresTerminal?kExitUsage:kExitConfig;
+    }
+    NativeProcessScope originalStartup(inspectedConfig.nativeEpoch);
+    if(g_stop)return kExitOk;
+    if(!nativeProcessEpochCurrent(inspectedConfig.nativeEpoch))return kExitFaultLatched;
+    ProductConfig cfg=std::move(inspectedConfig.config);
     {
         std::string cfgError;
-        if (!loadProductConfig(cli.ov.configPath, &cfg, &cfgError) || !applyOverrides(cli.ov, &cfg, &cfgError) ||
+        if (!applyOverrides(cli.ov, &cfg, &cfgError) ||
             !validateConfig(cfg, false, &cfgError) || (cli.command == Command::Run && !checkPoolLogin(cfg, &cfgError))) {
             fprintf(stderr, "%s%s", cfgError.c_str(), "\n");
             return kExitConfig;
@@ -501,6 +514,7 @@ int main(int argc, char **argv) {
 #endif
     if(g_stop)return kExitOk;
     if(preRunNativeEpoch&&!nativeProcessEpochCurrent(preRunNativeEpoch))return kExitFaultLatched;
+    if(!nativeProcessEpochCurrent(inspectedConfig.nativeEpoch))return kExitFaultLatched;
     if (workerChild) {
         // Each GPU worker keeps its own donation state, shutdown record and log files under gpu-<index>.
         if (workerIdText.empty() || workerIdText.size() > 3 || workerIdText.find_first_not_of("0123456789") != std::string::npos) return 1;
@@ -901,6 +915,7 @@ int main(int argc, char **argv) {
     // ---- devices: identity, allowlist, one device per process (nothing has touched a kernel yet)
     if(g_stop)return kExitOk;
     if(preRunNativeEpoch&&!nativeProcessEpochCurrent(preRunNativeEpoch))return kExitFaultLatched;
+    if(!nativeProcessEpochCurrent(inspectedConfig.nativeEpoch))return kExitFaultLatched;
     DeviceIdentity chosenDevice;
     std::vector<DeviceIdentity> chosenAll;
     {

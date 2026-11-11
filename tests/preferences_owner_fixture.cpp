@@ -1,6 +1,7 @@
 // Separate CPU fixture only: real typed service + deliberately held/lost/malformed acknowledgement. Not linked into worker.
 #include "product/preferences_service.h"
 #include "product/duplex_task_process.h"
+#include "product/startup_config_service.h"
 #include <chrono>
 #include <fstream>
 #include <thread>
@@ -10,7 +11,7 @@
 int main(int argc,char **argv){using namespace om;
     try {
         DuplexTaskChannel channel;if(!channel.adopt(argc,argv))return 2;
-        PreferencesService service;std::string input,output;size_t sent=0;std::array<std::string,8> targets{};
+        PreferencesService service;std::string input,output;size_t sent=0;std::array<std::string,8> targets{};bool first=true;
         const auto hold=[&](){while(channel.parentAlive())std::this_thread::sleep_for(std::chrono::milliseconds(5));};
         while(channel.parentAlive()){
             if(!output.empty()){
@@ -26,6 +27,8 @@ int main(int argc,char **argv){using namespace om;
                     input.append(bytes,result.bytes);const auto end=input.find('\n');
                     if(end!=input.npos){
                         if(end+1!=input.size())return 2;
+                        if(first){StartupConfigRequest config;if(decodeStartupConfigRequest(input,&config))return serveStartupConfigRead(channel,config);}
+                        first=false;
                         PreferencesRequest request;PreferencesReply reply;
                         if(!decodePreferencesRequest(input,&request))return 2;
                         if(request.operation==PreferencesOperation::Init)targets=request.targets;
