@@ -174,6 +174,8 @@ Test best eligible estimated net per elapsed time, no-data/nonpositive pause, al
 
 ## T-GAME
 
+[P-11q](../game-experience.md) tests complete paired synthetic originals, all ten identity fields, exact session/sequence/clock/coverage/campaign bounds, no-mining versus requested-wait attribution, missing/safety refusal and every declared limit. Equality/one-nanosecond and per-repetition failures, 101-frame low/P99 rank distinctions, 65536-frame/sixteen-pair capacity and near-uint64 clocks stay exact. A separate Python Fraction/sorted-original oracle compares rates, tail/rank/maxima and whole decisions. These do not execute or qualify a real game, collector, capture permission, latency/energy controller, immutable profile, native activation or human experience.
+
 [P-11a](../game-session-guard.md) checks complete time-weighted ten-minute net, exact zero/loss latching, positive-data non-revival, stale/unavailable data, fresh exit debounce, cached/substituted detections, identity changes, proof/source/time mapping, thermal pauses and terminal stop. Synthetic episode tests do not qualify actual gameplay, process detection or physical pause latency.
 
 [P-11b](../game-detection.md) checks strict bounded probe IPC, exact target/namespace/time binding, original observation age, partial-as-unknown, disabled/no-helper and terminal owner states. Native tests operate only on owned synthetic targets and verify stable/new/multiple creation identities, exact names and parent-bound helper death. Linux active procfs mount/UID/stat parsing is separate from host visibility; complete lifecycle tests in an isolated PID namespace do not certify desktop access or gameplay.

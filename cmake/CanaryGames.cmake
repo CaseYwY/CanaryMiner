@@ -1,5 +1,6 @@
 # Episode/profit core and opt-in isolated readonly detection. No ordinary mining activation.
-add_library(canary_games STATIC "${CMAKE_SOURCE_DIR}/src/product/game_profit.cpp" "${CMAKE_SOURCE_DIR}/src/product/game_guard.cpp")
+add_library(canary_games STATIC "${CMAKE_SOURCE_DIR}/src/product/game_profit.cpp" "${CMAKE_SOURCE_DIR}/src/product/game_guard.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/game_experience.cpp")
 target_compile_features(canary_games PUBLIC cxx_std_17)
 target_include_directories(canary_games PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(canary_games PUBLIC canary_forecast)

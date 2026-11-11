@@ -246,6 +246,8 @@ Owns per-elapsed-time candidate scoring, admissibility, hysteresis, switch budge
 
 Owns detection/manual override, per-game capabilities, experience baselines and pause/coexist policy constraints. It requests allowed miner transitions. It never injects into a process, kills/modifies a game, assumes a launcher is gameplay, or changes whole-GPU settings without the independent hardware-control policy.
 
+[P-11q](../game-experience.md) supplies an offline synthetic paired-frame comparator with full private identity/session, exact elapsed coverage and explicitly declared per-repetition absolute/relative limits. Its mean/slowest-one-percent/P99 conventions are named, not inferred from a launcher or another tool's metrics. It collects/runs nothing and has no bridge to ordinary game eligibility; qualified adapters, actual authorized bounded experiments, input latency, energy, immutable profiles/runtime and human experience remain separate.
+
 ### M-TLS
 
 Owns authenticated pool byte transport, handshake/I/O deadlines and explicit downgrade policy. Preserve the injectable `PearlPoolTransport` boundary and Pearl framing above it. HTTPS data adapters may share approved dependency/trust components, but pool transport and data-provider connections have distinct policies and error classes.
