@@ -8,6 +8,8 @@ Test S entry, all keyboard contexts, focus, supported edit/toggle/select, review
 
 ## T-CONFIG
 
+[P-14v](../prerun-preferences.md) locks the actual inert CLI's ordered Language/Runtime/Game/Pool inspection, Q/SIGINT at each held phase, complete admission, idle-language stop, missing helper, malformed-original preservation, fallback and bypass distinctions. A native CPU helper test covers stop/argument/original-epoch denial, read-only defaults, pool-only isolation and preserved rejected outputs. CPU sentinels, synthetic epochs and software bounds do not qualify real devices, console/native hard deadlines or physical storage.
+
 [P-14u](../idle-preferences.md) exercises the actual idle command with observed held reads/writes, signal stop, real lost commit acknowledgement, missing helper and malformed private original. Existing eight-domain idle PTYs preserve positive saves, separate drafts, frozen clocks/contexts and originals on conflict while expecting conservative UNKNOWN instead of raw helper errors. Structural module/layout checks do not establish physical/native latency or source qualification.
 
 [P-14o](../preferences-reopen.md) reproduces known-failed-reopen/current-conflict authority revival using only owned malformed/oversized/unknown-schema/directory/byte-restored originals across eight native store types. Null outputs and missing-original restoration must refuse without losing caller outputs; explicit successful reopen must restore valid saves. Existing native migration/backup/confirmation/version/CLI/PTY regressions remain separate from undetected ABA races, native write-uncertainty, asynchronous isolation, physical storage or production configuration qualification.

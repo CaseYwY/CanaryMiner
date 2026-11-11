@@ -4,12 +4,14 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from preferences_cli_fixture import build_preferences_helper
 
 ROOT = Path(__file__).resolve().parents[1]
 
 class ExactProfileCliTests(unittest.TestCase):
     def test_exact_profile_reaches_owned_guard_and_bad_tuples_do_not(self):
         with tempfile.TemporaryDirectory(prefix='canary-exact-cli-') as td:
+            build_preferences_helper(td)
             binary = Path(td) / 'cli'
             command = ['g++', '-x', 'c++', '-std=c++17', '-O1', '-Wall', '-Wextra',
                 '-Werror', '-Wno-unused-variable', '-Itests/pearl_cli_stubs',
@@ -35,7 +37,7 @@ class ExactProfileCliTests(unittest.TestCase):
                 '--pearl-transcript', str(Path(td)/'transcript'), '--batch', '256']
             # Actual CLI parses finite ranges before device admission.
             for value in ('0x8000000000000000:0x80000000ffffffff','0xffffffffffffffff:0xffffffffffffffff'):
-                result=subprocess.run(args+['--pearl-work-range',value],env=baseline,capture_output=True,timeout=5)
+                result=subprocess.run(args+['--pearl-work-range',value],cwd=td,env=baseline,capture_output=True,timeout=5)
                 self.assertEqual(result.returncode,1)
                 self.assertIn(b'shape experiment requires an owned bounded guard',result.stderr)
                 self.assertNotIn(b'FORBIDDEN_DEVICE_SETUP',result.stdout+result.stderr)
@@ -43,7 +45,7 @@ class ExactProfileCliTests(unittest.TestCase):
                           ['--pearl-work-range','0x0000000000000000:0xffffffffffffffff'],
                           ['--pearl-work-range','0x8000000000000000:0x80000000ffffffff']*2,
                           ['--pearl-work-range','0x8000000000000000:0x80000000ffffffff','--bench']):
-                result=subprocess.run(args+extra,env=baseline,capture_output=True,timeout=5)
+                result=subprocess.run(args+extra,cwd=td,env=baseline,capture_output=True,timeout=5)
                 self.assertEqual(result.returncode,1)
                 self.assertIn(b'--pearl-work-range requires',result.stderr)
                 self.assertNotIn(b'FORBIDDEN_DEVICE_SETUP',result.stdout+result.stderr)
@@ -60,7 +62,7 @@ class ExactProfileCliTests(unittest.TestCase):
                     for k,v in changes.items():
                         if v is None: env.pop(k,None)
                         else: env[k]=v
-                    result=subprocess.run(args,env=env,capture_output=True,timeout=5)
+                    result=subprocess.run(args,cwd=td,env=env,capture_output=True,timeout=5)
                     output=result.stdout+result.stderr
                     self.assertEqual(result.returncode,1,output)
                     self.assertNotIn(b'FORBIDDEN_DEVICE_SETUP',output)

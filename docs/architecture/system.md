@@ -295,6 +295,8 @@ Possible states: `Stopped`, `Starting`, `MiningNormal`, `MiningCoexist`, `Calibr
 
 ## Durable storage boundary
 
+[P-14v pre-device inspection](../prerun-preferences.md) uses a separate finite read-only invocation of the existing preference owner before actual CLI device/source admission. Requested modes preserve exact receipts, known language fallback and mandatory refusal; the original native epoch reaches later caller scopes. This is neither a four-file transaction nor collection/mining authority. Main configuration/private fields and console/native/source/physical/deployment gates remain independent.
+
 [P-14u idle settings](../idle-preferences.md) shares the same background helper/receipt bridge without creating a mining fleet. Initial UI inspection gates edits/optional runtime callbacks; later eight-domain operations retain original clocks, conservative Unknown and explicit private review. Actual-module sibling layout applies to host preview/review callers too. Main pre-call configuration/language, arbitrary callbacks/console and native/physical/privacy/deployment qualifications remain independent.
 
 Use transactional/idempotent history and credit stores with versioned records, one-writer/concurrency policy, bounded retention/compaction and tested crash recovery. The engine must preserve all-time aggregates while pruning expired detail and show the retained-detail coverage.

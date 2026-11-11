@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from preferences_cli_fixture import build_preferences_helper
 
 ROOT = Path(__file__).resolve().parents[1]
 # Emitted legacy help at parent95c6579, including printf's literal percent.
@@ -19,6 +20,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
             raise RuntimeError('host g++ required; missing tools are not passing skips')
         cls.stage = tempfile.TemporaryDirectory(prefix='canary-help-cli-')
         cls.addClassCleanup(cls.stage.cleanup)
+        build_preferences_helper(cls.stage.name, compiler)
         cls.binaries = {}
         for profile in ('0', '1'):
             binary = Path(cls.stage.name) / ('cli-' + profile)
@@ -38,7 +40,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
 
     def cli(self, *args, profile='1'):
         result = subprocess.run([str(self.binaries[profile]), *args],
-                                cwd=ROOT, capture_output=True, timeout=5)
+                                cwd=self.stage.name, capture_output=True, timeout=5)
         self.assertNotEqual(result.returncode, 97, result.stderr)
         self.assertNotIn(b'FORBIDDEN_DEVICE_SETUP', result.stdout + result.stderr)
         return result
@@ -111,7 +113,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertIn(b"unknown command 'frobnicate'", unknown.stderr)
         for args in (['list-devices'], ['--list-devices'], ['selftest']):
             with self.subTest(args=args):
-                result = subprocess.run([str(self.binaries['1']), *args], cwd=ROOT, capture_output=True, timeout=5)
+                result = subprocess.run([str(self.binaries['1']), *args], cwd=self.stage.name, capture_output=True, timeout=5)
                 # list-devices and selftest need no pool or wallet: they go straight to device enumeration (the stub exits 97)
                 self.assertEqual(result.returncode, 97, result.stderr)
                 self.assertIn(b'FORBIDDEN_DEVICE_SETUP', result.stderr)
@@ -141,7 +143,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertIn(b'F2Pool needs your F2Pool account name', result.stderr)
         # the same pool with an account name passes this check (the stub then stops at device setup)
         account = subprocess.run([str(self.binaries['1']), '--pool', 'f2pool', '--wallet', 'myaccount.rig1'],
-                                 cwd=ROOT, capture_output=True, timeout=5)
+                                 cwd=self.stage.name, capture_output=True, timeout=5)
         self.assertNotIn(b'F2Pool needs', account.stderr)
 
     def test_config_supplies_pool_and_policy_and_cli_overrides_it(self):

@@ -63,7 +63,7 @@ def main():
                 if name in ('missing-helper', 'malformed-ui'):
                     wait(lambda: child.poll() is not None)
                     assert child.returncode == 3
-                    assert b'Idle preference inspection refused' in transcript
+                    assert (b'Pre-run preferences unavailable' if name == 'missing-helper' else b'Idle preference inspection refused') in transcript
                     assert target.read_text() == invalid if name == 'malformed-ui' else not target.exists()
                     assert b'fixture.private-original-must-stay-private' not in transcript
                 else:

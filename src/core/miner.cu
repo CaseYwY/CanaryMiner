@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,7 @@
 #include "../product/fee_session.h"
 #include "../product/supervisor.h"
 #include "../product/settings_command.h"
+#include "../product/prerun_preferences.h"
 #include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
@@ -138,9 +140,9 @@ int main(int argc, char **argv) {
     }
     LanguageSettingsContext languageContext;
     languageContext.cliOverrides=explicitPresentation;
-    const auto loadLanguageContext=[&](){
-        LanguagePreferencesStore store(std::filesystem::u8path(cfg.stateDir)/"language-preferences.json");LanguagePreferences saved;std::string error;
-        if(!store.load(&saved,&error))fprintf(stderr,"Language preferences unavailable; legacy English presentation retained; original file preserved.\n");
+    const auto loadLanguageContext=[&](const LanguagePreferences &saved,bool available){
+        std::string error;
+        if(!available)fprintf(stderr,"Language preferences unavailable; legacy English presentation retained; original file preserved.\n");
         if(!applyLanguageOverrides(saved,cli.ov.presentation,&languageContext.requested,&error))languageContext.requested=LanguagePreferences{};
         if(!explicitPresentation&&languageContext.requested!=LanguagePreferences{})fprintf(stderr,"Language request: effective UI en / legacy per-field formatting; full native translation/layout integration unavailable. No mining setting changed.\n");
     };
@@ -149,9 +151,15 @@ int main(int argc, char **argv) {
     if (cli.command == Command::Settings) {
         if (cli.help) { printf("canary-miner settings [--config FILE] [--language ID] [--format-locale ID] [--ascii-ui]\nEdit display/runtime/game/presentation requests without starting mining.\nEffective legacy English remains until all-domain native integration is available.\n"); return kExitOk; }
         if (!cli.rest.empty()) { fprintf(stderr, "settings: unsupported option; no mining was started\n"); return kExitUsage; }
-        loadLanguageContext();
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
+        PreRunPreferences inspected;
+        const auto admission=inspectPreRunPreferences(cfg.stateDir,&g_stop,PreRunPreferencesMode::IdleLanguage,&inspected);
+        if(admission!=PreRunPreferencesStatus::Ready)return admission==PreRunPreferencesStatus::Stopped?kExitOk:admission==PreRunPreferencesStatus::RequiresTerminal?kExitUsage:kExitConfig;
+        NativeProcessScope originalPreRun(inspected.nativeEpoch);
+        if(g_stop)return kExitOk;
+        if(!nativeProcessEpochCurrent(inspected.nativeEpoch))return kExitFaultLatched;
+        loadLanguageContext(inspected.language,inspected.languageAvailable);
 #if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
         const auto factory=[state=cfg.stateDir](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
         return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices,{},languageContext);
@@ -444,23 +452,26 @@ int main(int argc, char **argv) {
         && guardControlText.empty()
 #endif
         ;
+    const bool poolPreferenceGuard=cli.command==Command::Run&&!workerChild&&!cli.help&&!opt.bench&&!opt.formalBenchmark.enabled;
+    PoolSecurityPreferences poolDefaults;
+    uint64_t preRunNativeEpoch=0;
+    std::optional<NativeProcessScope> preRunScope;
+    if((ordinaryRuntime||poolPreferenceGuard)&&!cli.help){
+        signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
+        PreRunPreferences inspected;
+        const auto admission=inspectPreRunPreferences(cfg.stateDir,&g_stop,ordinaryRuntime?PreRunPreferencesMode::Ordinary:PreRunPreferencesMode::PoolOnly,&inspected);
+        if(admission!=PreRunPreferencesStatus::Ready)return admission==PreRunPreferencesStatus::Stopped?kExitOk:kExitConfig;
+        preRunNativeEpoch=inspected.nativeEpoch;
+        preRunScope.emplace(preRunNativeEpoch);
+        runtimeDefaults=std::move(inspected.runtime);gameDefaults=std::move(inspected.game);poolDefaults=std::move(inspected.pool);
+        if(ordinaryRuntime)loadLanguageContext(inspected.language,inspected.languageAvailable);
+    }
     if (ordinaryRuntime && !cli.help) {
-        loadLanguageContext();
-        RuntimePreferencesStore runtimeStore(std::filesystem::u8path(cfg.stateDir) / "runtime-preferences.json");
-        std::string error;
-        if (!runtimeStore.load(&runtimeDefaults, &error)) {
-            fprintf(stderr, "runtime preferences unavailable: %s; no mining was started\n", error.c_str());
-            return kExitConfig;
-        }
         runtimeContext.running = true;
         if (workWaitSeen) runtimeContext.cliWorkWait = opt.workWaitMs;
         runtimeContext.cliNoHistory = cli.ov.noHistory;
         runtimeContext.effective = effectiveRuntimePreferences(runtimeDefaults, runtimeContext);
         opt.workWaitMs = runtimeContext.effective.workWaitMs;
-        GamePreferencesStore gameStore(std::filesystem::u8path(cfg.stateDir) / "game-preferences.json");
-        if(!gameStore.load(&gameDefaults,&error)){
-            fprintf(stderr,"game preferences unavailable: %s; no mining was started\n",error.c_str());return kExitConfig;
-        }
         if(gameDefaults.mode!=GameIntent::Off){
             fprintf(stderr,"configured game mode requires qualified native safety/worker binding, unavailable in this build; select off in Games settings before an ordinary start; no mining was started\n");
             return kExitConfig;
@@ -468,12 +479,7 @@ int main(int argc, char **argv) {
     }
     // Secure intent is not an optional game/economics feature: pooled parent research/evidence
     // modes must not bypass it and silently construct the legacy plaintext source either.
-    if(cli.command==Command::Run&&!workerChild&&!cli.help&&!opt.bench&&!opt.formalBenchmark.enabled){
-        std::string error;
-        PoolSecurityPreferencesStore poolStore(std::filesystem::u8path(cfg.stateDir)/"pool-security-preferences.json");PoolSecurityPreferences poolDefaults;
-        if(!poolStore.load(&poolDefaults,&error)){
-            fprintf(stderr,"pool security declarations unavailable: %s; no mining was started\n",error.c_str());return kExitConfig;
-        }
+    if(poolPreferenceGuard){
         if(poolSecurityRequested(poolDefaults)){
             fprintf(stderr,"configured pool TLS requires qualified ordinary transport/trust binding, unavailable in this build; review Pools and TLS declarations before an ordinary start; no TCP downgrade or mining was started\n");return kExitConfig;
         }
@@ -493,6 +499,8 @@ int main(int argc, char **argv) {
 #endif
         )){fprintf(stderr,"private worker control requires an ordinary untuned worker run\n");return kExitUsage;}
 #endif
+    if(g_stop)return kExitOk;
+    if(preRunNativeEpoch&&!nativeProcessEpochCurrent(preRunNativeEpoch))return kExitFaultLatched;
     if (workerChild) {
         // Each GPU worker keeps its own donation state, shutdown record and log files under gpu-<index>.
         if (workerIdText.empty() || workerIdText.size() > 3 || workerIdText.find_first_not_of("0123456789") != std::string::npos) return 1;
@@ -891,6 +899,8 @@ int main(int argc, char **argv) {
     }
 #endif
     // ---- devices: identity, allowlist, one device per process (nothing has touched a kernel yet)
+    if(g_stop)return kExitOk;
+    if(preRunNativeEpoch&&!nativeProcessEpochCurrent(preRunNativeEpoch))return kExitFaultLatched;
     DeviceIdentity chosenDevice;
     std::vector<DeviceIdentity> chosenAll;
     {

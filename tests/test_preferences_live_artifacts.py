@@ -6,6 +6,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PreferencesLiveArtifactTests(unittest.TestCase):
+    def test_prerun_inspection_is_read_only_and_original_epoch_reaches_device_admission(self):
+        source = (ROOT / 'src/product/prerun_preferences.h').read_text(encoding='utf8')
+        for forbidden in ('PreferencesStore', 'MarketStore', 'DeclarationStore', 'owner->save(', 'getenv(', 'argv[', 'canonical(', 'exists('):
+            self.assertNotIn(forbidden, source)
+        self.assertIn('owner->load(kinds[phase])', source)
+        self.assertIn('owner->takeReply(ticket)', source)
+        self.assertLess(source.index('if(stop&&*stop)return'), source.index('selfExecutablePath()'))
+        main = (ROOT / 'src/core/miner.cu').read_text(encoding='utf8')
+        for synchronous in ('RuntimePreferencesStore', 'GamePreferencesStore', 'PoolSecurityPreferencesStore', 'LanguagePreferencesStore'):
+            self.assertNotIn(synchronous, main)
+        self.assertIn('preRunScope.emplace(preRunNativeEpoch)', main)
+        self.assertIn('NativeProcessScope originalPreRun(inspected.nativeEpoch)', main)
+        device = main.index('// ---- devices: identity')
+        self.assertLess(main.index('if(preRunNativeEpoch&&!nativeProcessEpochCurrent(preRunNativeEpoch))', device), main.index('if (!queryDevices(&present))', device))
+
     def test_idle_command_has_only_background_preference_io_and_fixed_module_binding(self):
         source = (ROOT / 'src/product/settings_command.h').read_text(encoding='utf8')
         for forbidden in ('PreferencesStore', 'MarketStore', 'DeclarationStore', '.save(', 'openRuntimeControls(', 'openManualMarketControls(', 'openElectricityControls(', 'openTariffControls(', 'openGameControls(', 'openPoolSecurityControls(', 'openLanguageControls(', 'getenv(', 'exists(', 'canonical('):
