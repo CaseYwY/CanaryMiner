@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CanaryMiner build-only diagnostic preview/export",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "scope", "selection", "excluded", "qualification"],
+  "properties": {
+    "schema": {"const": "canaryminer-diagnostics-v1"},
+    "scope": {"const": "build-only"},
+    "selection": {
+      "type": "object", "additionalProperties": false, "required": ["build"],
+      "properties": {"build": {"type": "boolean"}}
+    },
+    "build": {
+      "type": "object", "additionalProperties": false,
+      "required": ["platform", "architecture", "compiler", "version"],
+      "properties": {
+        "platform": {"enum": ["windows", "linux", "other"]},
+        "architecture": {"enum": ["host-only", "sm120"]},
+        "compiler": {"enum": ["msvc", "gcc", "clang", "unknown"]},
+        "version": {"type": ["string", "null"], "pattern": "^(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})(?![\\s\\S])", "minLength": 5, "maxLength": 11}
+      }
+    },
+    "excluded": {"const": ["identity", "configuration", "runtime", "network", "logs", "financial", "game_activity"]},
+    "qualification": {"const": "build facts only; not runtime, hardware or release qualification"}
+  },
+  "if": {"properties": {"selection": {"properties": {"build": {"const": true}}}}},
+  "then": {"required": ["build"]},
+  "else": {"properties": {"build": {"not": {}}}}
+}

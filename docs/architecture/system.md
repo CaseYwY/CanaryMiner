@@ -263,6 +263,8 @@ while the stdout/stderr tee omits complete oversized raw lines instead of publis
 Original newline/EOF boundaries restore context; pipe draining and subsequent ordinary lines continue. This does not make
 unknown raw data anonymous, authorize exports, or complete collection/retention/disclosure/vault and hard native-write gates.
 
+[P-14n](../diagnostic-export.md) adds an isolated idle build-only preview/export command before config/preferences/runtime/device initialization. A closed report never takes private source inputs; optional public build facts are explicitly selected. Exact preview-digest confirmation admits only exclusive new-file creation, with unknown partial results preserved and no overwrite, delete, repair, retry or upload. This is not a live callback, broad privacy/vault/retention implementation, physical I/O or release qualification.
+
 ### M-RELEASE
 
 Owns host/production test matrices, packaged dependencies/licences, compatibility/migration notes and honest release status. Windows and Linux capabilities are reported separately. Existing device qualification and kernel admission are not broadened as an incidental convenience.

@@ -35,11 +35,12 @@
 #include <vector>
 
 #include "config.h"
+#include "diagnostic_cli.h"
 #include "language_preferences.h"
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics };
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -87,6 +88,7 @@ struct CliParse {
     bool commandExplicit = false;
     bool help = false;  // -h / --help was given (it is also left in `rest` for the legacy loop)
     CliOverrides ov;
+    DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
 };
 
@@ -125,12 +127,17 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "status") r.command = Command::Status;
         else if (c == "version") r.command = Command::Version;
         else if (c == "settings") r.command = Command::Settings;
+        else if (c == "diagnostics") r.command = Command::Diagnostics;
         else {
-            if (error) *error = "unknown command '" + c + "' (run, list-devices, selftest, status, version, settings; or start with an option, e.g. --pool)";
+            if (error) *error = "unknown command '" + c + "' (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool)";
             return false;
         }
         r.commandExplicit = true;
         ++i;
+    }
+    if(r.command==Command::Diagnostics){
+        if(!parseDiagnosticCli(argc,argv,i,&r.diagnostics,error))return false;
+        r.help=r.diagnostics.help;*out=std::move(r);return true;
     }
     auto need = [&](int &k, const char *opt, std::string *value) {
         if (k + 1 >= argc) {
@@ -422,6 +429,7 @@ inline std::string productHelpText() {
         "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
         "       canary-miner version\n"
         "       canary-miner settings          edit display/runtime defaults without mining\n"
+        "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress offline manual references this run; saved values stay\n"
         "       --no-energy                   disable optional session energy recording; safety telemetry stays\n"

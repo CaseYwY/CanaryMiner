@@ -346,6 +346,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
 
+[P-14n](../diagnostic-export.md) exercises the closed report/digest, excluded-by-default selection, strict parser/basename, actual new-file writer, competing exclusive creates, existing-target preservation and unknown partial writes. Actual inert host CLI tests require exact stdout bytes/schema/digest and refusal before config/preferences/device/runtime setup; a separate default-run sentinel proves the tested entry point is real. POSIX symlink/FIFO and process-local zero-file-size write failure stay distinct from untested Windows fault injection, physical storage/native hard bounds, full privacy/vault controls and production qualification.
+
 [P-14m](../credential-redaction.md) reproduces known quoted/whitespace/compound/escaped/truncated credential disclosure
 through both pure filtering and the actual bounded rotating sink. Real stdout/stderr tee pipes must omit complete oversized
 lines, never emit a contextless private suffix, preserve following ordinary lines, handle oversized EOF and restart a fresh

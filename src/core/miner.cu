@@ -29,6 +29,7 @@
 #include "../algos/pearl-pow/a_root_fusion.h"
 #include "../product/log_sink.h"
 #include "../product/product_main.h"
+#include "../product/diagnostic_export.h"
 #include "../product/selftest.h"
 #include "../product/restart_budget.h"
 #include "../product/fee_session.h"
@@ -114,6 +115,10 @@ int main(int argc, char **argv) {
             fprintf(stderr, "%s%s", cliError.c_str(), "\n");
             return kExitUsage;
         }
+    }
+    if(cli.command==Command::Diagnostics){
+        signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
+        return commandDiagnostics(cli.diagnostics,&g_stop); // before any config, preference, platform or device/runtime setup
     }
     const bool explicitPresentation=cli.ov.presentation.language.has_value()||cli.ov.presentation.formattingLocale.has_value()||cli.ov.presentation.ascii;
     if(explicitPresentation)fprintf(stderr,"Language request: effective UI en / legacy per-field formatting; full native translation/layout integration unavailable. No mining setting changed.\n");
@@ -349,7 +354,8 @@ int main(int argc, char **argv) {
                 "       canary-miner selftest           offline kernel + proof self-test per device\n"
                 "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
                 "       canary-miner version\n"
-                "       canary-miner settings          edit local display/runtime defaults\n\n"
+                "       canary-miner settings          edit local display/runtime defaults\n"
+                "       canary-miner diagnostics       build-only preview/export; see diagnostics --help\n\n"
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"

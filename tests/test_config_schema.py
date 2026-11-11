@@ -17,6 +17,8 @@ def load(rel):
 def validate(value, schema, root, path='$'):
     """Returns a list of problems. Supports the subset the product schemas use."""
     problems = []
+    if 'not' in schema and not validate(value, schema['not'], root, path):
+        problems.append('%s: forbidden schema matched' % path)
     if '$ref' in schema:
         ref = root
         for part in schema['$ref'].lstrip('#/').split('/'):
@@ -293,6 +295,27 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
             if definition.get('type') == 'object':
                 self.assertFalse(definition['additionalProperties'])
                 self.assertEqual(set(definition['required']), set(definition['properties']))
+
+
+class DiagnosticSchemaTests(unittest.TestCase):
+    def test_closed_selected_groups_and_no_private_inputs(self):
+        schema = load('config/diagnostics-v1.schema.json')
+        value = dict(schema='canaryminer-diagnostics-v1', scope='build-only', selection=dict(build=False),
+                     excluded=['identity', 'configuration', 'runtime', 'network', 'logs', 'financial', 'game_activity'],
+                     qualification='build facts only; not runtime, hardware or release qualification')
+        build = dict(platform='linux', architecture='host-only', compiler='gcc', version='1.0.3')
+        self.assertEqual(validate(value, schema, schema), [])
+        selected = {**value, 'selection': dict(build=True), 'build': build}
+        self.assertEqual(validate(selected, schema, schema), [])
+        self.assertEqual(validate({**selected, 'build': {**build, 'version': None}}, schema, schema), [])
+        for bad in ({}, {**value, 'build': build}, {**value, 'selection': dict(build=True)},
+                    {**value, 'wallet': 'synthetic'}, {**value, 'selection': dict(build=1)},
+                    {**value, 'excluded': []}, {**value, 'scope': 'runtime'},
+                    {**selected, 'build': {**build, 'hostname': 'synthetic'}},
+                    {**selected, 'build': {**build, 'platform': 'synthetic'}}):
+            self.assertTrue(validate(bad, schema, schema))
+        for version in ('1.2', '01.2.3', '1.2.3-private', '1.2.3\n', '1000.0.0'):
+            self.assertTrue(validate({**selected, 'build': {**build, 'version': version}}, schema, schema))
 
 
 class StatsSchemaTests(unittest.TestCase):
