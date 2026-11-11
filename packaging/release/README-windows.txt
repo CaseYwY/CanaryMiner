@@ -6,6 +6,8 @@ Pearl pool protocol; it is tested on F2Pool and Kryptex.
 
 Requirements
 - Windows 10 or 11, 64-bit.
+- Keep canary_preferences_worker.exe beside canary-miner.exe. This required CPU-only helper isolates dashboard settings I/O;
+  it is not a mining worker and is not an independent command. Missing/refused helpers never trigger a synchronous fallback.
 - NVIDIA RTX 50-series GPU (Blackwell, SM120). This release does not run on other GPUs.
 - An NVIDIA driver that supports CUDA 13.1 (tested with 616.92 or newer). The CUDA toolkit is not needed.
 - The Microsoft Visual C++ 2015-2022 x64 runtime. If canary-miner.exe reports a missing DLL, install

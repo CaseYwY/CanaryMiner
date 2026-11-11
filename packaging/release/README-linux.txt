@@ -5,9 +5,14 @@ CanaryMiner mines Pearl (PRL) on NVIDIA RTX 50-series GPUs (Blackwell). It works
 Pearl pool protocol; it is tested on F2Pool and Kryptex.
 
 Requirements
-- x86-64 Linux with glibc @GLIBC@ or newer (Ubuntu 22.04, 24.04 and later).
+- x86-64 Linux with glibc @GLIBC@ or newer. The native capability contract is at least glibc 2.40 plus working
+  atomic pidfd spawning, pidfd signaling and waitid(P_PIDFD), with normal waitable SIGCHLD handling.
+  Older distributions, restricted containers and clean-machine GPU deployment are not qualified by CPU/WSL tests.
+  The glibc number includes both shipped programs; it does not qualify the C++ runtime, kernel, loader or a distribution.
 - NVIDIA RTX 50-series GPU (Blackwell, SM120). This release does not run on other GPUs.
 - @MIN_DRIVER@ The driver's libcuda.so.1 is the only NVIDIA library this archive needs. The CUDA toolkit is not needed.
+- Keep canary_preferences_worker beside canary-miner. This required CPU-only helper isolates dashboard settings I/O;
+  it is not a mining worker and is not an independent command. Missing/refused helpers never trigger a synchronous fallback.
 
 1. Set your address
    Open start.sh in a text editor. Replace YOUR_PRL_ADDRESS with your public PRL payout address, which starts with prl1.

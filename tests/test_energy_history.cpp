@@ -166,7 +166,11 @@ int main(int argc,char **argv){
     r=request(root/"process.db",first());r.mode=EnergyHistoryOpen::CreateNew;
     auto result=client.transact(r,cancel,5000);CHECK(result.transport==LocalTaskStatus::Ok&&!result.writeOutcomeUnknown&&result.reply->applied==S::Ok);
     r.mode=EnergyHistoryOpen::Existing;r.batch=second();r.batch->id="fixture.stall-after";
-    result=fake.transact(r,cancel,200);CHECK(result.transport==LocalTaskStatus::Timeout&&result.writeOutcomeUnknown&&!result.reply);
+    // Elapsed startup time cannot establish COMMIT. Observe the fixture's post-COMMIT marker before losing its acknowledgement.
+    auto committed=r.file;committed+=".fixture-ready";
+    std::thread postCommit([&]{result=fake.transact(r,cancel,5000);});
+    CHECK(until([&]{return std::filesystem::exists(committed);}));cancel=true;postCommit.join();cancel=false;
+    CHECK(result.transport==LocalTaskStatus::Cancelled&&result.writeOutcomeUnknown&&!result.reply);
     auto inspect=r;inspect.batch.reset();result=client.transact(inspect,cancel,5000);CHECK(result.reply&&result.reply->checkpoint.sequence==2&&result.reply->totals[0].knownKwh.numerator.text()=="423456");
     result=client.transact(r,cancel,5000);CHECK(result.reply&&result.reply->applied==S::Replay&&!result.writeOutcomeUnknown);
     cancel=true;CHECK(client.transact(r,cancel,5000).transport==LocalTaskStatus::Cancelled);cancel=false;
@@ -185,8 +189,9 @@ int main(int argc,char **argv){
         CHECK(owner.submit(2,owner.snapshot()->revision,next)==EnergyHistoryAdmission::Invalid);owner.stop();
     }
     for(const auto &id:std::vector<std::string>{"fixture.stall-before","fixture.stall-after","fixture.bad-ack"}){
-        const auto path=root/(id+".db");EnergyHistoryOwner owner(fixture,path,binding(),{},300,[]{return T+20000;},false);CHECK(owner.start(1,EnergyHistoryOpen::CreateNew)&&ready(owner));
+        const auto path=root/(id+".db");EnergyHistoryOwner owner(fixture,path,binding(),{},2000,[]{return T+20000;},false);CHECK(owner.start(1,EnergyHistoryOpen::CreateNew)&&ready(owner));
         auto batch=first();batch.id=id;CHECK(owner.submit(1,owner.snapshot()->revision,batch)==EnergyHistoryAdmission::Queued);
+        if(id!="fixture.bad-ack"){auto marker=path;marker+=".fixture-ready";CHECK(until([&]{return std::filesystem::exists(marker);}));}
         CHECK(until([&]{return owner.snapshot()->state==EnergyHistoryOwnerState::Faulted;}));CHECK(owner.snapshot()->uncertainBatch&&owner.snapshot()->uncertainBatch->id==id);
         const auto retained=owner.snapshot()->uncertainBatch;owner.stop();CHECK(owner.start(2)&&ready(owner));
         const auto s=owner.snapshot();CHECK(s->state==EnergyHistoryOwnerState::NeedsReview&&s->uncertainBatch==retained);
