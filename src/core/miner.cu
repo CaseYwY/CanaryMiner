@@ -448,9 +448,7 @@ int main(int argc, char **argv) {
             // --algo, where swallowing an unknown algorithm silently mined
             // Ergo instead of Pearl. Fixing it there and not here left the
             // hole open for every other flag.
-            fprintf(stderr,
-                    "unknown option '%s'. Run with --help for the list.\n",
-                    a.c_str());
+            fprintf(stderr, "unknown option. Run with --help for the list; rejected original omitted.\n");
             return 1;
         }
     }

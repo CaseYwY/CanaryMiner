@@ -22,6 +22,8 @@ add_test(NAME startup_config COMMAND $<TARGET_FILE:test_startup_config> $<TARGET
 set_tests_properties(startup_config PROPERTIES TIMEOUT 30)
 add_test(NAME startup_config_errors COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_config_error_privacy_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:canary_preferences_worker>)
 set_tests_properties(startup_config_errors PROPERTIES TIMEOUT 60)
+add_test(NAME cli_error_privacy COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_cli_error_privacy.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:canary_preferences_worker>)
+set_tests_properties(cli_error_privacy PROPERTIES TIMEOUT 60)
 add_executable(test_preferences_prerun ${R}/tests/test_preferences_prerun.cpp)
 target_link_libraries(test_preferences_prerun PRIVATE canary_economics canary_preferences_owner Threads::Threads ${CMAKE_DL_LIBS} $<$<PLATFORM_ID:Windows>:ws2_32>)
 add_dependencies(test_preferences_prerun canary_preferences_worker)

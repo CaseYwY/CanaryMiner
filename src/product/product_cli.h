@@ -129,7 +129,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "settings") r.command = Command::Settings;
         else if (c == "diagnostics") r.command = Command::Diagnostics;
         else {
-            if (error) *error = "unknown command '" + c + "' (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool)";
+            if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted";
             return false;
         }
         r.commandExplicit = true;
@@ -319,7 +319,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         } else if (a == "--disable-cpu") {
             // Accepted and ignored: this miner is GPU only.
         } else if (isOverclockOption(a)) {
-            if (error) *error = "unknown GPU tuning flag '" + a + "'";
+            if (error) *error = "unknown GPU tuning flag; rejected original omitted";
             return false;
         } else if (a == "--list-devices" && !r.commandExplicit) {
             r.command = Command::ListDevices;
@@ -348,7 +348,7 @@ inline bool validAccountName(const std::string &s) {
 inline bool looksLikePrlAddress(const std::string &s) { return s.rfind("prl1", 0) == 0 || s.rfind("tprl1", 0) == 0; }
 
 /**
- * Layer the CLI over a config (file or defaults). Pool specs are parsed here so errors name the offending value.
+ * Layer the CLI over a config (file or defaults). Pool refusal diagnostics omit the private original.
  * --wallet ADDR.WORKER: the split happens on the first dot; --worker wins over the split part. On an F2Pool pool, a
  * name that is not a prl1 address is the F2Pool account (the login becomes ACCOUNT.WORKER, as on every other miner).
  */

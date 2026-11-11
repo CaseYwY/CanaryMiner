@@ -361,6 +361,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 
 ## T-PRIVACY
 
+[P-14y](../cli-error-privacy.md) drives four actual inert CLI refusal paths with six private/quoted/ESC/CRLF/bidi/oversized synthetic original shapes. Require exact fixed whole-output envelopes, unchanged exit codes and owned files/directory, and no device sentinel for refusals. Static syntax/wallet/API/strict-TLS controls and help/version/valid-device positives prevent weakening policy or blanket rejection. Native tests preserve caller output while asserting the closed parser messages. These fixtures do not certify every later diagnostic, real source/hardware or native/physical bounds.
+
 [P-14x](../config-error-privacy.md) drives the actual inert entry/genuine helper with synthetic unknown/nested/control-key, private pool/value, schema/type/JSON/UTF-8/NUL failures. Assert exact closed refusal bytes, no original/control/path output, unchanged files and no device admission, with separate read/size and valid-entry positive controls. Native tests preserve the internal strict-parser detail API while requiring the startup envelope. This is not universal log/CLI/privacy or physical/native/source qualification.
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.

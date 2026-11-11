@@ -151,6 +151,29 @@ int main() {
         CHECK(parseArgs({"--mem-oc"}).rest.size() == 1);
     }
 
+    // ---- rejected originals never enter parser diagnostics or replace the caller's prior output
+    {
+        for (const std::string &payload : std::vector<std::string>{"fixture-private", "fixture'private", "fixture\x1b[2J",
+                                                                  "fixture\r\nprivate", "fixture\xe2\x80\xae", std::string(4096, 'x')}) {
+            CliParse prior;
+            prior.command = Command::Status;
+            std::string err;
+            const char *command[] = {"canary-miner", payload.c_str()};
+            CHECK(!parseProductCli(2, command, &prior, &err) && prior.command == Command::Status &&
+                  err == "unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted");
+            const std::string flag = "--oc-" + payload;
+            const char *tuning[] = {"canary-miner", flag.c_str()};
+            CHECK(!parseProductCli(2, tuning, &prior, &err) && prior.command == Command::Status &&
+                  err == "unknown GPU tuning flag; rejected original omitted");
+            PoolEntry pool;
+            pool.host = "fixture-kept.invalid";
+            pool.port = 7;
+            CHECK(!parsePoolSpec("stratum+tcp://fixture-user:" + payload + "@fixture.invalid:3333", &pool, &err) &&
+                  pool.host == "fixture-kept.invalid" && pool.port == 7 &&
+                  err == "pool is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted");
+        }
+    }
+
     // ---- CLI over config: precedence and the file keeps what the CLI does not name
     {
         ProductConfig base;

@@ -1,0 +1,13 @@
+# Closed command-line rejection output (P-14y)
+
+M-CONFIG/M-PRIVACY; R-PRIV-001/002, R-SAFE-001; T-CONFIG/T-PRIVACY; D-182.
+
+Four early actual-entry refusals no longer include their rejected original: unknown commands, unknown GPU tuning flags, malformed pool specifications and unknown legacy options. A typo can contain a private account/credential or terminal controls just as a configuration value can. Each route now emits a fixed ASCII error with its existing help/format guidance and an explicit `rejected original omitted` notice, not an escaped, truncated or partially masked original.
+
+The unknown-command and tuning errors remain exit 2; a malformed pool remains exit 3; an unknown legacy option remains exit 1. Accepted command/option routing, parser rules, defaults, CLI precedence, failed caller outputs and original files are unchanged. No write, retry, repair, source, network or device authority is added. The existing strict `stratum+ssl://` refusal and no-TCP-fallback policy remain byte-for-byte unchanged.
+
+Unlike [P-14x](config-error-privacy.md), this also changes the shared pool parser's malformed-input diagnostic, not just a private-file display boundary. Its Boolean/output API and acceptance rules do not change. Other structural configuration parser details remain internal; the startup boundary still uses its own closed envelope. No English error classifier, generic regex filter, automatic private preview or raw-argument logger is introduced. Less automatic diagnostic detail is intentional; consult the unchanged `--help` and public schema without copying private input into a report.
+
+`tests/test_cli_error_privacy.py` drives the actual CPU-only inert main entry with a genuine sibling helper, six synthetic original shapes across all four routes, five unchanged static policy controls and help/version/device-admission positive controls: 32 cases. It requires exact complete refusal bytes, original-file/directory preservation and no device admission on every refusal. The positive device command must still reach the inert sentinel, not a blanket reject-all gate. Native parser tests additionally require exact messages and unchanged caller output. Exact red/green/platform/build evidence belongs in the [execution ledger](architecture/execution-plan.md).
+
+This is not universal command-line/runtime/log anonymization, command-line secrecy from the operating system or complete privacy/localization. Later diagnostics and explicit private views, collection/disclosure/retention/vault controls, console/native bounds, real sources, hardware, deployment and production-release gates remain incomplete.

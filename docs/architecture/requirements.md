@@ -65,6 +65,8 @@ Each row is a testable requirement, not a checklist of already implemented featu
 
 `PARTIAL` means a baseline behaviour or process exists, not that the expanded requirement is complete. For example, current Q/signal tests do not establish the future economic/game resume state machine, and current ASCII resize tests do not establish multilingual terminal accessibility.
 
+[P-14y](../cli-error-privacy.md) omits rejected private/control originals in four early actual CLI refusals while retaining accepted inputs, failed outputs, exit codes, strict TLS refusal and no-device admission. It does not anonymize every runtime/log/private-review surface or complete collection/disclosure/retention/vault, localization, native/source/physical/deployment/release qualification. The expanded privacy/safety requirements remain partial.
+
 [P-14x](../config-error-privacy.md) prevents private parser diagnostics from becoming actual startup terminal output, using a fixed config-v1 refusal while preserving strict validation and original files. It does not sanitize every legacy CLI/runtime/log surface, supply a private review/credential vault or complete localization, source/native/deployment/physical/release qualification. The expanded privacy/UI requirements remain partial.
 
 

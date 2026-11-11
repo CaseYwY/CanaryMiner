@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
     {
         std::string err;
         parseArgs({"bogus"}, &err);
-        CHECK(contains(err, "unknown command 'bogus'"));
+        CHECK(err == "unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted");
         parseArgs({"--pool"}, &err);
         CHECK(contains(err, "--pool needs a value"));
         parseArgs({"--pool", ""}, &err);

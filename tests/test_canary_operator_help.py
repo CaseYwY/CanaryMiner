@@ -110,7 +110,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertEqual(self.cli('--version').stdout, version.stdout)
         unknown = self.cli('frobnicate')
         self.assertEqual(unknown.returncode, 2)
-        self.assertIn(b"unknown command 'frobnicate'", unknown.stderr)
+        self.assertEqual(unknown.stdout+unknown.stderr, b'unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted\n')
         for args in (['list-devices'], ['--list-devices'], ['selftest']):
             with self.subTest(args=args):
                 result = subprocess.run([str(self.binaries['1']), *args], cwd=self.stage.name, capture_output=True, timeout=5)

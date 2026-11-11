@@ -33,6 +33,8 @@ Owns pure rendering, keyboard context/focus, staged edits and read-only presenta
 
 ### M-CONFIG
 
+[P-14y closed CLI refusals](../cli-error-privacy.md) uses fixed errors at the unknown-command/tuning, malformed-pool and unknown-legacy-option sites, before device admission. The shared pool parser's diagnostic now omits the original too; acceptance/output/exit/strict-TLS semantics remain authoritative. This is not a generic raw-output sanitizer, private preview or source/collection capability.
+
 [P-14x closed startup rejection](../config-error-privacy.md) keeps the strict parser's private detail API separate from the actual main-entry display boundary. A failed private file parse emits one fixed schema-v1 envelope, not original key/value/control bytes. Read/size failures remain distinct and validation, caller preservation and admission retain sole authority; no write, preview, source or device capability is added.
 
 Owns typed defaults, schema validation/version migration, CLI precedence, persistence targets and change impact. `config.h`, `product_cli.h` and `ui_preferences.h` exist today. Mining config, presentation preferences, private provider credentials and runtime records remain separate concerns. Unknown/new versions must not be silently reset.

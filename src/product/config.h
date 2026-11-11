@@ -176,7 +176,7 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
     }
     if (endpoint.rfind("stratum+tcp://", 0) == 0) endpoint = endpoint.substr(std::string("stratum+tcp://").size());
     if (!parseEndpoint(endpoint, &e.host, &e.port)) {
-        if (error) *error = "pool '" + spec + "' is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT";
+        if (error) *error = "pool is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted";
         return false;
     }
     if (hostInDomain(e.host, "kryptex.network")) e.preset = "kryptex";
