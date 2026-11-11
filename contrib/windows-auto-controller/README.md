@@ -16,11 +16,11 @@ End the current mining session, then run these commands from the repository root
 $install = Join-Path $env:ProgramFiles 'CanaryMiner'
 $patch = (Resolve-Path '.\contrib\windows-auto-controller\clock-status-race.patch').Path
 $backup = Join-Path $install ('backups\clock-status-race-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-git -C $install apply --check $patch
+git -c core.autocrlf=false -C $install apply --check $patch
 if ($LASTEXITCODE) { throw 'The installed scripts do not match this patch.' }
 New-Item -ItemType Directory -Path $backup -ErrorAction Stop | Out-Null
 Copy-Item -LiteralPath (Join-Path $install 'auto_controller.py'), (Join-Path $install 'gpu-clock-helper.ps1') -Destination $backup -ErrorAction Stop
-git -C $install apply $patch
+git -c core.autocrlf=false -C $install apply $patch
 if ($LASTEXITCODE) { throw 'Patch application failed. Restore the saved scripts.' }
 python -I -B .\contrib\windows-auto-controller\test_clock_status.py --install-dir $install
 ```
