@@ -2,11 +2,17 @@
 #include "preferences_service.h"
 #include "duplex_task_process.h"
 #include "startup_config_service.h"
+#include "console_output_service.h"
 #include <chrono>
 #include <thread>
 int main(int argc,char **argv){using namespace om;
     try {
-        DuplexTaskChannel channel;if(!channel.adopt(argc,argv))return 2;
+        DuplexTaskChannel channel;
+        if(argc>1&&(std::string(argv[1])=="--local-output-v1"||std::string(argv[1])=="--local-terminal-v1")){
+            if(!channel.adopt(argc,argv,std::string(argv[1])=="--local-terminal-v1"?DuplexTaskOutput::InheritedTerminal:DuplexTaskOutput::InheritedStdout))return 2;
+            return serveConsoleOutput(channel); // role is creation-bound: no preference/config service exists here
+        }
+        if(!channel.adopt(argc,argv))return 2;
         PreferencesService service;std::string input,output;size_t sent=0;bool first=true;
         while(channel.parentAlive()){
             if(!output.empty()){

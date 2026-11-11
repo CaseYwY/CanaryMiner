@@ -2,6 +2,7 @@
 #pragma once
 #include "executable_path.h"
 #include "preferences_settings.h"
+#include "console_output.h"
 #include <chrono>
 #include <thread>
 
@@ -20,6 +21,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     const auto token=intent.explicitStart(); // explicit idle helper lifetime, never a fleet/mining start
     if(!intent.permits(token)){if(billingAccess.requestStop)billingAccess.requestStop();return 3;}
     std::unique_ptr<PreferencesOwner> owner;
+    std::unique_ptr<ConsoleOutput> output;
     try{
         const auto module=selfExecutablePath();
         if(!module.empty()){
@@ -33,11 +35,17 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
 #else
                 "canary_preferences_worker";
 #endif
+            ConsoleOutputPolicy outputPolicy;
+#if defined(_WIN32)
+            outputPolicy.terminalInput=true; // native console keys/geometry can block behind ConPTY output too
+#endif
+            output=std::make_unique<ConsoleOutput>(helper,intent,token,outputPolicy);
+            if(!output->start())output.reset();
             owner=std::make_unique<PreferencesOwner>(helper,std::move(targets),intent,token);
             if(!owner->start())owner.reset();
         }
     }catch(...){owner.reset();}
-    if(!owner){intent.stop();if(billingAccess.requestStop)billingAccess.requestStop();fprintf(stderr,"Idle preferences unavailable; no synchronous fallback or file changes.\n");return stop&&*stop?0:3;}
+    if(!owner||!output){intent.stop();if(owner)owner->requestStop();if(output)output->requestStop(ConsoleCleanup::IdleRefused);if(billingAccess.requestStop)billingAccess.requestStop();return stop&&*stop?0:3;}
     enableAnsiOnWindows();
     KeyReader keys;
     SettingsPanel panel;
@@ -54,13 +62,18 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     std::unique_ptr<EnergyRuntime> runtime;
     bool initial=true,loadIssued=false,runtimeAttempted=false,quit=false;
     int result=0;
-    printf("\x1b[2J\x1b[?25l");
+    output->submit("\x1b[2J\x1b[?25l");
     try{while(panel.visible&&!quit){
         if(stop&&*stop)intent.stop();
         if(!intent.permits(token))break;
         for(int n=0;n<32;++n){
             if(stop&&*stop){intent.stop();break;}
-            const int key=keys.poll();if(!key)break;
+#if defined(_WIN32)
+            const int key=output->pollKey();
+#else
+            const int key=keys.poll();
+#endif
+            if(!key)break;
             if(initial){if(key==3||key==27||key=='q'||key=='Q')quit=true;}
             else{
                 const auto utc=static_cast<uint64_t>(time(nullptr));
@@ -71,6 +84,8 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
             if(quit)break;
         }
         if(quit||!intent.permits(token)||(stop&&*stop))break;
+        const auto display=output->snapshot();
+        if(display.state==ConsoleOutputState::Faulted||display.state==ConsoleOutputState::Stopped){result=3;break;}
         const auto state=owner->snapshot();
         if(initial){
             if(state.state==PreferencesOwnerState::Faulted||state.state==PreferencesOwnerState::Stopped){result=3;break;}
@@ -96,16 +111,21 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
         if(runtime){const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();runtime->tick(utc,0);}
         panel.updateCreditReview();panel.updateEnergyReview();panel.updateEnergyAuthorization();panel.updateBillingReview();
         const auto color=panel.active.color?detectColorLevel():ColorLevel::None;
-        printSettingsFrame(initial?"Preferences PENDING - NOT Saved\nInitial idle inspection\nNo mining is started\nQ/^C Stop; Esc Close\n":preferences.overlay()?preferences.render(terminalColumns(80),terminalRows(24),color):panel.render(terminalColumns(80),terminalRows(24),color));
+#if defined(_WIN32)
+        const auto terminal=output->snapshot();const int columns=static_cast<int>(terminal.columns),rows=static_cast<int>(terminal.rows);
+#else
+        const int columns=terminalColumns(80),rows=terminalRows(24);
+#endif
+        if(!output->submit(settingsFrameBytes(initial?"Preferences PENDING - NOT Saved\nInitial idle inspection\nNo mining is started\nQ/^C Stop; Esc Close\n":preferences.overlay()?preferences.render(columns,rows,color):panel.render(columns,rows,color)),true)){result=3;break;}
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     }catch(...){result=3;}
     if(!intent.permits(token)&&!quit&&!(stop&&*stop))result=3;
-    intent.stop();owner->requestStop();panel.stopBillingReview();
+    const bool terminalFailed=output->snapshot().state==ConsoleOutputState::Faulted;
+    intent.stop();owner->requestStop();output->requestStop(terminalFailed?ConsoleCleanup::IdleTerminalFault:result?ConsoleCleanup::IdleRefused:ConsoleCleanup::IdleClosed);panel.stopBillingReview();
     if(runtime){runtime->requestStop();runtime->stop();}
     owner->stop(); // optional join after revocation; no mining worker exists in this command
-    printf("\x1b[2J\x1b[H\x1b[?25h%s\n",i18n::settingsDiagnosticEnglish(i18n::SettingsDiagnosticMessageKey::Closed).c_str());
-    if(result)fprintf(stderr,"Idle preference inspection refused; no synchronous fallback or automatic retry. An issued write may be UNKNOWN.\n");
+    output->stop(); // bounded fixed cleanup only; never a synchronous stdout/stderr fallback
     return stop&&*stop?0:result;
 }
 } // namespace om

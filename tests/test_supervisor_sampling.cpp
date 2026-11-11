@@ -71,7 +71,7 @@ void loopback(){
     const auto json=statsToJson(source);StatsServer server;std::string error;std::atomic<unsigned> calls{0};
     CHECK(server.start("127.0.0.1",0,[&]{++calls;return json;},"{}",&error));
     const std::vector<DisplaySampleTarget> nativeTargets={{targets[0].uuid,server.port()}};
-    SupervisorSampling owner;CHECK(owner.start(nativeTargets)&&owner.request({5}));
+    SupervisorSampling owner;CHECK(owner.start(nativeTargets,cpu_fixture::statsOnly())&&owner.request({5}));
     std::shared_ptr<const DisplaySampleBatch> sample;CHECK(wait([&]{sample=owner.take();return bool(sample);}));
     CHECK(sample&&sample->readings[0].stats&&sample->readings[0].accepted==17&&sample->generations[0]==5);
     if(sample){const auto &r=sample->readings[0];CHECK(displaySampleOrdered(sample->began,r.statsObserved)&&displaySampleOrdered(r.statsObserved,r.powerBegan));

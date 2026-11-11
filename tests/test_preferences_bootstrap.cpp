@@ -48,6 +48,7 @@ int main(int argc,char **argv){
     std::ofstream(ui,std::ios::binary)<<uiBytes;std::ofstream(manual,std::ios::binary)<<manualBytes;std::ofstream(electricity,std::ios::binary)<<energyBytes;
     Probe probe;volatile sig_atomic_t stop=0;NativeProcessAdmission synthetic;
     SupervisorOptions options;options.version="synthetic";options.exe="must-not-be-executed";options.apiEnabled=false;options.dashboard=!plain;options.stop=&stop;
+    options.displaySampleFactory=cpu_fixture::statsOnly();
     WorkerSeed seed;seed.index=0;seed.uuid="fixture.bootstrap";options.seeds={seed};
     options.uiPreferencesPath=ui.u8string();options.manualMarketPreferencesPath=manual.u8string();options.electricityPreferencesPath=electricity.u8string();
     options.noEnergy=mode=="no-energy";options.noMarket=suppressed;

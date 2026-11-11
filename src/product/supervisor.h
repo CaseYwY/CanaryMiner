@@ -67,6 +67,7 @@
 #include "supervisor_sampling.h"
 #include "legacy_child_process.h"
 #include "executable_path.h"
+#include "console_output.h"
 
 namespace om {
 
@@ -123,6 +124,7 @@ struct SupervisorOptions {
     std::vector<std::string> userArgs;     // argv[1..] of this process
     std::vector<WorkerSeed> seeds;         // the selected GPUs, in device order
     std::string version, archLabel, poolEndpoint, poolPreset, worker;
+    std::string startupNotice;              // memory-only ordinary banner; displayed by the same owned output role
     std::string apiBind = "127.0.0.1";
     bool apiEnabled = true;
     int apiPort = 8085;
@@ -313,6 +315,9 @@ class Supervisor {
         sessionToken_ = intent_.explicitStart();
         if (!intent_.permits(sessionToken_)) return kExitFaultLatched;
         if(opt_.workerFleetFactory&&(opt_.tuning||opt_.drainMs>60000)){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
+        const bool tty=opt_.dashboard;
+        if(tty)enableAnsiOnWindows();
+        if(!startOutput()){intent_.stop();settings_.stopBillingReview();return opt_.stop&&*opt_.stop?kExitOk:kExitFaultLatched;}
         const uint64_t t0 = supervisorNowMs();
         startupUtc_=static_cast<uint64_t>(time(nullptr)); // paired original activation anchor; helper delay never renews it
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
@@ -331,11 +336,6 @@ class Supervisor {
                 addEvent("stats endpoint disabled: " + err);
         }
 
-        const bool tty = opt_.dashboard;
-        if (tty) {
-            enableAnsiOnWindows();
-            printf("\x1b[2J\x1b[?25l");  // hide the cursor while the dashboard owns the screen
-        }
         KeyReader keys;
         bool stopping = false, forced = false, quit = false, controlFault = false;
         uint64_t stopDeadline = 0, nextSummary = 0, nextSample = 0;
@@ -356,7 +356,11 @@ class Supervisor {
             if (tty) {
                 for (int n = 0; n < 32; ++n) {
                     if(stopping||(opt_.stop&&*opt_.stop))break;
-                    const int key = keys.poll();
+#if defined(_WIN32)
+                    const int key=output_->pollKey();
+#else
+                    const int key=keys.poll();
+#endif
                     if (!key) break;
                     view_.options = ui_;  // a saved page switch also governs the very next queued shortcut
                     if(!sessionActivated_){
@@ -399,12 +403,22 @@ class Supervisor {
                 stopping = true;
                 stopDeadline = now + opt_.drainMs + 5000;
             }
-            if(!stopping&&!bootstrapPending_&&!sessionActivated_){
+            const auto display=output_->snapshot();
+            // Input-only polls cannot stand in for acceptance of the original startup display bytes.
+            const bool outputPending=display.state==ConsoleOutputState::Starting||
+                (display.state==ConsoleOutputState::Ready&&!display.outputAccepted);
+            if(!stopping&&!outputPending&&display.state!=ConsoleOutputState::Ready){
+                controlFault=true;beginStop();stopping=true;stopDeadline=now+opt_.drainMs+5000;
+            }
+            if(!stopping&&!outputPending&&!bootstrapPending_&&!sessionActivated_){
                 sessionActivated_=true; // one attempted activation, never a retry after a callback/factory failure
                 if(!activateSession(t0,nativeEpoch)){
                     controlFault=controlFault||!(opt_.stop&&*opt_.stop);
                     beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;
-                }else if(settingsRequested_&&tty){settingsRequested_=false;openPreferencesSettings();}
+                }else{
+                    nextFrame_=0; // a pending startup screen must not delay the first activated dashboard
+                    if(settingsRequested_&&tty){settingsRequested_=false;openPreferencesSettings();}
+                }
                 latchNativeFault();
                 if(!stopping&&opt_.stop&&*opt_.stop){beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}
             }
@@ -483,7 +497,7 @@ class Supervisor {
                     addEvent("drain deadline passed: remaining workers were stopped");
                     break;
                 }
-            } else if (!alive && !pending && !bootstrapPending_) {
+            } else if (!alive && !pending && !bootstrapPending_ && !outputPending) {
                 addEvent("no GPU is mining: stopping");
                 break;
             }
@@ -495,14 +509,14 @@ class Supervisor {
                 if(now>=nextSample&&!sampling_.pending())sampling_.request(sampleGenerations);
             }
             publish(now, t0, stopping ? "draining" : sessionActivated_ ? "running" : "starting");
-            frame(now, t0, tty);
-            if (!tty && now >= nextSummary) {
+            if(!stopping)frame(now,t0,tty);
+            if(!stopping&&!tty&&sessionActivated_&&now>=nextSummary){
                 nextSummary = now + 15000;
-                printf("%s\n", renderPlainSummary(buildModel(now, t0), time(nullptr)).c_str());
-                fflush(stdout);
+                output_->submit(renderPlainSummary(buildModel(now,t0),time(nullptr))+"\n");
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(tty||fleet_ ? 50 : 250));
         }
+        if(!stopping)beginStop(); // natural/faulted worker exit revokes display before any optional join too
         settings_.stopBillingReview();
         if(energyCapture_)energyCapture_->requestStop();
         if(forecast_)forecast_->requestStop();
@@ -534,16 +548,13 @@ class Supervisor {
         if (marketReference_) marketReference_->stop(); // optional data joining cannot delay controlled-worker settlement
         if(preferences_)preferences_->stop(); // optional file/helper joining only after worker drain/settlement
         publish(supervisorNowMs(), t0, "stopped");
-        if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
-        frame(supervisorNowMs(), t0, tty);
         server.stop();
         sampling_.stop(); // native reader teardown joins only after worker control/ordinary drains
         bool failed = false;
         for (auto &w : workers_) failed = failed || w->view.state == "Error";
-        const std::string summary = "stopped: " + std::to_string(workers_.size()) + " GPU(s), session " +
-                                    std::to_string((supervisorNowMs() - t0) / 1000) + " s";
-        if (tty) printf("%s\n", summary.c_str());
-        else printLine(summary);
+        output_->stopSupervisor(workers_.size(),(supervisorNowMs()-t0)/1000,tty,controlFault||forced||failed);
+        const auto finalOutput=output_->snapshot();
+        controlFault=controlFault||finalOutput.state==ConsoleOutputState::Faulted||!finalOutput.settled;
         if (failed) intent_.stop();
         controlFault=controlFault||!nativeProcessEpochCurrent(nativeEpoch); // late optional-helper settlement cannot erase the original fault epoch
         return controlFault ? kExitFaultLatched : forced ? kExitShutdownForced : failed && !quit && !(opt_.stop && *opt_.stop) ? kExitFaultLatched : kExitOk;
@@ -596,6 +607,7 @@ class Supervisor {
     SessionIntent intent_;
     SessionToken sessionToken_;
     SupervisorSampling sampling_; // declared before fleet_: exceptional destruction revokes workers before joining display I/O
+    std::unique_ptr<ConsoleOutput> output_; // workers/fleet are destroyed before this owner joins; intent outlives it
     std::unique_ptr<PreferencesOwner> preferences_; // destroyed after fleet_, before borrowed intent
     std::unique_ptr<PreferencesSettings> preferencesSettings_;
     std::unique_ptr<WorkerFleet> fleet_; // destroyed before its borrowed intent; retained across child restarts/settings
@@ -607,6 +619,25 @@ class Supervisor {
     bool manualKnown_=true,manualLoaded_=false,electricityKnown_=true;
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
+
+    bool startOutput(){
+        try{
+            const auto module=selfExecutablePath();if(module.empty())return false;
+            const auto helper=std::filesystem::u8path(module).parent_path()/
+#if defined(_WIN32)
+                "canary_preferences_worker.exe";
+#else
+                "canary_preferences_worker";
+#endif
+            ConsoleOutputPolicy policy;
+#if defined(_WIN32)
+            policy.terminalInput=opt_.dashboard&&_isatty(_fileno(stdin))&&_isatty(_fileno(stdout));
+#endif
+            output_=std::make_unique<ConsoleOutput>(helper,intent_,sessionToken_,policy);
+            if(!output_->start())return false;
+            return output_->submit(opt_.dashboard?"\x1b[2J\x1b[?25l":opt_.startupNotice.empty()?"\n":redactor_.apply(opt_.startupNotice));
+        }catch(...){return false;}
+    }
 
     PreferencesSettingsContext preferencesContext()const{
         PreferencesSettingsContext context;context.runtime=opt_.runtimeContext;context.game=opt_.gameContext;context.game.running=true;
@@ -751,8 +782,7 @@ class Supervisor {
     }
 
     void printLine(const std::string &text) {
-        if (!opt_.dashboard) printf("[%s] %s\n", utcClock(time(nullptr)).c_str(), text.c_str());
-        fflush(stdout);
+        if(!opt_.dashboard&&output_)output_->submit("["+utcClock(time(nullptr))+"] "+text+"\n");
     }
 
     /** Starts (or restarts) worker i. A spawn failure counts as an unexpected exit. */
@@ -801,6 +831,7 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        if(output_)output_->requestStop(ConsoleCleanup::SupervisorStopped);
         if(fleet_)fleet_->requestStop();
         sampling_.requestStop();
         if(preferences_)preferences_->requestStop();
@@ -1005,8 +1036,11 @@ class Supervisor {
         if (now < nextFrame_) return;
         nextFrame_ = now + (settings_.visible ? 50 : ui_.refreshMs);
         const DashModel m = buildModel(now, t0);
-        view_.columns = terminalColumns(80);
-        view_.rows = terminalRows(24);
+#if defined(_WIN32)
+        const auto terminal=output_->snapshot();view_.columns=static_cast<int>(terminal.columns);view_.rows=static_cast<int>(terminal.rows);
+#else
+        view_.columns=terminalColumns(80);view_.rows=terminalRows(24);
+#endif
         view_.color = ui_.color ? detectColorLevel() : ColorLevel::None;
         view_.showEvents = ui_.showEvents;
         view_.hideWorker = ui_.hideWorker;
@@ -1020,8 +1054,7 @@ class Supervisor {
             if (ch == '\n') out += "\x1b[K";
             out += ch;
         }
-        printf("\x1b[H%s\x1b[K\x1b[J", out.c_str());
-        fflush(stdout);
+        if(output_)output_->submit("\x1b[H"+out+"\x1b[K\x1b[J",true);
     }
 };
 

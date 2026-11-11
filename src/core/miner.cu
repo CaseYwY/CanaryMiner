@@ -1028,11 +1028,10 @@ int main(int argc, char **argv) {
             so.tuning = gpuTuning.get();
         }
         if (!so.dashboard) {
-            printf("CanaryMiner %s: %zu GPU worker(s), pool %s, worker %s, donation %s\n", CANARY_MINER_VERSION, so.seeds.size(),
-                   so.poolEndpoint.empty() ? "none" : so.poolEndpoint.c_str(), so.worker.c_str(),
-                   donationActive(cfg) ? "on (1% developer donation, mined to the developer's pool)" : "off");
-            printf("Allow about 5 minutes for the hashrate to stabilize.\n");
-            fflush(stdout);
+            so.startupNotice=std::string("CanaryMiner ")+CANARY_MINER_VERSION+": "+std::to_string(so.seeds.size())+
+                " GPU worker(s), pool "+(so.poolEndpoint.empty()?"none":so.poolEndpoint)+", worker "+so.worker+", donation "+
+                (donationActive(cfg)?"on (1% developer donation, mined to the developer's pool)":"off")+
+                "\nAllow about 5 minutes for the hashrate to stabilize.\n";
         }
         Supervisor supervisor(std::move(so));
         const int rc = supervisor.run();

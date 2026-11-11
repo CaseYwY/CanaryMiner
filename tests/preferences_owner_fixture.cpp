@@ -2,6 +2,7 @@
 #include "product/preferences_service.h"
 #include "product/duplex_task_process.h"
 #include "product/startup_config_service.h"
+#include "product/console_output_service.h"
 #include <chrono>
 #include <fstream>
 #include <thread>
@@ -10,7 +11,12 @@
 #endif
 int main(int argc,char **argv){using namespace om;
     try {
-        DuplexTaskChannel channel;if(!channel.adopt(argc,argv))return 2;
+        DuplexTaskChannel channel;
+    if(argc>1&&(std::string(argv[1])=="--local-output-v1"||std::string(argv[1])=="--local-terminal-v1")){
+        if(!channel.adopt(argc,argv,std::string(argv[1])=="--local-terminal-v1"?DuplexTaskOutput::InheritedTerminal:DuplexTaskOutput::InheritedStdout))return 2;
+            return serveConsoleOutput(channel); // preference hold modes must not intercept display output
+        }
+        if(!channel.adopt(argc,argv))return 2;
         PreferencesService service;std::string input,output;size_t sent=0;std::array<std::string,8> targets{};bool first=true;
         const auto hold=[&](){while(channel.parentAlive())std::this_thread::sleep_for(std::chrono::milliseconds(5));};
         while(channel.parentAlive()){

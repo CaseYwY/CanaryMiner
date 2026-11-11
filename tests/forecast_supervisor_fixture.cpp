@@ -1,5 +1,6 @@
 // Native supervisor/terminal with synthetic workers and explicit fixture-only credit setup. No CUDA or pool traffic.
 #include "income_forecast_fixture.h"
+#include "cpu_telemetry_fixture.h"
 #include "product/supervisor.h"
 #include <csignal>
 #include <fstream>
@@ -67,6 +68,7 @@ int main(int argc,char **argv){
     StatsServer workerProbe,apiProbe;std::string error;
     if(!workerProbe.start("127.0.0.1",0,[]{return "{}";},"{}",&error)||!apiProbe.start("127.0.0.1",0,[]{return "{}";},"{}",&error))return 8;
     SupervisorOptions options;options.exe=selfExecutablePath();options.userArgs={"--fixture-child"};options.workerPortBase=workerProbe.port();options.apiPort=apiProbe.port();workerProbe.stop();apiProbe.stop();
+    options.displaySampleFactory=cpu_fixture::statsOnly();
     options.apiEnabled=true;options.dashboard=true;options.drainMs=500;options.version="SYNTHETIC FORECAST OWNER";options.poolEndpoint="fixture.example:1";options.worker="fixture";
     options.stop=&stopping;std::signal(SIGINT,signalStop);std::signal(SIGTERM,signalStop);options.noMarket=mode=="no-market";options.noEnergy=mode=="no-energy";
     WorkerSeed gpu;gpu.index=0;gpu.uuid="GPU-aaaaaaaa-0000-0000-0000-000000000001";gpu.name="SYNTHETIC GPU";options.seeds={gpu};

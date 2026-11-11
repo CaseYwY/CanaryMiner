@@ -299,6 +299,7 @@ void supervisor(){
     for(bool retry:{false,true}){
         volatile sig_atomic_t stop=0;unsigned factories=0;uint64_t revision=0,finishAfter=0;GameWorkerSession *borrowed=nullptr;
         SupervisorOptions o;o.exe=exe.u8string();o.userArgs={"--fleet-child",retry?"restart-once":"normal"};o.apiEnabled=false;o.stop=&stop;o.drainMs=100;
+        o.displaySampleFactory=cpu_fixture::statsOnly();
         WorkerSeed seed;seed.index=0;seed.uuid="fixture.no-device";seed.name="fixture.cpu";o.seeds={seed};
         StatsServer port;std::string error;CHECK(port.start("127.0.0.1",0,[]{return "{}";},"{}",&error));o.workerPortBase=port.port();port.stop();
         o.workerFleetFactory=[&](const SessionIntent &i,SessionToken t){++factories;
@@ -333,6 +334,7 @@ class FleetProbe final:public WorkerFleet {
 void supervisorRefusals(){
     for(unsigned mode=0;mode<6;++mode){volatile sig_atomic_t stop=0;FleetProbeState state;state.lateUnreaped=mode==2||mode==5;state.exitCode=mode==4?1:0;unsigned factories=0;
         SupervisorOptions o;o.exe="must-not-be-executed";o.apiEnabled=false;o.stop=&stop;WorkerSeed seed;seed.uuid="fixture.no-device";o.seeds={seed};
+        o.displaySampleFactory=cpu_fixture::statsOnly();
         o.workerFleetFactory=[&](const SessionIntent &,SessionToken)->std::unique_ptr<WorkerFleet>{++factories;
             if(mode==0)return {};
             if(mode==1||mode==5)stop=1;

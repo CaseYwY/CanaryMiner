@@ -37,6 +37,7 @@ int main(int argc,char **argv){
     StatsServer local;std::string error;if(!local.start("127.0.0.1",0,[]{return "{}";},"{}",&error)){platformShutdown();return 4;}
     std::signal(SIGINT,stopSignal);std::signal(SIGTERM,stopSignal);
     SupervisorOptions options;options.exe=std::filesystem::absolute(std::filesystem::u8path(argv[0])).u8string();options.version="fixture";options.archLabel="CPU SYNTHETIC ONLY";
+    options.displaySampleFactory=cpu_fixture::statsOnly();
     WorkerSeed seed;seed.index=0;seed.uuid="SYNTHETIC-GPU-0";seed.name="inert fixture";options.seeds={seed};
     options.userArgs={"--fixture-child",(dir/"worker-starts").u8string()};options.workerPortBase=local.port();options.apiEnabled=false;options.dashboard=true;options.stop=&stopped;options.drainMs=1000;
     options.noMarket=argc==3&&std::string(argv[2])=="--no-market";

@@ -55,6 +55,13 @@ def main():
             os.write(master, data)
 
         try:
+            # The pending startup screen also has [S]; it is deliberately available before any worker.
+            # Observe this fixture's real child admission instead of racing Q against that early screen.
+            deadline = time.monotonic() + 10
+            while not (root / 'worker-starts').exists():
+                assert child.poll() is None and time.monotonic() < deadline, 'owned synthetic worker admission'
+                if select.select([master], [], [], .05)[0]:
+                    transcript += os.read(master, 65536)
             work(send, until)
             child.wait(timeout=8)
             assert child.returncode == 0
@@ -110,10 +117,8 @@ def main():
 
             def withheld(send, until):
                 nonlocal checks
-                text = until(b'[S]')
+                text = until(b'Current ' if disabled else b'Public and manual market sources both requested')
                 assert b'PUBLIC MARKET REFERENCES' not in text and b'MANUAL/OFFLINE PRICE REFERENCES' not in text
-                if not disabled:
-                    until(b'Public and manual market sources both requested')
                 assert file.read_bytes() == original
                 checks += 2
                 send(b'q')

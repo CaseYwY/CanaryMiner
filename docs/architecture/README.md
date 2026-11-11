@@ -69,6 +69,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Capability | Current scope; exact batch evidence is in [the execution ledger](execution-plan.md) |
 |---|---|
 | S-entry settings, navigation, review/save/discard and idle settings command | Implemented; host/PTY evidence linked above |
+| Live terminal I/O and stop isolation | Ordinary idle/settings/dashboard/plain/startup paths integrated through owned bounded helpers; [P-14z scope and Windows terminal-host limit](../console-io.md), no new opt-in |
 | Display refresh, terminal color, recent events and hiding worker label | Implemented, local presentation preferences only |
 | Durable 24h/7d/30d/all accepted counters | Implemented for observed user-share counters; partial coverage and clock/recovery warnings explicit |
 | Market adapters and native market projection | Offline-tested exact market core/owner/projection; not production-activated or live-qualified |

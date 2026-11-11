@@ -1,4 +1,4 @@
-# Private helper foundation only. Linking/building does not activate a source, settings callback or ordinary runtime owner.
+# Mandatory creation-bound preference/config/console helper. It does not activate optional financial or game sources.
 add_library(canary_preferences_protocol STATIC "${CMAKE_SOURCE_DIR}/src/product/preferences_protocol.cpp")
 target_compile_features(canary_preferences_protocol PUBLIC cxx_std_17)
 target_include_directories(canary_preferences_protocol PUBLIC "${CMAKE_SOURCE_DIR}/src")

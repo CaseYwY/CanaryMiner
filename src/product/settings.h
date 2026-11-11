@@ -359,13 +359,17 @@ class SettingsPanel {
     }
 };
 
-inline void printSettingsFrame(const std::string &text) {
+inline std::string settingsFrameBytes(const std::string &text) {
     std::string out;
     for (char ch : text) {
         if (ch == '\n') out += "\x1b[K";
         out += ch;
     }
-    printf("\x1b[H%s\x1b[K\x1b[J", out.c_str());
+    return "\x1b[H" + out + "\x1b[K\x1b[J";
+}
+
+inline void printSettingsFrame(const std::string &text) {
+    printf("%s", settingsFrameBytes(text).c_str()); // standalone preview only; live entries use ConsoleOutput
     fflush(stdout);
 }
 

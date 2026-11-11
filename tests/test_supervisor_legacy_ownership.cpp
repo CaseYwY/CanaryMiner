@@ -6,7 +6,7 @@
 extern "C" int __real_pidfd_spawn(int *,const char *,const posix_spawn_file_actions_t *,const posix_spawnattr_t *,char *const[],char *const[]);
 extern "C" int __real_waitid(idtype_t,id_t,siginfo_t *,int);
 namespace {
-unsigned spawns=0,numericSignals=0,lateProbes=0;int owned=-1;
+unsigned spawns=0,numericSignals=0,lateProbes=0;std::atomic<int> owned{-1}; // helper waits run on another thread
 bool stolen=false,error=false,lost=false,cancelCreated=false,faultCreated=false;
 volatile sig_atomic_t stop=0;
 om::NativeProcessAdmission foreign;
@@ -14,10 +14,13 @@ class Reader final:public om::DisplaySampleReader {public:om::DisplaySampleReadi
 }
 extern "C" int __wrap_pidfd_spawn(int *fd,const char *path,const posix_spawn_file_actions_t *actions,const posix_spawnattr_t *attributes,char *const argv[],char *const env[]){
     const auto result=__real_pidfd_spawn(fd,path,actions,attributes,argv,env);
-    if(!result){owned=*fd;++spawns;if(cancelCreated)stop=1;if(faultCreated){CHECK(foreign.begin());foreign.markUnresolved();foreign.settled();}}
+    // The console/prefs helpers now share pidfd_spawn. Inject only at the actual ordinary-worker boundary.
+    if(!result&&argv[1]&&std::string(argv[1])=="--ordinary-supervisor-cpu-child"){owned=*fd;++spawns;if(cancelCreated)stop=1;if(faultCreated){CHECK(foreign.begin());foreign.markUnresolved();foreign.settled();}}
     return result;
 }
 extern "C" int __wrap_waitid(idtype_t type,id_t id,siginfo_t *status,int flags){
+    const int worker=owned.load();
+    if(type!=P_PIDFD||worker<0||id!=static_cast<id_t>(worker))return __real_waitid(type,id,status,flags);
     if(lost){++lateProbes;errno=ECHILD;return -1;}
     if(error){lost=true;errno=EINVAL;return -1;}
     const auto result=__real_waitid(type,id,status,flags);
@@ -41,7 +44,7 @@ int main(int argc,char **argv){
     CHECK(spawns==1&&numericSignals==0&&lateProbes==0);
     CHECK(om::nativeProcessUnresolved()==(stolen||error));
     CHECK_MSG("synthetic native faults must not leave the ordinary output reader waiting for EOF",om::supervisorNowMs()-began<12000);
-    if(error&&owned>=0){siginfo_t status{};CHECK(__real_waitid(P_PIDFD,static_cast<id_t>(owned),&status,WEXITED)==0);}
+    if(error&&owned>=0){siginfo_t status{};CHECK(__real_waitid(P_PIDFD,static_cast<id_t>(owned.load()),&status,WEXITED)==0);}
     return finishTests("actual ordinary supervisor native uncertainty/creation-stop/final fault (CPU only)");
 }
 #else

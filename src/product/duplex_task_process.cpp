@@ -122,9 +122,19 @@ struct DuplexTaskProcess::Impl {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));}while(true);
         unreaped();return false;
     }
-    bool launch(const std::filesystem::path &exe,const std::atomic<bool> &cancel){
+    bool launch(const std::filesystem::path &exe,const std::atomic<bool> &cancel,DuplexTaskOutput outputRole){
 #if defined(_WIN32)
-        struct Temps {Native input=invalid,output=invalid,parent=invalid,null=invalid,thread=invalid;~Temps(){closeNative(input);closeNative(output);closeNative(parent);closeNative(null);closeNative(thread);}} child;
+        struct Temps {Native input=invalid,output=invalid,parent=invalid,null=invalid,thread=invalid,display=invalid,keyboard=invalid;~Temps(){closeNative(input);closeNative(output);closeNative(parent);closeNative(null);closeNative(thread);closeNative(display);closeNative(keyboard);}} child;
+        bool console=false;
+        if(outputRole!=DuplexTaskOutput::Discard){
+            const auto display=GetStdHandle(STD_OUTPUT_HANDLE);DWORD mode=0;
+            if(!display||display==invalid||!DuplicateHandle(GetCurrentProcess(),display,GetCurrentProcess(),&child.display,0,TRUE,DUPLICATE_SAME_ACCESS))return false;
+            console=GetConsoleMode(child.display,&mode)!=0; // console children must share the existing console, never CREATE_NO_WINDOW
+            if(outputRole==DuplexTaskOutput::InheritedTerminal){
+                const auto keyboard=GetStdHandle(STD_INPUT_HANDLE);
+                if(!console||!keyboard||keyboard==invalid||!DuplicateHandle(GetCurrentProcess(),keyboard,GetCurrentProcess(),&child.keyboard,0,TRUE,DUPLICATE_SAME_ACCESS)||!GetConsoleMode(child.keyboard,&mode))return false;
+            }
+        }
         SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};
         if(!CreatePipe(&child.input,&channel.output,&sa,8192)||!CreatePipe(&channel.input,&child.output,&sa,8192))return false;
         bool ready=inherit(channel.input,false)&&inherit(channel.output,false)&&nonblocking(channel.input)&&nonblocking(channel.output)&&nonblocking(child.input)&&nonblocking(child.output);
@@ -135,21 +145,29 @@ struct DuplexTaskProcess::Impl {
         SIZE_T size=0;InitializeProcThreadAttributeList(nullptr,1,0,&size);std::vector<unsigned char> storage(size);auto *attributes=reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
         const bool initialized=ready&&InitializeProcThreadAttributeList(attributes,1,0,&size);
         struct AttributeCleanup {LPPROC_THREAD_ATTRIBUTE_LIST value;~AttributeCleanup(){if(value)DeleteProcThreadAttributeList(value);}} cleanup{initialized?attributes:nullptr};
-        Native handles[]={child.input,child.output,child.parent,child.null};ready=initialized&&UpdateProcThreadAttribute(attributes,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,handles,sizeof(handles),nullptr,nullptr);
-        std::wstring command=L"\""+exe.wstring()+L"\" --local-stream-v1 "+std::to_wstring(reinterpret_cast<uintptr_t>(child.input))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(child.output))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(child.parent));
+        Native handles[]={child.input,child.output,child.parent,child.null,child.display,child.keyboard};const SIZE_T handleBytes=(outputRole==DuplexTaskOutput::InheritedTerminal?6u:outputRole==DuplexTaskOutput::InheritedStdout?5u:4u)*sizeof(Native);
+        ready=initialized&&UpdateProcThreadAttribute(attributes,0,PROC_THREAD_ATTRIBUTE_HANDLE_LIST,handles,handleBytes,nullptr,nullptr);
+        const auto flag=outputRole==DuplexTaskOutput::InheritedTerminal?L" --local-terminal-v1 ":outputRole==DuplexTaskOutput::InheritedStdout?L" --local-output-v1 ":L" --local-stream-v1 ";
+        std::wstring command=L"\""+exe.wstring()+L"\""+flag+std::to_wstring(reinterpret_cast<uintptr_t>(child.input))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(child.output))+L" "+std::to_wstring(reinterpret_cast<uintptr_t>(child.parent));
         std::vector<wchar_t> words(command.begin(),command.end());words.push_back(0);wchar_t directory[32768]{};const auto n=GetWindowsDirectoryW(directory,32768);if(!n||n>=32768)ready=false;
         std::wstring environment=L"SystemRoot=";environment+=directory;environment.push_back(0);environment.push_back(0);const auto parent=exe.parent_path().wstring();
         STARTUPINFOEXW startup{};startup.StartupInfo.cb=sizeof(startup);startup.StartupInfo.dwFlags=STARTF_USESTDHANDLES;startup.StartupInfo.hStdInput=startup.StartupInfo.hStdOutput=startup.StartupInfo.hStdError=child.null;startup.lpAttributeList=attributes;
-        PROCESS_INFORMATION pi{};const bool created=ready&&!cancel.load()&&admission.permitted()&&CreateProcessW(exe.c_str(),words.data(),nullptr,nullptr,TRUE,EXTENDED_STARTUPINFO_PRESENT|CREATE_UNICODE_ENVIRONMENT|CREATE_NO_WINDOW|CREATE_SUSPENDED,environment.data(),parent.c_str(),&startup.StartupInfo,&pi);
+        if(outputRole!=DuplexTaskOutput::Discard)startup.StartupInfo.hStdOutput=child.display;
+        if(outputRole==DuplexTaskOutput::InheritedTerminal)startup.StartupInfo.hStdInput=child.keyboard;
+        const DWORD flags=EXTENDED_STARTUPINFO_PRESENT|CREATE_UNICODE_ENVIRONMENT|CREATE_SUSPENDED|(console?CREATE_NEW_PROCESS_GROUP:CREATE_NO_WINDOW);
+        PROCESS_INFORMATION pi{};const bool created=ready&&!cancel.load()&&admission.permitted()&&CreateProcessW(exe.c_str(),words.data(),nullptr,nullptr,TRUE,flags,environment.data(),parent.c_str(),&startup.StartupInfo,&pi);
         if(!created)return false;
         process=pi.hProcess;child.thread=pi.hThread;owned=true;jobBound=AssignProcessToJobObject(job,process)!=0;
         return jobBound&&!cancel.load()&&admission.permitted()&&ResumeThread(child.thread)!=static_cast<DWORD>(-1);
 #else
+        if(outputRole==DuplexTaskOutput::InheritedTerminal)return false; // Linux retains its existing nonblocking termios reader
         struct sigaction policy{};if(sigaction(SIGCHLD,nullptr,&policy)||policy.sa_handler!=SIG_DFL||(policy.sa_flags&SA_NOCLDWAIT))return false;
 #if !defined(OM_DUPLEX_PIDFD_SPAWN) || !defined(SYS_pidfd_send_signal)
         return false;
 #endif
-        struct Pipes {int pair[2]={-1,-1},child=-1;~Pipes(){for(int fd:{pair[0],pair[1],child})if(fd>=0)::close(fd);}} pipe;
+        struct Pipes {int pair[2]={-1,-1},child=-1,display=-1;~Pipes(){for(int fd:{pair[0],pair[1],child,display})if(fd>=0)::close(fd);}} pipe;
+        // Freeze before creating IPC descriptors; a closed stdout must never become the private socket.
+        if(outputRole==DuplexTaskOutput::InheritedStdout){pipe.display=fcntl(STDOUT_FILENO,F_DUPFD_CLOEXEC,4);if(pipe.display<0)return false;}
         if(socketpair(AF_UNIX,SOCK_STREAM|SOCK_CLOEXEC,0,pipe.pair))return false;
         pipe.child=fcntl(pipe.pair[1],F_DUPFD_CLOEXEC,4);closeNative(pipe.pair[1]);channel.input=channel.output=pipe.pair[0];pipe.pair[0]=-1;
         if(pipe.child<0||!nonblocking(channel.input)||!nonblocking(pipe.child))return false;
@@ -159,7 +177,8 @@ struct DuplexTaskProcess::Impl {
         setup.actionsReady=true;
         if(posix_spawnattr_init(&setup.attributes))return false;
         setup.attributesReady=true;
-        bool ready=posix_spawn_file_actions_addopen(&setup.actions,0,"/dev/null",O_RDONLY,0)==0&&posix_spawn_file_actions_addopen(&setup.actions,1,"/dev/null",O_WRONLY,0)==0&&
+        bool ready=posix_spawn_file_actions_addopen(&setup.actions,0,"/dev/null",O_RDONLY,0)==0&&
+            (outputRole==DuplexTaskOutput::InheritedStdout?posix_spawn_file_actions_adddup2(&setup.actions,pipe.display,1):posix_spawn_file_actions_addopen(&setup.actions,1,"/dev/null",O_WRONLY,0))==0&&
             posix_spawn_file_actions_addopen(&setup.actions,2,"/dev/null",O_WRONLY,0)==0&&posix_spawn_file_actions_adddup2(&setup.actions,pipe.child,3)==0;
 #if defined(OM_DUPLEX_PIDFD_SPAWN)
         ready=ready&&posix_spawn_file_actions_addclosefrom_np(&setup.actions,4)==0;
@@ -167,7 +186,8 @@ struct DuplexTaskProcess::Impl {
         sigset_t mask,defaults;sigemptyset(&mask);sigemptyset(&defaults);for(int sig:{SIGPIPE,SIGINT,SIGTERM})sigaddset(&defaults,sig);
         ready=ready&&posix_spawnattr_setflags(&setup.attributes,POSIX_SPAWN_SETPGROUP|POSIX_SPAWN_SETSIGMASK|POSIX_SPAWN_SETSIGDEF)==0&&
             posix_spawnattr_setpgroup(&setup.attributes,0)==0&&posix_spawnattr_setsigmask(&setup.attributes,&mask)==0&&posix_spawnattr_setsigdefault(&setup.attributes,&defaults)==0;
-        auto executable=exe.string(),parent=std::to_string(getpid());char flag[]="--local-stream-v1",fd[]="3",lang[]="LANG=C",locale[]="LC_ALL=C";
+        auto executable=exe.string(),parent=std::to_string(getpid());char streamFlag[]="--local-stream-v1",outputFlag[]="--local-output-v1",fd[]="3",lang[]="LANG=C",locale[]="LC_ALL=C";
+        char *flag=outputRole==DuplexTaskOutput::InheritedStdout?outputFlag:streamFlag;
         char *argv[]={executable.data(),flag,fd,fd,parent.data(),nullptr};char *environment[]={lang,locale,nullptr};
 #if defined(OM_DUPLEX_PIDFD_SPAWN)
         const int result=ready&&!cancel.load()&&admission.permitted()?pidfd_spawn(&pidfd,executable.c_str(),&setup.actions,&setup.attributes,argv,environment):-1;
@@ -181,10 +201,12 @@ struct DuplexTaskProcess::Impl {
 DuplexTaskProcess::DuplexTaskProcess():impl_(new Impl){}
 DuplexTaskProcess::~DuplexTaskProcess(){if(!impl_->stop(250)){std::lock_guard<std::mutex> lock(Impl::mutex());Impl::quarantine().push_back(impl_.release());}
     else{std::lock_guard<std::mutex> lock(Impl::mutex());impl_.reset();}}
-bool DuplexTaskProcess::start(const std::filesystem::path &exe,const std::atomic<bool> &cancel){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+bool DuplexTaskProcess::start(const std::filesystem::path &exe,const std::atomic<bool> &cancel){return start(exe,cancel,DuplexTaskOutput::Discard);}
+bool DuplexTaskProcess::start(const std::filesystem::path &exe,const std::atomic<bool> &cancel,DuplexTaskOutput outputRole){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;
+    if(outputRole!=DuplexTaskOutput::Discard&&outputRole!=DuplexTaskOutput::InheritedStdout&&outputRole!=DuplexTaskOutput::InheritedTerminal){p.state=S::Failed;return false;}
     if(cancel.load()){p.state=S::Stopped;return false;}
     try{if(!localTaskPath(exe)||!Impl::reserve(&p)){p.state=nativeProcessUnresolved()?S::Unreaped:S::Failed;return false;}p.reserved=true;
-        if(!p.launch(exe,cancel)||cancel.load()||!p.admission.permitted()){p.state=S::Failed;p.stop(250);return false;}p.state=S::Running;return true;}catch(...){p.state=S::Failed;p.stop(250);return false;}}
+        if(!p.launch(exe,cancel,outputRole)||cancel.load()||!p.admission.permitted()){p.state=S::Failed;p.stop(250);return false;}p.state=S::Running;return true;}catch(...){p.state=S::Failed;p.stop(250);return false;}}
 bool DuplexTaskProcess::send(const std::string &wire){auto &p=*impl_;if(p.state!=S::Running||!p.admission.permitted()||!p.pending.empty()||wire.empty()||wire.size()>duplexTaskFrameLimit)return false;p.pending=wire;p.offset=0;return true;}
 DuplexTaskPoll DuplexTaskProcess::poll(){auto &p=*impl_;DuplexTaskPoll out;
     if(p.state==S::Running&&!p.admission.permitted()){p.fault=true;p.channel.close();p.state=S::Failed;}
@@ -199,7 +221,7 @@ DuplexTaskPoll DuplexTaskProcess::poll(){auto &p=*impl_;DuplexTaskPoll out;
 }
 void DuplexTaskProcess::requestStop(){auto &p=*impl_;p.attempted=true;p.channel.close();if(p.state!=S::Exited&&p.state!=S::Unreaped)p.state=S::Stopped;}
 bool DuplexTaskProcess::terminate(unsigned ms){requestStop();return impl_->stop(ms);}
-struct DuplexTaskChannel::Impl {duplex_task_detail::Channel channel;bool attempted=false;
+struct DuplexTaskChannel::Impl {duplex_task_detail::Channel channel;bool attempted=false;DuplexTaskOutput role=DuplexTaskOutput::Discard;
 #if defined(_WIN32)
     Native parent=invalid;~Impl(){closeNative(parent);}bool alive()const{return parent!=invalid&&WaitForSingleObject(parent,0)==WAIT_TIMEOUT;}
 #else
@@ -207,8 +229,11 @@ struct DuplexTaskChannel::Impl {duplex_task_detail::Channel channel;bool attempt
 #endif
 };
 DuplexTaskChannel::DuplexTaskChannel():impl_(new Impl){}DuplexTaskChannel::~DuplexTaskChannel()=default;
-bool DuplexTaskChannel::adopt(int argc,char **argv){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;uint64_t input=0,output=0,parent=0;
-    if(argc!=5||std::string(argv[1])!="--local-stream-v1"||!integer(argv[2],input)||!integer(argv[3],output)||!integer(argv[4],parent))return false;
+bool DuplexTaskChannel::adopt(int argc,char **argv){return adopt(argc,argv,DuplexTaskOutput::Discard);}
+bool DuplexTaskChannel::adopt(int argc,char **argv,DuplexTaskOutput outputRole){auto &p=*impl_;if(p.attempted)return false;p.attempted=true;uint64_t input=0,output=0,parent=0;
+    if(outputRole!=DuplexTaskOutput::Discard&&outputRole!=DuplexTaskOutput::InheritedStdout&&outputRole!=DuplexTaskOutput::InheritedTerminal)return false;
+    const auto flag=outputRole==DuplexTaskOutput::InheritedTerminal?"--local-terminal-v1":outputRole==DuplexTaskOutput::InheritedStdout?"--local-output-v1":"--local-stream-v1";
+    if(argc!=5||std::string(argv[1])!=flag||!integer(argv[2],input)||!integer(argv[3],output)||!integer(argv[4],parent))return false;
 #if defined(_WIN32)
     if(input>UINTPTR_MAX||output>UINTPTR_MAX||parent>UINTPTR_MAX||input==output||input==parent||output==parent)return false;
     auto r=reinterpret_cast<Native>(static_cast<uintptr_t>(input)),w=reinterpret_cast<Native>(static_cast<uintptr_t>(output)),h=reinterpret_cast<Native>(static_cast<uintptr_t>(parent));
@@ -217,14 +242,16 @@ bool DuplexTaskChannel::adopt(int argc,char **argv){auto &p=*impl_;if(p.attempte
         !GetNamedPipeHandleStateW(r,&rs,nullptr,nullptr,nullptr,nullptr,0)||!GetNamedPipeHandleStateW(w,&ws,nullptr,nullptr,nullptr,nullptr,0)||!(rs&PIPE_NOWAIT)||!(ws&PIPE_NOWAIT)||!IsProcessInJob(GetCurrentProcess(),nullptr,&job)||!job)return false;
     p.channel.input=r;p.channel.output=w;p.parent=h;if(!inherit(r,false)||!inherit(w,false)||!inherit(h,false))return false;
 #else
+    if(outputRole==DuplexTaskOutput::InheritedTerminal)return false;
     if(input!=3||output!=3||parent>UINT32_MAX||static_cast<uint64_t>(getppid())!=parent)return false;
     ucred peer{};socklen_t size=sizeof(peer);int type=0;socklen_t typeSize=sizeof(type);
     if(getsockopt(3,SOL_SOCKET,SO_PEERCRED,&peer,&size)||size!=sizeof(peer)||peer.pid!=getppid()||peer.uid!=getuid()||getsockopt(3,SOL_SOCKET,SO_TYPE,&type,&typeSize)||type!=SOCK_STREAM||
         prctl(PR_SET_PDEATHSIG,SIGKILL)||static_cast<uint64_t>(getppid())!=parent||fcntl(3,F_SETFD,FD_CLOEXEC)||!nonblocking(3))return false;
     p.channel.input=p.channel.output=3;p.parent=static_cast<pid_t>(parent);
 #endif
-    return true;
+    p.role=outputRole;return true;
 }
+DuplexTaskOutput DuplexTaskChannel::outputRole()const{return impl_->role;}
 bool DuplexTaskChannel::parentAlive()const{return impl_->alive();}
 uint64_t DuplexTaskChannel::parentId()const{
 #if defined(_WIN32)

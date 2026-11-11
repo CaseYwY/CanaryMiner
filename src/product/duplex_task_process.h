@@ -4,6 +4,7 @@
 namespace om {
 constexpr std::size_t duplexTaskFrameLimit=localTaskRequestLimit+264;
 enum class DuplexTaskState { Dormant, Running, Exited, Failed, Stopped, Unreaped };
+enum class DuplexTaskOutput { Discard, InheritedStdout, InheritedTerminal }; // creation-bound stdio; terminal input is Windows-only
 struct DuplexTaskPoll {
     DuplexTaskState state=DuplexTaskState::Dormant;
     bool flushed=false,eof=false;
@@ -16,6 +17,7 @@ class DuplexTaskProcess {
     DuplexTaskProcess();~DuplexTaskProcess();
     DuplexTaskProcess(const DuplexTaskProcess &)=delete;DuplexTaskProcess &operator=(const DuplexTaskProcess &)=delete;
     bool start(const std::filesystem::path &,const std::atomic<bool> &cancel);
+    bool start(const std::filesystem::path &,const std::atomic<bool> &cancel,DuplexTaskOutput);
     bool send(const std::string &); // one immutable queued frame, never replaces a partial write
     DuplexTaskPoll poll(); // <= one 4096-byte read/write and native wait(0); no readiness wait
     void requestStop();
@@ -30,6 +32,8 @@ class DuplexTaskChannel {
     DuplexTaskChannel();~DuplexTaskChannel();
     DuplexTaskChannel(const DuplexTaskChannel &)=delete;DuplexTaskChannel &operator=(const DuplexTaskChannel &)=delete;
     bool adopt(int argc,char **argv); // --local-stream-v1 plus inherited numeric handles/PID only
+    bool adopt(int argc,char **argv,DuplexTaskOutput); // distinct output/Windows-terminal roles; no file-service authority
+    DuplexTaskOutput outputRole()const;
     bool parentAlive()const;
     uint64_t parentId()const;
     DuplexTaskBytes receive(char *,std::size_t);

@@ -31,6 +31,8 @@ Restricted optional helper -> owned hardware controls only (separate opt-in)
 
 Owns pure rendering, keyboard context/focus, staged edits and read-only presentation snapshots. Current anchors are `dashboard.h`, `settings.h`, `terminal_keys.h` and `status_view.h`. It never fetches prices, tunes a GPU, runs a benchmark or mutates the income ledger directly.
 
+[P-14z live terminal I/O](../console-io.md) queues ordinary idle/dashboard/settings/plain output through a fixed-role owned helper instead of native console writes on the control loop. Windows keys/geometry are also helper-owned; its fixed finalizer is prepared before display pressure. Original ticket/deadline/epoch, bounded queues and no fallback/replay survive Stop. Fixed cleanup after worker drain cannot disclose old private frames. Native write acceptance is not visual proof; Windows application-return/child-retirement evidence is distinct from CRT/OS terminal exit.
+
 ### M-CONFIG
 
 [P-14y closed CLI refusals](../cli-error-privacy.md) uses fixed errors at the unknown-command/tuning, malformed-pool and unknown-legacy-option sites, before device admission. The shared pool parser's diagnostic now omits the original too; acceptance/output/exit/strict-TLS semantics remain authoritative. This is not a generic raw-output sanitizer, private preview or source/collection capability.

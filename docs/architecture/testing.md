@@ -4,6 +4,10 @@ All fixtures are synthetic. Acceptance specifications are not passing runtime ev
 
 ## T-UI
 
+[P-14z](../console-io.md) reproduces retained native stdout writes through actual idle and Supervisor paths, then tests memory-only stop, child retirement, exact output/order/coalescing, inherited-role/descriptor limits, timeout/fault/no-retry and fixed sibling admission. Linux observes fd-1 write barriers before Q/SIGINT and requires actual exit before output release. Owned Windows headless ConPTY tests separate explicit actual application-return receipts and worker/helper retirement from later CRT/OS/terminal-host exit; unobserved input permits safe refusal 3/8, not fabricated intentional-stop success. Healthy footers, one worker start, redaction and unchanged originals remain required. CPU tests do not qualify physical consoles or hard native/kernel/callback deadlines.
+
+CPU Supervisor fixtures must explicitly inject their stats-only/no-I/O reader; a loader macro around inline production telemetry is not isolation across translation units. An expanded forecast sanitizer run actually loaded WSL CUDA/NVML and failed; it is retained as an isolation failure, not no-driver or real-device qualification. The corrected Linux affected fixture links also reject driver `dlopen` before loading, with a dedicated self-load/seven-refusal control. This test-only backstop and explicit Windows reader injection do not modify production telemetry or authorize real probes; see P-14z for final guarded evidence and sanitizer limits.
+
 Test S entry, all keyboard contexts, focus, supported edit/toggle/select, review/save/discard, idle/no-mining command and redirected rejection. Verify D/L page switches and disabled shortcuts, active-page fallback, each Details field, Log threshold/row limit/time/follow display and continued pipe draining. Verify resize/short/no-color/plain and explicit unavailable/stale/coverage labels. Net row is absent without electricity; valuation is never called sold proceeds/current holdings.
 
 ## T-CONFIG

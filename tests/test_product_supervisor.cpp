@@ -138,6 +138,7 @@ SupervisorOptions baseOptions() {
     o.donationOn = true;
     o.donationDestinationConfigured = true;
     o.apiEnabled = false;
+    o.displaySampleFactory = cpu_fixture::statsOnly();
     return o;
 }
 
@@ -688,7 +689,7 @@ void testChildPipes() {
     crasher.joinReader();
 }
 
-/** Runs the supervisor over `workers` fake workers and stops it after `stopAfterMs` unless it ends first. */
+/** Stops long-lived fake workers after `stopAfterMs` of observed admission, not helper startup. */
 int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_t stopAfterMs, SupervisorTuning *tuning = nullptr, EnergyCaptureFactory capture = {}, bool noEnergy = false, EnergyRuntimeFactory runtime = {}, ForecastSinkFactory forecast = {}, BillingReviewAccess billing = {}, MarketReferenceFactory market = {}, bool noMarket = false, bool dashboard = false) {
     volatile sig_atomic_t stop = 0;
     SupervisorOptions o = baseOptions();
@@ -705,8 +706,22 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     o.forecastFactory=std::move(forecast);
     o.billingReviewAccess=std::move(billing);
     o.marketReferenceFactory=std::move(market);o.noMarket=noMarket;
-    std::atomic<bool> finished{false};
+    std::atomic<bool> finished{false},admitted{false};
+    class Reader final:public DisplaySampleReader {public:
+        DisplaySampleReading read(size_t,const std::atomic<bool> &)override{
+            DisplaySampleReading out;out.statsObserved=out.powerBegan=out.powerFinished=displaySampleTime();return out;
+        }
+    };
+    o.displaySampleFactory=[&](const std::vector<DisplaySampleTarget> &)->std::unique_ptr<DisplaySampleReader>{
+        admitted=true;return std::make_unique<Reader>(); // actual post-worker sampling request; no sensor/network I/O
+    };
+    const bool awaitAdmission=!userArgs.empty()&&(userArgs.front()==kFakeChild||userArgs.front()==kFakeHang);
+    bool admissionTimedOut=false;
     std::thread timer([&] {
+        const auto until=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        while(awaitAdmission&&!admitted.load()&&!finished.load()&&std::chrono::steady_clock::now()<until)
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        if(awaitAdmission&&!admitted.load()&&!finished.load()){admissionTimedOut=true;stop=1;return;}
         for (uint64_t t = 0; t < stopAfterMs / 20 && !finished.load(); ++t) std::this_thread::sleep_for(std::chrono::milliseconds(20));
         stop = 1;
     });
@@ -714,6 +729,7 @@ int supervisedRun(const std::vector<std::string> &userArgs, int workers, uint64_
     const int rc = sup.run();
     finished = true;
     timer.join();
+    CHECK(!admissionTimedOut);
     return rc;
 }
 
