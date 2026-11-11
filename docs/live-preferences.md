@@ -1,0 +1,35 @@
+# Asynchronous native live-settings binding (P-14r)
+
+M-CONFIG/M-PRIVACY/M-SUPERVISOR; R-UI-007, R-SAFE-001/002, R-PRIV-001/002; T-CONFIG/T-INTENT/T-PRIVACY; D-175.
+
+The ordinary dashboard now uses the [background preference owner](preferences-owner.md) for all eight **live** settings Load/Save paths. This is a real native binding, not a default-off factory seam. No preference Store is retained by the live supervisor, no synchronous live fallback is provided, and absence/failure of the helper never becomes a successful Save.
+
+## Admission is not Saved
+
+`PreferencesSettings` adapts the existing native state machines without turning their Boolean Save callbacks into queue receipts. A callback queues an immutable canonical document and returns false with an explicit **QUEUED / NOT Saved** notice. Edits/navigation are held while that ticket is pending; Q/Ctrl+C remains a stop, and Esc cancels the optional preference owner for this session rather than joining it on the control loop. Only the exact owner-confirmed Saved receipt publishes the new panel baseline and existing Saved notice. Confirmed UI settings affect presentation; runtime/game/pool/language/electricity declarations retain their existing next-session/frozen-current semantics. Opening/saving one subpanel does not discard the unrelated root UI draft.
+
+Manual reference confirmation, electricity confirmation and tariff confirmation retain the original submission UTC. The existing pure manual display factory is prepared at that original UTC/monotonic anchor **before** queue admission; acknowledgement never reconstructs it at a later clock or renews reference freshness. Frozen public/manual source conflict and CLI suppression still win. Possible failed/lost acknowledgements never apply a speculative manual projection or other current setting.
+
+The completion bridge prepares an entire replacement panel and completion object before publication. Failed allocation retains the pending receipt/draft for another memory poll, not a new Save. No-throw moves publish already-prepared panel/context/manual values. Encoder/admission failures do not escape the keyboard action or consume a healthy review; this is exception containment, not a hard allocation/scheduling latency guarantee.
+
+The enclosing bridge checks the owner's **denial-only** foreign-caller classification before changing its own ticket/cache, editing a panel, calling the manual factory, accepting Quit or rendering private review. A denied Stopped-shaped snapshot is not evidence the healthy newer owner really stopped. This distinction prevents an old scope from orphaning a valid pending reply even though the owner itself correctly refused consumption. Current-authority checks remain with the original owner; the classification is not a positive permission.
+
+## Private Unknown inspection, never automatic replay
+
+Unknown outcomes retain the exact canonical requested document in parent memory. The overlay hides private documents by default. R reveals locally, Tab switches between original request and freshly loaded **current parsed canonical values**, and arrows/page keys scroll reversible byte escapes without truncating a document. These are not raw on-disk formatting bytes, filesystem backup exports or permission to share terminal captures.
+
+I explicitly requests a same-kind inspection. Space/Enter can accept the inspected current values as a new editable baseline only after both previews reach their end and the operator explicitly acknowledges. This is a UI gate, **not proof a human read or understood every byte**. It never resubmits the original, resolves its historical outcome, deletes/repairs a file or changes an unknown write into Saved. A faulted/stopped owner cannot inspect/restart itself; preserved originals can still be viewed locally, and file inspection must wait for a separate explicit idle/new-session action. No durable pending-original journal or crash/relaunch recovery is supplied by this slice.
+
+## Native lifetime and build layout
+
+The dashboard resolves only the fixed `canary_preferences_worker[.exe]` sibling of the OS-reported actual executable module. It never guesses from argv[0], worker executable options, PATH, an arbitrary command line or an environment override, and never probes alternate executable locations. Target slots retain the configured independent filenames, including the pre-existing tariff target next to electricity preferences. Init opens none of them. The owner is not constructed in plain/no-dashboard mode or after an already-requested stop.
+
+`beginStop()` revokes intent and requests preference cancellation before worker drain. The optional helper thread joins only after worker settlement; exceptional destruction also destroys the fleet before joining the optional owner. Global native ownership uncertainty still faults the original supervisor epoch. Merely reaping the helper does not renew that epoch or authorize restart.
+
+CMake links the parent owner and installs/builds the fixed CPU helper beside the miner. The legacy native recipe adds only host preference/transport objects plus a separate CPU helper link; kernel translation units/flags/seeds and `--only` remain unchanged. Recipe tests are command-construction evidence, **not** an nvcc/SASS, installed-package or production qualification. Existing idle `settings` and initial UI/manual/electricity bootstrap reads remain synchronous and explicitly outside this live-path claim; startup isolation is subsequent work. Console rendering/output, native stalls, physical storage, real source/device/game/miner, comprehensive privacy/vault and release gates remain open.
+
+The archive release scripts still describe the legacy single-miner-binary layout; they are not run or release-qualified here. Their required-helper inclusion/privacy/dependency checks and the native Linux capability floor must be updated and tested with owned synthetic packaging inputs before a later release gate. Do not treat the component install or fake build-recipe tests as an archive/deployment approval.
+
+Build reference: [CMake 3.31.12 install documentation](https://github.com/kitware/cmake/blob/v3.31.12/Help/command/install.rst). An explicitly launched sibling executable needs its own `install(TARGETS ...)` entry/component; a build dependency or runtime-library scan alone does not install a build-tree helper executable.
+
+Executed evidence is recorded in the [architecture ledger](architecture/execution-plan.md): Windows default-off full CTest **453/453**; fresh Linux ordinary/own-code ASan+UBSan **eight scenarios / 221 checks** per profile, thirteen native consumers, actual inert CLI checks and ten ordinary POSIX PTY suites. The Linux driver verifies one unchanged fingerprint over all 864 source inputs before and after execution; interrupted duplicate-output builds are explicitly discarded. Owned CPU/native/PTY tests cannot qualify real hardware or genuine kernel/disk stalls.

@@ -29,7 +29,10 @@ TUS=[('miner','src/core/miner.cu'),('registry','src/core/registry.cu'),('pearl_a
 idx={n:i for i,(n,_) in enumerate(TUS)}
 if a.only: TUS=[t for t in TUS if t[0]=='pearl_algo']
 else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market','src/product/manual_market.cpp'),('energy_owner','src/product/energy_owner.cpp'),
-              ('civil_time','src/product/civil_time.cpp'),('electricity','src/product/electricity.cpp'),('tariff_declaration','src/product/tariff_declaration.cpp')]
+              ('civil_time','src/product/civil_time.cpp'),('electricity','src/product/electricity.cpp'),('tariff_declaration','src/product/tariff_declaration.cpp'),
+              ('preferences_protocol','src/product/preferences_protocol.cpp'),('preferences_document','src/product/preferences_document.cpp'),
+              ('preferences_owner','src/product/preferences_owner.cpp'),('local_task_process','src/product/local_task_process.cpp'),('duplex_task_process','src/product/duplex_task_process.cpp')]
+HELPER_TUS=[] if a.only else [('preferences_service','src/product/preferences_service.cpp'),('preferences_worker','src/product/preferences_worker.cpp')]
 out.mkdir(parents=True,exist_ok=True)
 env=dict(os.environ,PATH=str(T/'bin')+os.pathsep+os.environ['PATH'])
 def comp(t):
@@ -38,13 +41,13 @@ def comp(t):
         argv=[NVCC,'-c','-x','cu',*flags,'--std=c++17','-lineinfo','-ccbin=/usr/bin/g++',*inc,*extra,
               *['-D'+d for d in defs],'--frandom-seed='+seeds[idx[name]],str(src/rel),'-o',str(o)]
     else:
-        # Pure host arithmetic/projector; no CUDA preprocessing or optional HTTPS backend is needed.
+        # Host arithmetic/projector/private preferences; no CUDA preprocessing or optional HTTPS backend is needed.
         argv=['/usr/bin/g++','-c','-O3','-std=c++17','-Wall','-Wformat','-Werror=format','-pthread',*inc,
               str(src/rel),'-o',str(o)]
     r=subprocess.run(argv,cwd=src,capture_output=True,text=True,env=env)
     (out/(name+'.log')).write_text(' '.join(argv)+'\n'+r.stdout+r.stderr)
     return name,r.returncode,(hashlib.sha256(o.read_bytes()).hexdigest() if r.returncode==0 else r.stderr[-1500:])
-with cf.ThreadPoolExecutor(a.jobs) as ex: res=list(ex.map(comp,TUS))
+with cf.ThreadPoolExecutor(a.jobs) as ex: res=list(ex.map(comp,TUS+HELPER_TUS))
 for n,rc,h in res: print(n,rc,h if rc else h[:16])
 if any(r[1] for r in res): sys.exit(1)
 if not a.only:
@@ -52,3 +55,7 @@ if not a.only:
     r=subprocess.run(link,cwd=src,capture_output=True,text=True,env=env); (out/'link.log').write_text(' '.join(link)+r.stdout+r.stderr)
     if r.returncode: sys.exit(r.stderr[-800:])
     d=(out/'canary-miner'); print('native sha256',hashlib.sha256(d.read_bytes()).hexdigest(),d.stat().st_size)
+    helper_units=['preferences_worker','preferences_service','preferences_protocol','local_task_process','duplex_task_process','exact_decimal','manual_market','energy_owner','civil_time','electricity','tariff_declaration']
+    helper_link=['/usr/bin/g++','-std=c++17','-pthread',*[str(out/(n+'.o')) for n in helper_units],'-ldl','-o',str(out/'canary_preferences_worker')]
+    r=subprocess.run(helper_link,cwd=src,capture_output=True,text=True,env=env); (out/'preferences-link.log').write_text(' '.join(helper_link)+r.stdout+r.stderr)
+    if r.returncode: sys.exit(r.stderr[-800:])

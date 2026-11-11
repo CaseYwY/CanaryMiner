@@ -148,6 +148,7 @@ bool PreferencesOwner::acknowledgeInspection(PreferencesKind kind,uint64_t revie
     s.view.acknowledgedUnknown=s.view.uncertain;s.view.uncertain.reset();s.view.inspectionReview=0;s.view.state=PreferencesOwnerState::Ready;return true;
 }
 PreferencesOwnerSnapshot PreferencesOwner::snapshot()const{auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(s.foreign())return s.denied;s.current();return s.view;}
+bool PreferencesOwner::foreignCaller()const{auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);return s.foreign();}
 void PreferencesOwner::requestStop(){auto &s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);if(s.foreign())return;s.revoke(PreferencesOwnerState::Stopped);}
 void PreferencesOwner::stop(){auto &s=*impl_;std::lock_guard<std::mutex> lifecycle(s.lifecycle);{std::lock_guard<std::mutex> lock(s.mutex);if(s.foreign())return;s.revoke(PreferencesOwnerState::Stopped);}if(s.thread.joinable())s.thread.join();}
 } // namespace om

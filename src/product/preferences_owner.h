@@ -35,6 +35,7 @@ class PreferencesOwner {
     // Explicit operator acknowledgement AFTER a fresh same-kind Load and complete unknown/current review.
     // Clears the block, not the historical unknown outcome; never retries or writes anything.
     bool acknowledgeInspection(PreferencesKind,uint64_t loadedReview);
+    bool foreignCaller()const; // denial classification only; does not establish current authority or mutate a healthy owner
     PreferencesOwnerSnapshot snapshot()const; // memory revocation only; no clock, I/O, callback, join or C++ new
     void requestStop(); // memory-only before worker drain; preserves an issued possible write
     void stop(); // after worker drain; joins this owner's thread, not a UI/render callback or hard native bound

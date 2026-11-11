@@ -28,7 +28,9 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                 '-include', 'tests/pearl_cli_stubs/cuda_stub.h', 'src/core/miner.cu',
                 'src/core/registry.cu', 'tests/test_pearl_cli_stubs.cpp', 'src/product/exact_decimal.cpp',
                 'src/product/manual_market.cpp', 'src/product/energy_owner.cpp', 'src/product/civil_time.cpp',
-                'src/product/electricity.cpp', 'src/product/tariff_declaration.cpp', '-pthread', '-o', str(binary)]
+                'src/product/electricity.cpp', 'src/product/tariff_declaration.cpp',
+                'src/product/preferences_protocol.cpp', 'src/product/preferences_document.cpp', 'src/product/preferences_owner.cpp',
+                'src/product/local_task_process.cpp', 'src/product/duplex_task_process.cpp', '-pthread', '-o', str(binary)]
             compiled = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=90)
             if compiled.returncode:
                 raise RuntimeError(compiled.stderr.decode(errors='replace'))

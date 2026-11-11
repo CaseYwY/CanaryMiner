@@ -56,8 +56,10 @@ def main():
             result = subprocess.run([cmake, '--install', build, '--prefix', str(prefix), '--component',
                                      'energy-runtime-host', '--config', config or 'Release'], capture_output=True, timeout=20)
             assert result.returncode == 0, 'development component install failed'
-            assert {p.name for p in (prefix / 'bin').iterdir()} == {host.name, authorization.name, collector.name}
-            checks += 2
+            preferences = Path(sys.argv[10]).resolve()
+            assert {p.name for p in (prefix / 'bin').iterdir()} == {host.name, authorization.name, collector.name, preferences.name}
+            assert (prefix / 'bin' / preferences.name).read_bytes() == preferences.read_bytes()
+            checks += 3
             install = prefix / 'bin'
             shutil.copy2(probe, install / probe.name)
             run(b'native sibling ready; persistence disabled')

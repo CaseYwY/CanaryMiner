@@ -53,6 +53,7 @@
 #include "redact.h"
 #include "restart_budget.h"
 #include "settings.h"
+#include "preferences_settings.h"
 #include "forecast_owner.h"
 #include "market_reference_sink.h"
 #include "energy_owner.h"
@@ -334,19 +335,15 @@ class Supervisor {
         }
         const uint64_t t0 = supervisorNowMs();
         if (!opt_.uiPreferencesPath.empty() && opt_.dashboard) {
-            uiStore_.reset(new UiPreferencesStore(std::filesystem::u8path(opt_.uiPreferencesPath)));
+            UiPreferencesStore store(std::filesystem::u8path(opt_.uiPreferencesPath));
             std::string error;
-            if (!uiStore_->load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
+            if (!store.load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
         }
-        if (!opt_.runtimePreferencesPath.empty()) runtimeStore_.reset(new RuntimePreferencesStore(std::filesystem::u8path(opt_.runtimePreferencesPath)));
-        if(!opt_.gamePreferencesPath.empty())gameStore_.reset(new GamePreferencesStore(std::filesystem::u8path(opt_.gamePreferencesPath)));
-        if(!opt_.poolSecurityPreferencesPath.empty())poolSecurityStore_.reset(new PoolSecurityPreferencesStore(std::filesystem::u8path(opt_.poolSecurityPreferencesPath)));
-        if(!opt_.languagePreferencesPath.empty())languageStore_.reset(new LanguagePreferencesStore(std::filesystem::u8path(opt_.languagePreferencesPath)));
         if (opt_.dashboard && !opt_.manualMarketPreferencesPath.empty()) {
-            manualStore_.reset(new ManualMarketStore(std::filesystem::u8path(opt_.manualMarketPreferencesPath)));
             if (!opt_.noMarket) {
+                ManualMarketStore store(std::filesystem::u8path(opt_.manualMarketPreferencesPath));
                 std::string error;
-                if (!manualStore_->load(&manualEffective_,&error)) addEvent("Offline-market display unavailable: "+error);
+                if (!store.load(&manualEffective_,&error)) addEvent("Offline-market display unavailable: "+error);
                 else if (opt_.manualMarketFactory) manualProjection_=opt_.manualMarketFactory(manualEffective_,static_cast<uint64_t>(time(nullptr)),t0);
             }
         }
@@ -375,10 +372,10 @@ class Supervisor {
             workers_.push_back(std::move(w));
         }
         if(!opt_.electricityPreferencesPath.empty()) {
-            electricityStore_.reset(new ElectricityPreferencesStore(std::filesystem::u8path(opt_.electricityPreferencesPath)));
             if(!opt_.noEnergy) {
+                ElectricityPreferencesStore store(std::filesystem::u8path(opt_.electricityPreferencesPath));
                 std::string error;
-                if(!electricityStore_->load(&electricityEffective_,&error))addEvent("Electricity/energy unavailable: "+error);
+                if(!store.load(&electricityEffective_,&error))addEvent("Electricity/energy unavailable: "+error);
                 else if(electricityEffective_.collectEnergy && opt_.energyFactory && !workers_.empty()) {
                     energy_=opt_.energyFactory();
                     const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -427,6 +424,7 @@ class Supervisor {
             opt_.tuning->start(t0, &events);
             for (const std::string &event : events) addEvent(event);
         }
+        startPreferences(); // no synchronous fallback in the live settings path
         for (size_t i = 0; i < workers_.size(); ++i) startWorker(i, t0);
         if(intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)&&!workers_.empty()){
             std::vector<DisplaySampleTarget> targets;for(const auto &w:workers_)targets.push_back({w->view.seed.uuid,w->port});
@@ -459,6 +457,7 @@ class Supervisor {
         for (;;) {
             const uint64_t now = supervisorNowMs();
             latchNativeFault();
+            if(!stopping&&!(opt_.stop&&*opt_.stop))updatePreferences();
             if (tty) {
                 for (int n = 0; n < 32; ++n) {
                     if(stopping||(opt_.stop&&*opt_.stop))break;
@@ -470,38 +469,9 @@ class Supervisor {
                         settings_.updateEnergyReview();
                         settings_.updateEnergyAuthorization();
                         settings_.updateBillingReview();
-                        const auto result = settings_.key(key, [this](const UiPreferences &p, std::string *error) {
-                            if (uiStore_ && !uiStore_->save(p, error)) return false;
-                            ui_ = p;
-                            return true;
-                        }, [this](const RuntimePreferences &p, std::string *error) {
-                            return runtimeStore_ && runtimeStore_->save(p, error);
-                        }, [this,now](ManualMarketPreferences &p, std::string *error) {
-                            if (!manualStore_) { if(error)*error="Offline-market target unavailable."; return false; }
-                            if(p.enabled&&opt_.marketReferenceFactory&&!opt_.noMarket){if(error)*error="Public references requested for this parent; manual activation requires a separately selected new session.";return false;}
-                            if (p.enabled && !opt_.manualMarketFactory) { if(error)*error="Manual reference projection unavailable in this build."; return false; }
-                            const auto utc=static_cast<uint64_t>(time(nullptr));
-                            if (!confirmManualMarket(&p,utc,error)) return false;
-                            auto projection=opt_.manualMarketFactory?opt_.manualMarketFactory(p,utc,now):ManualMarketProjector{};
-                            if (!manualStore_->save(p,error)) return false;
-                            manualEffective_=p; manualProjection_=std::move(projection); return true;
-                        },static_cast<uint64_t>(time(nullptr)),[this](ElectricityPreferences &p,std::string *error){
-                            if(!electricityStore_){if(error)*error="Electricity target unavailable.";return false;}
-                            return confirmElectricityPreferences(&p,static_cast<uint64_t>(time(nullptr)),error)&&electricityStore_->save(p,error);
-                        },[this](const JsonValue &p,std::string *error){return tariffStore_&&tariffStore_->save(p,error);},
-                        [this](const GamePreferences &p,std::string *error){return gameStore_&&gameStore_->save(p,error);},
-                        [this](const PoolSecurityPreferences &p,std::string *error){return poolSecurityStore_&&poolSecurityStore_->save(p,error);},
-                        [this](const LanguagePreferences &p,std::string *error){return languageStore_&&languageStore_->save(p,error);});
-                        if (result == SettingsResult::OpenRuntime) openRuntimeControls(&settings_, runtimeStore_.get(), opt_.runtimeContext);
-                        if(result==SettingsResult::OpenGame){auto context=opt_.gameContext;context.running=true;openGameControls(&settings_,gameStore_.get(),context);}
-                        if(result==SettingsResult::OpenPoolSecurity)openPoolSecurityControls(&settings_,poolSecurityStore_.get(),{true});
-                        if(result==SettingsResult::OpenLanguage){auto context=opt_.languageContext;context.running=true;openLanguageControls(&settings_,languageStore_.get(),context);}
-                        if (result == SettingsResult::OpenManualMarket) { ManualMarketContext context; context.running=true; context.cliDisabled=opt_.noMarket; context.effective=manualEffective_; openManualMarketControls(&settings_,manualStore_.get(),context); }
-                        if(result==SettingsResult::OpenElectricity){ElectricitySettingsContext context;context.running=true;context.cliNoEnergy=opt_.noEnergy;context.effective=electricityEffective_;context.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;openElectricityControls(&settings_,electricityStore_.get(),context);}
-                        if(result==SettingsResult::OpenTariff){
-                            if(!tariffStore_&&!opt_.electricityPreferencesPath.empty())tariffStore_.reset(new TariffDeclarationStore(std::filesystem::u8path(opt_.electricityPreferencesPath).parent_path()/"tariff-declaration.json"));
-                            openTariffControls(&settings_,tariffStore_.get());
-                        }
+                        if(preferencesSettings_)preferencesSettings_->context=preferencesContext();
+                        const auto result=preferencesSettings_?preferencesSettings_->key(key,static_cast<uint64_t>(time(nullptr)),now):settings_.key(key,{});
+                        if(!preferencesSettings_)settings_.message="Background preferences unavailable; no synchronous file fallback or Save. Worker controls unchanged.";
                         if (result == SettingsResult::Quit) {
                             settings_.visible = false;
                             nextFrame_ = 0;
@@ -518,11 +488,11 @@ class Supervisor {
                         }
                     }
                     else if (key == 's' || key == 'S') {
-                        std::string error;
-                        UiPreferences loaded;
-                        if (uiStore_ && uiStore_->load(&loaded, &error)) ui_ = loaded;
-                        settings_.open(ui_);
-                        if (!error.empty()) settings_.message = error;
+                        // Unknown/back/reopen must not discard an unrelated unsaved root draft or the frozen original panel.
+                        if(preferences_&&preferences_->snapshot().uncertain)settings_.visible=true;
+                        else settings_.open(ui_);
+                        if(preferencesSettings_){preferencesSettings_->context=preferencesContext();preferencesSettings_->load(PreferencesKind::Ui);}
+                        else settings_.message="Background preferences unavailable; no synchronous file fallback or Save.";
                     } else handleDashKey(view_, key);
                     if (quit) break;
                 }
@@ -658,6 +628,7 @@ class Supervisor {
         if(fleet_){fleet_->stop();for(unsigned i=0;i<workers_.size();++i){const auto control=fleet_->snapshot(i);
             controlFault=controlFault||control.ownershipUnresolved;forced=forced||control.exitCode==kExitShutdownForced;}}
         if (marketReference_) marketReference_->stop(); // optional data joining cannot delay controlled-worker settlement
+        if(preferences_)preferences_->stop(); // optional file/helper joining only after worker drain/settlement
         publish(supervisorNowMs(), t0, "stopped");
         if (tty) printf("\x1b[2J\x1b[H\x1b[?25h");  // and give the cursor back
         frame(supervisorNowMs(), t0, tty);
@@ -707,18 +678,10 @@ class Supervisor {
     std::deque<DashLogEntry> logEntries_;
     DashView view_;  // page, scroll and terminal size of the dashboard
     UiPreferences ui_;
-    std::unique_ptr<UiPreferencesStore> uiStore_;
-    std::unique_ptr<RuntimePreferencesStore> runtimeStore_;
-    std::unique_ptr<GamePreferencesStore> gameStore_;
-    std::unique_ptr<PoolSecurityPreferencesStore> poolSecurityStore_;
-    std::unique_ptr<LanguagePreferencesStore> languageStore_;
-    std::unique_ptr<ManualMarketStore> manualStore_;
     ManualMarketPreferences manualEffective_;
     ManualMarketProjector manualProjection_;
     std::unique_ptr<MarketReferenceSink> marketReference_;
     bool marketReferenceStarted_=false;
-    std::unique_ptr<ElectricityPreferencesStore> electricityStore_;
-    std::unique_ptr<TariffDeclarationStore> tariffStore_;
     ElectricityPreferences electricityEffective_;
     std::unique_ptr<SessionEnergySink> energy_;
     std::unique_ptr<EnergyCaptureSink> energyCapture_;
@@ -729,10 +692,48 @@ class Supervisor {
     SessionIntent intent_;
     SessionToken sessionToken_;
     SupervisorSampling sampling_; // declared before fleet_: exceptional destruction revokes workers before joining display I/O
+    std::unique_ptr<PreferencesOwner> preferences_; // destroyed after fleet_, before borrowed intent
+    std::unique_ptr<PreferencesSettings> preferencesSettings_;
     std::unique_ptr<WorkerFleet> fleet_; // destroyed before its borrowed intent; retained across child restarts/settings
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
+
+    PreferencesSettingsContext preferencesContext()const{
+        PreferencesSettingsContext context;context.runtime=opt_.runtimeContext;context.game=opt_.gameContext;context.game.running=true;
+        context.pool.running=true;context.language=opt_.languageContext;context.language.running=true;
+        context.manual.running=true;context.manual.cliDisabled=opt_.noMarket;context.manual.effective=manualEffective_;
+        context.electricity.running=true;context.electricity.cliNoEnergy=opt_.noEnergy;context.electricity.effective=electricityEffective_;
+        context.electricity.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;
+        context.manualProjectionAvailable=static_cast<bool>(opt_.manualMarketFactory);context.publicReferencesRequested=opt_.marketReferenceFactory&&!opt_.noMarket;
+        context.manualFactory=opt_.manualMarketFactory;return context;
+    }
+    void startPreferences(){
+        if(!opt_.dashboard||!intent_.permits(sessionToken_)||(opt_.stop&&*opt_.stop))return;
+        try{
+            std::array<std::filesystem::path,8> targets{};const std::string paths[]={opt_.uiPreferencesPath,opt_.runtimePreferencesPath,opt_.manualMarketPreferencesPath,opt_.electricityPreferencesPath,opt_.gamePreferencesPath,opt_.poolSecurityPreferencesPath,opt_.languagePreferencesPath};
+            bool any=false;for(size_t i=0;i<7;++i)if(!paths[i].empty()){targets[i]=std::filesystem::u8path(paths[i]);any=true;}
+            if(!opt_.electricityPreferencesPath.empty())targets[7]=std::filesystem::u8path(opt_.electricityPreferencesPath).parent_path()/"tariff-declaration.json";
+            const auto module=selfExecutablePath();if(!any||module.empty())return;
+            const auto helper=std::filesystem::u8path(module).parent_path()/
+#if defined(_WIN32)
+                "canary_preferences_worker.exe";
+#else
+                "canary_preferences_worker";
+#endif
+            preferences_.reset(new PreferencesOwner(helper,std::move(targets),intent_,sessionToken_));
+            preferencesSettings_.reset(new PreferencesSettings(*preferences_,settings_));preferencesSettings_->context=preferencesContext();
+            if(!preferences_->start())addEvent("Background preference admission unavailable; no synchronous live fallback.");
+        }catch(...){addEvent("Background preference setup unavailable; no synchronous live fallback.");}
+    }
+    void updatePreferences(){
+        if(!preferencesSettings_)return;
+        auto completed=preferencesSettings_->poll();if(!completed||!completed->reply)return;
+        const auto &reply=*completed->reply;
+        if(reply.kind==PreferencesKind::Ui){UiPreferences value;if(parseUiPreferences(reply.document,&value,nullptr))ui_=value;}
+        if(reply.kind==PreferencesKind::Manual&&reply.status==PreferencesReplyStatus::Saved){manualEffective_=std::move(completed->manualValue);manualProjection_=std::move(completed->manualProjection);}
+        nextFrame_=0;
+    }
 
     void addEvent(const std::string &text) {
         events_.push_back({utcClock(time(nullptr)), text});
@@ -793,6 +794,7 @@ class Supervisor {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
         if(fleet_)fleet_->requestStop();
         sampling_.requestStop();
+        if(preferences_)preferences_->requestStop();
         settings_.stopBillingReview();
         if(forecast_)forecast_->requestStop();
         if(marketReference_){marketReferenceStarted_=false;marketReference_->requestStop();}
@@ -1002,7 +1004,7 @@ class Supervisor {
         view_.options = ui_;
         dash_detail::g_dashBoxRules = !g_asciiOnly;
         // Erase to the end of every line: a shorter line must not leave the previous frame's characters behind.
-        const std::string text = settings_.visible ? settings_.render(view_.columns, view_.rows, view_.color) : renderDashboard(m, view_);
+        const std::string text = settings_.visible ? (preferencesSettings_&&preferencesSettings_->overlay()?preferencesSettings_->render(view_.columns,view_.rows,view_.color):settings_.render(view_.columns, view_.rows, view_.color)) : renderDashboard(m, view_);
         std::string out;
         out.reserve(text.size() + 256);
         for (char ch : text) {

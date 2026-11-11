@@ -73,7 +73,8 @@ set(CANARY_SOURCES
 set_source_files_properties(src/core/run.cpp PROPERTIES LANGUAGE CUDA)
 
 add_executable(canaryminer ${CANARY_SOURCES})
-target_link_libraries(canaryminer PRIVATE canary_economics)
+target_link_libraries(canaryminer PRIVATE canary_economics canary_preferences_owner)
+add_dependencies(canaryminer canary_preferences_worker)
 if(CANARY_ENABLE_WORKER_CONTROL_RUNTIME)
   message(STATUS "Development worker control enabled; supervisor and physical qualification still required")
   canary_enable_worker_control(canaryminer)
@@ -116,7 +117,7 @@ if(WIN32)
   target_link_libraries(canaryminer PRIVATE ws2_32)
 endif()
 
-install(TARGETS canaryminer RUNTIME DESTINATION bin)
+install(TARGETS canaryminer canary_preferences_worker RUNTIME DESTINATION bin)
 if(CANARY_ENABLE_ENERGY_RUNTIME)
   install(TARGETS canary_energy_authorization_worker canary_energy_collector_worker RUNTIME DESTINATION bin)
 endif()
