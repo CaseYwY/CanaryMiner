@@ -4,6 +4,20 @@
 
 Task order below is a dependency plan, not a promise that every module lands in one PR. TLS is independent and should be discussed with upstream early even though its stable task ID is P-12. Split large tasks into smaller reviewable commits/PRs without changing their requirement IDs.
 
+### Module delivery rule (current user instruction)
+
+Finish and test one independently usable module, make its focused completion commit, and only then start the next module. A module is a user-visible capability with a declared ordinary entry point, not an individual helper, message extraction or injected fixture seam. Historical sub-batch commits remain valid history; do not rewrite them or repeat their implementation.
+
+Before implementation, identify the module's ordinary CLI/settings/runtime paths, supported platforms, configuration and activation semantics, failure/stop behavior, acceptance checks and dependencies. Complete the required ordinary wiring, not just a library or test-only caller. Keep shared prerequisites bounded and explicit; they do not by themselves complete the consuming module.
+
+Before a completion commit, run the module's functional and failure tests, an integrated entry-point check and affected regressions against the final source. Preserve exact commands, results, platform limits and unrun gates. CPU fixtures qualify only their declared scope; they cannot replace real-source, physical, human-language or release acceptance. Failed or interrupted checks are not passes.
+
+Stage only the verified module's source, tests and evidence, inspect the staged diff, and make one focused completion commit. Do not bundle unrelated unfinished work, silently discard it or accumulate several unclosed modules. Git submission uses only the already authorized branch/destination; it is not permission for a PR, main-branch merge, release, installation or live operation.
+
+The handoff must name the module, commit, ordinary entry/configuration, actual enabled scope, tests and remaining gates. Distinguish **available but opt-in**, **implemented but not ordinarily wired**, and **awaiting external acceptance**. Never describe the latter two as the whole module being formally usable, or mark an enclosing P-task DONE because a prerequisite passes.
+
+If owner input or action is genuinely required, state the exact minimum request, why it is needed and which module it blocks; leave that work open. First exhaust safe public-document research and software work. Do not make unrelated modules wait for personal tariff data, a vendor contract or physical permission they do not need. The [owner input/action checklist](owner-actions.zh-CN.md) records known gates and private-input boundaries.
+
 | Task | Deliverable | Dependencies | Baseline status |
 |---|---|---|---|
 | P-01 | Native settings shell, four local presentation controls, idle command and host/PTY tests | Existing upstream renderer/config/supervisor | DONE at ab208e8 |
@@ -22,6 +36,8 @@ Task order below is a dependency plan, not a promise that every module lands in 
 | P-14 | Cross-platform privacy/export/release/long-run qualification and upstream submissions | Every shipped feature's own tests; maintain throughout | PARTIAL: P-14a/b/c native ownership/shared epochs; P-14d task/credit scopes; P-14e five energy-layer lifetimes; P-14f six financial/market/detection/safety lifetimes; P-14g display/session-energy/deferred-identity lifetimes; P-14h economic current/CPU lifetimes; P-14i eight memory-control current views/caller denial; P-14j current game guard/runtime and force-clock clearing; P-14k enclosing fleet current/caller ownership; P-14l thermal current/caller denial; P-14m quoted/oversized output redaction; P-14n closed build-only preview/explicit new-file export; P-14o known-failed preference reopen/CAS authority; P-14p isolated private preference-service foundation; P-14q background private preference owner; P-14r ordinary live preference completion/private inspection; P-14s mandatory-helper archive software and both-artifact offline checks; P-14t finite background initial preference inspection; P-14u background idle preference editing; P-14v finite read-only pre-device preference inspection; P-14w finite read-only main configuration inspection; P-14x closed private-file parser refusal; P-14y closed early CLI refusals; full config review/other legacy diagnostics/native integration/collection/disclosure/retention/vault/console/latency/owners/archive/deployment/physical/release gates remain |
 
 ## Whole-objective checkpoint
+
+The [source-based progress audit](progress-audit.md) separates completed subfeatures from ordinary-runtime integration and acceptance. All eleven PARTIAL task groups contain implemented engines/controllers and tests. Do not redo closed credit correction/recovery/cursor, billing continuation/review, profile invalidation, native command delivery, preference isolation or mandatory-helper archive work merely because the enclosing task is PARTIAL. Unsupported complex tariff capabilities are explicit boundaries, not automatic additional implementation scope.
 
 The current requirement table contains **58 unique IDs: ten scoped DONE baselines, 46 PARTIAL and two PLANNED**. The task table has three scoped DONE groups and eleven PARTIAL groups. These differently sized requirements are not a weighted completion percentage. A passing small slice, large test count or completed helper foundation does not complete its enclosing roadmap requirement.
 

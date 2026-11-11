@@ -1,0 +1,55 @@
+# Repository progress audit
+
+## Scope and conclusion
+
+This audit distinguishes **implemented subfeatures**, **ordinary-runtime integration**, and **acceptance/release evidence**. These are different completion claims. It does not reopen completed implementation batches or redefine the product contract.
+
+This source audit was performed against committed baseline `76205465935a5573562ede37da34cf5f70a9b6ca` on `feat/dashboard-metrics`; the approved fork branch matched that object when checked. Uncommitted console-output work is separate and is **not** counted as a completed contribution; later documentation-only commits do not qualify it. The other advertised fork branches did not contain a newer completed desktop-automation implementation: `main` added the independent Windows clock/status repair, while the interactive-settings branch was the earlier settings baseline.
+
+**All eleven PARTIAL task groups already contain substantial implementation and tests.** Calling them eleven unimplemented projects is incorrect. Calling all eleven complete ordinary user features is also contradicted by current admission and wiring code. The three DONE task-group baselines are P-01 settings, P-02 Details/Log presentation, and P-04 local observed accepted-share history, in their documented scopes.
+
+The requirement table has 58 distinct IDs, labelled ten DONE, 46 PARTIAL and two PLANNED. Those labels are not a weighted percentage or a count of missing implementations. In particular, the two PLANNED rows describe restrictions on future hardware tuning and remote-disconnecting recovery; they are not instructions to implement or enable those operations.
+
+## Reconciled module inventory
+
+| Task | Already implemented; do not repeat | Remaining distinction |
+|---|---|---|
+| P-03 safety/configuration | Explicit intent/stop arbitration, complete-work host waits, persisted runtime defaults, isolated raw safety reads, core/extended thermal guards, controlled command deadlines and background display sampling. | Complete qualified safety-to-ordinary-worker/configuration binding and remaining blocking paths. Console changes are still uncommitted, not a finished cross-platform fix. |
+| P-05 electricity/billing | Exact declared flat/progressive/all-units/calendar/dynamic arithmetic, civil-clock handling, explicit reset windows, monetary continuation, source receipts, durable originals/recovery, isolated queries/owners, and native original/candidate review. | Ordinary observed-source/billing/reset scheduling and plan-specific qualification. Explicitly rejecting unsupported demand/prepaid/export rules is an existing capability boundary, not evidence those rules are secretly implemented or an instruction to add every researched tariff family. |
+| P-06 market/FX | Gate/Kraken parsers, exact aligned calculations, isolated HTTPS, bounded cache/scheduling/expiry, manual references and a supervisor injection seam. | Ordinary public-source configuration/consent/activation remains unwired; the one-hour candle convention is admitted only for synthetic fixtures. Latest provider-response parsing and working manual references must not be described as nonexistent. |
+| P-07 credits | Exact attributable-contract ledger machinery, IDs/revisions/corrections, durable uncertain originals, recovery, atomic cursors and native private review/retry. | A qualified real source, real collection/import binding and ordinary income activation. Attribution and correction algorithms already exist; the accepted source qualification is still synthetic only. |
+| P-08 energy/forecast/net | Session board-power estimates, durable energy history/compaction/authorization, opt-in development collector runtime, exact today/remaining-time forecast and net composition, background queries/owners. | Qualified ordinary energy/credit/billing/forecast binding and real-source acceptance. The forecast arithmetic is not missing; the ordinary caller does not supply its factory. |
+| P-09 profiles | Full identity/plan fingerprints, bounded warm-up/repeats, work/energy windows, drift/identity/expiry eligibility latches, experiment budgets, original work capture and native experiment handoff. | Qualified native power-to-sample admission, persisted/retest controls and ordinary integration. The existing drift/driver/plan invalidation logic must not be relisted as an algorithm to write from scratch. |
+| P-10 optimization | Exact candidate studies, independent schedules, immutable expiry, background evaluation, resume/switch margins, confirmation/cooldown/budgets, command ownership and opt-in native applied-wait delivery. | Qualified ordinary configuration/source/profile/safety integration. Actual CPU-fixture Pause/Run/WaitApplied delivery exists; ordinary automatic mining is not enabled merely because that chain passes. |
+| P-11 games | Native readonly detection, episode/debounce/profit-lock guards, cooperative pause, fixed-lifetime fleet integration, saved Games declarations, one-shot force-resume and synthetic paired-frame experience audit. | Qualified ordinary safety/fleet admission and real gameplay/latency/experience evidence. An ordinary start with saved pause/coexist mode is explicitly refused. |
+| P-12 TLS | OpenSSL/Schannel steps, private inspection, owned duplex TLS helper, bounded protocols, local tests and independent per-pool/donation declarations. | Ordinary mining transport/trust/reconnect/fallback/donation routing and its acceptance/packaging. Saved TLS intent currently refuses ordinary startup; having TLS source files is not an active TLS mining path. |
+| P-13 localization | Sixteen declared source/draft locale packs, typed message domains, Unicode/formatting primitives, language preferences and CLI requests. | Effective all-domain native translation/layout, remaining extraction and human/terminal qualification. The ordinary effective message language is explicitly English. |
+| P-14 privacy/lifecycle/release | Native process identity/epoch guards, owner cancellation, quoted/oversized-output refusal, closed build-only diagnostic export, eight-domain background preference service/UI integration, startup reads, mandatory-helper archive software and both-image inspection. | Broader collection/disclosure/retention/credential/configuration and uncertain-write recovery controls, remaining blocking paths and production acceptance. Mandatory preference-helper packaging is already fixed; producing and qualifying a real release is separate. |
+
+## Decisive code evidence
+
+These are behavioral gates, not conclusions inferred from a PARTIAL label:
+
+- [`miner.cu`](../../src/core/miner.cu), ordinary admission: non-Off saved game mode and requested pool TLS return configuration error before device setup, with explicit unavailable-binding diagnostics.
+- [`SupervisorOptions`](../../src/product/supervisor.h): optional market-reference, forecast, billing-review and controlled-fleet seams exist. The ordinary `so` construction in `miner.cu` supplies none of those four bindings. Manual references and session energy **are** supplied; the energy runtime is a separately opted-in development capability.
+- [`credit_ledger.h`](../../src/product/credit_ledger.h) and [`credit_ledger.cpp`](../../src/product/credit_ledger.cpp): supported qualification is `SyntheticFixture`, not a real credited-income provider.
+- [`market_data.cpp`](../../src/product/market_data.cpp): real latest-response parsing exists, while candle admission refuses the unqualified real convention.
+- [`billing_ledger.cpp`](../../src/product/billing_ledger.cpp), [`income_forecast.cpp`](../../src/product/income_forecast.cpp), [`work_profile.cpp`](../../src/product/work_profile.cpp), [`economic_study.cpp`](../../src/product/economic_study.cpp) and [`game_experience.cpp`](../../src/product/game_experience.cpp) retain explicit synthetic-origin/qualification gates.
+- [`work_profile.cpp`](../../src/product/work_profile.cpp), `WorkProfileUse::check`: changed complete plan/identity, drift, expiry, stop and faults already revoke eligibility.
+- [`language_preferences.h`](../../src/product/language_preferences.h), `effectiveNativeMessageLanguage`: returns `"en"`; saved requests do not activate the independent Unicode primitives.
+- [`CanaryPoolTls.cmake`](../../cmake/CanaryPoolTls.cmake), [`CanaryWorkerControl.cmake`](../../cmake/CanaryWorkerControl.cmake), [`CanaryEnergyHistory.cmake`](../../cmake/CanaryEnergyHistory.cmake) and [`CanaryTerminalText.cmake`](../../cmake/CanaryTerminalText.cmake) identify their opt-ins as development/default-off. An OFF default alone is not a defect; missing ordinary binding or explicit refusal is the relevant distinction.
+
+## Verification performed for this audit
+
+1. Read current committed source, working-tree differences, requirement/task tables, local refs and the advertised fork refs; inspected the newer `main` commits without merging or checking out another branch. Checked 55 committed source/test anchors across all eleven groups, plus the explicit admission/binding/qualification assertions above.
+2. Reran ten existing Windows CPU baseline CTests: `product_intent`, `bill_accrual`, `market_data`, `credit_ledger`, `income_forecast`, `work_profile`, `economic_study`, `game_experience`, `pool_tls_rpc`, `diagnostic_report`. **10/10 passed.** These are existing baseline artifacts, not a fresh build/qualification of uncommitted console changes or every development backend.
+3. Exercised the already-qualified inert Linux CPU CLI/genuine sibling with `test_game_settings_cli.py`, `test_pool_security_cli.py`, and `test_language_cli.py`: **13 + 14 + 56 checks passed**. These demonstrate actual game/TLS startup refusal and English fallback while preserving synthetic originals. The device sentinel is a stub, not device access.
+4. Did not run a production miner, GPU/game/driver operation, live provider/pool request, trust-store change, release builder or publication. Real-source, hardware, human-language/terminal and production release acceptance remain unverified.
+
+The selected passing tests confirm substantial working cores, not whole-product completion. Equally, an unactivated integration does not invalidate or require rewriting those completed cores.
+
+## Progress-reporting correction
+
+Future handoffs must name the completed batch and its scope separately from ordinary wiring and external acceptance. Old per-batch “remaining” paragraphs are historical and may have been superseded by later batches; do not turn all of them into a new cumulative to-do list. The architecture overview's old “latest slice” paragraph and the initial roadmap's “planned” list must not override current code and the execution ledger.
+
+If an earlier handoff claimed the complete roadmap or all ordinary features were done, that claim is unsupported by this baseline. If it said a named implementation batch was done, the code and passing evidence often support that narrower claim. Neither situation justifies telling the user that eleven substantial modules have not been implemented at all.

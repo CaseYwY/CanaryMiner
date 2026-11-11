@@ -4,7 +4,9 @@
 
 **Implementation baseline:** `ab208e8` adds native terminal settings and four presentation preferences. It is a fork development commit, not an upstream release. The dashboard-metrics branch starts from that baseline. Read the implementation ledger before executing work.
 
-**Latest bounded slice: P-09g.** [Native fleet experiment sessions](../native-work-experiment-session.md) connect actual measurement command ownership, retained reservations, one-use economic transfer and eligible reaped replacement. [P-09f raw alignment](../work-power-alignment.md) and [P-09e completed work](../completed-work-capture.md) supply original source seams. Qualified native sampling/transport, complete safety/financial qualification, ordinary activation and physical GPU/game acceptance remain open. The [execution ledger](execution-plan.md) is authoritative; older slice summaries below are historical context.
+**Current progress:** see the [source-based progress audit](progress-audit.md) and [execution ledger](execution-plan.md). All eleven PARTIAL task groups already have substantial implemented subfeatures; PARTIAL does not mean unimplemented, and a completed batch does not mean its ordinary-runtime feature is activated or fully accepted. The summaries below are historical context, not a cumulative missing-work list.
+
+**Delivery rule:** finish normal entry-point integration and the declared tests for one usable module, then make its focused completion commit before starting another. See the [module delivery rule](execution-plan.md#module-delivery-rule-current-user-instruction) and [owner input/action checklist](owner-actions.zh-CN.md). Neither a helper commit nor fixture success is whole-module activation.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 
