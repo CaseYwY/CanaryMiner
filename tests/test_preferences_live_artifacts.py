@@ -17,6 +17,8 @@ class PreferencesLiveArtifactTests(unittest.TestCase):
         self.assertLess(source.index('!current()||!encodeStartupConfigRequest'), source.index('process.start('))
         self.assertIn('wire.size()!=body+header.bytes', source)
         self.assertIn('view.state==DuplexTaskState::Exited', source)
+        self.assertIn('parseConfig(wire.substr(body),&parsed,nullptr)', source)
+        self.assertNotIn('"config file: "+', source)
         service = (ROOT / 'src/product/startup_config_service.h').read_text(encoding='utf8')
         self.assertIn('std::ifstream input(target,std::ios::binary)', service)
         for forbidden in ('ofstream', 'Store', 'canonical(', 'exists(', 'create_directories', 'remove(', 'getenv('):

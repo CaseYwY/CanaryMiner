@@ -65,6 +65,9 @@ Each row is a testable requirement, not a checklist of already implemented featu
 
 `PARTIAL` means a baseline behaviour or process exists, not that the expanded requirement is complete. For example, current Q/signal tests do not establish the future economic/game resume state machine, and current ASCII resize tests do not establish multilingual terminal accessibility.
 
+[P-14x](../config-error-privacy.md) prevents private parser diagnostics from becoming actual startup terminal output, using a fixed config-v1 refusal while preserving strict validation and original files. It does not sanitize every legacy CLI/runtime/log surface, supply a private review/credential vault or complete localization, source/native/deployment/physical/release qualification. The expanded privacy/UI requirements remain partial.
+
+
 [P-14w](../startup-config.md) isolates the actual main configuration read behind a finite original-epoch private helper, keeps terminal/signal stop live and preserves exact existing parser bounds and failed outputs/originals. It adds no file write, synchronous fallback or source/mining capability. Full config review/legacy diagnostics, console/native hard bounds and comprehensive privacy/source/translation/deployment/physical/release gates remain open; the expanded requirements stay partial.
 
 [P-14v](../prerun-preferences.md) isolates the actual CLI's finite pre-device preference reads, keeps early terminal/signal stop available and carries the original native epoch into later admission. Known language rejection and mandatory-read failure remain distinct; no source or mining capability is added. Main product configuration/private fields and broader console/native/privacy/source/physical/deployment/release gates remain open; these requirements stay partial.

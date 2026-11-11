@@ -48,8 +48,9 @@ inline bool read(const std::filesystem::path &helper,const StartupConfigRequest 
                 if(!process.terminate(250)||!current())return false;
                 if(header.status==StartupConfigReadStatus::Unavailable){*error="cannot read config file; original preserved";return false;}
                 if(header.status==StartupConfigReadStatus::Oversized){*error="config exceeds size limit; original preserved";return false;}
-                ProductConfig parsed;std::string problem;
-                if(!parseConfig(wire.substr(body),&parsed,&problem)){*error="config file: "+problem;return false;}
+                ProductConfig parsed;
+                // Parser diagnostics can contain private unknown keys/values and terminal controls. Never forward them.
+                if(!parseConfig(wire.substr(body),&parsed,nullptr)){*error="config file rejected: invalid or unsupported config-v1 (schema_version 1 required); private details omitted; original preserved.";return false;}
                 if(!current())return false;
                 *config=std::move(parsed);return true;
             }

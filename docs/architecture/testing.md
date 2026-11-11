@@ -8,6 +8,7 @@ Test S entry, all keyboard contexts, focus, supported edit/toggle/select, review
 
 ## T-CONFIG
 
+
 [P-14w](../startup-config.md) uses the actual inert entry and genuine fixed sibling with an owned FIFO to distinguish foreground stop from a released read. Test ordinary/idle Q/SIGINT, Escape, redirected idle refusal, version bypass, missing helper, malformed files and exact 1-MiB/oversized transport without configuration writes. Native tests cover canonical private headers, exact originals, Unicode/path resolution, original epoch/budget denial and separate wrong-ticket/truncated/extra/malformed/nonzero helper replies. These CPU/software fixtures do not qualify real devices, console/kernel hard bounds, broad schema-diagnostic privacy or physical storage.
 
 [P-14v](../prerun-preferences.md) locks the actual inert CLI's ordered Language/Runtime/Game/Pool inspection, Q/SIGINT at each held phase, complete admission, idle-language stop, missing helper, malformed-original preservation, fallback and bypass distinctions. A native CPU helper test covers stop/argument/original-epoch denial, read-only defaults, pool-only isolation and preserved rejected outputs. CPU sentinels, synthetic epochs and software bounds do not qualify real devices, console/native hard deadlines or physical storage.
@@ -359,6 +360,8 @@ P-13c extends those real line-core fixtures with maintained root line opportunit
 [P-13bc](../tariff-error-messages.md) checks 80 path/root/raw templates, one-pass empty/oversized/unsafe source preservation and actual root/path/native failed-callback behavior without storage. Independent original/human roles, bounded paths/reasons, all layout/paint orders/directions, provenance, human wrap versus invariant omission/refusal, maximum raw input and transactional invalid-input outcomes are separate from source-only compatibility. Fixed-native/validation/store/model/CLI/PTY evidence does not qualify private disclosure, actual sources or effective native/physical rendering.
 
 ## T-PRIVACY
+
+[P-14x](../config-error-privacy.md) drives the actual inert entry/genuine helper with synthetic unknown/nested/control-key, private pool/value, schema/type/JSON/UTF-8/NUL failures. Assert exact closed refusal bytes, no original/control/path output, unchanged files and no device admission, with separate read/size and valid-entry positive controls. Native tests preserve the internal strict-parser detail API while requiring the startup envelope. This is not universal log/CLI/privacy or physical/native/source qualification.
 
 Scan staged/committed files and locally available history with a private untracked deny-list. Test redacted exports/logs, default local-only financial/game records, credential-vault references, bounded retention/delete and opt-in provider disclosures. Inspect build archives, debug symbols, screenshots, branch/commit metadata and action logs. Never upload a wallet, personal tariff, host/device identity, private path or raw runtime file as evidence. Preserve upstream public attribution/licences.
 

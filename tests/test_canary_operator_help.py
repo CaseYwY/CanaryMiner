@@ -124,17 +124,22 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertIn(b'no miner is listening', result.stderr)
 
     def test_config_errors_exit_3_before_any_device_access(self):
+        closed = b'config file rejected: invalid or unsupported config-v1 (schema_version 1 required); private details omitted; original preserved.\n'
         with tempfile.TemporaryDirectory() as d:
-            for name, text, expected in (('missing.json', None, b'cannot read config file'),
-                    ('v2.json', '{"schema_version": 2}', b'no automatic migration'),
-                    ('typo.json', '{"schema_version": 1, "walet": "x"}', b"unknown key 'walet'")):
+            for name, text, expected in (('missing.json', None, b'cannot read config file; original preserved\n'),
+                    ('v2.json', '{"schema_version": 2}', closed),
+                    ('typo.json', '{"schema_version": 1, "walet": "x"}', closed)):
                 path = Path(d) / name
                 if text is not None:
                     path.write_text(text)
                 with self.subTest(name=name):
                     result = self.cli('--config', str(path))
                     self.assertEqual(result.returncode, 3)
-                    self.assertIn(expected, result.stderr)
+                    self.assertEqual((result.stdout+result.stderr).replace(b'\r\n', b'\n'), expected)
+                    if text is None:
+                        self.assertFalse(path.exists())
+                    else:
+                        self.assertEqual(path.read_bytes(), text.encode())
 
     def test_f2pool_with_a_prl_address_is_refused_before_any_device_access(self):
         address = 'prl1' + 'q' * 59

@@ -1,5 +1,6 @@
 # Background startup configuration inspection (P-14w)
 
+
 M-CONFIG/M-UI/M-SUPERVISOR/M-PRIVACY; R-UI-003/007, R-SAFE-001/002, R-PRIV-001/002; T-CONFIG/T-INTENT/T-PRIVACY; D-180.
 
 The actual main entry no longer calls the synchronous product-config file loader. Signals precede inspection; the idle command rejects a redirected terminal before reading its configured file. A temporary foreground wait remains responsive to Q/Ctrl+C/Esc while an owned background thread resolves the configured path, launches the fixed actual-module sibling `canary_preferences_worker`, receives the original bytes, parses the existing strict config schema and settles the helper. An empty config path uses pure existing defaults without locating a helper. Version and closed diagnostic export still bypass config inspection.
@@ -19,6 +20,8 @@ One ten-second software budget starts before thread/key setup and is checked bef
 The original native epoch is carried through the background thread and back into the entire main caller scope, with further checks before later device admission. Clearing a global uncertainty flag cannot renew an earlier observation. Helper process ownership/reaping still uses the existing retained/quarantine implementation. This is cooperative software responsiveness, **not** a hard OS spawn/wait/termios/console/kernel-stall or physical-storage deadline.
 
 ## Evidence and boundaries
+
+[P-14x](config-error-privacy.md) subsequently closes automatic private parser-error forwarding at this startup boundary. Internal schema diagnostics and other legacy CLI/log surfaces remain distinct; no comprehensive anonymization or private preview is implied.
 
 The old actual inert entry fails an owned held-FIFO test before it can announce a cancellable inspection. The new test connects a writer only after the genuine helper has opened that FIFO, then checks stop or releases exact synthetic bytes. Native tests separately cover canonical envelopes, Unicode local files, empty/missing/exact-size/oversized originals, caller preservation, cleared old epochs and real inherited-channel malformed/truncated/wrong-ticket/nonzero replies. Neither harness starts a miner/device backend, uses real configuration, contacts a source or writes configuration through the product.
 

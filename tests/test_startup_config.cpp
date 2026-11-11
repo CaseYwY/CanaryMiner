@@ -69,6 +69,9 @@ int main(int argc,char **argv){
     const std::string malformed="{broken-private-original";write(malformed);std::string error;
     CHECK(inspectStartupConfig(request.target,&stop,false,&output,&error)==StartupConfigStatus::Refused);
     CHECK(original()==malformed&&output.config.worker=="fixture-private-worker"&&error.find("broken-private-original")==error.npos&&error.find(request.target)==error.npos);
+    CHECK(error=="config file rejected: invalid or unsupported config-v1 (schema_version 1 required); private details omitted; original preserved.");
+    ProductConfig raw;std::string rawProblem;
+    CHECK(!parseConfig("{\"schema_version\":1,\"fixture-private-key\":0}",&raw,&rawProblem)&&rawProblem.find("fixture-private-key")!=rawProblem.npos); // internal parser API/strict schema unchanged
     std::atomic<bool> cancel{false};ProductConfig config;config.worker="unchanged";
     for(const auto *mode:{"wrong-ticket","truncated","extra","bad-header","empty","nonzero"}){
         request.target=(root/mode).u8string();error.clear();

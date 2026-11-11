@@ -33,6 +33,8 @@ Owns pure rendering, keyboard context/focus, staged edits and read-only presenta
 
 ### M-CONFIG
 
+[P-14x closed startup rejection](../config-error-privacy.md) keeps the strict parser's private detail API separate from the actual main-entry display boundary. A failed private file parse emits one fixed schema-v1 envelope, not original key/value/control bytes. Read/size failures remain distinct and validation, caller preservation and admission retain sole authority; no write, preview, source or device capability is added.
+
 Owns typed defaults, schema validation/version migration, CLI precedence, persistence targets and change impact. `config.h`, `product_cli.h` and `ui_preferences.h` exist today. Mining config, presentation preferences, private provider credentials and runtime records remain separate concerns. Unknown/new versions must not be silently reset.
 
 ### M-SUPERVISOR
@@ -298,6 +300,7 @@ Possible states: `Stopped`, `Starting`, `MiningNormal`, `MiningCoexist`, `Calibr
 [P-14v pre-device inspection](../prerun-preferences.md) uses a separate finite read-only invocation of the existing preference owner before actual CLI device/source admission. Requested modes preserve exact receipts, known language fallback and mandatory refusal; the original native epoch reaches later caller scopes. This is neither a four-file transaction nor collection/mining authority. Main configuration/private fields and console/native/source/physical/deployment gates remain independent.
 
 [P-14w startup config inspection](../startup-config.md) places the actual main file read/parsing on an original-parent background thread with a one-shot first-frame mode of the same fixed CPU sibling. A canonical header plus exact raw bytes preserves the parser's existing 1-MiB limit; only EOF/zero-exit settlement can publish. Foreground Q/signal/Escape, early idle terminal refusal, unchanged pure defaults/CLI validation and original native scope remain separate from disk/native work. No preference kind, write, fallback, source or device capability is added; complete config review/privacy and native/console/physical/release gates remain independent.
+
 
 [P-14u idle settings](../idle-preferences.md) shares the same background helper/receipt bridge without creating a mining fleet. Initial UI inspection gates edits/optional runtime callbacks; later eight-domain operations retain original clocks, conservative Unknown and explicit private review. Actual-module sibling layout applies to host preview/review callers too. Main pre-call configuration/language, arbitrary callbacks/console and native/physical/privacy/deployment qualifications remain independent.
 
