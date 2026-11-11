@@ -97,7 +97,8 @@ def main():
             value['user_pools'][0]['plaintext_url'] = 'stratum+tcp://conflict-fixture.test:1234'
             preferences.write_text(json.dumps(value), encoding='utf-8')
             session.send(b'\r')
-            session.until(b'changed externally')
+            refused = session.until(b'Preferences UNKNOWN')
+            assert b'NOT Saved' in refused and b'conflict-fixture.test' not in refused
             session.process.send_signal(signal.SIGINT)
             session.finished()
             assert json.loads(preferences.read_text()) == value

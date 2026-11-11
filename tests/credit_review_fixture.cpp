@@ -1,7 +1,7 @@
 // Test-only native settings harness; fixed synthetic binding/filename, no account manifest/import or production entry.
 #include "product/credit_recovery.h"
 #include "product/credit_owner.h"
-#include "product/settings.h"
+#include "product/settings_command.h"
 #include "credit_fixture.h"
 #include <csignal>
 using namespace om;

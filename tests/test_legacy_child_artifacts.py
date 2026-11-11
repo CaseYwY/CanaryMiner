@@ -26,7 +26,13 @@ class LegacyChildArtifacts(unittest.TestCase):
     def test_supervisor_uses_original_stop_and_unicode_path(self):
         source = (ROOT / 'src/product/supervisor.h').read_text(encoding='utf8')
         self.assertIn('#include "legacy_child_process.h"', source)
-        self.assertIn('GetModuleFileNameW', source)
+        self.assertIn('#include "executable_path.h"', source)
+        self.assertIn('selfExecutablePath()', source)
+        path = (ROOT / 'src/product/executable_path.h').read_text(encoding='utf8')
+        self.assertIn('GetModuleFileNameW', path)
+        self.assertIn('std::filesystem::path(std::wstring(buf, n)).u8string()', path)
+        for fallback in ('GetModuleFileNameA', 'getenv(', 'argv[', 'canonical(', 'exists('):
+            self.assertNotIn(fallback, path)
         self.assertIn('&err,[this]{if(opt_.stop&&*opt_.stop)intent_.stop();return !intent_.permits(sessionToken_);}', source)
         for marker in ('class ChildProcess', 'CreateProcessA', 'waitpid(', '::kill('):
             self.assertNotIn(marker, source)

@@ -105,7 +105,8 @@ def main():
             value['grouping'] = False
             preferences.write_text(json.dumps(value), encoding='utf-8')
             session.send(b'\r')
-            session.until(b'changed externally')
+            refused = session.until(b'Preferences UNKNOWN')
+            assert b'NOT Saved' in refused and b'formatting_locale' not in refused
             session.process.send_signal(signal.SIGINT)
             session.finished()
             assert json.loads(preferences.read_text()) == value

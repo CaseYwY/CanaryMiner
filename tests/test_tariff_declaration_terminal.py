@@ -164,7 +164,8 @@ def main():
             until(b'CanaryMiner / Settings')
             tariff()
             send(b'\x1b[B' * 6 + b'\r' + b'\x1b[B' * 8 + b'\r3\rv\r')
-            until(b'NEW plan.key', True)
+            refused = until(b'Preferences UNKNOWN', True)
+            assert b'NOT Saved' in refused and b'confirmed_utc' not in refused
             assert file.read_bytes() == saved_bytes
             checks += 1
             send(b'q')

@@ -6,6 +6,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PreferencesLiveArtifactTests(unittest.TestCase):
+    def test_idle_command_has_only_background_preference_io_and_fixed_module_binding(self):
+        source = (ROOT / 'src/product/settings_command.h').read_text(encoding='utf8')
+        for forbidden in ('PreferencesStore', 'MarketStore', 'DeclarationStore', '.save(', 'openRuntimeControls(', 'openManualMarketControls(', 'openElectricityControls(', 'openTariffControls(', 'openGameControls(', 'openPoolSecurityControls(', 'openLanguageControls(', 'getenv(', 'exists(', 'canonical('):
+            self.assertNotIn(forbidden, source)
+        self.assertIn('preferences.load(PreferencesKind::Ui)', source)
+        self.assertIn('preferences.key(', source)
+        self.assertIn('preferences.poll()', source)
+        self.assertIn('selfExecutablePath()', source)
+        self.assertLess(source.index('RequiresTerminal'), source.index('selfExecutablePath()'))
+        self.assertLess(source.index('owner->requestStop()'), source.index('owner->stop()'))
+        self.assertNotIn('runSettingsCommand', (ROOT / 'src/product/settings.h').read_text(encoding='utf8'))
+
     def test_live_supervisor_has_no_store_callback_or_synchronous_open_fallback(self):
         source = (ROOT / 'src/product/supervisor.h').read_text(encoding='utf8')
         live = source[source.index('for (;;) {', source.index('const auto latchNativeFault=')):source.index('const bool stopRequested = quit')]

@@ -3,7 +3,7 @@
 #include <cstdio>
 #include <string>
 
-#include "../src/product/settings.h"
+#include "../src/product/settings_command.h"
 
 static volatile sig_atomic_t stopped = 0;
 static void stop(int) { stopped = 1; }

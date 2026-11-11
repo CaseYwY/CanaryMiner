@@ -1,5 +1,5 @@
 // Test-only selected UUIDs and clock. No GPU discovery, mining, sensor calls or production-path selection.
-#include "product/settings.h"
+#include "product/settings_command.h"
 #include <csignal>
 using namespace om;
 static volatile sig_atomic_t stopped=0;

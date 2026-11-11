@@ -1,7 +1,7 @@
 // Fixed synthetic native settings harness. No runtime file picker, production manifest, GPU or network.
 #include "billing_input_fixture.h"
 #include "product/billing_review_access.h"
-#include "product/settings.h"
+#include "product/settings_command.h"
 #include <csignal>
 #include <chrono>
 #include <iostream>

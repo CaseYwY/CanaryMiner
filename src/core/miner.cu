@@ -34,6 +34,7 @@
 #include "../product/restart_budget.h"
 #include "../product/fee_session.h"
 #include "../product/supervisor.h"
+#include "../product/settings_command.h"
 #include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME

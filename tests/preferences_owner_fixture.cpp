@@ -38,6 +38,8 @@ int main(int argc,char **argv){using namespace om;
                         }
                         if(CANARY_PREFERENCES_FIXTURE_MODE==3&&request.operation==PreferencesOperation::Load){
                             auto marker=std::filesystem::u8path(targets[static_cast<unsigned>(request.kind)]);marker+=".fixture-load-held";std::ofstream(marker).put('1');}
+                        if(CANARY_PREFERENCES_FIXTURE_MODE==5&&request.operation==PreferencesOperation::Save){
+                            auto marker=std::filesystem::u8path(targets[static_cast<unsigned>(request.kind)]);marker+=".fixture-save-held";std::ofstream(marker).put('1');}
                         if((CANARY_PREFERENCES_FIXTURE_MODE==3&&request.operation==PreferencesOperation::Load)||
                            (CANARY_PREFERENCES_FIXTURE_MODE==5&&request.operation==PreferencesOperation::Save)){hold();return 0;}
                         if(!service.transact(request,&reply))return 2;

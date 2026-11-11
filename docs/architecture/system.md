@@ -295,6 +295,8 @@ Possible states: `Stopped`, `Starting`, `MiningNormal`, `MiningCoexist`, `Calibr
 
 ## Durable storage boundary
 
+[P-14u idle settings](../idle-preferences.md) shares the same background helper/receipt bridge without creating a mining fleet. Initial UI inspection gates edits/optional runtime callbacks; later eight-domain operations retain original clocks, conservative Unknown and explicit private review. Actual-module sibling layout applies to host preview/review callers too. Main pre-call configuration/language, arbitrary callbacks/console and native/physical/privacy/deployment qualifications remain independent.
+
 Use transactional/idempotent history and credit stores with versioned records, one-writer/concurrency policy, bounded retention/compaction and tested crash recovery. The engine must preserve all-time aggregates while pruning expired detail and show the retained-detail coverage.
 
 Local accepted history now uses optional system SQLite behind a single background owner; see [D-17 implementation](../accepted-history.md). This commits counters, lifetime totals and window records atomically and preserves unknown/corrupt/newer stores without resetting them. Production credit-source mapping/activation remain open; the initial fixture schema and isolated owner are described below. Never silently delete corrupt user records, initialize them as a zero lifetime total, or publish them as test fixtures.

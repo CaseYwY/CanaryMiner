@@ -3,7 +3,7 @@
 #include "energy_collector_fixture.h"
 #include "product/energy_leased_capture.h"
 #include "product/energy_recovery.h"
-#include "product/settings.h"
+#include "product/settings_command.h"
 #include <csignal>
 using namespace om;
 using namespace energy_capture_fixture;

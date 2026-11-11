@@ -211,7 +211,15 @@ def main():
                     public = response.read()
                     assert response.status == 200
                 assert all(token.encode() not in public for token in (first_session, saved[6], saved[7][3], str(root), 'energy-persistence'))
-                send(b' v\r')
+                # Capture can be active while the editable authorization reload is still BUSY.
+                # Observe its fresh ready frame and each review transition, not a timed key burst.
+                until(b'IDLE: settings do not start or restart mining.', True)
+                until(b'Persist board-energy history: ON')
+                send(b' ')
+                until(b'Persist board-energy history: OFF', True)
+                send(b'v')
+                until(b'REVIEW SAVE', True)
+                send(b'\r')
                 until(b'CONFIRMED saved', True)
                 until(b'Current capture: frozen active plan')
                 assert json.loads(file.read_bytes())[3][0] is False
@@ -224,8 +232,13 @@ def main():
             def inactive_on(send, until):
                 nonlocal checks
                 until(b'Current capture: not active')
+                until(b'IDLE: settings do not start or restart mining.', True)
                 until(b'Persist board-energy history: OFF')
-                send(b' v\r')
+                send(b' ')
+                until(b'Persist board-energy history: ON', True)
+                send(b'v')
+                until(b'REVIEW SAVE', True)
+                send(b'\r')
                 until(b'CONFIRMED saved', True)
                 until(b'Current capture: not active')
                 assert json.loads(file.read_bytes())[8] == first_session

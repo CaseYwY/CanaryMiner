@@ -112,7 +112,8 @@ def main():
             session.until(b"Review runtime-preferences.json only", fresh=True)
             preferences.write_text(json.dumps({"schema_version": 1, "work_wait_ms": 333, "history_enabled": True}), encoding="utf8")
             session.write(b"\r")
-            session.until(b"changed externally", fresh=True)
+            refused = session.until(b"Preferences UNKNOWN", fresh=True)
+            assert b"NOT Saved" in refused and b"work_wait_ms" not in refused
             session.process.send_signal(signal.SIGINT)
             session.finished()
             assert json.loads(preferences.read_text())["work_wait_ms"] == 333

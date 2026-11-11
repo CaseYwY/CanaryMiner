@@ -101,7 +101,8 @@ def main():
             value["poll_ms"] = 777
             preferences.write_text(json.dumps(value), encoding="utf8")
             s.send(b"\r")
-            s.until(b"changed externally")
+            refused = s.until(b"Preferences UNKNOWN")
+            assert b"NOT Saved" in refused and b"target_executable" not in refused
             s.process.send_signal(signal.SIGINT)
             s.finished()
             assert json.loads(preferences.read_text())["poll_ms"] == 777

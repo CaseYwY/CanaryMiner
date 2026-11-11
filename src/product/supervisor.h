@@ -66,6 +66,7 @@
 #include "stats_server.h"
 #include "supervisor_sampling.h"
 #include "legacy_child_process.h"
+#include "executable_path.h"
 
 namespace om {
 
@@ -74,19 +75,6 @@ inline uint64_t supervisorNowMs() {
 }
 inline GameGuardTime supervisorControlTime(){
     return {std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(),supervisorNowMs()};
-}
-
-/** Full path of this executable (the children are started from it). */
-inline std::string selfExecutablePath() {
-#if defined(_WIN32)
-    wchar_t buf[32768];
-    const DWORD n = GetModuleFileNameW(nullptr, buf, 32768);
-    return n == 0 || n >= 32768 ? std::string() : std::filesystem::path(std::wstring(buf, n)).u8string();
-#else
-    char buf[4096];
-    const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    return n <= 0 ? std::string() : std::string(buf, static_cast<size_t>(n));
-#endif
 }
 
 /** One GPU as the supervisor knows it at start (from the device list). */
