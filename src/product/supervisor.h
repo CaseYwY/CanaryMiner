@@ -23,6 +23,7 @@
 #include <time.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -323,113 +324,16 @@ class Supervisor {
         const auto nativeEpoch=nativeProcessEpoch();
         sessionToken_ = intent_.explicitStart();
         if (!intent_.permits(sessionToken_)) return kExitFaultLatched;
-        if(opt_.workerFleetFactory){
-            if(opt_.tuning||opt_.drainMs>60000){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
-            try{fleet_=opt_.workerFleetFactory(intent_,sessionToken_);}catch(...){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
-            if(opt_.stop&&*opt_.stop)intent_.stop();
-            if(!fleet_||!intent_.permits(sessionToken_)||!fleet_->start(static_cast<unsigned>(opt_.seeds.size()),supervisorControlTime())||!nativeProcessEpochCurrent(nativeEpoch)){
-                intent_.stop();bool unresolved=false;
-                if(fleet_){fleet_->requestStop();fleet_->stop();for(unsigned i=0;i<opt_.seeds.size();++i)unresolved=unresolved||fleet_->snapshot(i).ownershipUnresolved;}
-                settings_.stopBillingReview();return !unresolved&&nativeProcessEpochCurrent(nativeEpoch)&&opt_.stop&&*opt_.stop?kExitOk:kExitFaultLatched;
-            }
-        }
+        if(opt_.workerFleetFactory&&(opt_.tuning||opt_.drainMs>60000)){intent_.stop();settings_.stopBillingReview();return kExitFaultLatched;}
         const uint64_t t0 = supervisorNowMs();
-        if (!opt_.uiPreferencesPath.empty() && opt_.dashboard) {
-            UiPreferencesStore store(std::filesystem::u8path(opt_.uiPreferencesPath));
-            std::string error;
-            if (!store.load(&ui_, &error)) addEvent("UI preferences unavailable: " + error);
-        }
-        if (opt_.dashboard && !opt_.manualMarketPreferencesPath.empty()) {
-            if (!opt_.noMarket) {
-                ManualMarketStore store(std::filesystem::u8path(opt_.manualMarketPreferencesPath));
-                std::string error;
-                if (!store.load(&manualEffective_,&error)) addEvent("Offline-market display unavailable: "+error);
-                else if (opt_.manualMarketFactory) manualProjection_=opt_.manualMarketFactory(manualEffective_,static_cast<uint64_t>(time(nullptr)),t0);
-            }
-        }
-        if(opt_.stop&&*opt_.stop)intent_.stop();
-        if(opt_.dashboard&&!opt_.noMarket&&opt_.marketReferenceFactory&&intent_.permits(sessionToken_)){
-            if(manualEffective_.enabled){
-                manualProjection_={};addEvent("Public and manual market sources both requested; references withheld. Choose one source for a new explicit session.");
-            }else{
-                try{
-                    marketReference_=opt_.marketReferenceFactory();
-                    if(opt_.stop&&*opt_.stop)intent_.stop();
-                    const bool admitted=marketReference_&&intent_.permits(sessionToken_)&&marketReference_->start(sessionToken_.epoch);
-                    if(opt_.stop&&*opt_.stop)intent_.stop();
-                    if(!admitted||!intent_.permits(sessionToken_)){
-                        if(marketReference_)marketReference_->requestStop();
-                        addEvent("Public market references unavailable; no manual fallback, income or mining change.");
-                    }else marketReferenceStarted_=true;
-                }catch(...){if(marketReference_)marketReference_->requestStop();addEvent("Public market reference admission failed; no source fallback or mining change.");}
-            }
-        }
-        if (!opt_.historyPath.empty()) history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
+        startupUtc_=static_cast<uint64_t>(time(nullptr)); // paired original activation anchor; helper delay never renews it
         for (size_t i = 0; i < opt_.seeds.size(); ++i) {
             std::unique_ptr<Worker> w(new Worker());
             w->view.seed = opt_.seeds[i];
             w->port = opt_.workerPortBase + static_cast<int>(i);
             workers_.push_back(std::move(w));
         }
-        if(!opt_.electricityPreferencesPath.empty()) {
-            if(!opt_.noEnergy) {
-                ElectricityPreferencesStore store(std::filesystem::u8path(opt_.electricityPreferencesPath));
-                std::string error;
-                if(!store.load(&electricityEffective_,&error))addEvent("Electricity/energy unavailable: "+error);
-                else if(electricityEffective_.collectEnergy && opt_.energyFactory && !workers_.empty()) {
-                    energy_=opt_.energyFactory();
-                    const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-                    if(!energy_ || !energy_->start(sessionToken_.epoch,utc>0?static_cast<uint64_t>(utc):0,supervisorNowMs(),static_cast<unsigned>(workers_.size()),electricityEffective_,PowerOrigin::ObservedTelemetry)) {
-                        energy_.reset();addEvent("Session board-energy collection unavailable; mining settings unchanged.");
-                    }
-                }
-            }
-        }
-        if(opt_.stop&&*opt_.stop)intent_.stop();
-        if(opt_.energyRuntimeFactory&&intent_.permits(sessionToken_)){
-            std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
-            auto runtime=opt_.energyRuntimeFactory(true,opt_.noEnergy);
-            if(opt_.stop&&*opt_.stop)intent_.stop();
-            if(!runtime||!intent_.permits(sessionToken_)||!runtime->start(sessionToken_.epoch,ids)){
-                if(runtime)runtime->requestStop();
-                addEvent("Durable board-energy runtime unavailable; preserve local history.");
-            }else{
-                settings_.energyAccess=energyRuntimeReview(*runtime);
-                settings_.energyAuthorizationAccess=energyRuntimeAuthorization(*runtime);
-                energyCapture_=std::move(runtime);
-            }
-        }else if(!opt_.noEnergy&&opt_.energyCaptureFactory&&intent_.permits(sessionToken_)){
-            std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
-            energyCapture_=opt_.energyCaptureFactory();
-            if(opt_.stop&&*opt_.stop)intent_.stop();
-            if(!energyCapture_||!intent_.permits(sessionToken_)||!energyCapture_->start(sessionToken_.epoch,ids)){
-                energyCapture_.reset();addEvent("Durable board-energy capture unavailable; preserve local history.");
-            }else{
-                settings_.energyAccess.snapshot=[this]{return energyCapture_->snapshot();};
-                settings_.energyAccess.inspect=[this](uint64_t g,uint64_t r){return energyCapture_->inspect(g,r);};
-                settings_.energyAccess.retry=[this](uint64_t g,uint64_t r){return energyCapture_->retryReviewed(g,r);};
-            }
-        }
-        if(opt_.stop&&*opt_.stop)intent_.stop();
-        if(opt_.forecastFactory&&intent_.permits(sessionToken_)){
-            forecast_=opt_.forecastFactory(opt_.noMarket,opt_.noEnergy);
-            if(opt_.stop&&*opt_.stop)intent_.stop();
-            if(!forecast_||!intent_.permits(sessionToken_)||!forecast_->start(sessionToken_.epoch)){
-                if(forecast_)forecast_->requestStop();
-                forecast_.reset();addEvent("Income forecast unavailable; preserve source records.");
-            }
-        }
-        if (opt_.tuning) {
-            std::vector<std::string> events;
-            opt_.tuning->start(t0, &events);
-            for (const std::string &event : events) addEvent(event);
-        }
-        startPreferences(); // no synchronous fallback in the live settings path
-        for (size_t i = 0; i < workers_.size(); ++i) startWorker(i, t0);
-        if(intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)&&!workers_.empty()){
-            std::vector<DisplaySampleTarget> targets;for(const auto &w:workers_)targets.push_back({w->view.seed.uuid,w->port});
-            if(!sampling_.start(std::move(targets),opt_.displaySampleFactory))addEvent("Background display sampling unavailable.");
-        }
+        startPreferences(); // finite asynchronous initial reads; no synchronous bootstrap/live fallback
 
         StatsServer server;
         if (opt_.apiEnabled) {
@@ -457,14 +361,21 @@ class Supervisor {
         for (;;) {
             const uint64_t now = supervisorNowMs();
             latchNativeFault();
-            if(!stopping&&!(opt_.stop&&*opt_.stop))updatePreferences();
+            if(!stopping&&!(opt_.stop&&*opt_.stop)){
+                if(bootstrapPending_)updatePreferenceBootstrap();
+                else if(sessionActivated_)updatePreferences();
+            }
             if (tty) {
                 for (int n = 0; n < 32; ++n) {
                     if(stopping||(opt_.stop&&*opt_.stop))break;
                     const int key = keys.poll();
                     if (!key) break;
                     view_.options = ui_;  // a saved page switch also governs the very next queued shortcut
-                    if (settings_.visible) {
+                    if(!sessionActivated_){
+                        if(key=='q'||key=='Q'||key==3)quit=true;
+                        else if(key=='s'||key=='S'){settingsRequested_=true;nextFrame_=0;}
+                        else handleDashKey(view_,key);
+                    }else if (settings_.visible) {
                         settings_.updateCreditReview();
                         settings_.updateEnergyReview();
                         settings_.updateEnergyAuthorization();
@@ -488,11 +399,7 @@ class Supervisor {
                         }
                     }
                     else if (key == 's' || key == 'S') {
-                        // Unknown/back/reopen must not discard an unrelated unsaved root draft or the frozen original panel.
-                        if(preferences_&&preferences_->snapshot().uncertain)settings_.visible=true;
-                        else settings_.open(ui_);
-                        if(preferencesSettings_){preferencesSettings_->context=preferencesContext();preferencesSettings_->load(PreferencesKind::Ui);}
-                        else settings_.message="Background preferences unavailable; no synchronous file fallback or Save.";
+                        openPreferencesSettings();
                     } else handleDashKey(view_, key);
                     if (quit) break;
                 }
@@ -503,6 +410,15 @@ class Supervisor {
                 beginStop();
                 stopping = true;
                 stopDeadline = now + opt_.drainMs + 5000;
+            }
+            if(!stopping&&!bootstrapPending_&&!sessionActivated_){
+                sessionActivated_=true; // one attempted activation, never a retry after a callback/factory failure
+                if(!activateSession(t0,nativeEpoch)){
+                    controlFault=controlFault||!(opt_.stop&&*opt_.stop);
+                    beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;
+                }else if(settingsRequested_&&tty){settingsRequested_=false;openPreferencesSettings();}
+                latchNativeFault();
+                if(!stopping&&opt_.stop&&*opt_.stop){beginStop();stopping=true;stopDeadline=supervisorNowMs()+opt_.drainMs+5000;}
             }
             if(fleet_){
                 if(!stopping){WorkerFleetEvidence evidence;
@@ -515,7 +431,7 @@ class Supervisor {
                 for(size_t i=0;i<workers_.size();++i)for(auto &line:fleet_->takeLines(static_cast<unsigned>(i)))inbox_.emplace_back(i,std::move(line));
             }
             drainInbox(tty);
-            if (opt_.tuning) {
+            if (tuningStarted_) {
                 std::vector<std::string> events;
                 opt_.tuning->tick(now, &events);
                 for (const std::string &event : events) addEvent(event);
@@ -579,18 +495,18 @@ class Supervisor {
                     addEvent("drain deadline passed: remaining workers were stopped");
                     break;
                 }
-            } else if (!alive && !pending) {
+            } else if (!alive && !pending && !bootstrapPending_) {
                 addEvent("no GPU is mining: stopping");
                 break;
             }
-            if(!stopping&&intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)){
+            if(sessionActivated_&&!stopping&&intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)){
                 if(sampling_.faulted()&&!samplingFaultReported){samplingFaultReported=true;
                     if(energyCapture_)energyCapture_->markGap(sessionToken_.epoch);
                     for(auto &w:workers_){w->view.telValid=false;w->view.lastRateMs=0;}
                     addEvent("Background display sampling stopped; prior observations retain their original age.");}
                 if(now>=nextSample&&!sampling_.pending())sampling_.request(sampleGenerations);
             }
-            publish(now, t0, stopping ? "draining" : "running");
+            publish(now, t0, stopping ? "draining" : sessionActivated_ ? "running" : "starting");
             frame(now, t0, tty);
             if (!tty && now >= nextSummary) {
                 nextSummary = now + 15000;
@@ -616,7 +532,7 @@ class Supervisor {
         if (history_) for (size_t i = 0; i < workers_.size(); ++i)
             history_->markGap(static_cast<unsigned>(i), workers_[i]->historyLastUtc);
         if (forced) addEvent("workers were stopped by force");
-        if (opt_.tuning) {
+        if (tuningStarted_) {
             std::vector<std::string> events;
             opt_.tuning->stop(&events);
             for (const std::string &event : events) addEvent(event);
@@ -696,6 +612,11 @@ class Supervisor {
     std::unique_ptr<PreferencesSettings> preferencesSettings_;
     std::unique_ptr<WorkerFleet> fleet_; // destroyed before its borrowed intent; retained across child restarts/settings
     std::vector<std::unique_ptr<Worker>> workers_;  // declared after mu_ and inbox_: workers (and their readers) go first
+    std::array<bool,3> bootstrapReads_{};
+    unsigned bootstrapStep_=0;
+    uint64_t bootstrapTicket_=0,startupUtc_=0;
+    bool bootstrapPending_=false,sessionActivated_=false,settingsRequested_=false,tuningStarted_=false;
+    bool manualKnown_=true,manualLoaded_=false,electricityKnown_=true;
 
     static std::string workerLabel(const Worker &w) { return "GPU " + std::to_string(w.view.seed.index); }
 
@@ -709,7 +630,10 @@ class Supervisor {
         context.manualFactory=opt_.manualMarketFactory;return context;
     }
     void startPreferences(){
-        if(!opt_.dashboard||!intent_.permits(sessionToken_)||(opt_.stop&&*opt_.stop))return;
+        bootstrapReads_={{opt_.dashboard&&!opt_.uiPreferencesPath.empty(),opt_.dashboard&&!opt_.noMarket&&!opt_.manualMarketPreferencesPath.empty(),!opt_.noEnergy&&!opt_.electricityPreferencesPath.empty()}};
+        manualKnown_=!bootstrapReads_[1];electricityKnown_=!bootstrapReads_[2];
+        // Plain-mode electricity collection already existed; only its optional initial read needs this owner there.
+        if((!opt_.dashboard&&!bootstrapReads_[2])||!intent_.permits(sessionToken_)||(opt_.stop&&*opt_.stop))return;
         try{
             std::array<std::filesystem::path,8> targets{};const std::string paths[]={opt_.uiPreferencesPath,opt_.runtimePreferencesPath,opt_.manualMarketPreferencesPath,opt_.electricityPreferencesPath,opt_.gamePreferencesPath,opt_.poolSecurityPreferencesPath,opt_.languagePreferencesPath};
             bool any=false;for(size_t i=0;i<7;++i)if(!paths[i].empty()){targets[i]=std::filesystem::u8path(paths[i]);any=true;}
@@ -722,9 +646,106 @@ class Supervisor {
                 "canary_preferences_worker";
 #endif
             preferences_.reset(new PreferencesOwner(helper,std::move(targets),intent_,sessionToken_));
-            preferencesSettings_.reset(new PreferencesSettings(*preferences_,settings_));preferencesSettings_->context=preferencesContext();
-            if(!preferences_->start())addEvent("Background preference admission unavailable; no synchronous live fallback.");
+            if(opt_.dashboard){preferencesSettings_.reset(new PreferencesSettings(*preferences_,settings_));preferencesSettings_->context=preferencesContext();}
+            bootstrapPending_=preferences_->start();
+            if(!bootstrapPending_)addEvent("Background preference admission unavailable; no synchronous startup/live fallback.");
         }catch(...){addEvent("Background preference setup unavailable; no synchronous live fallback.");}
+    }
+    void updatePreferenceBootstrap(){
+        if(!preferences_||preferences_->foreignCaller())return;
+        const PreferencesKind kinds[]={PreferencesKind::Ui,PreferencesKind::Manual,PreferencesKind::Electricity};
+        try{
+            auto state=preferences_->snapshot();
+            if(state.state==PreferencesOwnerState::Faulted||state.state==PreferencesOwnerState::Stopped){
+                bootstrapPending_=false;bootstrapTicket_=0;addEvent("Initial preferences unavailable; unread optional sources withheld. No file fallback or retry.");return;}
+            if(bootstrapTicket_){
+                const auto reply=preferences_->takeReply(bootstrapTicket_);if(!reply)return;
+                bool loaded=false;
+                if(reply->kind==kinds[bootstrapStep_]&&reply->status==PreferencesReplyStatus::Loaded){
+                    if(reply->kind==PreferencesKind::Ui){UiPreferences value;loaded=parseUiPreferences(reply->document,&value,nullptr);if(loaded)ui_=std::move(value);}
+                    else if(reply->kind==PreferencesKind::Manual){ManualMarketPreferences value;loaded=parseManualMarket(reply->document,&value,nullptr);if(loaded){manualEffective_=std::move(value);manualKnown_=manualLoaded_=true;}}
+                    else{ElectricityPreferences value;loaded=parseElectricityPreferences(reply->document,&value,nullptr);if(loaded){electricityEffective_=std::move(value);electricityKnown_=true;}}
+                }
+                if(!loaded)addEvent("Initial preference read refused; associated optional sources withheld. File preserved.");
+                bootstrapTicket_=0;++bootstrapStep_;nextFrame_=0;
+                state=preferences_->snapshot();
+            }
+            while(bootstrapStep_<3&&!bootstrapReads_[bootstrapStep_])++bootstrapStep_;
+            if(bootstrapStep_==3){bootstrapPending_=false;nextFrame_=0;return;}
+            if(state.state==PreferencesOwnerState::Ready){
+                const auto admitted=preferences_->load(kinds[bootstrapStep_]);
+                if(admitted.status==PreferencesAdmission::Queued)bootstrapTicket_=admitted.ticket;
+                else{bootstrapPending_=false;addEvent("Initial preference admission refused; unread optional sources withheld. No retry.");}
+            }
+        }catch(...){preferences_->requestStop();bootstrapPending_=false;bootstrapTicket_=0;addEvent("Initial preference completion unavailable; unread optional sources withheld.");}
+    }
+    void openPreferencesSettings(){
+        // Unknown/back/reopen must not discard an unrelated root draft or the frozen original panel.
+        if(preferences_&&preferences_->snapshot().uncertain)settings_.visible=true;
+        else settings_.open(ui_);
+        if(preferencesSettings_){preferencesSettings_->context=preferencesContext();preferencesSettings_->load(PreferencesKind::Ui);}
+        else settings_.message="Background preferences unavailable; no synchronous file fallback or Save.";
+    }
+    bool activateSession(uint64_t t0,uint64_t nativeEpoch){
+        const auto current=[&]{if(opt_.stop&&*opt_.stop)intent_.stop();return nativeProcessEpochCurrent(nativeEpoch)&&intent_.permits(sessionToken_);};
+        if(!current())return false;
+        try{
+            if(opt_.workerFleetFactory){
+                fleet_=opt_.workerFleetFactory(intent_,sessionToken_);
+                if(!current()||!fleet_||!fleet_->start(static_cast<unsigned>(workers_.size()),supervisorControlTime())||!current())return false;
+            }
+            if(opt_.dashboard&&!opt_.noMarket){
+                if(!manualKnown_)addEvent("Manual source state unavailable; manual and requested public references both withheld for this session.");
+                else if(opt_.marketReferenceFactory&&manualEffective_.enabled)addEvent("Public and manual market sources both requested; references withheld. Choose one source for a new explicit session.");
+                else if(opt_.marketReferenceFactory){
+                    try{
+                        marketReference_=opt_.marketReferenceFactory();
+                        if(!current())return false;
+                        const bool admitted=marketReference_&&marketReference_->start(sessionToken_.epoch);
+                        if(!current())return false;
+                        if(admitted)marketReferenceStarted_=true;
+                        else{if(marketReference_)marketReference_->requestStop();addEvent("Public market references unavailable; no manual fallback, income or mining change.");}
+                    }catch(...){if(marketReference_)marketReference_->requestStop();addEvent("Public market reference admission failed; no source fallback or mining change.");}
+                }else if(manualLoaded_&&opt_.manualMarketFactory){manualProjection_=opt_.manualMarketFactory(manualEffective_,startupUtc_,t0);if(!current())return false;}
+            }
+            if(!current())return false;
+            if(!opt_.historyPath.empty())history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
+            if(electricityKnown_&&!opt_.noEnergy&&electricityEffective_.collectEnergy&&opt_.energyFactory&&!workers_.empty()){
+                energy_=opt_.energyFactory();if(!current())return false;
+                const auto utc=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                const bool admitted=energy_&&energy_->start(sessionToken_.epoch,utc>0?static_cast<uint64_t>(utc):0,supervisorNowMs(),static_cast<unsigned>(workers_.size()),electricityEffective_,PowerOrigin::ObservedTelemetry);
+                if(!current())return false;
+                if(!admitted){energy_.reset();addEvent("Session board-energy collection unavailable; mining settings unchanged.");}
+            }
+            if(electricityKnown_&&opt_.energyRuntimeFactory){
+                std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
+                auto runtime=opt_.energyRuntimeFactory(true,opt_.noEnergy);if(!current()){if(runtime)runtime->requestStop();return false;}
+                const bool admitted=runtime&&runtime->start(sessionToken_.epoch,ids);
+                if(!current()){if(runtime)runtime->requestStop();return false;}
+                if(admitted){settings_.energyAccess=energyRuntimeReview(*runtime);settings_.energyAuthorizationAccess=energyRuntimeAuthorization(*runtime);energyCapture_=std::move(runtime);}
+                else{if(runtime)runtime->requestStop();addEvent("Durable board-energy runtime unavailable; preserve local history.");}
+            }else if(electricityKnown_&&!opt_.noEnergy&&opt_.energyCaptureFactory){
+                std::vector<std::string> ids;for(const auto &w:workers_)ids.push_back(w->view.seed.uuid);
+                energyCapture_=opt_.energyCaptureFactory();if(!current())return false;
+                const bool admitted=energyCapture_&&energyCapture_->start(sessionToken_.epoch,ids);if(!current())return false;
+                if(!admitted){energyCapture_.reset();addEvent("Durable board-energy capture unavailable; preserve local history.");}
+                else{settings_.energyAccess.snapshot=[this]{return energyCapture_->snapshot();};settings_.energyAccess.inspect=[this](uint64_t g,uint64_t r){return energyCapture_->inspect(g,r);};settings_.energyAccess.retry=[this](uint64_t g,uint64_t r){return energyCapture_->retryReviewed(g,r);};}
+            }
+            if(manualKnown_&&electricityKnown_&&opt_.forecastFactory){
+                forecast_=opt_.forecastFactory(opt_.noMarket,opt_.noEnergy);if(!current())return false;
+                const bool admitted=forecast_&&forecast_->start(sessionToken_.epoch);if(!current())return false;
+                if(!admitted){if(forecast_)forecast_->requestStop();forecast_.reset();addEvent("Income forecast unavailable; preserve source records.");}
+            }
+            if(!current())return false;
+            if(opt_.tuning){std::vector<std::string> events;tuningStarted_=true;opt_.tuning->start(t0,&events);for(const auto &event:events)addEvent(event);if(!current())return false;}
+            for(size_t i=0;i<workers_.size();++i){if(!current())return false;startWorker(i,supervisorNowMs());}
+            if(!current())return false;
+            if(!workers_.empty()){
+                std::vector<DisplaySampleTarget> targets;for(const auto &w:workers_)targets.push_back({w->view.seed.uuid,w->port});
+                if(!sampling_.start(std::move(targets),opt_.displaySampleFactory))addEvent("Background display sampling unavailable.");
+            }
+            return current();
+        }catch(...){addEvent("Session startup unavailable; stop retained, no automatic source or worker retry.");return false;}
     }
     void updatePreferences(){
         if(!preferencesSettings_)return;
@@ -1004,7 +1025,7 @@ class Supervisor {
         view_.options = ui_;
         dash_detail::g_dashBoxRules = !g_asciiOnly;
         // Erase to the end of every line: a shorter line must not leave the previous frame's characters behind.
-        const std::string text = settings_.visible ? (preferencesSettings_&&preferencesSettings_->overlay()?preferencesSettings_->render(view_.columns,view_.rows,view_.color):settings_.render(view_.columns, view_.rows, view_.color)) : renderDashboard(m, view_);
+        const std::string text = bootstrapPending_ ? std::string("Preferences PENDING\nInitial inspection\nWorkers not started\nQ/^C Stop\n[S] Settings later\n")+(settingsRequested_?"Settings requested\n":"") : settings_.visible ? (preferencesSettings_&&preferencesSettings_->overlay()?preferencesSettings_->render(view_.columns,view_.rows,view_.color):settings_.render(view_.columns, view_.rows, view_.color)) : renderDashboard(m, view_);
         std::string out;
         out.reserve(text.size() + 256);
         for (char ch : text) {

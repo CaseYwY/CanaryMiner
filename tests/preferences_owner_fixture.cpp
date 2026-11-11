@@ -2,6 +2,7 @@
 #include "product/preferences_service.h"
 #include "product/duplex_task_process.h"
 #include <chrono>
+#include <fstream>
 #include <thread>
 #ifndef CANARY_PREFERENCES_FIXTURE_MODE
 #error Explicit fixture mode required
@@ -9,7 +10,7 @@
 int main(int argc,char **argv){using namespace om;
     try {
         DuplexTaskChannel channel;if(!channel.adopt(argc,argv))return 2;
-        PreferencesService service;std::string input,output;size_t sent=0;
+        PreferencesService service;std::string input,output;size_t sent=0;std::array<std::string,8> targets{};
         const auto hold=[&](){while(channel.parentAlive())std::this_thread::sleep_for(std::chrono::milliseconds(5));};
         while(channel.parentAlive()){
             if(!output.empty()){
@@ -27,6 +28,16 @@ int main(int argc,char **argv){using namespace om;
                         if(end+1!=input.size())return 2;
                         PreferencesRequest request;PreferencesReply reply;
                         if(!decodePreferencesRequest(input,&request))return 2;
+                        if(request.operation==PreferencesOperation::Init)targets=request.targets;
+                        if(CANARY_PREFERENCES_FIXTURE_MODE==6&&request.operation==PreferencesOperation::Load){
+                            const auto root=std::filesystem::u8path(targets[0]).parent_path();
+                            std::ofstream(root/"fixture-preference-loads.txt",std::ios::app)<<request.ticket<<":"<<preferencesKindName(request.kind)<<"\n";
+                            const auto release=root/("fixture-preference-release-"+std::to_string(request.ticket));
+                            while(channel.parentAlive()&&!std::filesystem::exists(release))std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                            if(!channel.parentAlive())return 0;
+                        }
+                        if(CANARY_PREFERENCES_FIXTURE_MODE==3&&request.operation==PreferencesOperation::Load){
+                            auto marker=std::filesystem::u8path(targets[static_cast<unsigned>(request.kind)]);marker+=".fixture-load-held";std::ofstream(marker).put('1');}
                         if((CANARY_PREFERENCES_FIXTURE_MODE==3&&request.operation==PreferencesOperation::Load)||
                            (CANARY_PREFERENCES_FIXTURE_MODE==5&&request.operation==PreferencesOperation::Save)){hold();return 0;}
                         if(!service.transact(request,&reply))return 2;

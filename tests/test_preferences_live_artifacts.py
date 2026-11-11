@@ -10,10 +10,20 @@ class PreferencesLiveArtifactTests(unittest.TestCase):
         source = (ROOT / 'src/product/supervisor.h').read_text(encoding='utf8')
         live = source[source.index('for (;;) {', source.index('const auto latchNativeFault=')):source.index('const bool stopRequested = quit')]
         self.assertIn('preferencesSettings_->key(', live)
-        self.assertIn('preferencesSettings_->load(PreferencesKind::Ui)', live)
+        self.assertIn('openPreferencesSettings()', live)
         for name in ('uiStore_', 'runtimeStore_', 'manualStore_', 'electricityStore_', 'tariffStore_', 'gameStore_', 'poolSecurityStore_', 'languageStore_', 'openRuntimeControls(', 'openManualMarketControls(', 'openElectricityControls(', 'openTariffControls(', 'openGameControls(', 'openPoolSecurityControls(', 'openLanguageControls('):
             self.assertNotIn(name, source)
         self.assertNotIn('Store', live)
+
+    def test_bootstrap_reads_share_the_owner_without_a_synchronous_initial_store(self):
+        source = (ROOT / 'src/product/supervisor.h').read_text(encoding='utf8')
+        for store in ('UiPreferencesStore', 'ManualMarketStore', 'ElectricityPreferencesStore'):
+            self.assertNotIn(store, source)
+        self.assertIn('preferences_->takeReply(bootstrapTicket_)', source)
+        self.assertIn('!alive && !pending && !bootstrapPending_', source)
+        self.assertIn('if(!sessionActivated_)', source)
+        self.assertIn('settingsRequested_=true', source)
+        self.assertLess(source.index('const bool stopRequested = quit'), source.index('if(!activateSession(t0,nativeEpoch))'))
 
     def test_native_optional_join_follows_worker_drain_and_actual_module_only(self):
         source = (ROOT / 'src/product/supervisor.h').read_text(encoding='utf8')

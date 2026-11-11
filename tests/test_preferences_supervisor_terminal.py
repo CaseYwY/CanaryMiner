@@ -75,7 +75,11 @@ def main():
                 os.write(master, b'q')
                 child.wait(timeout=4)
                 assert child.returncode == 0 and time.monotonic() - began < 3
-                assert (state / 'fixture-worker-starts.txt').read_text().splitlines() == ['start']
+                starts = state / 'fixture-worker-starts.txt'
+                if name == 'held-read':
+                    assert not starts.exists(), 'initial preference inspection must precede every mining-worker launch'
+                else:
+                    assert starts.read_text().splitlines() == ['start']
                 assert b'FORBIDDEN_DEVICE_SETUP' not in transcript
                 checks += 3
                 if name != 'lost-ack':
