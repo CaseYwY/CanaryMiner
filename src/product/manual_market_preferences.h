@@ -88,6 +88,7 @@ class ManualMarketStore {
    public:
     explicit ManualMarketStore(std::filesystem::path path) : path_(std::move(path)) {}
     bool load(ManualMarketPreferences *out, std::string *error) {
+        loaded_=false;
         if (!out) return fail(error,"Offline-market output is unavailable.");
         std::string text; bool exists = false;
         if (!read(&text,&exists,error)) return false;
@@ -103,8 +104,8 @@ class ManualMarketStore {
         auto lockPath=path_; lockPath+=".lock"; RuntimePreferencesLease lease;
         if (!lease.acquire(lockPath)) return fail(error,"Offline-market settings locked or invalid lock file.");
         std::string current; bool exists=false;
-        if (!read(&current,&exists,error)) return false;
-        if (exists != existed_ || current != original_) return fail(error,"Offline-market settings changed externally; reopen before saving.");
+        if (!read(&current,&exists,error)) {loaded_=false;return false;}
+        if (exists != existed_ || current != original_) {loaded_=false;return fail(error,"Offline-market settings changed externally; reopen before saving.");}
         static std::atomic<unsigned> serial{0}; auto temporary=path_;
 #if defined(_WIN32)
         temporary += ".tmp-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(++serial);

@@ -73,8 +73,8 @@ class GamePreferencesStore {
         if(ec)return fail(error,"Cannot create game preferences directory.");
         auto lock=path_;lock+=".lock";RuntimePreferencesLease lease;
         if(!lease.acquire(lock))return fail(error,"Game defaults locked or invalid lock file.");
-        std::string text;bool exists=false;if(!read(&text,&exists,error))return false;
-        if(exists!=existed_||text!=original_)return fail(error,"Game defaults changed externally; reopen before saving.");
+        std::string text;bool exists=false;if(!read(&text,&exists,error)){loaded_=false;return false;}
+        if(exists!=existed_||text!=original_){loaded_=false;return fail(error,"Game defaults changed externally; reopen before saving.");}
         static std::atomic<unsigned> serial{0};auto temporary=path_;
 #if defined(_WIN32)
         temporary+=".tmp-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(++serial);

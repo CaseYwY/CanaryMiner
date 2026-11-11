@@ -107,6 +107,7 @@ class ElectricityPreferencesStore {
    public:
     explicit ElectricityPreferencesStore(std::filesystem::path path):path_(std::move(path)){}
     bool load(ElectricityPreferences *out,std::string *error) {
+        loaded_=false;
         if(!out)return fail(error,"Electricity output unavailable.");
         std::string text; bool exists=false; if(!read(&text,&exists,error))return false;
         ElectricityPreferences p; if(exists&&!parseElectricityPreferences(text,&p,error))return false;
@@ -121,8 +122,8 @@ class ElectricityPreferencesStore {
         if(ec)return fail(error,"Cannot create electricity settings directory.");
         auto lock=path_; lock+=".lock"; RuntimePreferencesLease lease;
         if(!lease.acquire(lock))return fail(error,"Electricity settings locked or invalid lock file.");
-        std::string text; bool exists=false; if(!read(&text,&exists,error))return false;
-        if(exists!=existed_||text!=original_)return fail(error,"Electricity settings changed externally; reopen before saving.");
+        std::string text; bool exists=false; if(!read(&text,&exists,error)){loaded_=false;return false;}
+        if(exists!=existed_||text!=original_){loaded_=false;return fail(error,"Electricity settings changed externally; reopen before saving.");}
         static std::atomic<unsigned> serial{0}; auto temporary=path_;
 #if defined(_WIN32)
         temporary+=".tmp-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(++serial);

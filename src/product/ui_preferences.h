@@ -114,6 +114,8 @@ class UiPreferencesStore {
     explicit UiPreferencesStore(std::filesystem::path path) : path_(std::move(path)) {}
 
     bool load(UiPreferences *out, std::string *error) {
+        loaded_ = false;
+        if (!out) return fail(error, "UI preferences output unavailable");
         std::string text;
         bool exists = false;
         if (!read(&text, &exists, error)) return false;
@@ -140,8 +142,8 @@ class UiPreferencesStore {
         } lock{lockPath};
         std::string current;
         bool exists = false;
-        if (!read(&current, &exists, error)) return false;
-        if (exists != existed_ || current != original_) return fail(error, "UI preferences changed externally; reopen settings before saving");
+        if (!read(&current, &exists, error)) { loaded_ = false; return false; }
+        if (exists != existed_ || current != original_) { loaded_ = false; return fail(error, "UI preferences changed externally; reopen settings before saving"); }
         // Explicit v1 -> v2 save keeps one immutable, validated v1 rollback copy.
         JsonValue previous;
         if (exists && parseJsonStrict(current, &previous, nullptr) && previous.find("schema_version") && previous.find("schema_version")->text == "1") {

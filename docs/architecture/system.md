@@ -304,3 +304,5 @@ The initial [P-07a credit store](../credit-ledger.md) implements a separate fixt
 [P-07c](../credit-recovery.md) supplies the initial pending-journal part by default: a helper-owned private sidecar precedes ledger mutation and retains exact prepared/confirmed/rejected input. Queries do not auto-replay; missing/divergent current-ledger proof and failed retries preserve reconciliation requirements. Ledger schema v1 and the no-production-activation boundary remain unchanged; native recovery/source-cursor UI and OS failure qualification remain open.
 
 Presentation preferences already use a small independent atomic JSON store; this is not a justification to rewrite large financial/history files synchronously on each screen frame.
+
+[P-14o](../preferences-reopen.md) revokes cached save authority after a known failed reopen, current-read failure or original mismatch across eight native preference types. Byte restoration alone cannot renew a failed observation. Existing schema/migration/consent/activation semantics remain; asynchronous small-preference isolation and ambiguous native-write/physical qualification are separate work.

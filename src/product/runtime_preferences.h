@@ -125,6 +125,8 @@ class RuntimePreferencesStore {
    public:
     explicit RuntimePreferencesStore(std::filesystem::path path) : path_(std::move(path)) {}
     bool load(RuntimePreferences *out, std::string *error) {
+        loaded_ = false;
+        if (!out) return fail(error, "runtime preferences output unavailable");
         std::string text;
         bool exists = false;
         if (!read(&text, &exists, error)) return false;
@@ -147,8 +149,8 @@ class RuntimePreferencesStore {
         if (!lease.acquire(lockPath)) return fail(error, "runtime preferences locked by another writer or invalid lock file");
         std::string current;
         bool exists = false;
-        if (!read(&current, &exists, error)) return false;
-        if (exists != existed_ || current != original_) return fail(error, "runtime preferences changed externally; reopen runtime controls before saving");
+        if (!read(&current, &exists, error)) { loaded_ = false; return false; }
+        if (exists != existed_ || current != original_) { loaded_ = false; return fail(error, "runtime preferences changed externally; reopen runtime controls before saving"); }
         static std::atomic<unsigned> serial{0};
         auto temporary = path_;
 #if defined(_WIN32)

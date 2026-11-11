@@ -19,8 +19,8 @@ class LocalPreferencesStore {
         std::error_code ec;if(path_.has_parent_path())std::filesystem::create_directories(path_.parent_path(),ec);
         if(ec)return fail(error,"Cannot create private preferences directory.");
         auto lock=path_;lock+=".lock";RuntimePreferencesLease lease;if(!lease.acquire(lock))return fail(error,"Preferences locked or invalid lock file.");
-        std::string text;bool exists=false;if(!read(&text,&exists,error))return false;
-        if(exists!=existed_||text!=original_)return fail(error,"Preferences changed externally; reopen before saving.");
+        std::string text;bool exists=false;if(!read(&text,&exists,error)){loaded_=false;return false;}
+        if(exists!=existed_||text!=original_){loaded_=false;return fail(error,"Preferences changed externally; reopen before saving.");}
         static std::atomic<unsigned> serial{0};auto temporary=path_;
 #if defined(_WIN32)
         temporary+=".tmp-"+std::to_string(GetCurrentProcessId())+"-"+std::to_string(++serial);

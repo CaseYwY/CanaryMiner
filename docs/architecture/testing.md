@@ -8,6 +8,8 @@ Test S entry, all keyboard contexts, focus, supported edit/toggle/select, review
 
 ## T-CONFIG
 
+[P-14o](../preferences-reopen.md) reproduces known-failed-reopen/current-conflict authority revival using only owned malformed/oversized/unknown-schema/directory/byte-restored originals across eight native store types. Null outputs and missing-original restoration must refuse without losing caller outputs; explicit successful reopen must restore valid saves. Existing native migration/backup/confirmation/version/CLI/PTY regressions remain separate from undetected ABA races, native write-uncertainty, asynchronous isolation, physical storage or production configuration qualification.
+
 Test strict keys/types/ranges, old-version defaults, unsupported-new-version rejection, atomic replace, read-only/invalid/external edits, stale writers, lock/crash handling, CLI precedence and independent credential/runtime stores. A failed save cannot change effective state. Navigation cannot grant benchmark, plaintext or hardware permission.
 
 P-03c [runtime-default evidence](../runtime-settings.md) covers native numeric editor contexts, separate UI/runtime saves, zero CLI overrides, external writers and frozen current-session values. Real PTY tests verify collection off/on only at explicit future sessions; this is not live policy or credential-store qualification.
