@@ -59,6 +59,8 @@ The current priority is ordinary pool TLS. [P-12h](../pool-tls-runtime.md) integ
 
 [P-12j](../pool-tls-fallback.md) extends the ordinary first-user-pool path with separately authorized same-host TCP fallback, frozen across worker retries. Only native pre-handshake network failure from a cleanly exited helper can authorize it. Explicit SSL, certificate/handshake errors, unknown failures, cancellation and application failures do not downgrade. Both modes share one original deadline; every reconnect starts with TLS and ambiguous submits are not replayed. Review corrected premature failure publication and relative-budget renewal. Secure presets, donation TLS, public normal-trust/pool/GPU and release acceptance remain open; P-12 stays PARTIAL.
 
+At `1278d24`, the complete Linux/WSL `tools/test_all.sh` passed with 622 CTests and one namespace-constrained skip separately covered by 35 checks, pinned-verifier proof acceptance and protocol digest equality, a clean history secret scan and 67/67 recipe SASS matches. A separate TLS ON production build also matched all 67 kernels, passed nineteen artifact checks and exercised its actual helper in nine localhost scenarios. Independent post-PR review of all 62 changed files found no actionable defect. These receipts do not close the final Windows artifact check blocked by Defender, actual pool/GPU qualification or release acceptance; see the [module evidence](../pool-tls-fallback.md#production-artifact-checks).
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

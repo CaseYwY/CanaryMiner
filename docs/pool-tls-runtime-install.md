@@ -29,3 +29,7 @@ The release-boundary check first accepts a minimal cache with all required capab
 On 2026-11-13, the final install and release-preferences CTests passed 2/2 on Windows and 2/2 on WSL Linux. The installation test passed 38 checks on each platform. The existing Windows runtime-transport regression, including missing TLS helper refusal, also passed. These were CPU-only checks against local artifacts.
 
 The local logs are `build/p12i-windows-install-final.log`, `build/p12i-linux-install-final.log` and `build/p12i-windows-ctest.log`. No production CUDA build, installed miner replacement or release archive was created.
+
+## Subsequent production installation check
+
+[P-12j](pool-tls-fallback.md#production-artifact-checks) also built the actual Linux TLS-enabled CUDA program and installed its three-file layout into an isolated Unicode/space path. All installed hashes matched their build artifacts. Real help/version and pre-device refusal checks passed; removing the preferences sibling refused startup despite CWD/PATH alternatives. The actual production TLS helper separately passed localhost runtime/protocol tests through CPU probes. These extend the host-only layout evidence above; no real GPU session, main-program missing-TLS-helper run, external pool authorization or release publication was performed.
