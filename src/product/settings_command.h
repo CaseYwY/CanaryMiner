@@ -7,7 +7,7 @@
 #include <thread>
 
 namespace om {
-inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}, EnergyRuntimeFactory runtimeFactory = {}, const std::vector<std::string> &selectedDevices = {}, BillingReviewAccess billingAccess = {},LanguageSettingsContext languageContext={}) {
+inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t *stop, bool noMarket = false, bool noEnergy = false, CreditReviewAccess creditAccess = {}, EnergyReviewAccess energyAccess = {}, EnergyAuthorizationAccess authorizationAccess = {}, EnergyRuntimeFactory runtimeFactory = {}, const std::vector<std::string> &selectedDevices = {}, BillingReviewAccess billingAccess = {},LanguageSettingsContext languageContext={},PoolSecuritySettingsContext poolContext={}) {
 #if defined(_WIN32)
     if (!_isatty(_fileno(stdout)) || !_isatty(_fileno(stdin))) {
 #else
@@ -56,6 +56,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     panel.billingAccess=std::move(billingAccess);
     PreferencesSettings preferences(*owner,panel);
     preferences.context.language=std::move(languageContext);
+    preferences.context.pool=std::move(poolContext);
     preferences.context.manual.cliDisabled=noMarket;
     preferences.context.manualProjectionAvailable=true; // idle declarations need no running display projector
     preferences.context.electricity.cliNoEnergy=noEnergy;

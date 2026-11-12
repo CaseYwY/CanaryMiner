@@ -18,6 +18,7 @@
 #include "pool_panel_messages.h"
 #include "pool_value_messages.h"
 #include "pool_rule_messages.h"
+#include "pool_migration_messages.h"
 #include "pool_transport_messages.h"
 #include "manual_market_field_messages.h"
 #include "manual_market_notice_messages.h"
@@ -172,6 +173,16 @@ bool layoutTerminalGameValueMessage(const TerminalGameValueMessageRequest &,cons
 bool wrapTerminalGameValueMessage(const TerminalGameValueMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
 bool renderTerminalGameValueMessage(const TerminalGameValueMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
 bool renderWrappedTerminalGameValueMessage(const TerminalGameValueMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
+struct TerminalPoolMigrationMessageRequest {
+    std::string language="en";
+    i18n::PoolMigrationMessageKey key=i18n::PoolMigrationMessageKey::Action;
+    Tone literalTone=Tone::Plain;
+    std::vector<TerminalMessageArgument> arguments;
+};
+bool layoutTerminalPoolMigrationMessage(const TerminalPoolMigrationMessageRequest &,const TerminalTextPolicy &,TerminalMessageLine *);
+bool wrapTerminalPoolMigrationMessage(const TerminalPoolMigrationMessageRequest &,const TerminalTextPolicy &,std::size_t,TerminalMessageRows *);
+bool renderTerminalPoolMigrationMessage(const TerminalPoolMigrationMessageRequest &,const TerminalTextPolicy &,ColorLevel,PaintedTerminalMessageLine *);
+bool renderWrappedTerminalPoolMigrationMessage(const TerminalPoolMigrationMessageRequest &,const TerminalTextPolicy &,std::size_t,ColorLevel,PaintedTerminalMessageRows *);
 struct TerminalPoolTransportMessageRequest {
     std::string language="en";
     i18n::PoolTransportMessageKey key=i18n::PoolTransportMessageKey::Unknown;

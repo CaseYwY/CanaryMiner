@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -1003,7 +1004,7 @@ int main(int argc, char **argv) {
 #endif
     if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang || std::string(argv[1]) == kFakeLatched))
         return fakeChild(argv[1]);
-    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test" || std::string(argv[1]) == "--pool-transport-session-test"
+    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test" || std::string(argv[1]) == "--pool-transport-session-test" || std::string(argv[1]) == "--pool-tls-migration-session-test"
 #ifdef CANARY_ENERGY_RUNTIME_SUPERVISOR_TEST
         || std::string(argv[1]) == "--energy-runtime-session-test"
 #endif
@@ -1039,6 +1040,19 @@ int main(int argc, char **argv) {
             options.userArgs.insert(options.userArgs.end(),{"--fixture-pool-transport",(std::filesystem::path(argv[2])/"fixture-pool-transport.txt").u8string()});
             options.poolEndpoint="pool-fixture.test:8048";options.resolvedPoolTlsUrl="stratum+ssl://pool-fixture.test:8048";
             options.donationOn=false;options.noEnergy=true;options.noMarket=true;
+        }
+        if(std::string(argv[1])=="--pool-tls-migration-session-test"){
+            std::ifstream input(std::filesystem::path(argv[2])/"config.json",std::ios::binary);
+            if(!input)return 87;
+            const std::string text((std::istreambuf_iterator<char>(input)),std::istreambuf_iterator<char>());
+            ProductConfig config;
+            if(!parseConfig(text,&config,&error)||config.pools.empty())return 88;
+            options.poolMigrationCandidate=poolTlsMigrationCandidate(config);
+            options.poolMigrationRuntimeAvailable=true;
+            options.poolMigrationDonationEnabled=config.donation;
+            options.poolEndpoint=config.pools.front().endpoint();options.poolPreset=config.pools.front().preset;
+            options.donationOn=config.donation;options.noEnergy=true;options.noMarket=true;
+            options.userArgs.insert(options.userArgs.end(),{"--fixture-pool-transport",(std::filesystem::path(argv[2])/"fixture-pool-transport.txt").u8string()});
         }
 #ifdef CANARY_ENERGY_RUNTIME_SUPERVISOR_TEST
         options.energyRuntimeFactory=[state=std::string(argv[2])](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};

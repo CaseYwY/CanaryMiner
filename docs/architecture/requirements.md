@@ -5,6 +5,8 @@
 
 [P-12l](../pool-tls-status.md) adds read-only observed user-pool transport state, separate frozen host/policy and saved declarations, conservative freshness and multi-worker aggregation. R-UI-007/008 and R-TLS-001/002/003/004 remain PARTIAL. This status display grants no connection permission and does not qualify donation TLS, migration or real pool/GPU/release behavior.
 
+[P-12m](../pool-tls-migration.md) adds explicit review and save for the known legacy Kryptex US first-pool tuple. The first-user declaration uses the existing strict TLS admission at the next explicit start. R-TLS-001 and R-UI-007/008 remain PARTIAL.
+
 Each row is a testable requirement, not a checklist of already implemented features. Stable IDs are never recycled. Module IDs are defined in [system.md](system.md), task IDs in [execution-plan.md](execution-plan.md), and test-family IDs in [testing.md](testing.md).
 
 | ID | Requirement | Module | Task | Tests | Status |

@@ -113,5 +113,63 @@ void panel(const std::filesystem::path &dir){
     root.poolSecurity.draft.users[0]=rule();unsigned ui=0,pool=0;const auto key=[&](int ch){return root.key(ch,[&](const UiPreferences &,std::string *){++ui;return true;},{},{},0,{},{},{},[&](const PoolSecurityPreferences &v,std::string *error){++pool;return store.save(v,error);});};
     key('v');key('\r');CHECK(pool==1&&ui==0&&root.dirty()&&!root.poolSecurity.dirty());key(27);CHECK(!root.poolSecurity.visible);openPoolSecurityControls(&root,nullptr,{});CHECK(!root.poolSecurity.visible&&!root.message.empty());
 }
+void migration(){
+    PoolSecuritySettingsContext context;context.running=true;context.effective=PoolTransportPolicy::Plaintext;
+    context.frozenHost="prl-us.kryptex.network";context.current={{PoolTransportSecurity::Plaintext,PoolTransportError::None,7048,poolTransportNowMs()},false};
+    context.migrationCandidate=PoolTlsMigrationCandidate::KryptexUsTcp7048;context.migrationRuntimeAvailable=true;
+    const PoolSecurityRule strict{PoolSecurityMode::StrictTls,"stratum+ssl://prl-us.kryptex.network:8048",{},false};
+    PoolSecurityPreferences original;original.users.push_back(rule());original.donation=rule();
+    PoolSecuritySettingsPanel p;p.open(original,context);p.donation=true;unsigned saves=0;
+    const auto save=[&](const PoolSecurityPreferences &value,std::string *){++saves;CHECK(value.users.front()==strict&&value.users[1]==original.users[1]&&value.donation==original.donation);return true;};
+    p.key('M',save);CHECK(p.page==PoolSecuritySettingsPage::Review&&p.dirty()&&saves==0&&!p.donation&&p.slot==0);
+    CHECK(p.active==original&&p.draft.users.front()==strict&&p.draft.users[1]==original.users[1]&&p.draft.donation==original.donation);
+    const auto review=p.render(120,0,ColorLevel::None);
+    CHECK(review.find("Configured source: stratum+tcp://prl-us.kryptex.network:7048")!=review.npos);
+    CHECK(review.find("Proposed TLS: stratum+ssl://prl-us.kryptex.network:8048")!=review.npos&&review.find("Plaintext fallback disabled; consent cleared.")!=review.npos);
+    CHECK(review.find("Next explicit start only")!=review.npos&&review.find("Plaintext (port 7048)")!=review.npos&&review.find("Verified TLS")==review.npos);
+    CHECK(review.find("next start will refuse")==review.npos&&review.find("Donation is enabled")==review.npos);
+    const auto generated=p.draft;p.key('m',save);CHECK(p.draft==generated&&p.page==PoolSecuritySettingsPage::Review&&saves==0);
+    p.key(27);p.key('m',save);CHECK(p.draft==generated&&p.page==PoolSecuritySettingsPage::Browse&&p.message.find("Unsaved draft retained")!=p.message.npos&&saves==0);
+    p.key('v');p.key('\r',[](const auto &,std::string *error){*error="migration save refused";return false;});
+    CHECK(p.active==original&&p.draft==generated&&p.page==PoolSecuritySettingsPage::Review&&p.message=="migration save refused");
+    p.key('\r',save);CHECK(saves==1&&p.active==generated&&!p.dirty());
+    CHECK(p.context.effective==PoolTransportPolicy::Plaintext&&p.context.current.observation.security==PoolTransportSecurity::Plaintext&&p.context.current.observation.effectivePort==7048);
+    p.key('M',save);CHECK(saves==1&&p.draft==generated&&p.message.find("Existing first-user declaration retained")!=p.message.npos);
+
+    p.open(original,context);p.key('m');p.key(27);p.key(27);CHECK(p.page==PoolSecuritySettingsPage::Leave);
+    CHECK(p.key('d')==PoolSecuritySettingsResult::Close&&p.active==original&&p.draft==original&&saves==1);
+    for(const auto candidate:{PoolTlsMigrationCandidate::None,static_cast<PoolTlsMigrationCandidate>(99)}){
+        auto missing=context;missing.migrationCandidate=candidate;p.open({},missing);p.key('m');
+        CHECK(!p.dirty()&&p.page==PoolSecuritySettingsPage::Browse&&p.message.find("No supported legacy first pool")!=p.message.npos);}
+    for(const auto &existing:std::vector<PoolSecurityRule>{rule(),strict,{PoolSecurityMode::Unchanged,{},"stratum+tcp://prl-us.kryptex.network:7048",false},
+            {PoolSecurityMode::Unchanged,"stratum+ssl://custom.test:443",{},false}}){
+        PoolSecurityPreferences declared;declared.users.front()=existing;p.open(declared,context);p.key('M');
+        CHECK(p.draft==declared&&!p.dirty()&&p.page==PoolSecuritySettingsPage::Browse&&p.message.find("Existing first-user declaration retained")!=p.message.npos);}
+    p.open({},context);p.field=2;p.key('\r');p.key('M');p.key('m');CHECK(p.input=="Mm"&&p.page==PoolSecuritySettingsPage::Edit&&!p.dirty());p.key(27);
+
+    context.migrationRuntimeAvailable=false;context.migrationDonationEnabled=true;p.open({},context);p.key('m');
+    const auto blocked=p.render(120,0,ColorLevel::None);
+    CHECK(blocked.find("TLS runtime unavailable: next start will refuse this request.")!=blocked.npos);
+    CHECK(blocked.find("Donation is enabled: next TLS start requires donation off.")!=blocked.npos);
+    bool source=false,target=false,fallback=false,unavailable=false,donation=false,nextStart=false,end=false;
+    for(unsigned step=0;step<160;++step){const auto frame=p.render(20,12,ColorLevel::None);
+        CHECK(std::count(frame.begin(),frame.end(),'\n')<12&&frame.find("[Enter] Save")!=frame.npos&&frame.find("[Q] Stop")!=frame.npos);
+        std::string compact;for(const unsigned char ch:frame)if(!std::isspace(ch))compact+=static_cast<char>(ch);
+        source=source||compact.find("Configuredsource:stratum+tcp://prl-us.kryptex.network:7048")!=compact.npos;
+        target=target||compact.find("ProposedTLS:stratum+ssl://prl-us.kryptex.network:8048")!=compact.npos;
+        fallback=fallback||compact.find("Plaintextfallbackdisabled;consentcleared.")!=compact.npos;
+        unavailable=unavailable||compact.find("TLSruntimeunavailable:nextstartwillrefusethisrequest.")!=compact.npos;
+        donation=donation||compact.find("Donationisenabled:nextTLSstartrequiresdonationoff.")!=compact.npos;
+        nextStart=nextStart||compact.find("Nextexplicitstartonly.")!=compact.npos;
+        end=end||frame.find("[End of TLS review]")!=frame.npos;p.key(kKeyDown);}
+    CHECK(source&&target&&fallback&&unavailable&&donation&&nextStart&&end);
+    p.key(kKeyPageUp);CHECK(p.reviewOffset<160);p.key(27);CHECK(p.page==PoolSecuritySettingsPage::Browse&&p.dirty());
+    p.key(kKeyPageUp);const auto browse=p.render(20,12,ColorLevel::None);CHECK(std::count(browse.begin(),browse.end(),'\n')<12&&browse.find("[M] TLS review")!=browse.npos);
+
+    SettingsPanel root;root.open({});root.draft.color=false;root.poolSecurity.open({},context);unsigned ui=0,pool=0;
+    const auto route=[&](int ch){return root.key(ch,[&](const auto &,std::string *){++ui;return true;},{},{},0,{},{},{},[&](const auto &value,std::string *){++pool;CHECK(value.users.front()==strict);return true;});};
+    route('m');CHECK(root.poolSecurity.page==PoolSecuritySettingsPage::Review&&pool==0&&ui==0);route('\r');
+    CHECK(pool==1&&ui==0&&root.dirty()&&!root.poolSecurity.dirty());
 }
-int main(){const auto dir=std::filesystem::path(makeScratchDir("pool-security"));urls();declarations();fallback();storage(dir);panel(dir);std::error_code ec;std::filesystem::remove_all(dir,ec);return finishTests("native independent pool-security declarations (no network/mining)");}
+}
+int main(){const auto dir=std::filesystem::path(makeScratchDir("pool-security"));urls();declarations();fallback();storage(dir);panel(dir);migration();std::error_code ec;std::filesystem::remove_all(dir,ec);return finishTests("native independent pool-security declarations (no network/mining)");}

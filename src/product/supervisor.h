@@ -166,6 +166,9 @@ struct SupervisorOptions {
     std::string languagePreferencesPath;
     LanguageSettingsContext languageContext;
     GameSettingsContext gameContext; // frozen effective settings, not inferred from later saved preferences
+    PoolTlsMigrationCandidate poolMigrationCandidate = PoolTlsMigrationCandidate::None;
+    bool poolMigrationRuntimeAvailable = false;
+    bool poolMigrationDonationEnabled = false;
 };
 
 /** What the supervisor knows about one worker at one moment. */
@@ -678,6 +681,9 @@ class Supervisor {
 
     PoolSecuritySettingsContext poolSecurityContext()const{
         PoolSecuritySettingsContext context;
+        context.migrationCandidate=opt_.poolMigrationCandidate;
+        context.migrationRuntimeAvailable=opt_.poolMigrationRuntimeAvailable;
+        context.migrationDonationEnabled=opt_.poolMigrationDonationEnabled;
         context.running=intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop);
         context.effective=opt_.resolvedPoolTlsUrl.empty()?(opt_.poolEndpoint.empty()?PoolTransportPolicy::Unknown:PoolTransportPolicy::Plaintext):
             opt_.resolvedPoolFallbackUrl.empty()?PoolTransportPolicy::StrictTls:PoolTransportPolicy::PreferTls;
