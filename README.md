@@ -210,7 +210,7 @@ the miner; see [GPU tuning](#gpu-tuning-clocks-power-fans).
 - **F2Pool logs in with your F2Pool account name, not a PRL address.** Create an F2Pool account, set your PRL payout
   address in its settings, and pass `--wallet YOUR_F2POOL_ACCOUNT.rig1`. A prl1 address on F2Pool is refused at start-up.
   Kryptex and HeroMiners take your prl1 address directly.
-- **Strict TLS in opt-in local builds:** `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON` connects an explicit `stratum+ssl://DNS:PORT` user pool through system trust. Donation must be explicitly disabled. See [entry, build and acceptance limits](docs/pool-tls-runtime.md). Prefer-TLS fallback and donation TLS remain unavailable.
+- **TLS in opt-in local builds:** `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON` connects an explicit `stratum+ssl://DNS:PORT` user pool through system trust. Donation must be explicitly disabled. Explicit SSL URLs stay strict; saved Prefer TLS can use [separately consented same-host fallback](docs/pool-tls-fallback.md) after qualified pre-handshake network failures. See [entry, build and acceptance limits](docs/pool-tls-runtime.md). Donation TLS remains unavailable.
 - **Pool failover:** only the first pool is used. Secure requests for unused slots are refused.
 
 ## Several GPUs

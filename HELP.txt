@@ -64,7 +64,8 @@ Contents
 
   Strict encrypted user-pool connections (stratum+ssl://DNS:PORT) require a local build with
   CANARY_ENABLE_POOL_TLS_RUNTIME=ON, its matching TLS helper, and --no-donation.
-  Use a documented pool port. Prefer-TLS fallback and donation TLS are unavailable.
+  Use a documented pool port. Explicit SSL stays strict. Saved Prefer TLS requires separate
+  same-host plaintext consent for network-failure fallback. Donation TLS is unavailable.
   Only one pool is used; there is no automatic failover. See docs/pool-tls-runtime.md for acceptance limits.
   F2Pool and Kryptex are tested. HeroMiners and other Pearl pools should work but are not tested with this build.
 

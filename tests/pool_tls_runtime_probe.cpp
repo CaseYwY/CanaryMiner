@@ -11,7 +11,8 @@
 
 int main(int argc, char **argv) {
     using namespace om;
-    if (argc != 3 || std::string(argv[2]) != "canonical") return 2;
+    const bool fallbackMode = argc == 4 && std::string(argv[2]) == "fallback";
+    if (!fallbackMode && (argc != 3 || std::string(argv[2]) != "canonical")) return 2;
     try {
 #if defined(_WIN32)
         if (_setmode(_fileno(stdin), _O_BINARY) < 0) return 3;
@@ -29,14 +30,22 @@ int main(int argc, char **argv) {
         if (!decodePoolTlsCheckRequest(wire, &request, &parent) || request.host != "localhost" ||
             !request.caPem.empty() || request.windowsPrivateTrust) return 4;
         volatile sig_atomic_t stop = 0;
-        PoolTlsRuntimeTransport transport(std::filesystem::u8path(argv[1]), request, &stop);
+        PoolTlsRuntimeTransport transport(std::filesystem::u8path(argv[1]), request, &stop,
+            fallbackMode ? argv[3] : "");
         PearlPoolSource source(request.host, static_cast<int>(request.port), "placeholder", "fixture",
             {PearlNetwork::Mainnet, PearlTargetSemantics::BaseBeforePenalty}, "", &transport);
         Job job;
         const bool fetched = source.fetch(&job);
+        bool submitted = false;
+        if (fallbackMode && fetched) {
+            Solution solution; solution.nonce = 7; solution.hit[0] = 11; solution.extra = "synthetic-proof";
+            std::string error;
+            submitted = source.submit(job, solution, &error);
+        }
         // A trust failure must happen before PearlPoolSource writes mining.authorize.
         // The independent peer test checks that its application-byte buffer stays empty.
-        std::cout << "{\"ok\":" << (fetched ? 1 : 0)
+        std::cout << "{\"ok\":" << ((fetched && (!fallbackMode || submitted)) ? 1 : 0)
+                  << ",\"plaintext\":" << (transport.plaintextActive() ? 1 : 0)
                   << ",\"tls\":" << static_cast<unsigned>(transport.error()) << "}" << std::endl;
         return 0;
     } catch (...) {

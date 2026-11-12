@@ -9,7 +9,7 @@
 
 static int g_checks = 0, g_failures = 0;
 
-static void checkTrue(const char *name, bool ok) {
+[[maybe_unused]] static void checkTrue(const char *name, bool ok) {
     ++g_checks;
     if (!ok) {
         ++g_failures;
@@ -20,7 +20,7 @@ static void checkTrue(const char *name, bool ok) {
 #define CHECK(expr) checkTrue(#expr, (expr))
 #define CHECK_MSG(name, expr) checkTrue(name, (expr))
 
-static int finishTests(const char *suite) {
+[[maybe_unused]] static int finishTests(const char *suite) {
     std::printf("%s: %d checks, %d failures\n", suite, g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

@@ -94,12 +94,13 @@ struct SupervisorTuning {
 
 /** Arguments for one worker: the user's command line without the options the supervisor sets per worker, plus the internal ones. */
 inline std::vector<std::string> workerArgs(const std::vector<std::string> &user, const WorkerSeed &w, int port,
-                                         std::optional<unsigned> resolvedWait = std::nullopt,const std::string &resolvedPoolTlsUrl = {}) {
+                                         std::optional<unsigned> resolvedWait = std::nullopt,const std::string &resolvedPoolTlsUrl = {},
+                                         const std::string &resolvedPoolFallbackUrl = {}) {
     std::vector<std::string> out;
     for (size_t i = 0; i < user.size(); ++i) {
         const std::string &a = user[i];
         if (resolvedWait && a == "--work-wait-ms") { ++i; continue; }
-        if (!resolvedPoolTlsUrl.empty() && a == "--worker-pool-tls") { ++i; continue; }
+        if (!resolvedPoolTlsUrl.empty() && (a == "--worker-pool-tls" || a == "--worker-pool-fallback")) { ++i; continue; }
         if (a == "--devices" || a == "--device" || a == "--api-port" || a == "--api-bind" || a == "--worker-id") {
             ++i;  // drop the option and its value
             continue;
@@ -118,6 +119,7 @@ inline std::vector<std::string> workerArgs(const std::vector<std::string> &user,
     out.push_back(std::to_string(w.index));
     if (resolvedWait) { out.push_back("--work-wait-ms"); out.push_back(std::to_string(*resolvedWait)); }
     if (!resolvedPoolTlsUrl.empty()) { out.push_back("--worker-pool-tls"); out.push_back(resolvedPoolTlsUrl); out.push_back("--no-donation"); }
+    if (!resolvedPoolTlsUrl.empty() && !resolvedPoolFallbackUrl.empty()) { out.push_back("--worker-pool-fallback"); out.push_back(resolvedPoolFallbackUrl); }
     return out;
 }
 
@@ -154,7 +156,8 @@ struct SupervisorOptions {
     BillingReviewAccess billingReviewAccess; // default empty; borrowed owner must outlive this supervisor
     bool noEnergy = false;
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
-    std::string resolvedPoolTlsUrl; // frozen strict user peer; no saved preference reload or plaintext fallback in workers
+    std::string resolvedPoolTlsUrl; // frozen user peer; no saved preference reload in workers
+    std::string resolvedPoolFallbackUrl; // frozen consent for this exact TCP endpoint, or empty
     WorkerFleetFactory workerFleetFactory; // default empty; one fixed lifetime, never reconstructed on a worker retry
     WorkerFleetEvidenceSource workerFleetEvidence; // trusted memory-only source; missing evidence holds every controlled worker
     DisplaySampleFactory displaySampleFactory; // empty uses native display reader; constructed/read/destroyed only in the background
@@ -801,7 +804,7 @@ class Supervisor {
         w.historyLastUtc = static_cast<int64_t>(time(nullptr));
         if(fleet_){
             w.controlledExitHandled=false;w.view.haveStats=false;w.view.state="Pausing";w.view.detail="waiting for controlled startup";
-            if(!fleet_->launch(static_cast<unsigned>(i),std::filesystem::u8path(opt_.exe),workerArgs(opt_.userArgs,w.view.seed,w.port,opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl),
+            if(!fleet_->launch(static_cast<unsigned>(i),std::filesystem::u8path(opt_.exe),workerArgs(opt_.userArgs,w.view.seed,w.port,opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl,opt_.resolvedPoolFallbackUrl),
                 static_cast<unsigned>(opt_.drainMs+5000),supervisorControlTime())){
                 w.controlledExitHandled=true;onExit(i,kExitFaultLatched,now,false,"controlled worker admission refused");
             }else addEvent(workerLabel(w)+": controlled worker requested");
@@ -811,7 +814,7 @@ class Supervisor {
         const size_t slot = i;
         std::string err;
         const bool ok = w.proc->start(
-            opt_.exe, workerArgs(opt_.userArgs, w.view.seed, w.port, opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl),
+            opt_.exe, workerArgs(opt_.userArgs, w.view.seed, w.port, opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl,opt_.resolvedPoolFallbackUrl),
             [this, slot](const std::string &line) {
                 std::lock_guard<std::mutex> g(mu_);
                 inbox_.push_back({slot, line});

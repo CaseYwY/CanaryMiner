@@ -287,7 +287,8 @@ struct RunOptions {
     // node source.
     std::string poolHost;
     int poolPort = 0;
-    bool poolTls = false;  // strict first-user-pool transport; never inherited by donation or downgraded
+    bool poolTls = false;  // first-user-pool transport; never inherited by donation
+    std::string poolPlaintextFallbackUrl; // frozen user consent; empty keeps TLS strict
     std::string wallet;
     std::string worker = "canary";
     bool poolProofCompression = false;  // H-019: offer the gzip v2 dialect at login (product pool.compression auto)

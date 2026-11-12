@@ -1,6 +1,6 @@
 # Test families and release gates
 
-[P-12h](../pool-tls-runtime.md) adds enabled/disabled ordinary CLI admission, pure policy and worker-freezing checks, real-IPC reconnect/cancellation/Unknown tests, actual enabled run-source compilation and a native system-trust rejection check. Synthetic IPC, private-trust encryption and public normal-trust acceptance remain separate evidence categories.
+[P-12h](../pool-tls-runtime.md) adds enabled/disabled ordinary CLI admission, pure policy and worker-freezing checks, real-IPC reconnect/cancellation/Unknown tests, actual enabled run-source compilation and a native system-trust rejection check. [P-12j](../pool-tls-fallback.md) adds distinct plaintext RPC states, partial-write preservation, clean failed-helper evidence, shared-deadline regressions and localhost consent/no-downgrade checks. Synthetic IPC, private-trust encryption and public normal-trust acceptance remain separate evidence categories.
 
 
 All fixtures are synthetic. Acceptance specifications are not passing runtime evidence. Tests must state their measurement/OS/toolchain scope; CPU stubs, WSL, fake launchers and short mining runs cannot substitute for native GPU/game/release qualification.

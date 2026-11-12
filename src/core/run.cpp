@@ -136,6 +136,10 @@ static void applyMemOc(GpuMonitor &gpu, const char *gpuName) {
 int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
              double gpuMemGB, const char *archLabel, volatile sig_atomic_t *stop,
              const char *gpuUuid, unsigned telemetryDeviceIndex) {
+    if (!opt.poolPlaintextFallbackUrl.empty() && !opt.poolTls) {
+        fprintf(stderr, "pool fallback requires its frozen TLS-first user policy\n");
+        return 1;
+    }
     if (opt.poolTls) {
 #if !defined(CANARY_ENABLE_POOL_TLS_RUNTIME) || !CANARY_ENABLE_POOL_TLS_RUNTIME
         fprintf(stderr, "strict pool TLS is unavailable in this build\n");
@@ -480,6 +484,9 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
 
     // PearlPoolSource borrows its transport. Destroy the source before the helper owner.
     std::unique_ptr<PearlPoolTransport> poolTransport;
+#if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
+    uint64_t reportedPlaintextConnections = 0;
+#endif
     std::unique_ptr<JobSource> source;
     uint64_t noncePrefix = 0;
     int nonceBits = 64;
@@ -533,7 +540,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
                 logLine(tty, "error", "invalid strict pool TLS endpoint");
                 return 1;
             }
-            poolTransport = std::make_unique<PoolTlsRuntimeTransport>(helper, std::move(request), stop);
+            poolTransport = std::make_unique<PoolTlsRuntimeTransport>(helper, std::move(request), stop, opt.poolPlaintextFallbackUrl);
         }
 #endif
         auto *pp = new PearlPoolSource(opt.poolHost, opt.poolPort, opt.wallet,
@@ -737,6 +744,15 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
                     return 1;
                 }
             } else fetched = source->fetch(&fresh);
+#if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
+            if (auto *tlsOwner = dynamic_cast<PoolTlsRuntimeTransport *>(poolTransport.get())) {
+                const auto count = tlsOwner->plaintextConnections();
+                if (count > reportedPlaintextConnections) {
+                    logLine(tty, "warn", "Pool connection used explicitly authorized plaintext fallback; login and proofs are unencrypted");
+                    reportedPlaintextConnections = count;
+                }
+            }
+#endif
             if (!fetched) {
                 if (!algo->discardPearlLookahead()) return 1;
                 auto *pp = dynamic_cast<PearlPoolSource *>(source.get());

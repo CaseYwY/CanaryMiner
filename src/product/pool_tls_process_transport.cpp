@@ -4,18 +4,20 @@
 #include <thread>
 namespace om {
 namespace {
-using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using I=PearlPoolInterest;using S=PearlTlsState;using E=PearlTlsError;using W=PearlPoolWaitStatus;
+using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using I=PearlPoolInterest;using S=PoolTlsRpcState;using E=PearlTlsError;using W=PearlPoolWaitStatus;
 uint64_t nowMs(){return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
 }
 struct PoolTlsProcessTransport::Impl {
-    std::filesystem::path helper;PoolTlsCheckRequest config;const std::atomic<bool> &cancel;const volatile sig_atomic_t *stop;DuplexTaskProcess process;
+    std::filesystem::path helper;PoolTlsCheckRequest config;const std::atomic<bool> &cancel;const volatile sig_atomic_t *stop;PoolTlsTransportMode mode;DuplexTaskProcess process;
     PoolTlsRpcGate gate;PoolTlsRpcFramer frames;std::optional<PoolTlsRpcReply> result;O resultOperation=O::Abort;
-    bool attempted=false,connected=false,terminal=false,nativeBuffered=false;uint64_t sequence=0,last=0;E failure=E::None;S state=S::Dormant;
+    bool attempted=false,connected=false,terminal=false,nativeBuffered=false;uint64_t sequence=0,last=0,openDeadline=0;E failure=E::None;S state=S::Dormant;
     std::string input,writeCopy;const char *writePointer=nullptr;std::size_t writeLength=0;
-    Impl(std::filesystem::path path,PoolTlsCheckRequest r,const std::atomic<bool> &c,const volatile sig_atomic_t *s):helper(std::move(path)),config(std::move(r)),cancel(c),stop(s){}
-    void fail(E error){if(!terminal){failure=error;terminal=true;connected=false;state=S::Failed;gate.stop();process.requestStop();}}
+    std::optional<PoolTlsCheckReply> openFailure;
+    Impl(std::filesystem::path path,PoolTlsCheckRequest r,const std::atomic<bool> &c,const volatile sig_atomic_t *s,PoolTlsTransportMode m):helper(std::move(path)),config(std::move(r)),cancel(c),stop(s),mode(m){}
+    void fail(E error,bool nativeOpen=false){if(!terminal){if(!nativeOpen)openFailure.reset();failure=error;terminal=true;connected=false;state=S::Failed;gate.stop();process.requestStop();}}
     bool check(){if(terminal)return false;if(cancel.load()||(stop&&*stop)){fail(E::Cancelled);return false;}const auto now=nowMs();
-        if(!now||now<last){fail(E::Clock);return false;}last=now;if(gate.pending()&&now>=gate.pending()->deadlineMonoMs){fail(E::Timeout);return false;}return true;}
+        if(!now||now<last){fail(E::Clock);return false;}last=now;
+        if((openDeadline&&!connected&&now>=openDeadline)||(gate.pending()&&now>=gate.pending()->deadlineMonoMs)){fail(E::Timeout);return false;}return true;}
     bool issue(O operation,std::string payload={},std::size_t maximum=0,I interest=I::None,unsigned wait=0,uint64_t deadline=0,uint64_t issued=0){
         if(!check()||gate.pending()||result||sequence==UINT64_MAX)return false;
         const auto now=nowMs();
@@ -32,9 +34,18 @@ struct PoolTlsProcessTransport::Impl {
             PoolTlsRpcReply reply;resultOperation=gate.pending()->operation;
             if(!decodePoolTlsRpcReply(*gate.pending(),wire,&reply)||!gate.settle(reply,nowMs()))return false;
             state=reply.state;nativeBuffered=reply.bufferedRead;result=std::move(reply);return true;})){fail(E::Protocol);return;}
-        if(result&&result->state==S::Failed){const auto error=result->error;fail(error);return;}
+        // No second reply is permitted while the first is retained, including a partial trailing frame.
+        if(result&&!frames.complete()){fail(E::Protocol);return;}
         if(poll.eof&&(!frames.complete()||gate.pending())){fail(E::Transport);return;}
         if(poll.state==DuplexTaskState::Exited&&poll.exitCode!=0){fail(E::Transport);return;} // successful exit still has a bounded unread pipe tail
+        if(result&&result->state==S::Failed){const auto error=result->error;
+            if(resultOperation==O::Open||resultOperation==O::OpenPlaintext){
+                // A failed native opener must finish its bounded reply and exit cleanly before its
+                // phase can authorize a different transport. The original Open budget still applies.
+                if(!poll.eof||poll.state!=DuplexTaskState::Exited)return;
+                openFailure=result->openFailure;
+            }
+            fail(error,true);return;}
     }
     // A pre-submit nonblocking read can still have a pending RPC when the canonical source switches to writing.
     // Preserve any returned plaintext exactly; do not replace it with a readiness hint or discard pushed work.
@@ -46,16 +57,24 @@ struct PoolTlsProcessTransport::Impl {
         return false;
     }
 };
-PoolTlsProcessTransport::PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest r,const std::atomic<bool> &cancel,const volatile sig_atomic_t *stop):impl_(new Impl(std::move(helper),std::move(r),cancel,stop)){}
+PoolTlsProcessTransport::PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest r,const std::atomic<bool> &cancel,const volatile sig_atomic_t *stop,PoolTlsTransportMode mode):impl_(new Impl(std::move(helper),std::move(r),cancel,stop,mode)){}
 PoolTlsProcessTransport::~PoolTlsProcessTransport(){close();}
-PearlPoolConnectStatus PoolTlsProcessTransport::open(const std::string &host,int port){auto &p=*impl_;if(p.attempted||p.terminal)return PearlPoolConnectStatus::ConnectFailure;p.attempted=true;
-    if(!p.check()||!p.config.enabled||host!=p.config.host||port<1||static_cast<unsigned>(port)!=p.config.port||!validPoolTlsCheckRequest(p.config)){p.fail(E::InvalidPolicy);return PearlPoolConnectStatus::ConnectFailure;}
-    const auto now=nowMs();if(now>UINT64_MAX-p.config.totalMs){p.fail(E::Clock);return PearlPoolConnectStatus::ConnectFailure;}const auto deadline=now+p.config.totalMs;
-    std::string payload;if(!encodePoolTlsCheckRequest(p.config,localTaskProcessId(),&payload)||!p.process.start(p.helper,p.cancel)||!p.issue(O::Open,std::move(payload),0,I::None,0,deadline,now)){p.fail(E::Transport);return PearlPoolConnectStatus::ConnectFailure;}
-    while(!p.terminal&&!p.result){p.pump();if(!p.result&&!p.terminal)std::this_thread::sleep_for(std::chrono::milliseconds(1));}
+PearlPoolConnectStatus PoolTlsProcessTransport::open(const std::string &host,int port){return openUntil(host,port,0);}
+PearlPoolConnectStatus PoolTlsProcessTransport::openUntil(const std::string &host,int port,uint64_t originalDeadlineMonoMs){auto &p=*impl_;if(p.attempted||p.terminal)return PearlPoolConnectStatus::ConnectFailure;p.attempted=true;
+    if(!p.check()||!p.config.enabled||host!=p.config.host||port<1||static_cast<unsigned>(port)!=p.config.port||!validPoolTlsCheckRequest(p.config)||
+        (p.mode!=PoolTlsTransportMode::Tls&&p.mode!=PoolTlsTransportMode::Plaintext)||
+        (p.mode==PoolTlsTransportMode::Plaintext&&(!p.config.caPem.empty()||p.config.windowsPrivateTrust))){p.fail(E::InvalidPolicy);return PearlPoolConnectStatus::ConnectFailure;}
+    const auto now=nowMs();if(now>UINT64_MAX-p.config.totalMs){p.fail(E::Clock);return PearlPoolConnectStatus::ConnectFailure;}
+    const auto deadline=originalDeadlineMonoMs?std::min(now+p.config.totalMs,originalDeadlineMonoMs):now+p.config.totalMs;
+    if(deadline<=now||deadline-now<50){p.fail(E::Timeout);return PearlPoolConnectStatus::ConnectFailure;}
+    p.openDeadline=deadline;
+    auto request=p.config;request.totalMs=static_cast<unsigned>(deadline-now);
+    const auto operation=p.mode==PoolTlsTransportMode::Tls?O::Open:O::OpenPlaintext;
+    std::string payload;if(!encodePoolTlsCheckRequest(request,localTaskProcessId(),&payload)||!p.process.start(p.helper,p.cancel)||!p.issue(operation,std::move(payload),0,I::None,0,deadline,now)){p.fail(E::Transport);return PearlPoolConnectStatus::ConnectFailure;}
+    while(!p.terminal&&(!p.result||p.result->state==S::Failed)){p.pump();if(!p.terminal&&(!p.result||p.result->state==S::Failed))std::this_thread::sleep_for(std::chrono::milliseconds(1));}
     if(p.terminal)return PearlPoolConnectStatus::ConnectFailure;
-    if(!p.result||p.result->state!=S::VerifiedOpen){p.fail(E::Protocol);return PearlPoolConnectStatus::ConnectFailure;}
-    p.result.reset();p.connected=true;return PearlPoolConnectStatus::Connected;
+    if(!p.result||p.result->state!=(p.mode==PoolTlsTransportMode::Tls?S::VerifiedOpen:S::PlaintextOpen)){p.fail(E::Protocol);return PearlPoolConnectStatus::ConnectFailure;}
+    p.result.reset();p.connected=true;p.openDeadline=0;return PearlPoolConnectStatus::Connected;
 }
 bool PoolTlsProcessTransport::isOpen()const{const auto &p=*impl_;return p.connected&&!p.terminal&&!p.cancel.load()&&!(p.stop&&*p.stop);} // pending reauthentication still owns the connected socket
 void PoolTlsProcessTransport::close(){auto &p=*impl_;p.attempted=true;if(!p.terminal){p.terminal=true;p.connected=false;p.state=S::Closed;p.gate.stop();p.process.requestStop();}p.process.terminate();}
@@ -70,6 +89,9 @@ PearlPoolWaitStatus PoolTlsProcessTransport::waitLocalRead(int ms){auto &p=*impl
 }
 bool PoolTlsProcessTransport::setNonblocking(bool enabled){return enabled&&isOpen();}
 PearlTlsError PoolTlsProcessTransport::error()const{return impl_->failure;}
+std::optional<PoolTlsCheckReply> PoolTlsProcessTransport::openFailure()const{
+    const auto &p=*impl_;return p.cancel.load()||(p.stop&&*p.stop)?std::nullopt:p.openFailure;
+}
 PearlPoolTransfer PoolTlsProcessTransport::send(const char *data,std::size_t length){auto &p=*impl_;if(!p.check()||!p.connected||!data||!length)return {T::Error,0};
     const auto size=std::min(length,poolTlsRpcPayloadLimit);
     if(p.writePointer&&(p.writePointer!=data||p.writeLength!=length||p.writeCopy.size()!=size||std::memcmp(data,p.writeCopy.data(),size))){p.fail(E::Protocol);return {T::Error,0};}

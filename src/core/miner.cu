@@ -198,6 +198,8 @@ int main(int argc, char **argv) {
     bool workerChild = false, noDashboard = false;
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
+    bool workerPoolFallbackSeen=false;
+    std::string workerPoolFallbackUrl;
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
     bool workerControlSeen=false;
     WorkerChannelHandles workerChannel;
@@ -364,6 +366,11 @@ int main(int argc, char **argv) {
             workerPoolTlsSeen=true;workerPoolTlsUrl=next();
             if(workerPoolTlsUrl.empty()){fprintf(stderr,"invalid private worker TLS policy\n");return kExitUsage;}
         }
+        else if (a == "--worker-pool-fallback") {
+            if(workerPoolFallbackSeen){fprintf(stderr,"duplicate private worker fallback policy\n");return kExitUsage;}
+            workerPoolFallbackSeen=true;workerPoolFallbackUrl=next();
+            if(workerPoolFallbackUrl.empty()){fprintf(stderr,"invalid private worker fallback policy\n");return kExitUsage;}
+        }
         else if (a == "--worker-id") workerIdText = next();
         else if (a == "--interval") {
             intervalCount++;
@@ -496,7 +503,10 @@ int main(int argc, char **argv) {
             return kExitConfig;
         }
     }
-    if(workerPoolTlsSeen&&(!workerChild||!applyFrozenPoolTlsEndpoint(workerPoolTlsUrl,&cfg))){
+    if(workerPoolFallbackSeen&&(!workerChild||!workerPoolTlsSeen)){
+        fprintf(stderr,"private worker fallback requires its parent's frozen TLS peer; no mining was started\n");return kExitConfig;
+    }
+    if(workerPoolTlsSeen&&(!workerChild||!applyFrozenPoolTlsEndpoint(workerPoolTlsUrl,&cfg,workerPoolFallbackUrl))){
         fprintf(stderr,"private worker TLS policy does not match its frozen user peer and disabled donation; no mining was started\n");return kExitConfig;
     }
     if(workerChild&&!workerPoolTlsSeen&&!cfg.pools.empty()&&cfg.pools[0].tls){
@@ -518,8 +528,13 @@ int main(int argc, char **argv) {
             fprintf(stderr,"%s\n",error.c_str());return kExitConfig;
         }
         if(poolTlsPolicy.tls){
+            // The private URL already passed source-intent and exact-peer checks before TLS was applied.
+            if(workerPoolFallbackSeen)poolTlsPolicy.fallbackUrl=workerPoolFallbackUrl;
             cfg.pools[0].host=poolTlsPolicy.host;cfg.pools[0].port=static_cast<int>(poolTlsPolicy.port);cfg.pools[0].tls=true;
-            if(!workerChild)fprintf(stderr,"Strict user-pool TLS: system trust and DNS verification; no plaintext fallback; donation is off.\n");
+            if(!workerChild){
+                if(poolTlsPolicy.fallbackUrl.empty())fprintf(stderr,"Strict user-pool TLS: system trust and DNS verification; no plaintext fallback; donation is off.\n");
+                else fprintf(stderr,"Prefer TLS: plaintext fallback is authorized for a qualifying pre-TLS connection failure. Plaintext exposes login/proof data, and a network attacker can trigger fallback. Donation is off.\n");
+            }
         }else if(ordinaryRuntime)fprintf(stderr,"Legacy TCP compatibility is unencrypted; no automatic TLS migration or downgrade is performed.\n");
     }
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
@@ -580,6 +595,7 @@ int main(int argc, char **argv) {
             opt.poolHost = cfg.pools[0].host;
             opt.poolPort = cfg.pools[0].port;
             opt.poolTls = cfg.pools[0].tls;
+            opt.poolPlaintextFallbackUrl = poolTlsPolicy.fallbackUrl;
             opt.poolProofCompression = cfg.pools[0].compression == "auto" && poolPresetSpeaksV2(cfg.pools[0].preset);
             opt.poolAccount = cfg.pools[0].account;
             // explicit policy flags (research/harness) win over the pool entry's own
@@ -1054,6 +1070,7 @@ int main(int argc, char **argv) {
         so.noEnergy = cli.ov.noEnergy;
         so.resolvedWorkWait = opt.workWaitMs;
         so.resolvedPoolTlsUrl = poolTlsPolicy.frozenUrl;
+        so.resolvedPoolFallbackUrl = poolTlsPolicy.fallbackUrl;
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;
         for (const DeviceIdentity &d : chosenAll) tuningDevices.push_back({d.index, d.uuid});

@@ -8,7 +8,7 @@
 
 **Delivery rule:** finish normal entry-point integration and the declared tests for one usable module, then make its focused completion commit before starting another. See the [module delivery rule](execution-plan.md#module-delivery-rule-current-user-instruction) and [owner input/action checklist](owner-actions.zh-CN.md). Neither a helper commit nor fixture success is whole-module activation.
 
-**Current module:** [P-12h strict user-pool TLS](../pool-tls-runtime.md) supplies ordinary first-user-pool integration in local builds explicitly enabling `CANARY_ENABLE_POOL_TLS_RUNTIME`, with donation off. This is the declared software path; public normal-trust positives, real-pool/GPU, Prefer-TLS fallback, donation TLS and release acceptance remain open. P-12 remains PARTIAL.
+**Current module:** [P-12j consent-bound fallback](../pool-tls-fallback.md) extends the ordinary first-user-pool TLS path in explicitly enabled local builds, with donation off. Prefer TLS may use a separately authorized same-host TCP endpoint only after qualified pre-handshake network failure; explicit SSL URLs remain strict. [P-12i](../pool-tls-runtime-install.md) supplies the local helper installation layout. Secure presets, donation TLS, public normal-trust/pool/GPU and release acceptance remain open. P-12 remains PARTIAL.
 
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 
@@ -85,7 +85,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Monetary bill continuation and today's forecast | Exact synthetic receipt/recovery/review/compute and calendar-forecast/query owners implemented; ordinary source/configuration/accrued-bill binding and real-source qualification remain open |
 | Automatic profitability selection | Exact synthetic study/schedule/result/choice/budget/command chain and opt-in native CPU-worker integration implemented; ordinary reviewed controls, qualified measurement/safety/source bindings and physical qualification remain open |
 | Tested game pause/coexist policies | CPU-tested episode/profit guard, native detector, cooperative pause and optional lifetime supervisor bridge; ordinary activation and real experience/economic qualification remain open |
-| Stratum TLS | [Strict first-user-pool runtime](../pool-tls-runtime.md) wired in opt-in local builds with donation off; frozen worker peer, fresh reconnects and no TCP downgrade. Prefer-TLS fallback, donation TLS, public normal-trust/pool and release acceptance remain open |
+| Stratum TLS | [First-user-pool runtime](../pool-tls-runtime.md), [helper installation](../pool-tls-runtime-install.md) and [consent-bound Prefer-TLS fallback](../pool-tls-fallback.md) in opt-in local builds with donation off; strict SSL never downgrades. Secure presets, donation TLS, public normal-trust/pool/GPU and release acceptance remain open |
 | First internationalization language packs | Sixteen declared packs with honest source/draft review status, separately tested typed Unicode/formatting primitives and multiple English-only native source domains; complete domain extraction, effective native translation and human/terminal qualification remain open |
 
 No personal prototype, local GPU curve, wallet observation or machine-specific deployment is evidence that a fork feature is implemented or universally safe. Disabled groups must stay explicitly unavailable until their backend and tests exist.

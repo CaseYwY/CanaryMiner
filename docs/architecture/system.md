@@ -1,6 +1,6 @@
 # System and module boundaries
 
-[P-12h](../pool-tls-runtime.md) places a reconnecting strict TLS owner before the canonical source in ordinary run construction. Each connection uses a fresh fixed sibling, retains the parent native epoch and signal stop, and settles the previous helper before replacement. CLI/config admission and the frozen worker endpoint cannot authorize TCP fallback or a donation peer.
+[P-12h](../pool-tls-runtime.md) places a reconnecting strict TLS owner before the canonical source in ordinary run construction. Each connection uses a fresh fixed sibling, retains the parent native epoch and signal stop, and settles the previous helper before replacement. [P-12j](../pool-tls-fallback.md) freezes separately consented same-host fallback with the worker TLS endpoint. A clean failed helper reply supplies native phase evidence; one absolute deadline covers both connection modes. Explicit SSL never downgrades and donation remains disabled for this path.
 
 
 ## Architecture direction

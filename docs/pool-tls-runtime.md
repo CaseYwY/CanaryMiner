@@ -2,7 +2,9 @@
 
 P-12h; M-TLS; R-TLS-001/003/004; T-TLS/T-CONFIG/T-INTENT.
 
-This module connects the ordinary first-user-pool path to the retained TLS helper. It is available in a local build configured with `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON`. The option defaults off. Windows uses Schannel and system trust; Linux requires OpenSSL 3.5 or newer development libraries. Configuration downloads nothing. The miner and its fixed `canary_pool_tls_stream_worker` sibling must come from the same build, alongside the existing preference helper. [P-12i local installation](pool-tls-runtime-install.md) installs that sibling for enabled builds and verifies the host-only layout.
+This document records the strict baseline. [P-12j](pool-tls-fallback.md) adds separately authorized same-host fallback for saved Prefer TLS; explicit SSL URLs and requests without effective fallback consent retain the strict behavior below.
+
+This module connects the ordinary first-user-pool path to the retained TLS helper. It is available in a local build configured with `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON`. The option defaults off. Windows uses Schannel and system trust; Linux requires OpenSSL 3.5 or newer development libraries and a glibc 2.40-or-newer build/runtime for the existing atomic `pidfd_spawn` process owner. A build against older glibc cannot launch the duplex TLS helper; a successful CUDA-only build on such a system does not qualify TLS runtime support. Kernel pidfd support and the existing signal/ownership admission checks also remain required. Configuration downloads nothing. The miner and its fixed `canary_pool_tls_stream_worker` sibling must come from the same build, alongside the existing preference helper. [P-12i local installation](pool-tls-runtime-install.md) installs that sibling for enabled builds and verifies the host-only layout.
 
 ## Entry and scope
 
@@ -12,7 +14,7 @@ Alternatively, save **strict TLS** for the first slot in Settings → Pools and 
 
 The parent freezes the selected TLS URL and disabled-donation choice for worker launches and retries. Later preference edits affect a new explicit parent session. A restarted child cannot drop TLS or change the frozen host. This module does not freeze every unrelated field of the existing main configuration file.
 
-Only ordinary first-user-pool mining is supported. Research/evidence modes, secure requests for unused pool slots, prefer-TLS/plaintext fallback and donation TLS are refused before device setup. Legacy TCP remains an explicit compatibility path with its warning. The module neither changes the donation schedule nor applies user TLS permission to the developer's peer. A defensive fee-session check also refuses an unexpected TLS donation attempt.
+Only ordinary first-user-pool mining is supported. Research/evidence modes, secure requests for unused pool slots and donation TLS are refused before device setup. Saved Prefer TLS follows the additional consent and failure rules in P-12j; it never weakens an explicit SSL input. Legacy TCP remains an explicit compatibility path with its warning. The module neither changes the donation schedule nor applies user TLS permission to the developer's peer. A defensive fee-session check also refuses an unexpected TLS donation attempt.
 
 ## Connection and failure behavior
 

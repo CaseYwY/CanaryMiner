@@ -7,9 +7,11 @@ namespace om {
 class PoolTlsProcessTransport final:public PearlPoolTransport {
    public:
     PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest,const std::atomic<bool> &cancel,
-                            const volatile sig_atomic_t *stop=nullptr);
+                            const volatile sig_atomic_t *stop=nullptr,
+                            PoolTlsTransportMode mode=PoolTlsTransportMode::Tls);
     ~PoolTlsProcessTransport()override;
     PearlPoolConnectStatus open(const std::string &,int)override;
+    PearlPoolConnectStatus openUntil(const std::string &,int,uint64_t originalDeadlineMonoMs);
     bool isOpen()const override;
     void close()override;
     bool progressIO()const override{return true;}
@@ -23,6 +25,7 @@ class PoolTlsProcessTransport final:public PearlPoolTransport {
     PearlPoolTransfer send(const char *,std::size_t)override;
     PearlPoolTransfer receive(char *,std::size_t)override;
     PearlTlsError error()const;
+    std::optional<PoolTlsCheckReply> openFailure()const;
    private:
     struct Impl;std::unique_ptr<Impl> impl_;
 };

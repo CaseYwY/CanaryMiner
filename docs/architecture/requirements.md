@@ -1,6 +1,6 @@
 # Requirements and traceability
 
-[P-12h](../pool-tls-runtime.md) wires the ordinary strict first-user-pool TLS path in an opt-in build, freezes the peer across worker retries and preserves canonical protocol/Unknown handling. Donation must be off; prefer-TLS fallback and donation TLS remain refused. R-TLS-001/002/003/004 stay PARTIAL pending the remaining modes and normal-trust/public-pool/production qualification.
+[P-12h](../pool-tls-runtime.md) wires the ordinary strict first-user-pool TLS path in an opt-in build, freezes the peer across worker retries and preserves canonical protocol/Unknown handling. [P-12j](../pool-tls-fallback.md) adds separately authorized same-host fallback after qualified native pre-handshake network failure. Explicit SSL stays strict and donation must be off. R-TLS-001/002/003/004 stay PARTIAL pending secure presets, donation routing and normal-trust/public-pool/production qualification.
 
 
 Each row is a testable requirement, not a checklist of already implemented features. Stable IDs are never recycled. Module IDs are defined in [system.md](system.md), task IDs in [execution-plan.md](execution-plan.md), and test-family IDs in [testing.md](testing.md).

@@ -1,5 +1,7 @@
 # Independent pool-security declarations (P-12g)
 
+Current runtime extension: [P-12h](pool-tls-runtime.md) and [P-12j](pool-tls-fallback.md) bind the first user slot to ordinary startup in explicitly TLS-enabled builds with donation off. Strict SSL never falls back. Prefer TLS requires separate same-host plaintext consent and qualified original network-failure evidence. This P-12g record describes the earlier declaration-only implementation; its blanket startup-refusal statements are superseded only within the later modules' stated scope.
+
 M-UI/M-CONFIG/M-TLS; R-UI-007, R-TLS-001/002/003/004; T-UI/T-CONFIG/T-TLS/T-INTENT/T-PRIVACY; D-98.
 
 **Configured declarations, not live TLS or fallback activation.** S → Pools and TLS opens the same native editor as the idle `settings` command. It saves only `pool-security-preferences.json`, separately from UI/runtime/mining credentials. No menu, review or save constructs a helper, resolves DNS, connects, changes the running miner, replaces a pool, or rewrites donation identity/scheduling/protocol.

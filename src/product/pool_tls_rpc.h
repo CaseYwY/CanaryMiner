@@ -1,11 +1,12 @@
 // Private bounded duplex TLS RPC. No process/socket launch or ordinary-miner activation.
 #pragma once
 #include "pool_tls_check.h"
+#include "pool_tls_transport_state.h"
 #include <functional>
 #include <string_view>
 namespace om {
 constexpr std::size_t poolTlsRpcPayloadLimit=16384,poolTlsRpcFrameLimit=localTaskRequestLimit+256;
-enum class PoolTlsRpcOperation { Open, Write, Read, Wait, Abort };
+enum class PoolTlsRpcOperation { Open, Write, Read, Wait, Abort, OpenPlaintext };
 enum class PoolTlsRpcReady { NotWait, Ready, Timeout };
 struct PoolTlsRpcCommand {
     uint64_t sequence=0,issuedMonoMs=0,deadlineMonoMs=0;
@@ -18,12 +19,14 @@ struct PoolTlsRpcCommand {
 struct PoolTlsRpcReply {
     uint64_t sequence=0;
     PearlPoolTransfer transfer;
-    PearlTlsState state=PearlTlsState::Dormant;
+    PoolTlsRpcState state=PoolTlsRpcState::Dormant;
     PearlTlsError error=PearlTlsError::None;
     std::string payload; // only a successful Read; never a native diagnostic or request echo
     PoolTlsRpcReady ready=PoolTlsRpcReady::NotWait;
     bool bufferedRead=false;
+    std::optional<PoolTlsCheckReply> openFailure={}; // exact native Open failure only; never a parent timeout/IPC inference
 };
+PearlTlsError poolTlsRpcOpenError(const PoolTlsCheckReply &);
 bool validPoolTlsRpcCommand(const PoolTlsRpcCommand &);
 bool encodePoolTlsRpcCommand(const PoolTlsRpcCommand &,std::string *);
 bool decodePoolTlsRpcCommand(std::string_view,PoolTlsRpcCommand *);
@@ -52,6 +55,7 @@ class PoolTlsRpcGate {
     std::optional<PoolTlsRpcCommand> pending_;
     std::optional<PoolTlsRpcReply> settled_;
     std::optional<std::string> retryWrite_;
+    PoolTlsTransportMode mode_=PoolTlsTransportMode::Tls;
     bool time(uint64_t);
 };
 } // namespace om

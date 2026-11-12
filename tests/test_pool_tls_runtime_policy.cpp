@@ -14,7 +14,7 @@ int main(){
     config.pools={pool};
     PoolSecurityPreferences saved;PoolTlsRuntimePolicy policy;
     CHECK(resolvePoolTlsRuntimePolicy(config,saved,true,true,&policy,&error));
-    CHECK(policy.tls&&policy.host=="pool-fixture.invalid"&&policy.port==443&&policy.frozenUrl=="stratum+ssl://pool-fixture.invalid:443");
+    CHECK(policy.tls&&policy.host=="pool-fixture.invalid"&&policy.port==443&&policy.frozenUrl=="stratum+ssl://pool-fixture.invalid:443"&&policy.fallbackUrl.empty());
     const auto original=policy;
     CHECK(!resolvePoolTlsRuntimePolicy(config,saved,true,false,&policy,&error)&&error.find("no TCP fallback")!=error.npos);
     CHECK(policy.frozenUrl==original.frozenUrl&&policy.tls==original.tls);
@@ -41,11 +41,39 @@ int main(){
     CHECK(!resolvePoolTlsRuntimePolicy(explicitConfig,saved,true,true,&policy,&error)&&error.find("conflict")!=error.npos);
     explicitConfig.pools[0].port=443;
     CHECK(resolvePoolTlsRuntimePolicy(explicitConfig,saved,true,true,&policy,&error));
-    auto unavailable=saved;unavailable.users[0].mode=PoolSecurityMode::PreferTls;
-    unavailable.users[0].plaintextUrl="stratum+tcp://pool-fixture.invalid:1";unavailable.users[0].plaintextConsent=true;
+    auto prefer=saved;prefer.users[0].mode=PoolSecurityMode::PreferTls;
+    CHECK(resolvePoolTlsRuntimePolicy(config,prefer,true,true,&policy,&error)&&policy.tls&&policy.port==443&&policy.fallbackUrl.empty());
+    prefer.users[0].plaintextUrl="stratum+tcp://pool-fixture.invalid:2";
+    CHECK(resolvePoolTlsRuntimePolicy(config,prefer,true,true,&policy,&error)&&policy.fallbackUrl.empty());
+    prefer.users[0].plaintextConsent=true;
+    CHECK(resolvePoolTlsRuntimePolicy(config,prefer,true,true,&policy,&error)&&policy.fallbackUrl==prefer.users[0].plaintextUrl);
+    CHECK(config.pools[0].port==1&&!config.pools[0].tls); // the separately consented TCP port is not inferred from config
+    const auto consented=policy;
+    CHECK(!resolvePoolTlsRuntimePolicy(config,prefer,false,true,&policy,&error));
+    CHECK(policy.fallbackUrl==consented.fallbackUrl&&policy.frozenUrl==consented.frozenUrl);
+    CHECK(!resolvePoolTlsRuntimePolicy(config,prefer,true,false,&policy,&error));
+    donated=config;donated.donation=true;
+    CHECK(!resolvePoolTlsRuntimePolicy(donated,prefer,true,true,&policy,&error));
+    // An explicit SSL URL suppresses saved fallback permission but still detects conflicting saved endpoints.
+    CHECK(resolvePoolTlsRuntimePolicy(explicitConfig,prefer,true,true,&policy,&error)&&policy.tls&&policy.fallbackUrl.empty());
+    explicitConfig.pools[0].port=444;
+    CHECK(!resolvePoolTlsRuntimePolicy(explicitConfig,prefer,true,true,&policy,&error));
+    explicitConfig.pools[0].port=443;
+    for(const auto &url:std::vector<std::string>{"stratum+tcp://other-fixture.invalid:2","stratum+ssl://pool-fixture.invalid:2",
+        "stratum+tcp://POOL-fixture.invalid:2","stratum+tcp://pool-fixture.invalid:02",""}){
+        auto invalid=prefer;invalid.users[0].plaintextUrl=url;
+        CHECK(!resolvePoolTlsRuntimePolicy(config,invalid,true,true,&policy,&error));
+    }
+    auto wrongTls=prefer;wrongTls.users[0].tlsUrl="stratum+ssl://other-fixture.invalid:443";
+    CHECK(!resolvePoolTlsRuntimePolicy(config,wrongTls,true,true,&policy,&error));
+    auto unavailable=saved;unavailable.donation=saved.users[0];
     CHECK(!resolvePoolTlsRuntimePolicy(config,unavailable,true,true,&policy,&error));
-    unavailable=saved;unavailable.donation=saved.users[0];
-    CHECK(!resolvePoolTlsRuntimePolicy(config,unavailable,true,true,&policy,&error));
+    unavailable=saved;unavailable.donation.tlsUrl=saved.users[0].tlsUrl;
+    CHECK(resolvePoolTlsRuntimePolicy(config,unavailable,true,true,&policy,&error)&&policy.tls&&policy.fallbackUrl.empty());
+    unavailable=saved;unavailable.donation.plaintextUrl=prefer.users[0].plaintextUrl;
+    CHECK(resolvePoolTlsRuntimePolicy(config,unavailable,true,true,&policy,&error)&&policy.tls&&policy.fallbackUrl.empty());
+    unavailable.users[0]=PoolSecurityRule{};unavailable.donation.tlsUrl=saved.users[0].tlsUrl;
+    CHECK(resolvePoolTlsRuntimePolicy(config,unavailable,false,false,&policy,&error)&&!policy.tls&&policy.fallbackUrl.empty());
     unavailable=saved;unavailable.users.push_back(saved.users[0]);
     CHECK(!resolvePoolTlsRuntimePolicy(config,unavailable,true,true,&policy,&error));
     unavailable=saved;unavailable.users.clear();
@@ -61,6 +89,18 @@ int main(){
     config.pools[0].account="fixture_account";config.pools[0].compression="off";
     config.pools[0].targetSemantics="final-adjusted-bound";
     const auto frozen=std::string("stratum+ssl://pool-fixture.invalid:443");
+    const auto fallback=prefer.users[0].plaintextUrl;
+    auto sourceTcp=config;
+    CHECK(applyFrozenPoolTlsEndpoint(frozen,&sourceTcp,fallback));
+    CHECK(sourceTcp.pools[0].tls&&sourceTcp.pools[0].port==443&&sourceTcp.pools[0].account=="fixture_account");
+    // Once source configuration is explicit SSL, even the same peer cannot inherit weaker frozen consent.
+    CHECK(!applyFrozenPoolTlsEndpoint(frozen,&sourceTcp,fallback));
+    for(const auto &url:std::vector<std::string>{"stratum+tcp://other-fixture.invalid:2","stratum+ssl://pool-fixture.invalid:2",
+        "stratum+tcp://POOL-fixture.invalid:2","stratum+tcp://pool-fixture.invalid:02","stratum+tcp://pool-fixture.invalid:2/path"}){
+        auto unchanged=config;
+        CHECK(!applyFrozenPoolTlsEndpoint(frozen,&unchanged,url));
+        CHECK(!unchanged.pools[0].tls&&unchanged.pools[0].port==1&&unchanged.pools[0].account=="fixture_account");
+    }
     CHECK(applyFrozenPoolTlsEndpoint(frozen,&config));
     CHECK(config.pools[0].tls&&config.pools[0].port==443&&config.pools[0].account=="fixture_account"&&
         config.pools[0].compression=="off"&&config.pools[0].targetSemantics=="final-adjusted-bound");
@@ -73,18 +113,28 @@ int main(){
         CHECK(mode==0?changed.pools.empty():changed.pools[0].port==config.pools[0].port);
     }
     WorkerSeed seed;seed.index=2;seed.uuid="GPU-synthetic-fixture";
-    const auto args=workerArgs({"run","--config","fixture.json","--worker-pool-tls","stratum+ssl://old.invalid:1","--work-wait-ms","4"},seed,9000,7,frozen);
+    const std::vector<std::string> rawArgs={"run","--config","fixture.json","--worker-pool-tls","stratum+ssl://old.invalid:1",
+        "--worker-pool-fallback","stratum+tcp://old.invalid:1","--work-wait-ms","4"};
+    const auto args=workerArgs(rawArgs,seed,9000,7,frozen);
     const auto found=std::find(args.begin(),args.end(),"--worker-pool-tls");
     CHECK(found!=args.end()&&found+1!=args.end()&&*(found+1)==frozen);
     CHECK(std::count(args.begin(),args.end(),"--worker-pool-tls")==1&&std::count(args.begin(),args.end(),"--no-donation")==1);
     CHECK(std::find(args.begin(),args.end(),"stratum+ssl://old.invalid:1")==args.end());
+    CHECK(std::find(args.begin(),args.end(),"--worker-pool-fallback")==args.end());
+    CHECK(std::find(args.begin(),args.end(),"stratum+tcp://old.invalid:1")==args.end());
     CHECK(std::find(args.begin(),args.end(),"fixture.json")!=args.end());
+    const auto preferArgs=workerArgs(rawArgs,seed,9000,7,frozen,fallback);
+    const auto consent=std::find(preferArgs.begin(),preferArgs.end(),"--worker-pool-fallback");
+    CHECK(consent!=preferArgs.end()&&consent+1!=preferArgs.end()&&*(consent+1)==fallback);
+    CHECK(std::count(preferArgs.begin(),preferArgs.end(),"--worker-pool-fallback")==1&&
+        std::count(preferArgs.begin(),preferArgs.end(),"--worker-pool-tls")==1&&std::count(preferArgs.begin(),preferArgs.end(),"--no-donation")==1);
+    CHECK(std::find(preferArgs.begin(),preferArgs.end(),"stratum+tcp://old.invalid:1")==preferArgs.end());
     CHECK(effectiveConfigText(config,"fixture").find("stratum+ssl://pool-fixture.invalid:443")!=std::string::npos);
 
     // The early refusal must precede every scheduler clock, storage or run callback, even if miscalled internally.
     unsigned logs=0;FeeLoopDeps deps;deps.log=[&](const std::string &text){++logs;CHECK(text.find("refused")!=text.npos);};
     FeeSession fee(FeePolicy{},nullptr,FeeStateFile("unused-fixture-directory"),"synthetic-destination",deps);
-    RunOptions options;options.poolTls=true;
+    RunOptions options;options.poolTls=true;options.poolPlaintextFallbackUrl=fallback;
     CHECK(fee.runFeeWindow(options)==kRunPauseFault&&logs==1);
     CHECK(fee.windowsCompleted()==0&&fee.poolFailures()==0);
     return finishTests("pool_tls_runtime_policy");

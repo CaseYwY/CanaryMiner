@@ -16,7 +16,7 @@ cmake --build build/tests-tls --target test_pearl_cuda_cli_host
 ctest --test-dir build/tests-tls --output-on-failure -R '^pool_tls_runtime_install$'
 ```
 
-Linux additionally needs OpenSSL 3.5 or newer development libraries. The test executes `cmake --install` into an owned temporary path containing spaces and Unicode. It checks the exact three-file inventory, byte identity with the selected build, regular files and executable permissions. It also checks the TLS helper for known GPU-loader markers; this is not a full platform dependency qualification.
+Linux additionally needs OpenSSL 3.5 or newer development libraries. Actual TLS runtime requires a glibc 2.40-or-newer build/runtime and kernel pidfd support for its isolated process owner; a host-only installation inventory does not prove that capability. The test executes `cmake --install` into an owned temporary path containing spaces and Unicode. It checks the exact three-file inventory, byte identity with the selected build, regular files and executable permissions. It also checks the TLS helper for known GPU-loader markers; this is not a full platform dependency qualification.
 
 The installed inert CLI reaches its device sentinel from an unrelated working directory. Removing the installed preference helper causes startup refusal even when a genuine helper exists in CWD and PATH; restoring it restores admission. Configuration bytes remain unchanged. No device, pool connection or trust-store API is exercised by this test.
 

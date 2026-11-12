@@ -1,5 +1,7 @@
 # Retained native TLS helper (P-12f)
 
+This is the P-12f baseline record. Ordinary integration and installation were added in P-12h/i; [P-12j](pool-tls-fallback.md) versions the private protocol to C2/R2 and adds a separately authorized, explicitly identified plaintext mode. The historical absence of ordinary activation below does not describe those later modules.
+
 M-TLS; R-TLS-003/004; T-TLS/T-INTENT/T-PRIVACY/T-RELEASE; D-97.
 
 **Default-off development capability, not ordinary mining activation.** An explicit injected `PoolTlsProcessTransport` starts one owned native duplex helper, which performs DNS/connect/TLS and retains that exact authenticated socket/context for application records. It never treats the [one-shot check](pool-tls-check.md) as authentication for a second connection. No ordinary miner factory, SSL URL, preset, settings, plaintext fallback, donation permission, helper installation or production binary is added.

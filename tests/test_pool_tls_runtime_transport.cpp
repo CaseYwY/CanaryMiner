@@ -4,6 +4,7 @@
 #include "core/pearl_pool.h"
 #include "product_test_util.h"
 #include <csignal>
+#include <fstream>
 #include <thread>
 
 using namespace om;
@@ -224,6 +225,174 @@ void originalEpoch(const std::filesystem::path &helper) {
     transport.close();
     CHECK(transport.open("echo.test", 1) != PearlPoolConnectStatus::Connected);
 }
+
+void authorizedFallback(const std::filesystem::path &helper) {
+    for (const auto *host : {"dns-fail.test", "connect-fail.test", "network-timeout.test"}) {
+        volatile sig_atomic_t stop = 0;
+        PoolTlsRuntimeTransport strict(helper, request(host), &stop);
+        CHECK(strict.open(host, 1) != PearlPoolConnectStatus::Connected && !strict.plaintextActive());
+        PoolTlsRuntimeTransport transport(helper, request(host), &stop,
+            std::string("stratum+tcp://") + host + ":2");
+        PearlPoolSource source(host, 1, "placeholder", "fixture",
+            {PearlNetwork::Mainnet, PearlTargetSemantics::BaseBeforePenalty}, "", &transport);
+        for (unsigned attempt = 0; attempt < 2; ++attempt) {
+            Job job;
+            const bool fetched = source.fetch(&job);
+            CHECK(fetched && job.valid && transport.plaintextActive());
+            if (!fetched) break;
+            CHECK(transport.plaintextConnections() == attempt + 1);
+            Solution solution;
+            solution.nonce = 7 + attempt; solution.hit[0] = 11; solution.extra = "synthetic-proof";
+            std::string error;
+            CHECK(source.submit(job, solution, &error));
+            CHECK(source.submitCounters().accepted == attempt + 1);
+            transport.close();
+            CHECK(!transport.isOpen() && !nativeProcessUnresolved());
+        }
+    }
+}
+
+void fallbackRefusals(const std::filesystem::path &helper) {
+    volatile sig_atomic_t stop = 0;
+    for (const auto *host : {"verify-fail.test", "handshake-timeout.test", "unavailable-open.test", "lost-open.test"}) {
+        PoolTlsRuntimeTransport transport(helper, request(host), &stop, std::string("stratum+tcp://") + host + ":2");
+        CHECK(transport.open(host, 1) != PearlPoolConnectStatus::Connected);
+        CHECK(!transport.isOpen() && !transport.plaintextActive() && transport.plaintextConnections() == 0);
+        CHECK(!nativeProcessUnresolved());
+    }
+    for (const auto *url : {"stratum+tcp://other.test:2", "stratum+ssl://echo.test:2",
+                            "stratum+tcp://echo.test:02", "stratum+tcp://private@echo.test:2"}) {
+        PoolTlsRuntimeTransport transport(helper, request(), &stop, url);
+        CHECK(transport.open("echo.test", 1) != PearlPoolConnectStatus::Connected);
+        CHECK(transport.error() == PearlTlsError::InvalidPolicy && transport.plaintextConnections() == 0);
+    }
+    PoolTlsRuntimeTransport transport(helper, request("connect-fail.test"), &stop, "stratum+tcp://connect-fail.test:2");
+    CHECK(transport.open("connect-fail.test", 1) == PearlPoolConnectStatus::Connected && transport.plaintextActive());
+    {
+        NativeProcessScope foreign(nativeProcessEpoch() + 1);
+        CHECK(!transport.plaintextActive() && transport.plaintextConnections() == 0);
+        transport.close();
+        CHECK(transport.open("connect-fail.test", 1) != PearlPoolConnectStatus::Connected);
+    }
+    CHECK(transport.isOpen() && transport.plaintextActive());
+    stop = 1;
+    const PearlPoolTransport &observation = transport;
+    CHECK(!observation.isOpen());
+    stop = 0;
+    CHECK(transport.open("connect-fail.test", 1) != PearlPoolConnectStatus::Connected);
+    CHECK(transport.error() == PearlTlsError::Cancelled);
+}
+
+void noReplayOnFallback(const std::filesystem::path &helper) {
+    volatile sig_atomic_t stop = 0;
+    PoolTlsRuntimeTransport transport(helper, request("fallback-lost-submit.test"), &stop,
+        "stratum+tcp://fallback-lost-submit.test:2");
+    PearlPoolSource source("fallback-lost-submit.test", 1, "placeholder", "fixture",
+        {PearlNetwork::Mainnet, PearlTargetSemantics::BaseBeforePenalty}, "", &transport);
+    Job job;
+    const bool fetched = source.fetch(&job);
+    CHECK(fetched && job.valid && transport.plaintextActive());
+    if (!fetched) return;
+    Solution solution; solution.nonce = 7; solution.hit[0] = 11; solution.extra = "synthetic-proof";
+    std::string error;
+    CHECK(!source.submit(job, solution, &error));
+    PearlSourceEvent events[64];
+    const auto count = source.pearlSourceObservability()->drain(events, 64);
+    unsigned unknown = 0;
+    for (std::size_t i = 0; i < count; ++i)
+        if (events[i].delivery == PearlSourceDelivery::PossiblySent && events[i].terminal == PearlSourceTerminal::Unknown) ++unknown;
+    CHECK(unknown == 1 && !transport.isOpen() && source.submitCounters().accepted == 0);
+    Job fresh;
+    CHECK(source.fetch(&fresh) && fresh.valid && transport.plaintextActive());
+    const auto after = source.pearlSourceObservability()->drain(events, 64);
+    unsigned replayed = 0;
+    for (std::size_t i = 0; i < after; ++i)
+        if (events[i].delivery == PearlSourceDelivery::PossiblySent || events[i].delivery == PearlSourceDelivery::Sent) ++replayed;
+    CHECK(replayed == 0 && source.submitCounters().accepted == 0);
+}
+
+struct StageMarker {
+    std::string host;
+    std::filesystem::path directory;
+    bool ready = false;
+    StageMarker(const std::filesystem::path &helper, const char *prefix) {
+        const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+        host = std::string(prefix) + std::to_string(localTaskProcessId()) + "-" + std::to_string(unique) + ".test";
+        const auto parent = helper.parent_path().lexically_normal();
+        directory = (parent / (".tls-runtime-" + host)).lexically_normal();
+        std::error_code error;
+        ready = directory.parent_path() == parent && std::filesystem::create_directory(directory, error);
+    }
+    ~StageMarker() {
+        if (!ready) return;
+        std::error_code error;
+        // Remove only this attempt's two known marker files and its now-empty directory.
+        std::filesystem::remove(directory / "plain-open.tmp", error);
+        std::filesystem::remove(directory / "plain-open", error);
+        std::filesystem::remove(directory, error);
+    }
+    bool entered() const {
+        std::error_code error;
+        return std::filesystem::is_regular_file(directory / "plain-open", error);
+    }
+    unsigned remaining() const {
+        std::ifstream marker(directory / "plain-open", std::ios::binary);
+        unsigned value = 0;
+        std::string extra;
+        if (!(marker >> value) || (marker >> extra)) return 0;
+        return value;
+    }
+};
+
+void fallbackSharesOriginalBudget(const std::filesystem::path &helper) {
+    StageMarker marker(helper, "budget-fallback-");
+    CHECK(marker.ready);
+    if (!marker.ready) return;
+    volatile sig_atomic_t stop = 0;
+    auto config = request(marker.host);
+    config.totalMs = 6000;
+    PoolTlsRuntimeTransport transport(helper, config, &stop, "stratum+tcp://" + marker.host + ":2");
+    const auto began = std::chrono::steady_clock::now();
+    const auto opened = transport.open(marker.host, 1);
+    const auto elapsed = std::chrono::steady_clock::now() - began;
+    CHECK(marker.entered()); // TLS used 3500 ms; a second real helper must receive only the remainder.
+    CHECK(marker.remaining() >= 50 && marker.remaining() <= 2550);
+    CHECK(opened != PearlPoolConnectStatus::Connected && transport.error() == PearlTlsError::Timeout);
+    CHECK(!transport.isOpen() && !transport.plaintextActive() && transport.plaintextConnections() == 0);
+    CHECK(elapsed < std::chrono::milliseconds(7500) && !nativeProcessUnresolved());
+}
+
+void cancelDuringPlaintextOpen(const std::filesystem::path &helper) {
+    StageMarker marker(helper, "cancel-fallback-");
+    CHECK(marker.ready);
+    if (!marker.ready) return;
+    signalStop = 0;
+    const auto previous = std::signal(SIGINT, stopSignal);
+    auto config = request(marker.host);
+    config.totalMs = 8000;
+    PoolTlsRuntimeTransport transport(helper, config, &signalStop, "stratum+tcp://" + marker.host + ":2");
+    bool entered = false;
+    std::chrono::steady_clock::time_point observed;
+    std::thread stopper([&] {
+        const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+        while (std::chrono::steady_clock::now() < limit) {
+            if (marker.entered()) { entered = true; observed = std::chrono::steady_clock::now(); break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        // The timeout only cleans up a failed fixture; success requires observing the actual plaintext stage.
+        std::raise(SIGINT);
+    });
+    const auto opened = transport.open(marker.host, 1);
+    const auto completed = std::chrono::steady_clock::now();
+    stopper.join();
+    CHECK(entered && marker.entered() && marker.remaining() >= 50);
+    CHECK(entered && completed >= observed && completed - observed < std::chrono::seconds(2));
+    CHECK(opened != PearlPoolConnectStatus::Connected && transport.error() == PearlTlsError::Cancelled);
+    CHECK(!transport.isOpen() && transport.plaintextConnections() == 0 && !nativeProcessUnresolved());
+    signalStop = 0;
+    CHECK(transport.open(marker.host, 1) != PearlPoolConnectStatus::Connected && transport.error() == PearlTlsError::Cancelled);
+    std::signal(SIGINT, previous);
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -235,6 +404,11 @@ int main(int argc, char **argv) {
     refusals(helper);
     cancelOpen(helper);
     foreignCaller(helper);
+    authorizedFallback(helper);
+    fallbackRefusals(helper);
+    noReplayOnFallback(helper);
+    fallbackSharesOriginalBudget(helper);
+    cancelDuringPlaintextOpen(helper);
     originalEpoch(helper);
     return finishTests("ordinary TLS runtime owner (synthetic peers, real IPC)");
 }
