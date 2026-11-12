@@ -11,14 +11,19 @@
 namespace om {
 enum class PoolSecuritySettingsResult { None, Close, Quit };
 enum class PoolSecuritySettingsPage { Browse, Edit, Review, Leave };
-struct PoolSecuritySettingsContext {bool running=false;};
+struct PoolSecuritySettingsContext {
+    bool running=false;
+    PoolTransportPolicy effective=PoolTransportPolicy::Unknown;
+    StatsPoolTransport current{};
+    std::string frozenHost{};
+};
 class PoolSecuritySettingsPanel {
    public:
     using Save=std::function<bool(const PoolSecurityPreferences &,std::string *)>;
-    bool visible=false,donation=false,replaceInput=true;unsigned slot=0,field=0,reviewOffset=0;
+    bool visible=false,donation=false,replaceInput=true,browseScroll=false;unsigned slot=0,field=0,reviewOffset=0,browseOffset=0;
     PoolSecurityPreferences active,draft;PoolSecuritySettingsContext context;
     PoolSecuritySettingsPage page=PoolSecuritySettingsPage::Browse;std::string input,message;
-    void open(PoolSecurityPreferences value,PoolSecuritySettingsContext current={}){active=draft=std::move(value);context=current;visible=true;donation=false;slot=field=reviewOffset=0;page=PoolSecuritySettingsPage::Browse;message.clear();input.clear();}
+    void open(PoolSecurityPreferences value,PoolSecuritySettingsContext current={}){active=draft=std::move(value);context=std::move(current);visible=true;donation=false;browseScroll=false;slot=field=reviewOffset=browseOffset=0;page=PoolSecuritySettingsPage::Browse;message.clear();input.clear();}
     bool dirty()const{return active!=draft;}
     PoolSecuritySettingsResult key(int key,const Save &save={}){
         using NoticeKey=i18n::PoolNoticeMessageKey;
@@ -40,6 +45,13 @@ class PoolSecuritySettingsPanel {
             return PoolSecuritySettingsResult::None;
         }
         if(key=='q'||key=='Q')return PoolSecuritySettingsResult::Quit;
+        if(page==PoolSecuritySettingsPage::Browse&&(key==kKeyPageUp||key==kKeyPageDown)){
+            if(!browseScroll){browseScroll=true;browseOffset=0;}
+            else if(key==kKeyPageUp)browseOffset=browseOffset>3?browseOffset-3:0;
+            else browseOffset=std::min(4096u,browseOffset+3);
+            return PoolSecuritySettingsResult::None;
+        }
+        if(page==PoolSecuritySettingsPage::Browse&&(key==kKeyUp||key==kKeyDown||key==kKeyBackTab||key=='\t'||key==' '||key=='\r'||key=='\n'))browseScroll=false;
         if(page==PoolSecuritySettingsPage::Leave){
             if(key=='d'||key=='D'){draft=active;visible=false;return PoolSecuritySettingsResult::Close;}
             if(key==27)page=PoolSecuritySettingsPage::Browse;else if(key=='\r'||key=='\n'||key==kKeyF2)review();
@@ -70,10 +82,17 @@ class PoolSecuritySettingsPanel {
         using ValueKey=i18n::PoolValueMessageKey;
         if(rows>0&&rows<12)return i18n::poolPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::poolPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::poolPanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::poolPanelEnglish(page==PoolSecuritySettingsPage::Edit?PanelKey::FooterEdit:page==PoolSecuritySettingsPage::Review?
-            PanelKey::FooterReview:PanelKey::FooterBrowse),width);
+            PanelKey::FooterReview:PanelKey::FooterBrowse)+(page==PoolSecuritySettingsPage::Browse?" "+i18n::poolTransportEnglish(i18n::PoolTransportMessageKey::Scroll):std::string{}),width);
         const auto budget=rows>0?static_cast<std::size_t>(std::max(1,rows-static_cast<int>(footer.size())-2)):4096;
         std::vector<std::string> body;std::size_t focus=0;auto add=[&](const std::string &s){const auto lines=wrapText(s,width);body.insert(body.end(),lines.begin(),lines.end());};
         add(page==PoolSecuritySettingsPage::Edit&&field==4?i18n::poolPanelEnglish(PanelKey::PlaintextRisk):i18n::poolPanelEnglish(PanelKey::Title)+(dirty()?i18n::poolPanelEnglish(PanelKey::UnsavedSuffix):std::string{}));
+        if(page==PoolSecuritySettingsPage::Browse||page==PoolSecuritySettingsPage::Review){
+            add(poolTransportText(context.running?context.current:StatsPoolTransport{}));
+            add(poolTransportPolicyText(context.effective));
+            if(!context.frozenHost.empty())add(i18n::poolTransportEnglish(i18n::PoolTransportMessageKey::Host,{{"host",context.frozenHost}}));
+            const auto currentError=poolTransportErrorText(context.running?context.current:StatsPoolTransport{});
+            if(!currentError.empty())add(currentError);
+        }
         if(page==PoolSecuritySettingsPage::Edit){
             add(i18n::poolPanelEnglish(field==4?PanelKey::LoginExposed:field==6?PanelKey::RemoveOnly:PanelKey::ExplicitDns));
             add(i18n::poolPanelEnglish(field==4?PanelKey::ConsentPrompt:field==6?PanelKey::RemovePrompt:PanelKey::EditorKeys));
@@ -95,7 +114,9 @@ class PoolSecuritySettingsPanel {
             add(i18n::poolPanelEnglish(PanelKey::ConfiguredOnly));
         }
         std::size_t start=0;if(body.size()>budget){if(page==PoolSecuritySettingsPage::Review)start=std::min(static_cast<std::size_t>(reviewOffset),body.size()-budget);
-            else if(page==PoolSecuritySettingsPage::Edit)start=focus;else if(page==PoolSecuritySettingsPage::Browse&&focus>=budget)start=std::min(focus,body.size()-budget);}
+            else if(page==PoolSecuritySettingsPage::Edit)start=focus;else if(page==PoolSecuritySettingsPage::Browse){
+                if(browseScroll)start=std::min(static_cast<std::size_t>(browseOffset),body.size()-budget);
+                else if(focus>=budget)start=std::min(focus,body.size()-budget);}}
         std::string result;for(std::size_t i=start;i<body.size()&&i<start+budget;++i)result+=paint(body[i],i==0?Tone::Canary:Tone::Plain,color)+"\n";
         result+=paint(clip(message.empty()?i18n::poolPanelEnglish(PanelKey::LocalDefaults):message,width),Tone::Plain,color)+"\n";
         for(const auto &line:footer)result+=paint(line,Tone::Plain,color)+"\n";

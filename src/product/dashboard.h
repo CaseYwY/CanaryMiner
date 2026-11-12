@@ -21,6 +21,7 @@
 
 #include "../core/platform.h"  // winsock2.h must come before windows.h
 #include "stats.h"
+#include "pool_transport_display.h"
 #include "terminal_keys.h"
 #include "terminal_style.h"
 #include "ui_preferences.h"
@@ -50,6 +51,7 @@ struct DashGpu {
     std::string detail;   // the worker's last status or error (shown on the Details page)
     std::string pciBus;
     std::string poolState = "-";
+    StatsPoolTransport poolTransport;
     unsigned restarts = 0;
     double rate = 0;      // T MAC/s, last report interval (shown as TH/s)
     double rateAvg = 0;   // T MAC/s, since start
@@ -74,6 +76,7 @@ struct DashLogEntry {
 
 struct DashModel {
     std::string version, poolEndpoint, worker;
+    StatsPoolTransport poolTransport;
     std::string connection = "Connecting";  // Authorized | Connecting | Error | Stopped
     uint64_t sessionSeconds = 0;
     std::vector<DashGpu> gpus;
@@ -272,6 +275,9 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
     out.push_back(one("mining | PRL | Pool " + (m.poolEndpoint.empty() ? std::string("none") : m.poolEndpoint) + " | Worker " + m.worker));
     // The whole connection line takes the connection's tone, as in the private viewer.
     out.push_back(Line{Seg{"Connection " + m.connection + " | Mining session " + hms(m.sessionSeconds), connectionTone(m.connection)}});
+    for (const auto &line : wrapText(poolTransportText(m.poolTransport), w)) out.push_back(one(line, poolTransportTone(m.poolTransport)));
+    const auto transportError=poolTransportErrorText(m.poolTransport);
+    if(!transportError.empty())for(const auto &line:wrapText(transportError,w))out.push_back(one(line,Tone::Amber));
     if (m.forceResumeActive)
         out.push_back(Line{Seg{"FORCE RESUME ON", Tone::Red},
                            Seg{"  game/economic pause overridden; safety, cooling, fault and stop still win", Tone::Plain}});
@@ -424,6 +430,10 @@ inline std::vector<Line> detailsPage(const DashModel &m, size_t w, const UiPrefe
         if (options.detailsPool) state.push_back({"  Pool " + g.poolState, Tone::Plain});
         if (options.detailsRestarts) state.push_back({"  Restarts " + std::to_string(g.restarts), Tone::Plain});
         out.push_back(state);
+        if (options.detailsPool) for(const auto &line:wrapText("  "+poolTransportText(g.poolTransport),w))
+            out.push_back(one(line,poolTransportTone(g.poolTransport)));
+        const auto transportError=poolTransportErrorText(g.poolTransport);
+        if(options.detailsErrors&&!transportError.empty())for(const auto &line:wrapText("  "+transportError,w))out.push_back(one(line,Tone::Amber));
         const bool faulty = g.state == "Error" || g.state == "Restarting";
         if (options.detailsErrors)
             out.push_back(one("  Last error: " + (faulty && !g.detail.empty() ? g.detail : std::string("none")), faulty ? Tone::Amber : Tone::Dark));
@@ -607,7 +617,8 @@ inline std::string renderPlainSummary(const DashModel &m, time_t now) {
     }
     return "[" + utcClock(now) + "] Current " + fixed(rate, 1) + " TH/s | average " + fixed(avg, 1) + " TH/s | accepted " +
            std::to_string(accepted) + " rejected " + std::to_string(rejected) + " | " + states + " | donation " +
-           (m.donationOn ? std::string("on") : std::string("off")) + history;
+           (m.donationOn ? std::string("on") : std::string("off")) + " | " + poolTransportText(m.poolTransport) +
+           (poolTransportErrorText(m.poolTransport).empty()?std::string{}:" | "+poolTransportErrorText(m.poolTransport)) + history;
 }
 
 // ---- terminal helpers

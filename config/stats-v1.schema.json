@@ -17,7 +17,19 @@
         "endpoint": { "type": "string", "description": "host:port, no credentials" },
         "preset": { "type": "string" },
         "state": { "enum": ["none", "connecting", "mining"] },
-        "last_error": { "type": "string" }
+        "last_error": { "type": "string" },
+        "transport": {
+          "type": "object",
+          "description": "Optional current first-user-pool observation. Missing or expired data is unknown. This read-only value grants no connection or fallback permission.",
+          "required": ["state", "error", "port", "age_ms"],
+          "properties": {
+            "state": { "enum": ["unknown", "disconnected", "connecting", "verified_tls", "plaintext", "mixed"] },
+            "error": { "enum": ["none", "dns", "socket", "connect", "policy", "unavailable", "verification", "protocol", "transport", "timeout", "cancelled", "clock", "capacity", "authentication"] },
+            "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "age_ms": { "type": ["integer", "null"], "minimum": 0, "maximum": 4999 }
+          },
+          "additionalProperties": false
+        }
       }
     },
     "devices": {

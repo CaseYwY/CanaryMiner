@@ -188,6 +188,33 @@ struct WorkerView {
     uint64_t lastRateMs = 0;
 };
 
+inline StatsPoolTransport workerPoolTransport(const WorkerView &view, uint64_t nowMs) {
+    if (!view.haveStats || view.stats.state != "running" || !view.lastSampleMs || nowMs < view.lastSampleMs ||
+        nowMs - view.lastSampleMs >= kPoolTransportObservationMaxAgeMs || view.state == "Stopped" ||
+        view.state == "Restarting" || view.state == "Error") return {};
+    return currentPoolTransport(view.stats.poolTransport, nowMs);
+}
+
+inline StatsPoolTransport aggregatePoolTransport(const std::vector<WorkerView> &views, uint64_t nowMs) {
+    if (views.empty()) return {};
+    StatsPoolTransport result;
+    bool first = true, mixed = false;
+    for (const auto &view : views) {
+        const auto current = workerPoolTransport(view, nowMs);
+        const auto &o = current.observation;
+        if (!current.mixed && o.security == PoolTransportSecurity::Unknown) return {};
+        if (first) { result = current; first = false; }
+        else {
+            mixed = mixed || result.mixed != current.mixed || result.observation.security != o.security ||
+                result.observation.error != o.error || result.observation.effectivePort != o.effectivePort;
+            result.observation.observedMonoMs = std::min(result.observation.observedMonoMs, o.observedMonoMs);
+        }
+        mixed = mixed || current.mixed;
+    }
+    if (mixed) result = {{PoolTransportSecurity::Unknown, PoolTransportError::None, 0, result.observation.observedMonoMs}, true};
+    return result;
+}
+
 /** a += b for every counter. */
 inline void addOutcomes(StatsOutcomes &a, const StatsOutcomes &b) {
     a.submitted += b.submitted;
@@ -204,7 +231,7 @@ inline void addOutcomes(StatsOutcomes &a, const StatsOutcomes &b) {
 
 /** The public stats document for N workers: one devices[] entry per GPU, summed totals and one donation block. Pure. */
 inline StatsSnapshot aggregateSnapshot(const SupervisorOptions &opt, const std::vector<WorkerView> &views, double uptimeSeconds,
-                                       const std::string &state) {
+                                       const std::string &state, uint64_t nowMs = poolTransportNowMs()) {
     StatsSnapshot s;
     s.version = opt.version;
     s.state = state;
@@ -212,6 +239,8 @@ inline StatsSnapshot aggregateSnapshot(const SupervisorOptions &opt, const std::
     s.poolEndpoint = opt.poolEndpoint;
     s.poolPreset = opt.poolPreset;
     s.poolState = "connecting";
+    if (state == "running" && (opt.seeds.empty() || opt.seeds.size() == views.size()))
+        s.poolTransport = aggregatePoolTransport(views, nowMs);
     bool anyMining = false;
     StatsFee &f = s.fee;
     f.enabled = opt.donationOn;
@@ -263,6 +292,7 @@ inline DashModel dashboardModel(const SupervisorOptions &opt, const std::vector<
     DashModel m;
     m.version = opt.version;
     m.poolEndpoint = opt.poolEndpoint;
+    m.poolTransport = agg.poolTransport;
     m.worker = opt.worker;
     m.sessionSeconds = static_cast<uint64_t>(uptimeSeconds);
     m.donationOn = opt.donationOn;
@@ -280,6 +310,7 @@ inline DashModel dashboardModel(const SupervisorOptions &opt, const std::vector<
         g.pciBus = v.seed.pciBus;
         g.detail = v.detail;
         g.poolState = v.haveStats ? v.stats.poolState : std::string("-");
+        g.poolTransport = agg.state == "running" ? workerPoolTransport(v, nowMs) : StatsPoolTransport{};
         g.restarts = v.restarts;
         // A sample can land after `nowMs` was read: clamp instead of wrapping around.
         if (v.lastSampleMs) g.sampleAgeS = nowMs > v.lastSampleMs ? static_cast<double>(nowMs - v.lastSampleMs) / 1000.0 : 0.0;
@@ -510,7 +541,7 @@ class Supervisor {
             if(sessionActivated_&&!stopping&&intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop)){
                 if(sampling_.faulted()&&!samplingFaultReported){samplingFaultReported=true;
                     if(energyCapture_)energyCapture_->markGap(sessionToken_.epoch);
-                    for(auto &w:workers_){w->view.telValid=false;w->view.lastRateMs=0;}
+                    for(auto &w:workers_){w->view.telValid=false;w->view.lastRateMs=0;w->view.stats.poolTransport={};}
                     addEvent("Background display sampling stopped; prior observations retain their original age.");}
                 if(now>=nextSample&&!sampling_.pending())sampling_.request(sampleGenerations);
             }
@@ -645,9 +676,23 @@ class Supervisor {
         }catch(...){return false;}
     }
 
+    PoolSecuritySettingsContext poolSecurityContext()const{
+        PoolSecuritySettingsContext context;
+        context.running=intent_.permits(sessionToken_)&&!(opt_.stop&&*opt_.stop);
+        context.effective=opt_.resolvedPoolTlsUrl.empty()?(opt_.poolEndpoint.empty()?PoolTransportPolicy::Unknown:PoolTransportPolicy::Plaintext):
+            opt_.resolvedPoolFallbackUrl.empty()?PoolTransportPolicy::StrictTls:PoolTransportPolicy::PreferTls;
+        PoolSecurityEndpoint frozen;
+        if(!opt_.resolvedPoolTlsUrl.empty()&&parsePoolSecurityUrl(opt_.resolvedPoolTlsUrl,&frozen))context.frozenHost=frozen.host;
+        else if(const auto colon=opt_.poolEndpoint.rfind(':');colon!=std::string::npos)context.frozenHost=opt_.poolEndpoint.substr(0,colon);
+        if(context.running){
+            std::vector<WorkerView> views;for(const auto &worker:workers_)views.push_back(worker->view);
+            if(opt_.seeds.size()==views.size())context.current=aggregatePoolTransport(views,poolTransportNowMs());
+        }
+        return context;
+    }
     PreferencesSettingsContext preferencesContext()const{
         PreferencesSettingsContext context;context.runtime=opt_.runtimeContext;context.game=opt_.gameContext;context.game.running=true;
-        context.pool.running=true;context.language=opt_.languageContext;context.language.running=true;
+        context.pool=poolSecurityContext();context.language=opt_.languageContext;context.language.running=true;
         context.manual.running=true;context.manual.cliDisabled=opt_.noMarket;context.manual.effective=manualEffective_;
         context.electricity.running=true;context.electricity.cliNoEnergy=opt_.noEnergy;context.electricity.effective=electricityEffective_;
         context.electricity.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;
@@ -798,6 +843,7 @@ class Supervisor {
         if (!intent_.permits(sessionToken_)) return;
         Worker &w = *workers_[i];
         w.restartPending = false;
+        w.view.stats.poolTransport = {};
         w.view.telValid=false;w.view.lastRateMs=0;
         ++w.historyGeneration;
         w.historySeen = w.historyOutage = false;
@@ -837,6 +883,8 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        // HTTP remains reachable during optional joins: revoke its published observation before any cleanup can wait.
+        publisher_.update([](StatsSnapshot *snapshot){snapshot->poolTransport={};snapshot->state="draining";});
         if(output_)output_->requestStop(ConsoleCleanup::SupervisorStopped);
         if(fleet_)fleet_->requestStop();
         sampling_.requestStop();
@@ -848,6 +896,7 @@ class Supervisor {
         if(energyCapture_)energyCapture_->requestStop();
         addEvent("stopping: draining every GPU");
         for (auto &w : workers_) {
+            w->view.stats.poolTransport = {};
             w->restartPending = false;
             w->stopping = true;
             if (w->proc && !w->proc->finished()) w->proc->closeStdin();
@@ -857,6 +906,7 @@ class Supervisor {
     /** A worker ended: a stop is recorded; anything else is restarted after 10 s while the 3-per-hour budget allows it. */
     void onExit(size_t i, int code, uint64_t now, bool stopping, const std::string &spawnError = std::string()) {
         Worker &w = *workers_[i];
+        w.view.stats.poolTransport = {};
         if(energyCapture_)energyCapture_->markGap(sessionToken_.epoch);
         if (stopping || w.stopping) {
             w.view.state = "Stopped";
@@ -901,6 +951,7 @@ class Supervisor {
     /** Applies one original, generation-matched background observation; no HTTP or driver calls. */
     void sample(size_t i,const DisplaySampleReading &reading) {
         Worker &w = *workers_[i];
+        w.view.stats.poolTransport = {}; // A failed/malformed response revokes the previous positive observation immediately.
         bool historySample = false;
         const auto now=displaySampleTime();
         if(reading.stats&&displaySampleOrdered(reading.statsObserved,now)){
@@ -918,6 +969,9 @@ class Supervisor {
             }
             observe(w, snap);
             w.view.stats = snap;
+            if (!displaySampleInterval(reading.statsBegan, reading.statsObserved, kPoolTransportObservationMaxAgeMs))
+                w.view.stats.poolTransport = {};
+            else w.view.stats.poolTransport = currentPoolTransport(snap.poolTransport, now.monotonicMs);
             w.view.haveStats = true;
             w.view.lastSampleMs = reading.statsObserved.monotonicMs;
         }
@@ -1008,7 +1062,8 @@ class Supervisor {
     void publish(uint64_t now, uint64_t t0, const std::string &state) {
         std::vector<WorkerView> views;
         for (auto &w : workers_) views.push_back(w->view);
-        const StatsSnapshot agg = aggregateSnapshot(opt_, views, static_cast<double>(now - t0) / 1000.0, state);
+        StatsSnapshot agg = aggregateSnapshot(opt_, views, static_cast<double>(now - t0) / 1000.0, state, now);
+        if (!intent_.permits(sessionToken_) || (opt_.stop && *opt_.stop)) agg.poolTransport = {};
         publisher_.update([&](StatsSnapshot *s) { *s = agg; });
     }
 
@@ -1016,7 +1071,11 @@ class Supervisor {
         std::vector<WorkerView> views;
         for (auto &w : workers_) views.push_back(w->view);
         const double up = static_cast<double>(now - t0) / 1000.0;
-        const StatsSnapshot agg = aggregateSnapshot(opt_, views, up, "running");
+        StatsSnapshot agg = aggregateSnapshot(opt_, views, up, "running", now);
+        if (!intent_.permits(sessionToken_) || (opt_.stop && *opt_.stop)) {
+            agg.poolTransport = {};
+            for (auto &view : views) view.stats.poolTransport = {};
+        }
         DashModel model = dashboardModel(opt_, views, agg, up, now, events_, log_);
         model.logEntries.assign(logEntries_.begin(), logEntries_.end());
         if (history_) model.history = history_->snapshot();
@@ -1042,6 +1101,8 @@ class Supervisor {
         if (now < nextFrame_) return;
         nextFrame_ = now + (settings_.visible ? 50 : ui_.refreshMs);
         const DashModel m = buildModel(now, t0);
+        // Refresh only the read-only context; an async load/save must never freeze a positive status or replace the draft here.
+        settings_.poolSecurity.context=poolSecurityContext();
 #if defined(_WIN32)
         const auto terminal=output_->snapshot();view_.columns=static_cast<int>(terminal.columns);view_.rows=static_cast<int>(terminal.rows);
 #else

@@ -19,6 +19,9 @@ namespace om {
 
 struct PearlPoolSourceTestAccess {
     static bool connect(PearlPoolSource &source) { return source.connectAndLogin(); }
+    static void close(PearlPoolSource &source, PearlSourceReason reason = PearlSourceReason::Shutdown, bool faulted = false) {
+        source.closeConnection(reason, faulted);
+    }
     static bool current(const PearlPoolSource &source, Job *job) {
         return source.currentJob(job);
     }
@@ -92,6 +95,9 @@ class FakeTransport final : public om::PearlPoolTransport {
     explicit FakeTransport(FakeClock &clock) : clock_(clock) {}
 
     om::PearlPoolConnectStatus open(const std::string &, int) override {
+        if (latestObservation) connectWasAnnounced = connectWasAnnounced &&
+            latestObservation->security == om::PoolTransportSecurity::Connecting &&
+            latestObservation->error == om::PoolTransportError::None && latestObservation->effectivePort == 0;
         ++openCalls;
         om::PearlPoolConnectStatus result = om::PearlPoolConnectStatus::Connected;
         if (!openResults.empty()) {
@@ -103,6 +109,11 @@ class FakeTransport final : public om::PearlPoolTransport {
     }
 
     bool isOpen() const override { return open_; }
+    om::PoolTransportObservation observation() const override {
+        if (reportedSecurity == om::PoolTransportSecurity::Unknown) return {};
+        return {open_ ? reportedSecurity : om::PoolTransportSecurity::Disconnected,
+            reportedError, open_ ? reportedPort : uint16_t{0}, om::poolTransportNowMs()};
+    }
     void close() override {
         if (open_) ++closeCalls;
         open_ = false;
@@ -207,6 +218,11 @@ class FakeTransport final : public om::PearlPoolTransport {
     }
 
     FakeClock &clock_;
+    const om::PoolTransportObservation *latestObservation = nullptr;
+    bool connectWasAnnounced = true;
+    om::PoolTransportSecurity reportedSecurity = om::PoolTransportSecurity::Unknown;
+    om::PoolTransportError reportedError = om::PoolTransportError::None;
+    uint16_t reportedPort = 0;
     bool open_ = false;
     bool failNextRestore = false;
     bool failNextSetup = false;
@@ -1558,6 +1574,73 @@ void soloAuthorizationTest() {
     }
 }
 
+void transportObservationTest() {
+    using Security = om::PoolTransportSecurity;
+    using Error = om::PoolTransportError;
+    struct Observer final : om::PoolTransportObserver {
+        om::PoolTransportObservation last;
+        unsigned count = 0, verified = 0, plaintext = 0;
+        void onPoolTransportObservation(const om::PoolTransportObservation &value) noexcept override {
+            last = value; ++count;
+            if (value.security == Security::VerifiedTls) ++verified;
+            if (value.security == Security::Plaintext) ++plaintext;
+        }
+    };
+    {
+        FakeClock clock; FakeTransport transport(clock); Observer observer;
+        om::PearlPoolSource source("fixture.invalid", 8048, "prl1test", "rig", sourcePolicy(), "", &transport, &clock);
+        transport.latestObservation = &observer.last;
+        source.setTransportObserver(&observer);
+        check(observer.last.security == Security::Unknown, "unattempted transport is unknown");
+        transport.bytes(authReply + "\n");
+        check(om::PearlPoolSourceTestAccess::connect(source) && transport.connectWasAnnounced,
+              "connecting with cleared error is published before transport open");
+        check(observer.last.security == Security::Unknown && !observer.verified && !observer.plaintext,
+              "unspecified fake transport never inherits configured encryption");
+        om::PearlPoolSourceTestAccess::close(source);
+        const auto before = observer.count;
+        om::PearlPoolSourceTestAccess::close(source);
+        check(observer.count == before + 1 && observer.last.security == Security::Disconnected && !observer.last.effectivePort,
+              "already-closed early return still publishes disconnection");
+    }
+    {
+        FakeClock clock; FakeTransport transport(clock); Observer observer;
+        transport.reportedSecurity = Security::VerifiedTls; transport.reportedPort = 8048;
+        om::PearlPoolSource source("fixture.invalid", 8048, "prl1test", "rig", sourcePolicy(), "", &transport, &clock);
+        transport.latestObservation = &observer.last;
+        source.setTransportObserver(&observer);
+        transport.bytes("{\"id\":1,\"result\":false,\"error\":\"private peer text\"}\n");
+        check(!om::PearlPoolSourceTestAccess::connect(source) && observer.verified == 1,
+              "verified TLS is reported before and independently of rejected authorization");
+        check(observer.last.security == Security::Disconnected && observer.last.error == Error::Authentication && !observer.last.effectivePort,
+              "authorization failure publishes only a fixed error and clears connected port");
+        transport.bytes(authReply + "\n");
+        const auto began = om::poolTransportNowMs();
+        check(om::PearlPoolSourceTestAccess::connect(source) && transport.connectWasAnnounced && observer.last.error == Error::None,
+              "new connection attempt clears preceding authorization error");
+        check(observer.last.effectivePort == 8048 && observer.last.observedMonoMs >= began &&
+                  observer.last.observedMonoMs <= om::poolTransportNowMs() && observer.last.observedMonoMs != clock.now,
+              "connected port and actual producer monotonic observation are retained");
+        om::PearlPoolSourceTestAccess::close(source, om::PearlSourceReason::Protocol, true);
+        check(observer.last.security == Security::Disconnected && observer.last.error == Error::Protocol,
+              "protocol rejection revokes verified transport");
+    }
+    {
+        FakeClock clock; FakeTransport transport(clock); Observer observer;
+        transport.reportedSecurity = Security::VerifiedTls; transport.reportedError = Error::Verification;
+        transport.openResults.push_back(om::PearlPoolConnectStatus::ConnectFailure);
+        {
+            om::PearlPoolSource source("fixture.invalid", 8048, "prl1test", "rig", sourcePolicy(), "", &transport, &clock);
+            source.setTransportObserver(&observer);
+            check(!om::PearlPoolSourceTestAccess::connect(source) && observer.last.error == Error::Verification,
+                  "specific verification failure survives generic connect failure");
+            om::PearlPoolSourceTestAccess::close(source);
+        }
+        check(observer.last.security == Security::Disconnected && observer.last.error == Error::Verification,
+              "repeat close and source destruction preserve the specific verification error");
+    }
+}
+
 void connectAndAuthorizationFailureTest() {
     std::puts("connect-stage and authorization failures:");
     const om::PearlPoolConnectStatus failures[] = {
@@ -2488,6 +2571,7 @@ void h025GpuBoundTest() {
 }
 
 int main() {
+    transportObservationTest();
     h019SameHeightAndJobIdTest();
     h019ProofCompressionTest();
     h025V2LoginTest();

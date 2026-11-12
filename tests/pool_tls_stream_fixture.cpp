@@ -43,6 +43,8 @@ struct Connection final:PoolTlsConnection {
 PoolTlsOpenResult open(const PoolTlsCheckRequest &r,bool plain){
     const bool budget=r.host.rfind("budget-fallback-",0)==0;
     const bool cancelFallback=r.host.rfind("cancel-fallback-",0)==0;
+    const bool observeReconnect=r.host.rfind("observe-reconnect-",0)==0;
+    if(plain&&observeReconnect)recordPlainOpen(r);
     if(plain&&(budget||cancelFallback)){
         recordPlainOpen(r); // publication proves this exact helper entered the plaintext factory
         std::this_thread::sleep_for(std::chrono::milliseconds(budget?3500:30000));
@@ -55,6 +57,8 @@ PoolTlsOpenResult open(const PoolTlsCheckRequest &r,bool plain){
         if(r.host=="dns-fail.test")result.failure=PoolTlsCheckReply{C::Dns,G::Resolve,E::None};
         if(budget)std::this_thread::sleep_for(std::chrono::milliseconds(3500));
         if(budget||cancelFallback||r.host=="connect-fail.test"||r.host=="fallback-lost-submit.test")result.failure=PoolTlsCheckReply{C::Connect,G::Connect,E::None};
+        if(observeReconnect&&!std::filesystem::is_regular_file(fixtureDirectory/(".tls-runtime-"+r.host)/"plain-open"))
+            result.failure=PoolTlsCheckReply{C::Connect,G::Connect,E::None};
         if(r.host=="network-timeout.test")result.failure=PoolTlsCheckReply{C::Timeout,G::Connect,E::None};
         if(r.host=="handshake-timeout.test")result.failure=PoolTlsCheckReply{C::Timeout,G::Handshake,E::None};
         if(r.host=="unavailable-open.test")result.failure=PoolTlsCheckReply{C::Unavailable,G::None,E::None};

@@ -14,10 +14,11 @@ class StatsOnlyReader final:public om::DisplaySampleReader {
     om::DisplaySampleReading read(size_t slot,const std::atomic<bool> &cancel)override{
         om::DisplaySampleReading out;if(!current(cancel)||slot>=targets_.size())return out;
         int status=0;std::string body,error;
+        out.statsBegan=om::displaySampleTime();
         const bool received=om::httpGetLocal("127.0.0.1",targets_[slot].port,"/api/v1/stats",&status,&body,&error,1);
         out.statsObserved=om::displaySampleTime();if(!current(cancel))return {};
         if(received&&status==200){om::JsonValue root;om::StatsSnapshot stats;
-            if(om::parseJsonStrict(body,&root,&error)&&om::statsFromJson(root,&stats,&error)){
+            if(om::parseJsonStrict(body,&root,&error)&&om::statsFromJson(root,&stats,&error,out.statsBegan.monotonicMs)){
                 uint64_t accepted=0;if(om::acceptedHistoryCounter(root,&accepted))out.accepted=accepted;
                 out.stats=std::move(stats);
             }

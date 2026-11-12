@@ -1,5 +1,6 @@
 // Actual shared run loop, CPU algorithm and bounded in-memory source only. No telemetry, socket, device or Pearl proof qualification.
 #include "core/run.h"
+#include "core/pearl_pool.h"
 #include "product/worker_control.h"
 #include "product/worker_process.h"
 #include "product_test_util.h"
@@ -26,6 +27,7 @@ struct Rig {
     bool rawBoundaryOpen=false,rawOrdering=true;
     WorkerControlGate *gate=nullptr;uint64_t *gateClock=nullptr;unsigned gateMode=0;
     WorkerControlClient *nativeClient=nullptr;
+    JobSource *injectedSource=nullptr;
     bool nativeWorkStream=false;
     unsigned searches=0,submits=0,drains=0,resumes=0,fetches=0,version=1;
     uint64_t completedAttempts=0;
@@ -90,6 +92,37 @@ struct Hook:RunLoopHook {
     void pauseChanged(bool paused)override{active->events.push_back(paused?"idle":"active");
         if(active->nativeClient&&paused){std::printf("NATIVEPAUSE %u %u\n",active->searches,active->submits);std::fflush(stdout);}}
 };
+struct TransportObserver final : RunObserver {
+    PoolTransportObservation last;
+    unsigned reports=0, observations=0, positive=0;
+    bool ordered=true;
+    void onReport(const MinerStats &,const GpuTelemetry &) override { ++reports; }
+    void onPoolTransportObservation(const PoolTransportObservation &value) noexcept override {
+        ordered=ordered&&value.observedMonoMs!=0&&value.observedMonoMs>=last.observedMonoMs;
+        if(value.security==PoolTransportSecurity::VerifiedTls||value.security==PoolTransportSecurity::Plaintext)++positive;
+        last=value;++observations;
+    }
+};
+struct RefusingTransport final : PearlPoolTransport {
+    TransportObserver &observer;
+    bool connectingBeforeOpen=false;
+    explicit RefusingTransport(TransportObserver &value):observer(value){}
+    PearlPoolConnectStatus open(const std::string &,int) override {
+        connectingBeforeOpen=observer.last.security==PoolTransportSecurity::Connecting&&observer.last.error==PoolTransportError::None;
+        active->stop=1;
+        return PearlPoolConnectStatus::ConnectFailure;
+    }
+    bool isOpen()const override{return false;}
+    void close()override{}
+    PearlPoolWaitStatus waitReadable(int)override{return PearlPoolWaitStatus::Error;}
+    PearlPoolWaitStatus waitWritable(int)override{return PearlPoolWaitStatus::Error;}
+    PearlPoolTransfer send(const char *,std::size_t)override{return {};}
+    PearlPoolTransfer receive(char *,std::size_t)override{return {};}
+    bool setNonblocking(bool)override{return false;}
+    PoolTransportObservation observation()const override {
+        return {PoolTransportSecurity::Disconnected,PoolTransportError::Verification,0,poolTransportNowMs()};
+    }
+};
 RunOptions options(Rig &r){RunOptions o;o.workPause=&r.control;o.plain=true;o.batch=1;o.reportSeconds=3600;
     o.poolHost="fixture.invalid";o.poolPort=1;o.poolAccount="fixture.account";o.poolProofCompression=true;o.pearlPolicy={PearlNetwork::Mainnet,PearlTargetSemantics::BaseBeforePenalty};return o;}
 size_t event(const Rig &r,const std::string &s){return static_cast<size_t>(std::find(r.events.begin(),r.events.end(),s)-r.events.begin());}
@@ -114,7 +147,9 @@ struct WorkSink:CompletedWorkSink {
     }
 };
 }
-namespace om {JobSource *workPauseTestSource(){active->sourceMade=true;return new Source;}}
+namespace om {JobSource *workPauseTestSource(){active->sourceMade=true;
+    if(active->injectedSource){auto *source=active->injectedSource;active->injectedSource=nullptr;return source;}
+    return new Source;}}
 int main(int argc,char **argv){
     if(argc==6&&std::string(argv[1])=="--work-stream-fixture"&&std::string(argv[2])=="--worker-control-v1"){
         WorkerChannelHandles handles;WorkerControlClient client(true);
@@ -144,12 +179,15 @@ int main(int argc,char **argv){
         if(r.searches!=r.submits||r.enabledHint||!r.rawOrdering||!raw.ordered||!raw.began||(!raw.ended&&result!=kRunPauseFault))return 91;
         return result==kRunPauseFault?8:result;
     }
-    for(unsigned mode=0;mode<9;++mode){Rig r;active=&r;Algo algo;Hook hook;auto o=options(r);o.loopHook=&hook;
+    for(unsigned mode=0;mode<9;++mode){Rig r;active=&r;Algo algo;Hook hook;TransportObserver observer;auto o=options(r);o.loopHook=&hook;o.observer=&observer;
         r.stopInPause=mode==1||mode==4;r.failDrain=mode==2;r.pauseInPrepare=mode==3;r.pauseInFetch=mode==5;r.requested=mode==4||mode==6;
         if(mode==7)o.workWaitMs=5;
         if(mode==8)r.stop=1;
         const int result=runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop);
         CHECK(result==(mode==2?kRunPauseFault:0)&&!r.enabledHint&&r.pauseOrdering);
+        CHECK(observer.observations>=2&&!observer.reports&&!observer.positive&&observer.ordered);
+        CHECK(observer.last.security==PoolTransportSecurity::Disconnected&&!observer.last.effectivePort);
+        CHECK(observer.last.error==(r.stop?PoolTransportError::Cancelled:PoolTransportError::None));
         if(mode==4||mode==8){CHECK(!r.configured&&!r.sourceMade&&!r.searches&&r.resumes==0);continue;}
         CHECK(r.configured&&r.sourceMade&&r.submits==r.searches);
         if(mode==0||mode==7){CHECK(r.searches==2&&r.resumes==1);CHECK(event(r,"submit")<event(r,"complete")&&event(r,"complete")<event(r,"paused")&&event(r,"resume")<event(r,"fetch2")&&event(r,"fetch2")<event(r,"search2"));}
@@ -160,14 +198,22 @@ int main(int argc,char **argv){
     {Rig r;active=&r;r.uncontrolled=true;Algo algo;Hook hook;auto o=options(r);o.workPause=nullptr;o.loopHook=&hook;
         CHECK(runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop)==0);
         CHECK(r.searches==2&&r.submits==2&&!r.resumes&&r.enabledHint&&event(r,"idle")==r.events.size());}
-    for(unsigned mode=0;mode<6;++mode){Rig r;active=&r;Algo algo;auto o=options(r);
+    {Rig r;active=&r;Algo algo;TransportObserver observer;RefusingTransport transport(observer);auto o=options(r);o.observer=&observer;
+        r.injectedSource=new PearlPoolSource(o.poolHost,o.poolPort,"prl1test","fixture",o.pearlPolicy,"",&transport);
+        CHECK(runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop)==0);
+        CHECK(transport.connectingBeforeOpen&&observer.observations>=5&&!observer.reports&&!observer.positive&&observer.ordered);
+        CHECK(observer.last.security==PoolTransportSecurity::Disconnected&&observer.last.error==PoolTransportError::Verification&&!observer.last.effectivePort);
+        CHECK(!r.searches&&!r.submits);}
+    for(unsigned mode=0;mode<6;++mode){Rig r;active=&r;Algo algo;TransportObserver observer;auto o=options(r);o.observer=&observer;
         if(mode==0)o.bench=true;
         if(mode==1)o.formalBenchmark.enabled=true;
         if(mode==2)o.pearlAcceptedQuota=1;
         if(mode==3)o.pearlSustainedSeconds=60;
         if(mode==4)o.memOffsetMhz=1;
         if(mode==5)o.pearlProduction=true;
-        CHECK(runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop)==kRunPauseFault&&!r.configured&&!r.sourceMade&&!r.searches);}
+        CHECK(runMiner(&algo,o,"fixture.cpu",0,"fixture",&r.stop)==kRunPauseFault&&!r.configured&&!r.sourceMade&&!r.searches);
+        CHECK(observer.observations==2&&!observer.positive&&observer.ordered&&observer.last.error==PoolTransportError::None);
+        CHECK(observer.last.security==(o.bench?PoolTransportSecurity::Unknown:PoolTransportSecurity::Disconnected)&&!observer.last.effectivePort);}
     for(unsigned mode=0;mode<3;++mode){Rig r;active=&r;uint64_t now=1000;WorkerControlGate gate(binding(),[&]{return now;});
         r.gate=&gate;r.gateClock=&now;r.gateMode=mode;Algo algo;GateHook hook;auto o=options(r);o.workPause=&gate;o.loopHook=&hook;
         CHECK(gate.receive({binding(),1,1000,2000,WorkerDirective::Pause})==WorkerCommandResult::Accepted);

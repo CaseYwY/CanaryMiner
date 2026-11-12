@@ -1,5 +1,5 @@
 // Ordinary TLS connection owner with real native IPC and synthetic TLS peers.
-// No resolver, trust store, socket, account, GPU or installed miner is used.
+// Synthetic TLS peers plus an owned localhost TCP socket; no external resolver, trust store, account or GPU.
 #include "product/pool_tls_runtime_transport.h"
 #include "core/pearl_pool.h"
 #include "product_test_util.h"
@@ -11,6 +11,58 @@ using namespace om;
 namespace {
 using T = PearlPoolTransferStatus;
 using W = PearlPoolWaitStatus;
+using Security = PoolTransportSecurity;
+using Error = PoolTransportError;
+
+void checkObservation(const PearlPoolTransport &transport, Security security, unsigned port, Error error = Error::None) {
+    const auto began = poolTransportNowMs();
+    const auto value = transport.observation();
+    CHECK(value.security == security && value.effectivePort == port && value.error == error);
+    CHECK(value.observedMonoMs >= began && value.observedMonoMs <= poolTransportNowMs());
+}
+
+void plainSocketObservation() {
+    const bool initialized = platformInit();
+    CHECK(initialized);
+    if (!initialized) return;
+    const auto listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(listener != OM_INVALID_SOCKET);
+    if (listener == OM_INVALID_SOCKET) { platformShutdown(); return; }
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#if defined(_WIN32)
+    int size = sizeof(address);
+#else
+    socklen_t size = sizeof(address);
+#endif
+    const bool ready = ::bind(listener, reinterpret_cast<sockaddr *>(&address), sizeof(address)) == 0 &&
+        ::getsockname(listener, reinterpret_cast<sockaddr *>(&address), &size) == 0 && ::listen(listener, 1) == 0;
+    CHECK(ready);
+    if (ready) {
+        PearlPoolSocketTransport transport;
+        checkObservation(transport, Security::Disconnected, 0);
+        const unsigned port = ntohs(address.sin_port);
+        const bool opened = transport.open("127.0.0.1", static_cast<int>(port)) == PearlPoolConnectStatus::Connected;
+        CHECK(opened);
+        if (opened) {
+            checkObservation(transport, Security::Plaintext, port);
+            const auto peer = ::accept(listener, nullptr, nullptr);
+            CHECK(peer != OM_INVALID_SOCKET);
+            if (peer != OM_INVALID_SOCKET) {
+                OM_CLOSESOCKET(peer);
+                CHECK(transport.waitReadable(1000) == W::Ready);
+                char byte = 0;
+                CHECK(transport.receive(&byte, 1).status == T::EndOfStream);
+                checkObservation(transport, Security::Disconnected, 0); // before explicit close
+            }
+        }
+        transport.close();
+        checkObservation(transport, Security::Disconnected, 0);
+    }
+    OM_CLOSESOCKET(listener);
+    platformShutdown();
+}
 
 PoolTlsCheckRequest request(std::string host = "echo.test") {
     return {true, std::move(host), 1, 5000, {}, {}};
@@ -44,9 +96,11 @@ void reconnect(const std::filesystem::path &helper) {
         const bool opened = transport.open("echo.test", 1) == PearlPoolConnectStatus::Connected;
         CHECK(opened && transport.isOpen() && transport.progressIO());
         if (!opened) break;
+        checkObservation(transport, Security::VerifiedTls, 1);
         CHECK(echo(transport, original));
         transport.close();
         CHECK(!transport.isOpen() && !nativeProcessUnresolved());
+        checkObservation(transport, Security::Disconnected, 0);
     }
 }
 
@@ -120,6 +174,9 @@ void refusals(const std::filesystem::path &helper) {
         PoolTlsRuntimeTransport transport(helper, request("verify-fail.test"), &stop);
         CHECK(transport.open("verify-fail.test", 1) != PearlPoolConnectStatus::Connected);
         CHECK(!transport.isOpen() && transport.error() == PearlTlsError::Verification);
+        checkObservation(transport, Security::Disconnected, 0, Error::Verification);
+        transport.close();
+        checkObservation(transport, Security::Disconnected, 0, Error::Verification);
         const std::string login = "synthetic-login-never-sent";
         CHECK(transport.send(login.data(), login.size()).status == T::Error);
         CHECK(!nativeProcessUnresolved());
@@ -161,7 +218,7 @@ void refusals(const std::filesystem::path &helper) {
         CHECK(transport.open("echo.test", 1) == PearlPoolConnectStatus::Connected);
         stop = 1;
         const PearlPoolTransport &observation = transport;
-        CHECK(!observation.isOpen()); // the only observation before the caller clears its input
+        checkObservation(observation, Security::Disconnected, 0, Error::Cancelled); // only observation before clearing input
         stop = 0;
         CHECK(!observation.isOpen() && transport.error() == PearlTlsError::Cancelled);
         CHECK(transport.open("echo.test", 1) != PearlPoolConnectStatus::Connected);
@@ -195,6 +252,7 @@ void foreignCaller(const std::filesystem::path &helper) {
     {
         NativeProcessScope foreign(nativeProcessEpoch() + 1);
         CHECK(!transport.isOpen() && !transport.bufferedRead() && !transport.localReadPending());
+        checkObservation(transport, Security::Unknown, 0, Error::Unavailable);
         CHECK(transport.open("echo.test", 1) != PearlPoolConnectStatus::Connected);
         const std::string data = "foreign-data";
         char byte = 0;
@@ -206,6 +264,7 @@ void foreignCaller(const std::filesystem::path &helper) {
         transport.close();
     }
     CHECK(transport.isOpen() && transport.error() == PearlTlsError::None);
+    checkObservation(transport, Security::VerifiedTls, 1);
     CHECK(echo(transport, "original-connection-still-owned"));
     transport.close();
     CHECK(!nativeProcessUnresolved());
@@ -220,7 +279,7 @@ void originalEpoch(const std::filesystem::path &helper) {
     fault.markUnresolved();
     fault.settled();
     CHECK(!nativeProcessUnresolved());
-    CHECK(!transport.isOpen());
+    checkObservation(transport, Security::Disconnected, 0, Error::Unavailable);
     CHECK(transport.error() == PearlTlsError::Unavailable);
     transport.close();
     CHECK(transport.open("echo.test", 1) != PearlPoolConnectStatus::Connected);
@@ -231,6 +290,8 @@ void authorizedFallback(const std::filesystem::path &helper) {
         volatile sig_atomic_t stop = 0;
         PoolTlsRuntimeTransport strict(helper, request(host), &stop);
         CHECK(strict.open(host, 1) != PearlPoolConnectStatus::Connected && !strict.plaintextActive());
+        checkObservation(strict, Security::Disconnected, 0, std::string(host) == "dns-fail.test" ? Error::Dns :
+            std::string(host) == "connect-fail.test" ? Error::Connect : Error::Timeout);
         PoolTlsRuntimeTransport transport(helper, request(host), &stop,
             std::string("stratum+tcp://") + host + ":2");
         PearlPoolSource source(host, 1, "placeholder", "fixture",
@@ -240,6 +301,8 @@ void authorizedFallback(const std::filesystem::path &helper) {
             const bool fetched = source.fetch(&job);
             CHECK(fetched && job.valid && transport.plaintextActive());
             if (!fetched) break;
+            checkObservation(transport, Security::Plaintext, 2);
+            CHECK(source.transportObservation().effectivePort == 2);
             CHECK(transport.plaintextConnections() == attempt + 1);
             Solution solution;
             solution.nonce = 7 + attempt; solution.hit[0] = 11; solution.extra = "synthetic-proof";
@@ -248,6 +311,7 @@ void authorizedFallback(const std::filesystem::path &helper) {
             CHECK(source.submitCounters().accepted == attempt + 1);
             transport.close();
             CHECK(!transport.isOpen() && !nativeProcessUnresolved());
+            checkObservation(transport, Security::Disconnected, 0);
         }
     }
 }
@@ -344,6 +408,23 @@ struct StageMarker {
     }
 };
 
+void fallbackThenVerifiedObservation(const std::filesystem::path &helper) {
+    StageMarker marker(helper, "observe-reconnect-");
+    CHECK(marker.ready);
+    if (!marker.ready) return;
+    volatile sig_atomic_t stop = 0;
+    PoolTlsRuntimeTransport transport(helper, request(marker.host), &stop, "stratum+tcp://" + marker.host + ":2");
+    CHECK(transport.open(marker.host, 1) == PearlPoolConnectStatus::Connected);
+    checkObservation(transport, Security::Plaintext, 2);
+    CHECK(marker.entered() && transport.plaintextConnections() == 1);
+    transport.close();
+    checkObservation(transport, Security::Disconnected, 0);
+    CHECK(transport.open(marker.host, 1) == PearlPoolConnectStatus::Connected);
+    checkObservation(transport, Security::VerifiedTls, 1);
+    CHECK(transport.plaintextConnections() == 1 && !transport.plaintextActive());
+    transport.close();
+}
+
 void fallbackSharesOriginalBudget(const std::filesystem::path &helper) {
     StageMarker marker(helper, "budget-fallback-");
     CHECK(marker.ready);
@@ -398,6 +479,7 @@ void cancelDuringPlaintextOpen(const std::filesystem::path &helper) {
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     const auto helper = std::filesystem::absolute(std::filesystem::u8path(argv[1]));
+    plainSocketObservation();
     reconnect(helper);
     canonicalReconnect(helper);
     noReplayAfterUnknown(helper);
@@ -407,6 +489,7 @@ int main(int argc, char **argv) {
     authorizedFallback(helper);
     fallbackRefusals(helper);
     noReplayOnFallback(helper);
+    fallbackThenVerifiedObservation(helper);
     fallbackSharesOriginalBudget(helper);
     cancelDuringPlaintextOpen(helper);
     originalEpoch(helper);

@@ -80,7 +80,8 @@ void loopback(){
         std::this_thread::sleep_for(std::chrono::milliseconds(20));CHECK(sample->readings[0].statsObserved.monotonicMs==original&&!owner.take()&&calls==1);}
     owner.stop();server.stop();
 }
-struct FleetState {unsigned ticks=0,stops=0,joins=0;bool revoked=false,throwLines=false;Probe *reader=nullptr;};
+struct FleetState {unsigned ticks=0,stops=0,joins=0;bool revoked=false,throwLines=false;Probe *reader=nullptr;
+    std::atomic<bool> *naturalExit=nullptr,*joinEntered=nullptr,*releaseJoin=nullptr;};
 class Fleet final:public WorkerFleet {
     FleetState &p;
    public:
@@ -90,10 +91,11 @@ class Fleet final:public WorkerFleet {
     bool launch(unsigned,std::filesystem::path,std::vector<std::string>,unsigned,GameGuardTime)override{return !p.revoked;}
     void tick(GameGuardTime,const WorkerFleetEvidence &)override{++p.ticks;}
     WorkerFleetState state()const override{return p.revoked?WorkerFleetState::Stopped:WorkerFleetState::Active;}
-    WorkerFleetSnapshot snapshot(unsigned)const override{WorkerFleetSnapshot s;s.requested=true;s.done=s.reaped=s.revoked=p.revoked;s.exitCode=p.revoked?0:-1;s.pauseRequested=false;return s;}
+    WorkerFleetSnapshot snapshot(unsigned)const override{WorkerFleetSnapshot s;s.requested=true;s.done=s.reaped=p.revoked||(p.naturalExit&&p.naturalExit->load());s.revoked=p.revoked;s.exitCode=s.done?0:-1;s.pauseRequested=false;return s;}
     std::vector<std::string> takeLines(unsigned)override{if(p.throwLines&&p.reader&&p.reader->entered)throw 1;return {};}
     void requestStop()override{++p.stops;p.revoked=true;if(p.reader)p.reader->release=true;}
-    void stop()override{requestStop();++p.joins;}
+    void stop()override{requestStop();++p.joins;if(p.joinEntered&&p.releaseJoin){*p.joinEntered=true;
+        const auto until=poolTransportNowMs()+3000;while(!*p.releaseJoin&&poolTransportNowMs()<until)std::this_thread::sleep_for(std::chrono::milliseconds(5));}}
 };
 struct CaptureState {unsigned samples=0,ticks=0,gaps=0,known=0,missing=0;uint64_t last=0;bool backward=false,delayed=false,revoked=false;};
 class Capture final:public EnergyCaptureSink {
@@ -142,5 +144,39 @@ void supervisor(){
         o.workerFleetEvidence=[&](uint64_t){if(capture.samples>=2||supervisorNowMs()-began>5000)stop=1;return WorkerFleetEvidence{};};
         Supervisor s(std::move(o));CHECK(s.run()==0);CHECK(capture.samples==2&&capture.known==0&&capture.missing==2&&!capture.backward&&capture.revoked);}
 }
+void transportDuringCleanup(){
+    volatile sig_atomic_t stop=0;Probe probe;FleetState fleet;
+    std::atomic<bool> naturalExit{false},joinEntered{false},releaseJoin{false};
+    fleet.naturalExit=&naturalExit;fleet.joinEntered=&joinEntered;fleet.releaseJoin=&releaseJoin;
+    auto o=options(stop,probe,fleet);o.apiEnabled=true;
+    StatsServer port;std::string error;CHECK(port.start("127.0.0.1",0,[]{return "{}";},"{}",&error));o.apiPort=port.port();port.stop();
+    class CurrentReader final:public DisplaySampleReader{
+    public:DisplaySampleReading read(size_t,const std::atomic<bool> &)override{
+        DisplaySampleReading r;r.statsBegan=r.statsObserved=r.powerBegan=r.powerFinished=displaySampleTime();
+        StatsSnapshot s;s.state="running";s.poolState="mining";s.poolTransport={{PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,r.statsBegan.monotonicMs},false};r.stats=s;return r;
+    }};
+    o.displaySampleFactory=[](const auto &)->std::unique_ptr<DisplaySampleReader>{return std::make_unique<CurrentReader>();};
+    const int apiPort=o.apiPort;bool sawVerified=false,heldResponse=false,revoked=false;uint64_t heldAge=UINT64_MAX;
+    std::thread observer([&]{
+        const auto until=poolTransportNowMs()+5000;uint64_t seen=0;
+        while(poolTransportNowMs()<until){int code=0;std::string body,diagnostic;JsonValue root;
+            if(httpGetLocal("127.0.0.1",apiPort,"/api/v1/stats",&code,&body,&diagnostic,1)&&code==200&&parseJsonStrict(body,&root,&diagnostic)){
+                const auto *pool=root.find("pool");const auto *transport=pool?pool->find("transport"):nullptr;const auto *state=transport?transport->find("state"):nullptr;
+                if(state&&state->text=="verified_tls"){sawVerified=true;seen=poolTransportNowMs();break;}}
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        naturalExit=true;
+        const auto deadline=poolTransportNowMs()+3000;while(!joinEntered&&poolTransportNowMs()<deadline)std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        if(joinEntered){int code=0;std::string body,diagnostic;JsonValue root;
+            heldResponse=httpGetLocal("127.0.0.1",apiPort,"/api/v1/stats",&code,&body,&diagnostic,1)&&code==200&&parseJsonStrict(body,&root,&diagnostic);
+            if(heldResponse){const auto *pool=root.find("pool");const auto *transport=pool?pool->find("transport"):nullptr;const auto *state=transport?transport->find("state"):nullptr;
+                revoked=root.find("state")&&root.find("state")->text=="draining"&&state&&state->text=="unknown";}
+            heldAge=poolTransportNowMs()-seen;
+        }
+        releaseJoin=true;
+    });
+    Supervisor s(std::move(o));const auto code=s.run();observer.join();
+    CHECK(code==0&&sawVerified&&joinEntered&&heldResponse&&heldAge<2000);CHECK(revoked);
 }
-int main(){if(!platformInit())return 2;lifetime();loopback();supervisor();platformShutdown();return finishTests("background supervisor sampling");}
+}
+int main(){if(!platformInit())return 2;lifetime();loopback();supervisor();transportDuringCleanup();platformShutdown();return finishTests("background supervisor sampling");}

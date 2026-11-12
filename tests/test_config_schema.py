@@ -324,6 +324,20 @@ class DiagnosticSchemaTests(unittest.TestCase):
 
 
 class StatsSchemaTests(unittest.TestCase):
+    def test_transport_is_optional_and_has_closed_display_values(self):
+        schema = load('config/stats-v1.schema.json')
+        pool = schema['properties']['pool']
+        self.assertNotIn('transport', pool['required'])
+        transport = pool['properties']['transport']
+        for state, error, port, age in [('unknown', 'none', 0, None), ('verified_tls', 'none', 8048, 25),
+                                       ('plaintext', 'none', 7048, 0), ('mixed', 'none', 0, 4999),
+                                       ('disconnected', 'verification', 0, 5)]:
+            self.assertEqual(validate(dict(state=state, error=error, port=port, age_ms=age), transport, schema), [])
+        for document in [dict(state='verified_tls', error='PRIVATE-error', port=8048, age_ms=0),
+                         dict(state='unknown-extension', error='none', port=0, age_ms=0),
+                         dict(state='verified_tls', error='none', port=8048, age_ms=5000)]:
+            self.assertTrue(validate(document, transport, schema))
+
     def test_schema_covers_the_writer(self):
         schema = load('config/stats-v1.schema.json')
         with open(os.path.join(ROOT, 'src', 'product', 'stats.h'), encoding='utf8') as f:

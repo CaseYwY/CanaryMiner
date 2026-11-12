@@ -62,8 +62,10 @@ bool has(const std::string &text, const char *needle) { return text.find(needle)
 
 int fakeHistoryChild(int argc, char **argv) {
     int port = 0;
+    std::filesystem::path transportControl;
     for (int i = 2; i + 1 < argc; ++i) if (std::string(argv[i]) == "--api-port") port = std::atoi(argv[i + 1]);
     for (int i = 2; i + 1 < argc; ++i) if (std::string(argv[i]) == "--fixture-start-count") std::ofstream(std::filesystem::u8path(argv[i+1]),std::ios::app)<<"start\n";
+    for (int i = 2; i + 1 < argc; ++i) if (std::string(argv[i]) == "--fixture-pool-transport") transportControl=std::filesystem::u8path(argv[i+1]);
     if (!platformInit() || port <= 0) return 81;
     StatsSnapshot stats;
     stats.state = "running";
@@ -75,7 +77,21 @@ int fakeHistoryChild(int argc, char **argv) {
     stats.fee.outcomes.accepted = 999;
     StatsServer server;
     std::string error;
-    if (!server.start("127.0.0.1", port, [&] { return statsToJson(stats); }, "{}", &error)) return 82;
+    std::string lastScenario;uint64_t frozenObservation=0;
+    if (!server.start("127.0.0.1", port, [&] {
+        if(!transportControl.empty()){
+            std::string scenario;std::ifstream input(transportControl);input>>scenario;
+            const auto now=poolTransportNowMs();
+            if(scenario!=lastScenario){lastScenario=scenario;frozenObservation=now;}
+            stats.poolTransport={};
+            if(scenario=="malformed")return std::string("not a stats document");
+            if(scenario=="verified"||scenario=="stale")stats.poolTransport.observation={PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,scenario=="stale"?frozenObservation:now};
+            else if(scenario=="plaintext")stats.poolTransport.observation={PoolTransportSecurity::Plaintext,PoolTransportError::None,7048,now};
+            else if(scenario=="disconnected")stats.poolTransport.observation={PoolTransportSecurity::Disconnected,PoolTransportError::Verification,0,now};
+            else if(scenario=="connecting")stats.poolTransport.observation={PoolTransportSecurity::Connecting,PoolTransportError::None,0,now};
+        }
+        return statsToJson(stats);
+    }, "{}", &error)) return 82;
     char input[64];
     while (fread(input, 1, sizeof(input), stdin) > 0) {}
     server.stop();
@@ -949,6 +965,29 @@ void testMarketReferenceBridge(){
 }
 }  // namespace
 
+static void testTransportAggregation() {
+    auto options=baseOptions();options.seeds={seed(0),seed(1)};
+    const uint64_t now=20000;
+    std::vector<WorkerView> views(2);
+    for(std::size_t i=0;i<views.size();++i){auto &v=views[i];v.seed=seed(static_cast<int>(i));v.haveStats=true;v.state="Mining";
+        v.lastSampleMs=now-10;v.stats.state="running";v.stats.poolTransport={{PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,now-20},false};}
+    auto observe=[&](uint64_t at=20000,const std::string &state="running"){return aggregateSnapshot(options,views,1,state,at).poolTransport;};
+    CHECK(observe().observation.security==PoolTransportSecurity::VerifiedTls&&!observe().mixed);
+    views[1].stats.poolTransport.observation={PoolTransportSecurity::Plaintext,PoolTransportError::None,7048,now-20};
+    CHECK(observe().mixed);
+    auto mixed=aggregateSnapshot(options,views,1,"running",now);JsonValue root;std::string error;StatsSnapshot roundtrip;
+    CHECK(parseJsonStrict(statsToJson(mixed,now),&root,&error)&&statsFromJson(root,&roundtrip,&error,now)&&roundtrip.poolTransport.mixed);
+    views[1].haveStats=false;CHECK(!observe().mixed&&observe().observation.security==PoolTransportSecurity::Unknown);
+    views[1]=views[0];views[1].stats.poolTransport.observation.effectivePort=8049;CHECK(observe().mixed);
+    views[1]=views[0];views[1].stats.poolTransport.observation.observedMonoMs=now-5000;CHECK(observe().observation.security==PoolTransportSecurity::Unknown);
+    views[1]=views[0];views[1].lastSampleMs=now+1;CHECK(observe().observation.security==PoolTransportSecurity::Unknown);
+    for(const auto *state:{"Stopped","Error","Restarting"}){views[1]=views[0];views[1].state=state;CHECK(observe().observation.security==PoolTransportSecurity::Unknown);}
+    views[1]=views[0];CHECK(observe(now,"draining").observation.security==PoolTransportSecurity::Unknown);
+    CHECK(observe(now,"stopped").observation.security==PoolTransportSecurity::Unknown);
+    CHECK(observe(now+5000).observation.security==PoolTransportSecurity::Unknown);
+    views.pop_back();CHECK(observe().observation.security==PoolTransportSecurity::Unknown);
+}
+
 int main(int argc, char **argv) {
     if(argc==2&&std::string(argv[1])=="--market-reference-bridge-test"){
         if(!platformInit())return 83;
@@ -964,7 +1003,7 @@ int main(int argc, char **argv) {
 #endif
     if (argc >= 2 && (std::string(argv[1]) == kFakeChild || std::string(argv[1]) == kFakeCrash || std::string(argv[1]) == kFakeHang || std::string(argv[1]) == kFakeLatched))
         return fakeChild(argv[1]);
-    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test"
+    if (argc == 3 && (std::string(argv[1]) == "--dashboard-session-test" || std::string(argv[1]) == "--manual-no-market-session-test" || std::string(argv[1]) == "--no-energy-session-test" || std::string(argv[1]) == "--pool-transport-session-test"
 #ifdef CANARY_ENERGY_RUNTIME_SUPERVISOR_TEST
         || std::string(argv[1]) == "--energy-runtime-session-test"
 #endif
@@ -996,6 +1035,11 @@ int main(int argc, char **argv) {
         options.electricityPreferencesPath = (std::filesystem::path(argv[2]) / "electricity-preferences.json").u8string();
         options.energyFactory = makeSessionEnergyOwner;
         options.noEnergy = std::string(argv[1]) == "--no-energy-session-test";
+        if(std::string(argv[1])=="--pool-transport-session-test"){
+            options.userArgs.insert(options.userArgs.end(),{"--fixture-pool-transport",(std::filesystem::path(argv[2])/"fixture-pool-transport.txt").u8string()});
+            options.poolEndpoint="pool-fixture.test:8048";options.resolvedPoolTlsUrl="stratum+ssl://pool-fixture.test:8048";
+            options.donationOn=false;options.noEnergy=true;options.noMarket=true;
+        }
 #ifdef CANARY_ENERGY_RUNTIME_SUPERVISOR_TEST
         options.energyRuntimeFactory=[state=std::string(argv[2])](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
         if(!probe.start("127.0.0.1",0,[]{return "{}";},"{}",&error))return 86;
@@ -1025,6 +1069,7 @@ int main(int argc, char **argv) {
     CHECK(supervisedRun({kFakeLatched}, 1, 120000) == kExitFaultLatched);
     testWorkerArgs();
     testStatsRoundTrip();
+    testTransportAggregation();
     testAggregate();
     testDashboardGoldens();
     testDashboardContent();

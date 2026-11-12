@@ -8,6 +8,29 @@ uint64_t runtimeNowMs() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
+PoolTransportError observedError(PearlTlsError error) {
+    switch (error) {
+    case PearlTlsError::None: return PoolTransportError::None;
+    case PearlTlsError::Disabled: case PearlTlsError::InvalidPolicy: return PoolTransportError::Policy;
+    case PearlTlsError::Unavailable: return PoolTransportError::Unavailable;
+    case PearlTlsError::Verification: return PoolTransportError::Verification;
+    case PearlTlsError::Protocol: return PoolTransportError::Protocol;
+    case PearlTlsError::Transport: return PoolTransportError::Transport;
+    case PearlTlsError::Clock: return PoolTransportError::Clock;
+    case PearlTlsError::Cancelled: return PoolTransportError::Cancelled;
+    case PearlTlsError::Timeout: return PoolTransportError::Timeout;
+    case PearlTlsError::Capacity: return PoolTransportError::Capacity;
+    }
+    return PoolTransportError::Unavailable;
+}
+PoolTransportError observedOpenError(const std::optional<PoolTlsCheckReply> &reply) {
+    if (!reply || reply->tlsError != PearlTlsError::None) return PoolTransportError::None;
+    if (reply->stage == PoolTlsCheckStage::Resolve && reply->status == PoolTlsCheckStatus::Dns)
+        return PoolTransportError::Dns;
+    if (reply->stage == PoolTlsCheckStage::Connect && reply->status == PoolTlsCheckStatus::Connect)
+        return PoolTransportError::Connect;
+    return PoolTransportError::None;
+}
 PoolFallbackFailure fallbackEvidence(const PoolTlsCheckReply &reply, uint64_t attempt, const std::string &tlsUrl) {
     PoolFallbackFailure evidence;
     evidence.attempt = attempt;
@@ -57,6 +80,7 @@ PearlPoolConnectStatus PoolTlsRuntimeTransport::open(const std::string &host, in
     // A failed/ambiguous write is never retained here for retransmission on the new connection.
     close();
     if (!current()) return PearlPoolConnectStatus::ConnectFailure;
+    observedOpenError_ = PoolTransportError::None;
     if (!request_.enabled || host != request_.host || port < 1 || static_cast<unsigned>(port) != request_.port ||
         !validPoolTlsCheckRequest(request_) || !request_.caPem.empty() || request_.windowsPrivateTrust) {
         failure_ = PearlTlsError::InvalidPolicy;
@@ -75,10 +99,14 @@ PearlPoolConnectStatus PoolTlsRuntimeTransport::open(const std::string &host, in
     const auto result = connection_->openUntil(host, port, deadline);
     if (current() && result == PearlPoolConnectStatus::Connected) {
         const auto completed = runtimeNowMs();
-        if (completed >= begin && completed < deadline) return result;
+        if (completed >= begin && completed < deadline) {
+            connectedPort_ = static_cast<uint16_t>(request_.port);
+            return result;
+        }
         failure_ = completed < begin ? PearlTlsError::Clock : PearlTlsError::Timeout;
     }
     const auto evidence = connection_->openFailure();
+    observedOpenError_ = observedOpenError(evidence);
     if (failure_ == PearlTlsError::None) failure_ = connection_->error();
     close();
     // The failed TLS helper must be settled before evaluating permission or opening a new peer.
@@ -101,6 +129,7 @@ PearlPoolConnectStatus PoolTlsRuntimeTransport::open(const std::string &host, in
     if (!current()) return PearlPoolConnectStatus::ConnectFailure;
     connection_ = std::make_unique<PoolTlsProcessTransport>(helper_, std::move(plaintext), cancelled_, stop_, PoolTlsTransportMode::Plaintext);
     failure_ = PearlTlsError::None;
+    observedOpenError_ = PoolTransportError::None;
     const auto fallback = connection_->openUntil(endpoint->host, static_cast<int>(endpoint->port), deadline);
     if (fallback == PearlPoolConnectStatus::Connected) {
         const auto completed = runtimeNowMs();
@@ -112,14 +141,26 @@ PearlPoolConnectStatus PoolTlsRuntimeTransport::open(const std::string &host, in
     }
     if (!current() || fallback != PearlPoolConnectStatus::Connected) {
         if (failure_ == PearlTlsError::None) failure_ = connection_->error();
+        observedOpenError_ = observedOpenError(connection_->openFailure());
         close();
         return PearlPoolConnectStatus::ConnectFailure;
     }
     mode_ = PoolTlsTransportMode::Plaintext;
+    connectedPort_ = static_cast<uint16_t>(endpoint->port);
     ++plaintextConnections_; // at most one per attempt; attempts_ already guards overflow
     return fallback;
 }
 bool PoolTlsRuntimeTransport::isOpen() const { return readable() && connection_ && connection_->isOpen(); }
+PoolTransportObservation PoolTlsRuntimeTransport::observation() const {
+    if (foreign()) return {PoolTransportSecurity::Unknown, PoolTransportError::Unavailable, 0, poolTransportNowMs()};
+    const bool connected = isOpen(); // observes and permanently latches stop/epoch loss
+    auto failure = observedError(error());
+    if (failure == PoolTransportError::Transport && observedOpenError_ != PoolTransportError::None)
+        failure = observedOpenError_;
+    return {connected ? (mode_ == PoolTlsTransportMode::Plaintext ? PoolTransportSecurity::Plaintext : PoolTransportSecurity::VerifiedTls)
+                      : PoolTransportSecurity::Disconnected,
+            failure, connected ? connectedPort_ : uint16_t{0}, poolTransportNowMs()};
+}
 bool PoolTlsRuntimeTransport::plaintextActive() const { return isOpen() && mode_ == PoolTlsTransportMode::Plaintext; }
 uint64_t PoolTlsRuntimeTransport::plaintextConnections() const { return readable() ? plaintextConnections_ : 0; }
 void PoolTlsRuntimeTransport::close() {
@@ -127,6 +168,7 @@ void PoolTlsRuntimeTransport::close() {
     retire();
 }
 void PoolTlsRuntimeTransport::retire() {
+    connectedPort_ = 0;
     if (connection_) {
         if (failure_ == PearlTlsError::None) failure_ = connection_->error();
         connection_->close();

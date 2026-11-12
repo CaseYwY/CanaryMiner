@@ -12,6 +12,7 @@ public:
     ~PoolTlsRuntimeTransport() override;
     PearlPoolConnectStatus open(const std::string &, int) override;
     bool isOpen() const override;
+    PoolTransportObservation observation() const override;
     void close() override;
     bool progressIO() const override { return true; }
     bool bufferedRead() const override;
@@ -40,6 +41,8 @@ private:
     std::unique_ptr<PoolTlsProcessTransport> connection_;
     mutable PearlTlsError failure_ = PearlTlsError::None;
     PoolTlsTransportMode mode_ = PoolTlsTransportMode::Tls;
+    uint16_t connectedPort_ = 0;
+    PoolTransportError observedOpenError_ = PoolTransportError::None;
     uint64_t attempts_ = 0, plaintextConnections_ = 0;
 };
 } // namespace om
