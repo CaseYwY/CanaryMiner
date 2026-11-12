@@ -2458,7 +2458,7 @@ foreach(name config cli log devices shutdown fee fee_session stats selftest supe
   target_link_options(test_product_${name} PRIVATE ${CANARY_PTHREAD})
   target_link_libraries(test_product_${name} PRIVATE $<$<PLATFORM_ID:Linux>:dl>)
 endforeach()
-add_test(NAME product_config COMMAND $<TARGET_FILE:test_product_config> ${R}/config/config.example.json WORKING_DIRECTORY ${R})
+add_test(NAME product_config COMMAND $<TARGET_FILE:test_product_config> ${R}/config/config.example.json ${R}/config/config.tls.example.json WORKING_DIRECTORY ${R})
 add_test(NAME market_reference_supervisor COMMAND $<TARGET_FILE:test_product_supervisor> --market-reference-bridge-test WORKING_DIRECTORY ${R})
 set_tests_properties(market_reference_supervisor PROPERTIES TIMEOUT 30)
 add_executable(test_energy_runtime_supervisor ${R}/tests/test_product_supervisor.cpp)

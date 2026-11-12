@@ -20,6 +20,8 @@ off). This README says plainly what has and has not been tested.
 | Other Pearl pools | configurable | not tested |
 | HiveOS and other mining distributions | not supported yet | no |
 
+Local development builds can opt into [strict user-pool TLS](docs/pool-tls-presets.md) with `kryptex-tls` and donation off. This feature is separate from the public-release qualifications above; default builds refuse TLS, and Linux TLS requires glibc 2.40 or newer.
+
 ### Measured speed and power
 
 | | RTX 5080 |

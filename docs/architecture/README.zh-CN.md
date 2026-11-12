@@ -4,7 +4,7 @@
 
 **当前交付规则：一个可独立使用的模块完成正常入口接入和声明范围内的测试后，单独提交，再开始下一个模块。** 不把底层类、辅助进程或合成测试入口当成整个模块已经可用。现状见[代码进度核查](progress-audit.md)，执行门槛见[模块交付规则](execution-plan.md#module-delivery-rule-current-user-instruction)。所有已知需人工提供的资料、授权及验收操作集中列在[人工输入与操作清单](owner-actions.zh-CN.md)；不要求提前提供私密资料。
 
-**当前模块：** [P-12j 授权明文回退](../pool-tls-fallback.md)扩展启用 `CANARY_ENABLE_POOL_TLS_RUNTIME` 的本地构建普通入口，仅支持首个用户矿池并要求关闭捐赠。Prefer TLS 只有在单独授权同主机 TCP 端点、收到本次握手前网络失败证据后才可回退；显式 SSL 保持严格 TLS。重连先尝试 TLS，停止后不恢复连接，未确认提交不重放。[P-12i](../pool-tls-runtime-install.md)补齐本地 helper 安装。安全预设、捐赠 TLS、公开系统信任正例、实池／真实 GPU 及正式发布验收仍待完成，P-12 继续标为部分完成。
+**当前模块：** [P-12k 严格 TLS 预设](../pool-tls-presets.md)新增 `kryptex-tls` 和独立配置示例，供显式启用 TLS、关闭捐赠的本地构建使用。预设保留 Kryptex 协议识别，不授予明文回退权限。[P-12h](../pool-tls-runtime.md)、[P-12i](../pool-tls-runtime-install.md)和 [P-12j](../pool-tls-fallback.md)分别接通严格连接、本地安装及单独授权的回退。更广的预设迁移、捐赠 TLS、实池／真实 GPU 和正式发布验收仍未完成，P-12 继续标为部分完成。
 
 **此前交付的模块：** [实时终端 I/O 与停止隔离 P-14z](../console-io.md)已接入普通 idle Settings、Supervisor 仪表盘／设置／纯文本日志和成功启动提示，无需开启开发宏。受阻输出不再由控制循环同步写入；Windows 输入／尺寸读取也隔离。应用返回和辅助／工作进程回收与 Windows CRT／终端宿主最终退出是不同边界；后者仍可能等待终端排空。声明范围、测试证据和未验收项见模块文档及执行账本，不表示其余规划已完成。
 

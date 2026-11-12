@@ -47,7 +47,7 @@ struct PoolEntry {
     // true when network/target_semantics come from a preset or from the config file (the user wrote that entry); false for a
     // bare HOST:PORT on the command line, where the policy must still be given explicitly (--pearl-network/--pearl-target-semantics)
     bool policyKnown = false;
-    bool tls = false;  // explicit strict TLS; never permits a TCP fallback
+    bool tls = false;  // explicit SSL or secure preset: strict TLS, never permits a TCP fallback
 
     std::string endpoint() const { return host + ":" + std::to_string(port); }
 };
@@ -170,7 +170,7 @@ inline bool normalizePoolTlsDns(std::string *host) {
 /**
  * A pool given as a preset name, HOST:PORT, or stratum+tcp://HOST:PORT (CLI --pool and string entries in the config).
  * A host of a known pool gets that pool's preset name, so its quirks apply (v2 gzip login for kryptex and f2pool). The
- * endpoint stays the one the user typed. Explicit stratum+ssl:// requires DNS identity and strict runtime admission.
+ * endpoint stays the one the user typed. Explicit stratum+ssl:// and kryptex-tls require strict runtime admission.
  */
 inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *error) {
     size_t n = 0;
@@ -186,13 +186,15 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
             return true;
         }
     }
-    std::string endpoint = spec;
+    // A secure alias has the same meaning in every build; runtime availability never changes it to TCP.
+    // Use the ordinary URL path so the canonical Kryptex protocol/policy identity is retained.
+    std::string endpoint = spec == "kryptex-tls" ? "stratum+ssl://prl-us.kryptex.network:8048" : spec;
     if (endpoint.rfind("stratum+ssl://", 0) == 0) {
         e.tls=true;endpoint=endpoint.substr(std::string("stratum+ssl://").size());
     }
     else if (endpoint.rfind("stratum+tcp://", 0) == 0) endpoint = endpoint.substr(std::string("stratum+tcp://").size());
     if (!parseEndpoint(endpoint, &e.host, &e.port)) {
-        if (error) *error = "pool is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted";
+        if (error) *error = "pool is neither a preset (kryptex, kryptex-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted";
         return false;
     }
     if(e.tls&&!normalizePoolTlsDns(&e.host)){
@@ -418,7 +420,7 @@ inline bool validateConfig(const ProductConfig &cfg, bool forRun, std::string *e
     if (forRun) {
         if (!checkPoolLogin(cfg, error)) return false;
         if (cfg.wallet.empty()) return fail(error, "no wallet: set \"wallet\" in the config or pass --wallet");
-        if (cfg.pools.empty()) return fail(error, "no pool: set \"pools\" in the config or pass --pool (kryptex, herominers, f2pool or HOST:PORT)");
+        if (cfg.pools.empty()) return fail(error, "no pool: set \"pools\" in the config or pass --pool (kryptex, kryptex-tls, herominers, f2pool or HOST:PORT)");
     }
     return true;
 }

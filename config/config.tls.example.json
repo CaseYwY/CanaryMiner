@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "wallet": "REPLACE_WITH_YOUR_PUBLIC_PRL_PAYOUT_ADDRESS",
+  "worker": "rig_1",
+  "pools": [
+    "kryptex-tls"
+  ],
+  "donation": false
+}

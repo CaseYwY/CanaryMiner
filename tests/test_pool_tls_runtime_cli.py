@@ -56,6 +56,23 @@ def main():
         case('explicit strict CLI', config={**base, 'pools': ['pool-fixture.invalid:1']}, args=['--pool', strict['tls_url'], '--pearl-network', 'mainnet', '--pearl-target-semantics', 'base-before-penalty'], admitted=True)
         case('explicit strict no donation CLI precedence', config={**base, 'donation': True}, args=['--no-donation'], admitted=True)
         case('strict refuses donation', config={**base, 'donation': True})
+        # Exact preset expansion is shared by config and CLI; these stubs never connect to the published peer.
+        secure_preset = {**base, 'pools': ['kryptex-tls']}
+        secure_url = 'stratum+ssl://prl-us.kryptex.network:8048'
+        plain_url = 'stratum+tcp://prl-us.kryptex.network:7048'
+        case('strict preset config', config=secure_preset, admitted=True)
+        case('strict preset CLI with explicit donation opt out', config={**base, 'donation': True},
+             args=['--pool', 'kryptex-tls', '--no-donation'], admitted=True)
+        case('strict preset never disables donation implicitly', config={**secure_preset, 'donation': True})
+        case('strict preset cannot activate unused slot', config={**base, 'pools': ['kryptex', 'kryptex-tls']})
+        secure_saved = dict(schema_version=1, donation=empty,
+                            user_pools=[dict(mode='prefer_tls', tls_url=secure_url, plaintext_url=plain_url, plaintext_consent=True)])
+        case('strict preset ignores saved fallback consent', config=secure_preset, prefs=secure_saved, admitted=True)
+        secure_worker = ['--worker-child', '--worker-id', '0', '--worker-pool-tls', secure_url, '--no-donation']
+        case('strict preset worker retains frozen TLS', config=secure_preset, args=secure_worker, admitted=True)
+        case('strict preset worker rejects inherited fallback', config=secure_preset,
+             args=secure_worker + ['--worker-pool-fallback', plain_url])
+        case('legacy preset retains TCP compatibility', config={**base, 'pools': ['kryptex']}, code=97)
         case('f2pool account only', config={**base, 'wallet': '', 'pools': [dict(url='stratum+ssl://pearl.f2pool.com:5501', account='synthetic_account')]}, admitted=True)
         prefs = dict(schema_version=1, user_pools=[strict], donation=empty)
         tcp = {**base, 'pools': ['pool-fixture.invalid:1']}

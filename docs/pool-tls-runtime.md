@@ -8,7 +8,7 @@ This module connects the ordinary first-user-pool path to the retained TLS helpe
 
 ## Entry and scope
 
-Use an explicit `--pool stratum+ssl://DNS:PORT` or the same URL in config-v1. The port must come from the chosen pool's documentation. No secure preset or port is guessed. The existing network and target-semantics requirements still apply to a custom pool. Disable donation explicitly with `--no-donation` or `"donation": false`.
+Use an explicit `--pool stratum+ssl://DNS:PORT` or the same URL in config-v1. The port must come from the chosen pool's documentation. [P-12k](pool-tls-presets.md) also provides the explicit `kryptex-tls` preset for the documented US Kryptex endpoint. Other secure ports or regions are not inferred. The existing network and target-semantics requirements still apply to a custom pool. Disable donation explicitly with `--no-donation` or `"donation": false`.
 
 Alternatively, save **strict TLS** for the first slot in Settings → Pools and TLS. Its DNS host must match the configured first pool; the saved declaration supplies the TLS port. If both command/config and saved settings specify strict TLS, their endpoints must agree. A saved declaration cannot redirect credentials to another host. TLS URLs use ASCII DNS names, including explicitly supplied punycode. IP literals, userinfo, paths and malformed names are refused.
 

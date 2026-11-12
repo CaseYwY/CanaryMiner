@@ -131,6 +131,30 @@ int main(){
     CHECK(std::find(preferArgs.begin(),preferArgs.end(),"stratum+tcp://old.invalid:1")==preferArgs.end());
     CHECK(effectiveConfigText(config,"fixture").find("stratum+ssl://pool-fixture.invalid:443")!=std::string::npos);
 
+    // The secure preset is explicit strict TLS, including saved Prefer-TLS and worker restart boundaries.
+    {
+        ProductConfig secure;secure.donation=false;secure.pools.resize(1);
+        CHECK(parsePoolSpec("kryptex-tls",&secure.pools[0],&error));
+        PoolSecurityPreferences preferPreset;
+        preferPreset.users[0]={PoolSecurityMode::PreferTls,"stratum+ssl://prl-us.kryptex.network:8048",
+                              "stratum+tcp://prl-us.kryptex.network:7048",true};
+        PoolTlsRuntimePolicy presetPolicy;
+        CHECK(resolvePoolTlsRuntimePolicy(secure,preferPreset,true,true,&presetPolicy,&error));
+        CHECK(presetPolicy.frozenUrl==preferPreset.users[0].tlsUrl&&presetPolicy.fallbackUrl.empty());
+        CHECK(!resolvePoolTlsRuntimePolicy(secure,preferPreset,true,false,&presetPolicy,&error));
+        auto differentPort=preferPreset;differentPort.users[0].tlsUrl="stratum+ssl://prl-us.kryptex.network:444";
+        CHECK(!resolvePoolTlsRuntimePolicy(secure,differentPort,true,true,&presetPolicy,&error));
+        auto second=secure;second.pools.insert(second.pools.begin(),PoolEntry{});
+        CHECK(!resolvePoolTlsRuntimePolicy(second,PoolSecurityPreferences{},true,true,&presetPolicy,&error));
+        CHECK(!applyFrozenPoolTlsEndpoint(presetPolicy.frozenUrl,&secure,preferPreset.users[0].plaintextUrl));
+        CHECK(applyFrozenPoolTlsEndpoint(presetPolicy.frozenUrl,&secure));
+        CHECK(secure.pools[0].preset=="kryptex"&&secure.pools[0].tls&&poolPresetSpeaksV2(secure.pools[0].preset));
+        const auto presetArgs=workerArgs({"--pool","kryptex-tls"},seed,9000,7,presetPolicy.frozenUrl,presetPolicy.fallbackUrl);
+        CHECK(std::find(presetArgs.begin(),presetArgs.end(),presetPolicy.frozenUrl)!=presetArgs.end());
+        CHECK(std::count(presetArgs.begin(),presetArgs.end(),"--no-donation")==1&&
+              std::find(presetArgs.begin(),presetArgs.end(),"--worker-pool-fallback")==presetArgs.end());
+    }
+
     // The early refusal must precede every scheduler clock, storage or run callback, even if miscalled internally.
     unsigned logs=0;FeeLoopDeps deps;deps.log=[&](const std::string &text){++logs;CHECK(text.find("refused")!=text.npos);};
     FeeSession fee(FeePolicy{},nullptr,FeeStateFile("unused-fixture-directory"),"synthetic-destination",deps);

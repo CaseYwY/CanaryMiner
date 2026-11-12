@@ -41,10 +41,17 @@ int main() {
     CHECK(parseArgs({"settings", "--help"}).help);
     CHECK(contains(productHelpText(), "canary-miner settings"));
 
-    // ---- pool forms: preset, HOST:PORT, stratum+tcp://, known hosts map to their preset, TLS refused
+    // ---- pool forms: legacy/strict presets, explicit endpoints, and canonical protocol identity
     {
         PoolEntry e;
         std::string err;
+        CHECK(parsePoolSpec("kryptex-tls", &e, &err) && e.tls && e.host == "prl-us.kryptex.network" && e.port == 8048 &&
+              e.preset == "kryptex" && e.policyKnown && e.network == "mainnet" && e.targetSemantics == "base-before-penalty" &&
+              e.compression == "auto" && poolPresetSpeaksV2(e.preset));
+        CHECK(parsePoolSpec("kryptex", &e, &err) && !e.tls && e.port == 7048 && e.preset == "kryptex");
+        CHECK(parsePoolSpec("stratum+tcp://prl-us.kryptex.network:8048", &e, &err) && !e.tls && e.port == 8048);
+        CHECK(parsePoolSpec("stratum+ssl://prl-us.kryptex.network:7048", &e, &err) && e.tls && e.port == 7048);
+        CHECK(!parsePoolSpec("KRYPTEX-TLS", &e, &err));
         CHECK(parsePoolSpec("stratum+tcp://pearl.f2pool.com:5500", &e, &err) && e.preset == "f2pool" && e.host == "pearl.f2pool.com" &&
               e.port == 5500 && e.policyKnown);
         CHECK(parsePoolSpec("prl-us.kryptex.network:7048", &e, &err) && e.preset == "kryptex" && e.policyKnown);
@@ -171,7 +178,7 @@ int main() {
             pool.port = 7;
             CHECK(!parsePoolSpec("stratum+tcp://fixture-user:" + payload + "@fixture.invalid:3333", &pool, &err) &&
                   pool.host == "fixture-kept.invalid" && pool.port == 7 &&
-                  err == "pool is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted");
+                  err == "pool is neither a preset (kryptex, kryptex-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted");
         }
     }
 
@@ -182,6 +189,8 @@ int main() {
         CHECK(parseConfig("{\"schema_version\":1,\"wallet\":\"prl1file\",\"worker\":\"fileworker\",\"pools\":[\"herominers\"]}", &base, &e));
         CliParse o = parseArgs({"--worker", "clirig"});
         CHECK(applyOverrides(o.ov, &base, &e) && base.wallet == "prl1file" && base.worker == "clirig" && base.pools[0].preset == "herominers");
+        CHECK(layered({"--pool", "kryptex-tls"}, &base, &e) && base.pools[0].tls && base.donation);
+        CHECK(layered({"--pool", "kryptex-tls", "--no-donation"}, &base, &e) && base.pools[0].tls && !base.donation);
     }
 
     // ---- help: the grouped text, and it names neither the donation account nor the donation address
@@ -191,7 +200,8 @@ int main() {
         const std::string help = productHelpText();
         for (const char *word : {"Pool", "Devices", "API", "Donation", "Other", "--pool", "--wallet", "--api-enable", "--gpu-id",
                                  "--no-donation", "--gpu-cclock", "--gpu-mclock", "--gpu-coffset", "--gpu-moffset", "--gpu-plimit", "--gpu-fan",
-                                 "--oc-delay", "--oc-reset-only", "tuning.gpu_cclock", "Windows:", "Linux:", "mined on F2Pool to the developer"})
+                                 "--oc-delay", "--oc-reset-only", "tuning.gpu_cclock", "Windows:", "Linux:", "mined on F2Pool to the developer",
+                                 "kryptex-tls", "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
             CHECK_MSG(word, contains(help, word));
         // Amendment 2: the rendered help must not show the donation account or payout address (values come from fee.h)
         CHECK_MSG("help hides donation account", !contains(help, CANARY_FEE_POOL_ACCOUNT));
