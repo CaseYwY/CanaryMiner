@@ -51,6 +51,10 @@ Close one bounded contribution before expanding the next. During development use
 
 The current priority is ordinary pool TLS. [P-12h](../pool-tls-runtime.md) integrates strict first-user-pool SSL URL/configuration admission, frozen worker endpoints, retained helper ownership with fresh TLS reconnects, signal cancellation and no ambiguous-submit replay. The local build option is `CANARY_ENABLE_POOL_TLS_RUNTIME`; donation must be explicitly disabled. Prefer-TLS fallback and donation TLS stay refused. The declared software path passed the recorded Windows and Linux checks, including clean Windows builds and review regressions; this is not complete P-12 or normal-trust/public-pool/production/release acceptance. Exact tests, the corrected refusal-test assertion and review fixes are recorded in the module document.
 
+## P-12i local TLS installation layout
+
+[P-12i](../pool-tls-runtime-install.md) adds the fixed TLS helper to enabled local CMake installs and validates the host-only installed sibling layout on Windows and Linux. Its inert fixture component requires explicit selection and cannot become a default test-profile install. Review added that exclusion and an isolated OFF/ON control for the unchanged release rejection. This closes the local installation rule and host layout check, not production CUDA installation or release qualification; P-12 remains PARTIAL.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

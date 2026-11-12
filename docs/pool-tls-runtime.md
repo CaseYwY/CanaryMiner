@@ -2,7 +2,7 @@
 
 P-12h; M-TLS; R-TLS-001/003/004; T-TLS/T-CONFIG/T-INTENT.
 
-This module connects the ordinary first-user-pool path to the retained TLS helper. It is available in a local build configured with `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON`. The option defaults off. Windows uses Schannel and system trust; Linux requires OpenSSL 3.5 or newer development libraries. Configuration downloads nothing. The miner and its fixed `canary_pool_tls_stream_worker` sibling must come from the same build, alongside the existing preference helper.
+This module connects the ordinary first-user-pool path to the retained TLS helper. It is available in a local build configured with `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON`. The option defaults off. Windows uses Schannel and system trust; Linux requires OpenSSL 3.5 or newer development libraries. Configuration downloads nothing. The miner and its fixed `canary_pool_tls_stream_worker` sibling must come from the same build, alongside the existing preference helper. [P-12i local installation](pool-tls-runtime-install.md) installs that sibling for enabled builds and verifies the host-only layout.
 
 ## Entry and scope
 

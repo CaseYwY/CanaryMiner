@@ -2589,4 +2589,14 @@ if(CANARY_ENABLE_POOL_TLS_RUNTIME)
       canary_enable_pool_tls_runtime(${target})
     endif()
   endforeach()
+  # A host-only installation fixture, never a production miner or release archive.
+  install(TARGETS test_pearl_cuda_cli_host canary_preferences_worker canary_pool_tls_stream_worker
+          RUNTIME DESTINATION bin COMPONENT pool-tls-runtime-host EXCLUDE_FROM_ALL)
+  add_test(NAME pool_tls_runtime_install
+           COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_pool_tls_runtime_install.py
+                   --build ${CMAKE_BINARY_DIR} --cmake ${CMAKE_COMMAND} --config "$<CONFIG>"
+                   --cli $<TARGET_FILE:test_pearl_cuda_cli_host>
+                   --preferences $<TARGET_FILE:canary_preferences_worker>
+                   --tls-helper $<TARGET_FILE:canary_pool_tls_stream_worker>)
+  set_tests_properties(pool_tls_runtime_install PROPERTIES TIMEOUT 60)
 endif()

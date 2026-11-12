@@ -121,6 +121,11 @@ if(WIN32)
 endif()
 
 install(TARGETS canaryminer canary_preferences_worker RUNTIME DESTINATION bin)
+if(CANARY_ENABLE_POOL_TLS_RUNTIME)
+  # Local developer installs must preserve the fixed sibling required by the runtime.
+  # The separate release builders continue to reject this unqualified capability.
+  install(TARGETS canary_pool_tls_stream_worker RUNTIME DESTINATION bin)
+endif()
 if(CANARY_ENABLE_ENERGY_RUNTIME)
   install(TARGETS canary_energy_authorization_worker canary_energy_collector_worker RUNTIME DESTINATION bin)
 endif()
