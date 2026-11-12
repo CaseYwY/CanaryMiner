@@ -2,10 +2,12 @@
 #pragma once
 #include "duplex_task_process.h"
 #include "pool_tls_rpc.h"
+#include <csignal>
 namespace om {
 class PoolTlsProcessTransport final:public PearlPoolTransport {
    public:
-    PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest,const std::atomic<bool> &cancel);
+    PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest,const std::atomic<bool> &cancel,
+                            const volatile sig_atomic_t *stop=nullptr);
     ~PoolTlsProcessTransport()override;
     PearlPoolConnectStatus open(const std::string &,int)override;
     bool isOpen()const override;

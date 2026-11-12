@@ -8,13 +8,13 @@ using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using I=PearlPoolInt
 uint64_t nowMs(){return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());}
 }
 struct PoolTlsProcessTransport::Impl {
-    std::filesystem::path helper;PoolTlsCheckRequest config;const std::atomic<bool> &cancel;DuplexTaskProcess process;
+    std::filesystem::path helper;PoolTlsCheckRequest config;const std::atomic<bool> &cancel;const volatile sig_atomic_t *stop;DuplexTaskProcess process;
     PoolTlsRpcGate gate;PoolTlsRpcFramer frames;std::optional<PoolTlsRpcReply> result;O resultOperation=O::Abort;
     bool attempted=false,connected=false,terminal=false,nativeBuffered=false;uint64_t sequence=0,last=0;E failure=E::None;S state=S::Dormant;
     std::string input,writeCopy;const char *writePointer=nullptr;std::size_t writeLength=0;
-    Impl(std::filesystem::path path,PoolTlsCheckRequest r,const std::atomic<bool> &c):helper(std::move(path)),config(std::move(r)),cancel(c){}
+    Impl(std::filesystem::path path,PoolTlsCheckRequest r,const std::atomic<bool> &c,const volatile sig_atomic_t *s):helper(std::move(path)),config(std::move(r)),cancel(c),stop(s){}
     void fail(E error){if(!terminal){failure=error;terminal=true;connected=false;state=S::Failed;gate.stop();process.requestStop();}}
-    bool check(){if(terminal)return false;if(cancel.load()){fail(E::Cancelled);return false;}const auto now=nowMs();
+    bool check(){if(terminal)return false;if(cancel.load()||(stop&&*stop)){fail(E::Cancelled);return false;}const auto now=nowMs();
         if(!now||now<last){fail(E::Clock);return false;}last=now;if(gate.pending()&&now>=gate.pending()->deadlineMonoMs){fail(E::Timeout);return false;}return true;}
     bool issue(O operation,std::string payload={},std::size_t maximum=0,I interest=I::None,unsigned wait=0,uint64_t deadline=0,uint64_t issued=0){
         if(!check()||gate.pending()||result||sequence==UINT64_MAX)return false;
@@ -46,7 +46,7 @@ struct PoolTlsProcessTransport::Impl {
         return false;
     }
 };
-PoolTlsProcessTransport::PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest r,const std::atomic<bool> &cancel):impl_(new Impl(std::move(helper),std::move(r),cancel)){}
+PoolTlsProcessTransport::PoolTlsProcessTransport(std::filesystem::path helper,PoolTlsCheckRequest r,const std::atomic<bool> &cancel,const volatile sig_atomic_t *stop):impl_(new Impl(std::move(helper),std::move(r),cancel,stop)){}
 PoolTlsProcessTransport::~PoolTlsProcessTransport(){close();}
 PearlPoolConnectStatus PoolTlsProcessTransport::open(const std::string &host,int port){auto &p=*impl_;if(p.attempted||p.terminal)return PearlPoolConnectStatus::ConnectFailure;p.attempted=true;
     if(!p.check()||!p.config.enabled||host!=p.config.host||port<1||static_cast<unsigned>(port)!=p.config.port||!validPoolTlsCheckRequest(p.config)){p.fail(E::InvalidPolicy);return PearlPoolConnectStatus::ConnectFailure;}
@@ -57,7 +57,7 @@ PearlPoolConnectStatus PoolTlsProcessTransport::open(const std::string &host,int
     if(!p.result||p.result->state!=S::VerifiedOpen){p.fail(E::Protocol);return PearlPoolConnectStatus::ConnectFailure;}
     p.result.reset();p.connected=true;return PearlPoolConnectStatus::Connected;
 }
-bool PoolTlsProcessTransport::isOpen()const{const auto &p=*impl_;return p.connected&&!p.terminal&&!p.cancel.load();} // pending reauthentication still owns the connected socket
+bool PoolTlsProcessTransport::isOpen()const{const auto &p=*impl_;return p.connected&&!p.terminal&&!p.cancel.load()&&!(p.stop&&*p.stop);} // pending reauthentication still owns the connected socket
 void PoolTlsProcessTransport::close(){auto &p=*impl_;p.attempted=true;if(!p.terminal){p.terminal=true;p.connected=false;p.state=S::Closed;p.gate.stop();p.process.requestStop();}p.process.terminate();}
 bool PoolTlsProcessTransport::bufferedRead()const{const auto &p=*impl_;return isOpen()&&(p.nativeBuffered||!p.input.empty()||
     (p.result&&p.resultOperation==O::Read&&p.result->transfer.status==T::Bytes));} // an outstanding IPC poll is not buffered TLS/application work

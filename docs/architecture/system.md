@@ -1,5 +1,8 @@
 # System and module boundaries
 
+[P-12h](../pool-tls-runtime.md) places a reconnecting strict TLS owner before the canonical source in ordinary run construction. Each connection uses a fresh fixed sibling, retains the parent native epoch and signal stop, and settles the previous helper before replacement. CLI/config admission and the frozen worker endpoint cannot authorize TCP fallback or a donation peer.
+
+
 ## Architecture direction
 
 Keep the portable policy/data layer host-side in the existing C++ product structure. Do not turn the renderer into a controller, copy a personal Python wrapper into production, change kernel mathematics, or require a GUI/browser runtime. Dependency/backend choices not yet reviewed are explicitly open in [decisions.md](decisions.md).

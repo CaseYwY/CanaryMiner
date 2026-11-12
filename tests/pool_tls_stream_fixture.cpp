@@ -32,4 +32,9 @@ struct Connection final:PoolTlsConnection {
 }
 int main(int argc,char **argv){return om::runPoolTlsStreamService(argc,argv,[](const om::PoolTlsCheckRequest &r,const std::atomic<bool> &){
     if(r.host=="stall-open.test")std::this_thread::sleep_for(std::chrono::seconds(30));
+    if(r.host=="verify-fail.test"){
+        om::PoolTlsOpenResult refused;
+        refused.reply={om::PoolTlsCheckStatus::Tls,om::PoolTlsCheckStage::Handshake,om::PearlTlsError::Verification};
+        return refused;
+    }
     om::PoolTlsOpenResult result;result.reply={om::PoolTlsCheckStatus::Verified,om::PoolTlsCheckStage::Complete,om::PearlTlsError::None};result.connection=std::make_unique<Connection>(r.host);return result;});}

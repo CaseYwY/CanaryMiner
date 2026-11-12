@@ -52,7 +52,7 @@ def main():
             ('language', ['--language', marker], 2, b'--language requires one supported exact locale ID; rejected value not applied.\n'),
             ('wallet-shape', ['--wallet', '.fixture'], 3, b'--wallet must be ADDRESS or ADDRESS.WORKER (one dot)\n'),
             ('api-conflict', ['--api-enable', '--api-port', '0'], 3, b'--api-enable conflicts with --api-port 0\n'),
-            ('strict-tls', ['--pool', 'stratum+ssl://fixture.invalid:443'], 3, b'stratum+ssl:// is strict TLS; this build has no qualified ordinary pool TLS runtime. No TCP fallback was attempted.\n')):
+            ('strict-tls-ip', ['--pool', 'stratum+ssl://127.0.0.1:443'], 3, b'strict pool TLS requires an explicit ASCII DNS host and port; private original omitted; no TCP fallback\n')):
             rejected(name, args, code, expected)
         for args in (['version'], ['--help']):
             result = invoke(args)

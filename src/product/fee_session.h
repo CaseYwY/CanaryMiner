@@ -157,6 +157,10 @@ class FeeSession {
     /** The scheduler asked for a window and the user run has returned kRunFeeWindow. Runs the whole window. Returns the fee run's
      *  stop code 0 or terminal kRunPauseFault; otherwise the user run is meant to resume. */
     int runFeeWindow(const RunOptions &userOpt) {
+        if(userOpt.poolTls){
+            deps_.log("donation window refused: strict user-pool TLS does not authorize a donation transport");
+            return kRunPauseFault;
+        }
         const uint64_t t0 = deps_.nowMs();
         std::unique_lock<std::recursive_mutex> lock(mu_);
         // Setup, connect and prepare are not productive: stop the clock, keep the window open.

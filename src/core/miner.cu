@@ -38,6 +38,7 @@
 #include "../product/settings_command.h"
 #include "../product/prerun_preferences.h"
 #include "../product/startup_config.h"
+#include "../product/pool_tls_runtime_policy.h"
 #include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
@@ -195,6 +196,8 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
+    bool workerPoolTlsSeen=false;
+    std::string workerPoolTlsUrl;
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
     bool workerControlSeen=false;
     WorkerChannelHandles workerChannel;
@@ -356,6 +359,11 @@ int main(int argc, char **argv) {
 #endif
         }
         else if (a == "--worker-child") workerChild = true;
+        else if (a == "--worker-pool-tls") {
+            if(workerPoolTlsSeen){fprintf(stderr,"duplicate private worker TLS policy\n");return kExitUsage;}
+            workerPoolTlsSeen=true;workerPoolTlsUrl=next();
+            if(workerPoolTlsUrl.empty()){fprintf(stderr,"invalid private worker TLS policy\n");return kExitUsage;}
+        }
         else if (a == "--worker-id") workerIdText = next();
         else if (a == "--interval") {
             intervalCount++;
@@ -488,14 +496,32 @@ int main(int argc, char **argv) {
             return kExitConfig;
         }
     }
-    // Secure intent is not an optional game/economics feature: pooled parent research/evidence
-    // modes must not bypass it and silently construct the legacy plaintext source either.
-    if(poolPreferenceGuard){
-        if(poolSecurityRequested(poolDefaults)){
-            fprintf(stderr,"configured pool TLS requires qualified ordinary transport/trust binding, unavailable in this build; review Pools and TLS declarations before an ordinary start; no TCP downgrade or mining was started\n");return kExitConfig;
-        }
+    if(workerPoolTlsSeen&&(!workerChild||!applyFrozenPoolTlsEndpoint(workerPoolTlsUrl,&cfg))){
+        fprintf(stderr,"private worker TLS policy does not match its frozen user peer and disabled donation; no mining was started\n");return kExitConfig;
     }
-    if(ordinaryRuntime&&!cli.help)fprintf(stderr,"Legacy TCP compatibility is unencrypted; no automatic TLS migration or downgrade is performed.\n");
+    if(workerChild&&!workerPoolTlsSeen&&!cfg.pools.empty()&&cfg.pools[0].tls){
+        fprintf(stderr,"strict TLS worker requires its parent's frozen peer policy; no mining was started\n");return kExitConfig;
+    }
+    const bool ordinaryTlsMode=cli.command==Command::Run&&!opt.bench&&!opt.formalBenchmark.enabled&&!opt.autotune&&
+        !opt.pearlProduction&&!opt.pearlAcceptedQuota&&!opt.pearlSustainedSeconds&&
+        !opt.pearlSoloAuthorization&&!opt.pearlWorkRange.enabled&&opt.pearlTranscript.empty()&&
+        !pearlPrivateEnabled(opt.pearlPrivateExecution)&&!pearlPublicEnabled(opt.pearlPublicExecution)&&
+        !opt.memOc&&!opt.memOffsetMhz&&!cfg.tuning.requested()
+#ifdef CANARY_PEARL_GUARD_RETIREMENT_EXPERIMENT
+        &&guardControlText.empty()
+#endif
+        ;
+    PoolTlsRuntimePolicy poolTlsPolicy;
+    if(cli.command==Command::Run&&!cli.help){
+        std::string error;
+        if(!resolvePoolTlsRuntimePolicy(cfg,poolDefaults,ordinaryTlsMode,poolTlsRuntimeAvailable(),&poolTlsPolicy,&error)){
+            fprintf(stderr,"%s\n",error.c_str());return kExitConfig;
+        }
+        if(poolTlsPolicy.tls){
+            cfg.pools[0].host=poolTlsPolicy.host;cfg.pools[0].port=static_cast<int>(poolTlsPolicy.port);cfg.pools[0].tls=true;
+            if(!workerChild)fprintf(stderr,"Strict user-pool TLS: system trust and DNS verification; no plaintext fallback; donation is off.\n");
+        }else if(ordinaryRuntime)fprintf(stderr,"Legacy TCP compatibility is unencrypted; no automatic TLS migration or downgrade is performed.\n");
+    }
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
         fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
         return kExitUsage;
@@ -553,6 +579,7 @@ int main(int argc, char **argv) {
         if (!cfg.pools.empty()) {
             opt.poolHost = cfg.pools[0].host;
             opt.poolPort = cfg.pools[0].port;
+            opt.poolTls = cfg.pools[0].tls;
             opt.poolProofCompression = cfg.pools[0].compression == "auto" && poolPresetSpeaksV2(cfg.pools[0].preset);
             opt.poolAccount = cfg.pools[0].account;
             // explicit policy flags (research/harness) win over the pool entry's own
@@ -877,6 +904,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "invalid or non-isolated Pearl experiment; refusing before device/source setup\n");
         return 1;
     }
+    // Environment-selected evidence modes are resolved after product preferences. Recheck before any device/source setup.
+    if(opt.poolTls&&(opt.pearlProduction||opt.pearlAcceptedQuota||opt.pearlSustainedSeconds||
+        pearlPrivateEnabled(opt.pearlPrivateExecution)||pearlPublicEnabled(opt.pearlPublicExecution)||
+        opt.pearlShapeExperiment!=PearlShapeExperiment::Disabled||!workWaitEnvironmentCompatible(1))){
+        fprintf(stderr,"strict pool TLS is supported only for ordinary user-pool mining; research environment refused before device setup\n");return kExitConfig;
+    }
     const char *admission = pearlRuntimeAdmissionProblem(
         opt, algoName.c_str(), PearlRuntimeCapability::CanonicalCudaPoolV1,
         getenv("CANARY_PEARL_BENCH_ALL_HIT") != nullptr,
@@ -1020,6 +1053,7 @@ int main(int argc, char **argv) {
 #endif
         so.noEnergy = cli.ov.noEnergy;
         so.resolvedWorkWait = opt.workWaitMs;
+        so.resolvedPoolTlsUrl = poolTlsPolicy.frozenUrl;
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;
         for (const DeviceIdentity &d : chosenAll) tuningDevices.push_back({d.index, d.uuid});
