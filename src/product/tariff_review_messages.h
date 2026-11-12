@@ -8,21 +8,21 @@ struct TariffReviewLocalePack {std::string_view id;bool rtl;ReviewStatus review;
 inline const std::array<TariffReviewLocalePack,16> &tariffReviewLocalePacks(){
     static const std::array<TariffReviewLocalePack,16> packs={{
         {"en",false,ReviewStatus::Source,{{"{path}: {before} -> {after}",": {before} -> {after}","{path} rows: {before} -> {after}"," rows: {before} -> {after}"}}},
-        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"{path}：{before} -> {after}",u8"：{before} -> {after}",u8"{path} 行数：{before} -> {after}",u8" 行数：{before} -> {after}"}}},
-        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"{path}：{before} -> {after}",u8"：{before} -> {after}",u8"{path} 列數：{before} -> {after}",u8" 列數：{before} -> {after}"}}},
+        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"{path}\uff1a{before} -> {after}",u8"\uff1a{before} -> {after}",u8"{path} \u884c\u6570\uff1a{before} -> {after}",u8" \u884c\u6570\uff1a{before} -> {after}"}}},
+        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"{path}\uff1a{before} -> {after}",u8"\uff1a{before} -> {after}",u8"{path} \u5217\u6578\uff1a{before} -> {after}",u8" \u5217\u6578\uff1a{before} -> {after}"}}},
         {"es",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}","{path} filas: {before} -> {after}"," filas: {before} -> {after}"}}},
         {"pt-BR",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}","{path} linhas: {before} -> {after}"," linhas: {before} -> {after}"}}},
         {"fr",false,ReviewStatus::MachineAssisted,{{"{path} : {before} -> {after}",": {before} -> {after}","{path} lignes : {before} -> {after}"," lignes : {before} -> {after}"}}},
         {"de",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}","{path} Zeilen: {before} -> {after}"," Zeilen: {before} -> {after}"}}},
-        {"ru",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} строки: {before} -> {after}",u8" строки: {before} -> {after}"}}},
-        {"ja",false,ReviewStatus::MachineAssisted,{{u8"{path}：{before} -> {after}",u8"：{before} -> {after}",u8"{path} 行数：{before} -> {after}",u8" 行数：{before} -> {after}"}}},
-        {"ko",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} 행 수: {before} -> {after}",u8" 행 수: {before} -> {after}"}}},
-        {"ar",true,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} صفوف: {before} -> {after}",u8" صفوف: {before} -> {after}"}}},
-        {"hi",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} पंक्तियाँ: {before} -> {after}",u8" पंक्तियाँ: {before} -> {after}"}}},
-        {"bn",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} সারি: {before} -> {after}",u8" সারি: {before} -> {after}"}}},
+        {"ru",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} \u0441\u0442\u0440\u043e\u043a\u0438: {before} -> {after}",u8" \u0441\u0442\u0440\u043e\u043a\u0438: {before} -> {after}"}}},
+        {"ja",false,ReviewStatus::MachineAssisted,{{u8"{path}\uff1a{before} -> {after}",u8"\uff1a{before} -> {after}",u8"{path} \u884c\u6570\uff1a{before} -> {after}",u8" \u884c\u6570\uff1a{before} -> {after}"}}},
+        {"ko",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} \ud589 \uc218: {before} -> {after}",u8" \ud589 \uc218: {before} -> {after}"}}},
+        {"ar",true,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} \u0635\u0641\u0648\u0641: {before} -> {after}",u8" \u0635\u0641\u0648\u0641: {before} -> {after}"}}},
+        {"hi",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} \u092a\u0902\u0915\u094d\u0924\u093f\u092f\u093e\u0901: {before} -> {after}",u8" \u092a\u0902\u0915\u094d\u0924\u093f\u092f\u093e\u0901: {before} -> {after}"}}},
+        {"bn",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} \u09b8\u09be\u09b0\u09bf: {before} -> {after}",u8" \u09b8\u09be\u09b0\u09bf: {before} -> {after}"}}},
         {"id",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}","{path} baris: {before} -> {after}"," baris: {before} -> {after}"}}},
-        {"tr",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} satır: {before} -> {after}",u8" satır: {before} -> {after}"}}},
-        {"vi",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} dòng: {before} -> {after}",u8" dòng: {before} -> {after}"}}}
+        {"tr",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} sat\u0131r: {before} -> {after}",u8" sat\u0131r: {before} -> {after}"}}},
+        {"vi",false,ReviewStatus::MachineAssisted,{{"{path}: {before} -> {after}",": {before} -> {after}",u8"{path} d\u00f2ng: {before} -> {after}",u8" d\u00f2ng: {before} -> {after}"}}}
     }};return packs;
 }
 inline std::string_view tariffReviewMessageKeyName(TariffReviewMessageKey key){
