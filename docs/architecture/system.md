@@ -1,5 +1,8 @@
 # System and module boundaries
 
+[P-12h](../pool-tls-runtime.md) places a reconnecting strict TLS owner before the canonical source in ordinary run construction. Each connection uses a fresh fixed sibling, retains the parent native epoch and signal stop, and settles the previous helper before replacement. [P-12j](../pool-tls-fallback.md) freezes separately consented same-host fallback with the worker TLS endpoint. A clean failed helper reply supplies native phase evidence; one absolute deadline covers both connection modes. Explicit SSL never downgrades and donation remains disabled for this path.
+
+
 ## Architecture direction
 
 Keep the portable policy/data layer host-side in the existing C++ product structure. Do not turn the renderer into a controller, copy a personal Python wrapper into production, change kernel mathematics, or require a GUI/browser runtime. Dependency/backend choices not yet reviewed are explicitly open in [decisions.md](decisions.md).

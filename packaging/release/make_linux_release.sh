@@ -54,7 +54,7 @@ tar -xf "$source_tar" -C "$work/src"
 
 (
   cd "$work/src"
-  cmake --preset production-sm120 -DCMAKE_CUDA_COMPILER="$nvcc" -DCANARY_ENABLE_ENERGY_RUNTIME=OFF -DCANARY_ENABLE_WORKER_CONTROL_RUNTIME=OFF >"$work/configure.log" 2>&1
+  cmake --preset production-sm120 -DCMAKE_CUDA_COMPILER="$nvcc" -DCANARY_ENABLE_ENERGY_RUNTIME=OFF -DCANARY_ENABLE_WORKER_CONTROL_RUNTIME=OFF -DCANARY_ENABLE_POOL_TLS_RUNTIME=OFF >"$work/configure.log" 2>&1
   cmake --build --preset production-sm120 --parallel "$(nproc)" >"$work/build.log" 2>&1
 )
 native="$work/src/build/production-sm120/canary-miner"

@@ -8,6 +8,8 @@
 
 **Delivery rule:** finish normal entry-point integration and the declared tests for one usable module, then make its focused completion commit before starting another. See the [module delivery rule](execution-plan.md#module-delivery-rule-current-user-instruction) and [owner input/action checklist](owner-actions.zh-CN.md). Neither a helper commit nor fixture success is whole-module activation.
 
+**Current module:** [P-12k strict TLS preset](../pool-tls-presets.md) adds `kryptex-tls` and a separate configuration example for explicitly enabled local builds with donation off. It retains the Kryptex protocol identity and never grants plaintext fallback. [P-12h](../pool-tls-runtime.md), [P-12i](../pool-tls-runtime-install.md) and [P-12j](../pool-tls-fallback.md) provide strict connections, local installation and separately consented fallback. Broader preset migration, donation TLS, real pool/GPU and release acceptance remain open; P-12 stays PARTIAL.
+
 **Display batch:** `a2549c3` adds Details/Log controls and the synthetic-input financial presentation contract. See [display validation](../display-validation.md); live financial providers are still absent.
 
 **History batch:** P-04 adds local observed accepted counters with optional system SQLite, rolling windows, coverage/recovery and `--no-history`. See [history semantics](../accepted-history.md) and [validation](../history-validation.md). It is not a complete pool-acknowledgement or token-income ledger.
@@ -83,7 +85,7 @@ The native dashboard also reports durable accepted-share history, market informa
 | Monetary bill continuation and today's forecast | Exact synthetic receipt/recovery/review/compute and calendar-forecast/query owners implemented; ordinary source/configuration/accrued-bill binding and real-source qualification remain open |
 | Automatic profitability selection | Exact synthetic study/schedule/result/choice/budget/command chain and opt-in native CPU-worker integration implemented; ordinary reviewed controls, qualified measurement/safety/source bindings and physical qualification remain open |
 | Tested game pause/coexist policies | CPU-tested episode/profit guard, native detector, cooperative pause and optional lifetime supervisor bridge; ordinary activation and real experience/economic qualification remain open |
-| Stratum TLS | Default-off native OpenSSL/Schannel step/duplex/inspection and independent URL/mode/consent settings implemented; ordinary trust/fallback/donation routing, packaging and live qualification remain open |
+| Stratum TLS | [First-user-pool runtime](../pool-tls-runtime.md), [helper installation](../pool-tls-runtime-install.md) and [consent-bound Prefer-TLS fallback](../pool-tls-fallback.md) in opt-in local builds with donation off; strict SSL never downgrades. Secure presets, donation TLS, public normal-trust/pool/GPU and release acceptance remain open |
 | First internationalization language packs | Sixteen declared packs with honest source/draft review status, separately tested typed Unicode/formatting primitives and multiple English-only native source domains; complete domain extraction, effective native translation and human/terminal qualification remain open |
 
 No personal prototype, local GPU curve, wallet observation or machine-specific deployment is evidence that a fork feature is implemented or universally safe. Disabled groups must stay explicitly unavailable until their backend and tests exist.

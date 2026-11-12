@@ -8,14 +8,14 @@ struct TariffErrorLocalePack {std::string_view id;bool rtl;ReviewStatus review;s
 inline const std::array<TariffErrorLocalePack,16> &tariffErrorLocalePacks(){
     static const std::array<TariffErrorLocalePack,16> packs={{
         {"en",false,ReviewStatus::Source,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
-        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"{path}：{reason}",u8"：{reason}",u8"{path}：{reason}",u8"：{reason}","{reason}"}}},
-        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"{path}：{reason}",u8"：{reason}",u8"{path}：{reason}",u8"：{reason}","{reason}"}}},
+        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"{path}\uff1a{reason}",u8"\uff1a{reason}",u8"{path}\uff1a{reason}",u8"\uff1a{reason}","{reason}"}}},
+        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"{path}\uff1a{reason}",u8"\uff1a{reason}",u8"{path}\uff1a{reason}",u8"\uff1a{reason}","{reason}"}}},
         {"es",false,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
         {"pt-BR",false,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
         {"fr",false,ReviewStatus::MachineAssisted,{{"{path} : {reason}",": {reason}","{path} : {reason}",": {reason}","{reason}"}}},
         {"de",false,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
         {"ru",false,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
-        {"ja",false,ReviewStatus::MachineAssisted,{{u8"{path}：{reason}",u8"：{reason}",u8"{path}：{reason}",u8"：{reason}","{reason}"}}},
+        {"ja",false,ReviewStatus::MachineAssisted,{{u8"{path}\uff1a{reason}",u8"\uff1a{reason}",u8"{path}\uff1a{reason}",u8"\uff1a{reason}","{reason}"}}},
         {"ko",false,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
         {"ar",true,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},
         {"hi",false,ReviewStatus::MachineAssisted,{{"{path}: {reason}",": {reason}","{path}: {reason}",": {reason}","{reason}"}}},

@@ -8,21 +8,21 @@ struct GameValueLocalePack {std::string_view id;bool rtl;ReviewStatus review;std
 inline const std::array<GameValueLocalePack,16> &gameValueLocalePacks(){
     static const std::array<GameValueLocalePack,16> packs={{
         {"en",false,ReviewStatus::Source,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_","Effective: {mode} (frozen)"}}},
-        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"{field}：{value}",u8"{field}：{before} -> {after}",u8"{field}：{value}",u8"{field}：{before} -> {after}",u8"{field}：","> {input}_",u8"实际：{mode}（冻结）"}}},
-        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"{field}：{value}",u8"{field}：{before} -> {after}",u8"{field}：{value}",u8"{field}：{before} -> {after}",u8"{field}：","> {input}_",u8"實際：{mode}（凍結）"}}},
+        {"zh-Hans",false,ReviewStatus::MachineAssisted,{{u8"{field}\uff1a{value}",u8"{field}\uff1a{before} -> {after}",u8"{field}\uff1a{value}",u8"{field}\uff1a{before} -> {after}",u8"{field}\uff1a","> {input}_",u8"\u5b9e\u9645\uff1a{mode}\uff08\u51bb\u7ed3\uff09"}}},
+        {"zh-Hant",false,ReviewStatus::MachineAssisted,{{u8"{field}\uff1a{value}",u8"{field}\uff1a{before} -> {after}",u8"{field}\uff1a{value}",u8"{field}\uff1a{before} -> {after}",u8"{field}\uff1a","> {input}_",u8"\u5be6\u969b\uff1a{mode}\uff08\u51cd\u7d50\uff09"}}},
         {"es",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_","Efectivo: {mode} (congelado)"}}},
         {"pt-BR",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_","Efetivo: {mode} (congelado)"}}},
-        {"fr",false,ReviewStatus::MachineAssisted,{{"{field} : {value}","{field} : {before} -> {after}","{field} : {value}","{field} : {before} -> {after}","{field} :","> {input}_",u8"Effectif : {mode} (figé)"}}},
+        {"fr",false,ReviewStatus::MachineAssisted,{{"{field} : {value}","{field} : {before} -> {after}","{field} : {value}","{field} : {before} -> {after}","{field} :","> {input}_",u8"Effectif : {mode} (fig\u00e9)"}}},
         {"de",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_","Wirksam: {mode} (eingefroren)"}}},
-        {"ru",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"Действующее: {mode} (заморожено)"}}},
-        {"ja",false,ReviewStatus::MachineAssisted,{{u8"{field}：{value}",u8"{field}：{before} -> {after}",u8"{field}：{value}",u8"{field}：{before} -> {after}",u8"{field}：","> {input}_",u8"実際：{mode}（固定）"}}},
-        {"ko",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"실제: {mode} (고정)"}}},
-        {"ar",true,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"الفعال: {mode} (مجمد)"}}},
-        {"hi",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"प्रभावी: {mode} (स्थिर)"}}},
-        {"bn",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"কার্যকর: {mode} (স্থির)"}}},
+        {"ru",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"\u0414\u0435\u0439\u0441\u0442\u0432\u0443\u044e\u0449\u0435\u0435: {mode} (\u0437\u0430\u043c\u043e\u0440\u043e\u0436\u0435\u043d\u043e)"}}},
+        {"ja",false,ReviewStatus::MachineAssisted,{{u8"{field}\uff1a{value}",u8"{field}\uff1a{before} -> {after}",u8"{field}\uff1a{value}",u8"{field}\uff1a{before} -> {after}",u8"{field}\uff1a","> {input}_",u8"\u5b9f\u969b\uff1a{mode}\uff08\u56fa\u5b9a\uff09"}}},
+        {"ko",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"\uc2e4\uc81c: {mode} (\uace0\uc815)"}}},
+        {"ar",true,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"\u0627\u0644\u0641\u0639\u0627\u0644: {mode} (\u0645\u062c\u0645\u062f)"}}},
+        {"hi",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"\u092a\u094d\u0930\u092d\u093e\u0935\u0940: {mode} (\u0938\u094d\u0925\u093f\u0930)"}}},
+        {"bn",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"\u0995\u09be\u09b0\u09cd\u09af\u0995\u09b0: {mode} (\u09b8\u09cd\u09a5\u09bf\u09b0)"}}},
         {"id",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_","Efektif: {mode} (beku)"}}},
-        {"tr",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"Etkin: {mode} (donmuş)"}}},
-        {"vi",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"Thực tế: {mode} (cố định)"}}}
+        {"tr",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"Etkin: {mode} (donmu\u015f)"}}},
+        {"vi",false,ReviewStatus::MachineAssisted,{{"{field}: {value}","{field}: {before} -> {after}","{field}: {value}","{field}: {before} -> {after}","{field}:","> {input}_",u8"Th\u1ef1c t\u1ebf: {mode} (c\u1ed1 \u0111\u1ecbnh)"}}}
     }};return packs;
 }
 inline std::string_view gameValueMessageKeyName(GameValueMessageKey key){

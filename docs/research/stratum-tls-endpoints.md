@@ -2,6 +2,10 @@
 
 **Reviewed:** 2026-11-04. **Scope:** published endpoint evidence for CanaryMiner's existing Kryptex, HeroMiners and F2Pool presets, including the independently configured developer-donation route. This is documentation research, not an implemented migration or live interoperability qualification.
 
+**Public-document refresh, 2026-11-12:** the official Kryptex overview still specifies same-host SSL port 8048; its general tutorial still contains inconsistent 7048 SSL examples. HeroMiners' current help still documents same-port TCP/TLS and gives `de.pearl.herominers.com:1200` as a Pearl example, but the dynamic east-US regional row was not independently retrieved in this refresh. F2Pool's PRL information table still lists TCP 5500, and its Chinese tutorial still labels the SSL 5500 example invalid. No valid donation TLS tuple was established and no mining endpoint was contacted. Sources: [Kryptex overview](https://pool.kryptex.com/articles/pearl-miners-en), [HeroMiners settings](https://herominers.com/help/main-miner-settings/), [HeroMiners proxy guide](https://herominers.com/help/ssl-mining-proxy/), [F2Pool table](https://f2pool.zendesk.com/hc/en-us/articles/360058887912-Mining-pools-info-payout-schemes-and-thresholds-at-f2pool), [F2Pool Chinese PRL tutorial](https://f2pool.zendesk.com/hc/zh-cn/articles/59248379419417-PRL-Pearl-%E6%8C%96%E7%9F%BF%E6%95%99%E7%A8%8B).
+
+**Later native handshake check, 2026-11-13:** Windows Schannel and Linux OpenSSL verified the documented Kryptex US TLS endpoint with system trust and no application bytes. See the exact [P-12j validation scope](../pool-tls-fallback.md#review-and-validation). The documentation-only and no-contact statements below describe the original research; this later check does not establish authentication, proof acceptance or a donation TLS endpoint.
+
 Controlling project decisions are **D-13/D-18** in [decisions](../architecture/decisions.md) and **R-TLS-001–004** in [requirements](../architecture/requirements.md). TLS backend selection, software policy and packaging remain separate work. This note refreshes the endpoint evidence in [secure transport backends, §7](secure-transport-backends.md#7-pearl-preset-and-donation-endpoint-evidence); it does not adopt that note's backend recommendation.
 
 ## 1. Result and research boundary
@@ -29,7 +33,7 @@ The repository defaults `PoolEntry.network` to `mainnet`, permits only mainnet f
 
 ## 3. Endpoint register for the existing presets
 
-**“Published TLS candidate” does not mean “certificate verified” or “works in CanaryMiner.”** The source inspection still finds `stratum+ssl://` rejected by `parsePoolSpec`; these URLs are migration inputs, not runnable instructions for the current build.[^repo-config]
+**“Published TLS candidate” does not mean “certificate verified” or “works in CanaryMiner.”** The original source inspection found `stratum+ssl://` refused. Later [P-12h/j](../pool-tls-fallback.md) enables explicit user-pool URLs within its documented local-build scope; this does not upgrade any candidate's certificate or protocol qualification.[^repo-config]
 
 | Preset / route | Documented plaintext endpoint | Published TLS endpoint | Required TLS SNI and certificate reference name | Qualification status |
 | --- | --- | --- | --- | --- |

@@ -53,7 +53,8 @@ class NativeDisplaySampleReader final:public DisplaySampleReader {
     explicit NativeDisplaySampleReader(std::vector<DisplaySampleTarget> targets):targets_(std::move(targets)),devices_(targets_.size()){}
     ~NativeDisplaySampleReader()override{for(auto &device:devices_)device.nvml.close();}
     DisplaySampleReading read(size_t slot,const std::atomic<bool> &cancel)override{
-        DisplaySampleReading out;if(!current(cancel)||slot>=targets_.size())return out;
+        if(!current(cancel)||slot>=targets_.size())return {};
+        DisplaySampleReading out;
         int status=0;std::string body,error;
         const bool received=httpGetLocal("127.0.0.1",targets_[slot].port,"/api/v1/stats",&status,&body,&error,1);
         out.statsObserved=displaySampleTime();

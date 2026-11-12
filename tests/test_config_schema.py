@@ -87,11 +87,16 @@ def validate(value, schema, root, path='$'):
 class ConfigSchemaTests(unittest.TestCase):
     def test_example_conforms_and_uses_placeholders(self):
         schema = load('config/config-v1.schema.json')
-        example = load('config/config.example.json')
-        self.assertEqual(validate(example, schema, schema), [])
-        self.assertEqual(example['schema_version'], 1)
-        self.assertIn('REPLACE', example['wallet'])
-        self.assertIsNone(re.search(r'prl1[a-z0-9]{20,}', json.dumps(example)))
+        for name in ('config.example.json', 'config.tls.example.json'):
+            with self.subTest(example=name):
+                example = load('config/' + name)
+                self.assertEqual(validate(example, schema, schema), [])
+                self.assertEqual(example['schema_version'], 1)
+                self.assertIn('REPLACE', example['wallet'])
+                self.assertIsNone(re.search(r'prl1[a-z0-9]{20,}', json.dumps(example)))
+        secure = load('config/config.tls.example.json')
+        self.assertEqual(secure['pools'], ['kryptex-tls'])
+        self.assertIs(secure['donation'], False)
 
     def test_schema_rejects_what_the_parser_rejects(self):
         schema = load('config/config-v1.schema.json')

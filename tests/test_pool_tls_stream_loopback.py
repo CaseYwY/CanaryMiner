@@ -87,14 +87,34 @@ def main(args):
             thread.start()
             private = ([ca], [], [crl]) if os.name == 'nt' and mode != 'untrusted' else None
             pem = ssl.DER_cert_to_PEM_cert(ca).encode('ascii') if os.name != 'nt' and mode != 'untrusted' else b''
+            fallback_listener = None
+            probe_mode = [] if mode == 'echo' else ['canonical']
+            if args.fallback_refusal:
+                assert mode == 'untrusted', 'fallback refusal requires the ordinary untrusted case'
+                fallback_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                fallback_listener.bind(('127.0.0.1', 0))
+                fallback_listener.listen(1)
+                fallback_listener.settimeout(0.1)
+                probe_mode = ['fallback', f'stratum+tcp://localhost:{fallback_listener.getsockname()[1]}']
             try:
-                process = subprocess.run([str(args.probe), str(args.worker), *([] if mode == 'echo' else ['canonical'])],
+                process = subprocess.run([str(args.probe), str(args.worker), *probe_mode],
                                          input=packet('localhost', port, 5000, pem, private), capture_output=True, timeout=25, check=True)
                 result = json.loads(process.stdout)
+                if fallback_listener:
+                    try:
+                        unexpected, _ = fallback_listener.accept()
+                    except socket.timeout:
+                        pass
+                    else:
+                        unexpected.close()
+                        raise AssertionError('verification failure attempted plaintext fallback')
+                    assert result['plaintext'] == 0, result
             finally:
                 done.set()
                 thread.join(timeout=11)
                 listener.close()
+                if fallback_listener:
+                    fallback_listener.close()
             assert not thread.is_alive() and not errors, (mode, errors, result, len(applications), len(submitted))
             if mode in ('untrusted', 'truncate'):
                 assert not result['ok'] and not submitted, (mode, result, len(submitted))
@@ -119,6 +139,7 @@ if __name__ == '__main__':
     parser.add_argument('--wsl-distro')
     parser.add_argument('--scratch', type=Path, required=True)
     parser.add_argument('--case', choices=('echo', 'canonical', 'tls12', 'untrusted', 'truncate'))
+    parser.add_argument('--fallback-refusal', action='store_true')
     args = parser.parse_args()
     args.scratch.mkdir(parents=True, exist_ok=True)
     main(args)

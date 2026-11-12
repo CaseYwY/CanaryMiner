@@ -25,7 +25,9 @@ def main():
             original = json.dumps({'schema_version': 1, 'user_pools': [empty if donation else selected], 'donation': selected if donation else empty})
             path.write_text(original, encoding='utf-8')
             result = run()
-            assert result.returncode == 3 and b'configured pool TLS requires' in result.stderr and b'no TCP downgrade' in result.stderr
+            assert result.returncode == 3 and b'FORBIDDEN_DEVICE_SETUP' not in result.stderr
+            assert any(message in result.stderr.lower() for message in (
+                b'no mining was started', b'no tcp fallback or mining was started'))
             assert b'private-fixture' not in result.stdout + result.stderr and path.read_text(encoding='utf-8') == original
             checks += 2
         for original in ('{"schema_version":99}', '[]', json.dumps({'schema_version': 1, 'user_pools': [{**selected, 'tls_url': 'stratum+ssl://private-user@fixture.test:1'}], 'donation': empty})):
@@ -43,7 +45,9 @@ def main():
         assert result.returncode == 97 and b'FORBIDDEN_DEVICE_SETUP' in result.stderr and path.read_text(encoding='utf-8') == original
         checks += 1
         result = run('--pool', 'stratum+ssl://private-fixture.test:1234')
-        assert result.returncode != 97 and b'No TCP fallback' in result.stderr and b'private-fixture' not in result.stderr
+        assert result.returncode == 3 and b'FORBIDDEN_DEVICE_SETUP' not in result.stderr and b'private-fixture' not in result.stderr
+        assert any(message in result.stderr.lower() for message in (
+            b'no mining was started', b'no tcp fallback or mining was started'))
         checks += 1
     print(f'pool security CLI: {checks} refusal/preservation checks passed; no device/network execution')
 

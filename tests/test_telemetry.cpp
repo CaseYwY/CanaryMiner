@@ -20,6 +20,41 @@
 using om::GpuTelemetry;
 using om::MinerStats;
 
+static bool glyphBytesMatch() {
+    const bool savedAscii = om::g_asciiOnly;
+    const auto frameMatches = [](const char *const *expected) {
+        const auto frame = om::frameChars();
+        const char *const actual[] = {frame.tl, frame.tr, frame.bl, frame.br,
+                                     frame.h, frame.v, frame.ml, frame.mr};
+        for (size_t i = 0; i < 8; ++i)
+            if (std::strcmp(actual[i], expected[i]) != 0) return false;
+        return true;
+    };
+    // Fixed bytes, not source glyphs: NVCC and the host compiler must agree even
+    // when their source/execution character sets differ. No console or GPU calls.
+    const char *const unicodeFrame[] = {
+        "\xE2\x94\x8C", "\xE2\x94\x90", "\xE2\x94\x94", "\xE2\x94\x98",
+        "\xE2\x94\x80", "\xE2\x94\x82", "\xE2\x94\x9C", "\xE2\x94\xA4"};
+    const std::vector<double> levels = {0, 1, 2, 3, 4, 5, 6, 7};
+    om::g_asciiOnly = false;
+    const bool unicodeFrameOk = frameMatches(unicodeFrame);
+    const bool pulseOk = std::strcmp(om::kPulse[0],
+        "\xE2\x96\xB0\xE2\x96\xB1\xE2\x96\xB1\xE2\x96\xB1") == 0;
+    const bool unicodeSparkOk = om::sparkline(levels) ==
+        "\xE2\x96\x81\xE2\x96\x82\xE2\x96\x83\xE2\x96\x84"
+        "\xE2\x96\x85\xE2\x96\x86\xE2\x96\x87\xE2\x96\x88";
+    const char *const asciiFrame[] = {"+", "+", "+", "+", "-", "|", "+", "+"};
+    om::g_asciiOnly = true;
+    const bool asciiFrameOk = frameMatches(asciiFrame);
+    const bool asciiSparkOk = om::sparkline(levels) == "_.,-=+*#";
+    om::g_asciiOnly = savedAscii;
+    const bool ok = unicodeFrameOk && pulseOk && unicodeSparkOk && asciiFrameOk && asciiSparkOk;
+    if (!ok)
+        fprintf(stderr, "telemetry glyph byte regression: UTF8 frame=%d pulse=%d spark=%d; ASCII frame=%d spark=%d\n",
+                unicodeFrameOk, pulseOk, unicodeSparkOk, asciiFrameOk, asciiSparkOk);
+    return ok;
+}
+
 static std::string readoutFor(const char *algo, double macsPerUnit = 0,
                               double rate = 0, bool tty = true,
                               const char *gpuUuid =
@@ -56,8 +91,10 @@ static std::string readoutFor(const char *algo, double macsPerUnit = 0,
     const int saved = dup(fileno(stdout));
     if (saved < 0 || dup2(fileno(capture), fileno(stdout)) < 0) return "";
 
+    const bool savedAscii = om::g_asciiOnly;
     om::g_asciiOnly = true;
     om::printReadout(stats, telemetry, tty);
+    om::g_asciiOnly = savedAscii;
     fflush(stdout);
     dup2(saved, fileno(stdout));
     close(saved);
@@ -72,6 +109,7 @@ static std::string readoutFor(const char *algo, double macsPerUnit = 0,
 }
 
 int main() {
+    if (!glyphBytesMatch()) return 1;
     const unsigned char uuidBytes[16] = {
         0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
         0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff};

@@ -2,7 +2,7 @@
 #include "product_test_util.h"
 using namespace om;
 namespace {
-using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using S=PearlTlsState;using E=PearlTlsError;using I=PearlPoolInterest;
+using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using S=PoolTlsRpcState;using E=PearlTlsError;using I=PearlPoolInterest;
 PoolTlsRpcCommand open(){PoolTlsCheckRequest r{true,"localhost",1,1000,{},{}};PoolTlsRpcCommand c{1,1000,2000,O::Open,0,I::None,0,{}};
     CHECK(encodePoolTlsCheckRequest(r,1,&c.payload));return c;}
 PoolTlsRpcReply reply(const PoolTlsRpcCommand &c){return {c.sequence,{T::Progress,0},S::VerifiedOpen,E::None,{}};}
@@ -79,5 +79,44 @@ void gate(){
         c.sequence=3;c.issuedMonoMs=1004;if(read){c.operation=O::Read;c.maximum=16;c.payload.clear();}else c.payload="different";
         CHECK(!g.issue(c,1004)&&g.stopped());}
 }
+void modesAndOpenEvidence(){
+    using C=PoolTlsCheckStatus;using G=PoolTlsCheckStage;
+    auto tls=open(),plain=tls;plain.operation=O::OpenPlaintext;std::string wire;PoolTlsRpcCommand command;PoolTlsRpcReply decoded;
+    CHECK(encodePoolTlsRpcCommand(plain,&wire)&&decodePoolTlsRpcCommand(body(wire),&command)&&command.operation==O::OpenPlaintext);
+    auto old=body(wire);old[6]='1';CHECK(!decodePoolTlsRpcCommand(old,&command));
+    auto r=reply(plain);CHECK(!encodePoolTlsRpcReply(plain,r,&wire));r.state=S::PlaintextOpen;
+    CHECK(encodePoolTlsRpcReply(plain,r,&wire)&&decodePoolTlsRpcReply(plain,body(wire),&decoded));
+    old=body(wire);old[6]='1';CHECK(!decodePoolTlsRpcReply(plain,old,&decoded));
+    CHECK(!encodePoolTlsRpcReply(tls,r,&wire));
+    for(bool plaintext:{false,true}){
+        const auto c=plaintext?plain:tls;
+        for(auto foreign:{S::VerifiedOpen,S::Handshaking,S::PlaintextOpen}){
+            if(plaintext==(foreign==S::PlaintextOpen))continue;
+            PoolTlsRpcGate g;auto initial=reply(c);if(plaintext)initial.state=S::PlaintextOpen;
+            CHECK(g.issue(c,1000)&&g.settle(initial,1001));
+            PoolTlsRpcCommand next{2,1002,2000,O::Read,16,I::None,0,{}};CHECK(g.issue(next,1002));
+            auto bad=reply(next);bad.state=foreign;bad.transfer={T::WouldBlock,0,I::Read};
+            CHECK(!g.settle(bad,1003)&&g.stopped());
+        }
+    }
+    for(const auto &failure:{PoolTlsCheckReply{C::Dns,G::Resolve,E::None},PoolTlsCheckReply{C::Connect,G::Connect,E::None},
+                            PoolTlsCheckReply{C::Timeout,G::Connect,E::None},PoolTlsCheckReply{C::Timeout,G::Handshake,E::None},
+                            PoolTlsCheckReply{C::Tls,G::Handshake,E::Verification},PoolTlsCheckReply{C::Unavailable,G::None,E::None}}){
+        auto failed=reply(tls);failed.state=S::Failed;failed.error=poolTlsRpcOpenError(failure);failed.transfer={T::Error,0};failed.openFailure=failure;
+        CHECK(encodePoolTlsRpcReply(tls,failed,&wire)&&decodePoolTlsRpcReply(tls,body(wire),&decoded)&&
+            decoded.openFailure&&decoded.openFailure->status==failure.status&&decoded.openFailure->stage==failure.stage&&decoded.openFailure->tlsError==failure.tlsError);
+        PoolTlsRpcGate g;CHECK(g.issue(tls,1000)&&g.settle(failed,1001)&&g.stopped());
+        CHECK(encodePoolTlsRpcReply(plain,failed,&wire)==(failure.stage!=G::Handshake));
+        auto write=tls;write.sequence=2;write.operation=O::Write;write.payload="payload";failed.sequence=2;
+        CHECK(!encodePoolTlsRpcReply(write,failed,&wire));
+    }
+    r=reply(tls);r.openFailure=PoolTlsCheckReply{C::Dns,G::Resolve,E::None};CHECK(!encodePoolTlsRpcReply(tls,r,&wire));
+    r.state=S::Failed;r.transfer={T::Error,0};r.error=E::Verification;CHECK(!encodePoolTlsRpcReply(tls,r,&wire));
+    r.error=E::Transport;r.openFailure->stage=G::Connect;CHECK(!encodePoolTlsRpcReply(tls,r,&wire));
+    r.openFailure=PoolTlsCheckReply{C::Verified,G::Complete,E::None};CHECK(!encodePoolTlsRpcReply(tls,r,&wire));
+    r.openFailure.reset();CHECK(encodePoolTlsRpcReply(tls,r,&wire)); // bounded generic failure is deliberately not phase evidence
+    PoolTlsCheckRequest privateRequest{true,"localhost",1,1000,"synthetic-anchor",{}};
+    CHECK(encodePoolTlsCheckRequest(privateRequest,1,&plain.payload)&&!validPoolTlsRpcCommand(plain));
 }
-int main(){framing();codec();gate();return finishTests("private TLS duplex RPC (CPU; no process/network/mining)");}
+}
+int main(){framing();codec();gate();modesAndOpenEvidence();return finishTests("private TLS/plaintext duplex RPC (CPU; no process/network/mining)");}

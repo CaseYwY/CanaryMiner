@@ -11,7 +11,7 @@ def main():
     cli, helper = [Path(value).resolve() for value in sys.argv[1:3]]
     command_error = b'unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted\n'
     tuning_error = b'unknown GPU tuning flag; rejected original omitted\n'
-    pool_error = b'pool is neither a preset (kryptex, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted\n'
+    pool_error = b'pool is neither a preset (kryptex, kryptex-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted\n'
     option_error = b'unknown option. Run with --help for the list; rejected original omitted.\n'
     marker = 'fixture.private-cli-original'
     payloads = [marker, marker+"'", marker+'\x1b[2J', marker+'\r\nhidden', marker+'\u202e', marker+'x'*4096]
@@ -52,7 +52,7 @@ def main():
             ('language', ['--language', marker], 2, b'--language requires one supported exact locale ID; rejected value not applied.\n'),
             ('wallet-shape', ['--wallet', '.fixture'], 3, b'--wallet must be ADDRESS or ADDRESS.WORKER (one dot)\n'),
             ('api-conflict', ['--api-enable', '--api-port', '0'], 3, b'--api-enable conflicts with --api-port 0\n'),
-            ('strict-tls', ['--pool', 'stratum+ssl://fixture.invalid:443'], 3, b'stratum+ssl:// is strict TLS; this build has no qualified ordinary pool TLS runtime. No TCP fallback was attempted.\n')):
+            ('strict-tls-ip', ['--pool', 'stratum+ssl://127.0.0.1:443'], 3, b'strict pool TLS requires an explicit ASCII DNS host and port; private original omitted; no TCP fallback\n')):
             rejected(name, args, code, expected)
         for args in (['version'], ['--help']):
             result = invoke(args)

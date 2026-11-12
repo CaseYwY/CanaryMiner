@@ -68,39 +68,92 @@ struct Connected final:PoolTlsConnection {
         return socket->waitFor(i,static_cast<int>(ms));
     }
     bool bufferedRead()const override{return tls.bufferedRead();}
-    PearlTlsState state()const override{return tls.state();}
+    PoolTlsRpcState state()const override{
+        switch(tls.state()){
+            case PearlTlsState::Dormant:return PoolTlsRpcState::Dormant;
+            case PearlTlsState::Handshaking:return PoolTlsRpcState::Handshaking;
+            case PearlTlsState::VerifiedOpen:return PoolTlsRpcState::VerifiedOpen;
+            case PearlTlsState::Closed:return PoolTlsRpcState::Closed;
+            case PearlTlsState::Failed:return PoolTlsRpcState::Failed;
+        }return PoolTlsRpcState::Failed;
+    }
     PearlTlsError error()const override{return tls.error();}
     void abort()override{tls.abort();}
 };
-bool pendingConnect(){
+struct PlainConnected final:PoolTlsConnection {
+    std::shared_ptr<Platform> platform;std::unique_ptr<Socket> socket;const std::atomic<bool> &cancel;
+    PoolTlsRpcState status=PoolTlsRpcState::PlaintextOpen;E failure=E::None;
+    PlainConnected(std::shared_ptr<Platform> api,std::unique_ptr<Socket> raw,const std::atomic<bool> &stop):platform(std::move(api)),socket(std::move(raw)),cancel(stop){}
+    bool current(){if(cancel.load()){failure=E::Cancelled;status=PoolTlsRpcState::Failed;socket->close();}return status==PoolTlsRpcState::PlaintextOpen;}
+    PearlPoolTransfer transfer(char *out,const char *in,std::size_t n){
+        using T=PearlPoolTransferStatus;if(!current())return {T::Error,0};
+        auto r=out?socket->receive(out,n):socket->send(in,n);
+        if(r.status==T::WouldBlock)r.interest=out?I::Read:I::Write;
+        if(r.status==T::EndOfStream&&out){status=PoolTlsRpcState::Closed;socket->close();} // ordinary TCP EOF, no TLS authentication claim
+        else if(r.status==T::Error||r.status==T::EndOfStream){failure=E::Transport;status=PoolTlsRpcState::Failed;socket->close();r={T::Error,0};}
+        return r;
+    }
+    PearlPoolTransfer send(const char *p,std::size_t n)override{return p?transfer(nullptr,p,n):PearlPoolTransfer{};}
+    PearlPoolTransfer receive(char *p,std::size_t n)override{return p?transfer(p,nullptr,n):PearlPoolTransfer{};}
+    W waitFor(I i,unsigned ms)override{return current()&&ms<=25?socket->waitFor(i,static_cast<int>(ms)):W::Error;}
+    bool bufferedRead()const override{return false;}
+    PoolTlsRpcState state()const override{return status;}
+    E error()const override{return failure;}
+    void abort()override{socket->close();status=PoolTlsRpcState::Closed;}
+};
+int socketError(){
 #if defined(_WIN32)
-    const int e=WSAGetLastError();return e==WSAEWOULDBLOCK||e==WSAEINPROGRESS||e==WSAEALREADY;
+    return WSAGetLastError();
 #else
-    return errno==EINPROGRESS||errno==EALREADY||errno==EINTR;
+    return errno;
 #endif
 }
-bool connected(socket_t fd){int error=0;
+bool networkDnsError(int e){
 #if defined(_WIN32)
-    int length=sizeof(error);return getsockopt(fd,SOL_SOCKET,SO_ERROR,reinterpret_cast<char *>(&error),&length)==0&&length==sizeof(error)&&!error;
+    return e==WSAHOST_NOT_FOUND||e==WSATRY_AGAIN||e==WSANO_DATA;
 #else
-    socklen_t length=sizeof(error);return getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&length)==0&&length==sizeof(error)&&!error;
+    return e==EAI_NONAME||e==EAI_AGAIN;
+#endif
+}
+bool networkConnectError(int e){
+#if defined(_WIN32)
+    return e==WSAECONNREFUSED||e==WSAETIMEDOUT||e==WSAENETUNREACH||e==WSAEHOSTUNREACH||e==WSAECONNRESET||e==WSAENETDOWN;
+#else
+    return e==ECONNREFUSED||e==ETIMEDOUT||e==ENETUNREACH||e==EHOSTUNREACH||e==ECONNRESET||e==ENETDOWN;
+#endif
+}
+bool pendingConnect(int e){
+#if defined(_WIN32)
+    return e==WSAEWOULDBLOCK||e==WSAEINPROGRESS||e==WSAEALREADY;
+#else
+    return e==EINPROGRESS||e==EALREADY||e==EINTR;
+#endif
+}
+bool connectResult(socket_t fd,int &error){
+#if defined(_WIN32)
+    int length=sizeof(error);return getsockopt(fd,SOL_SOCKET,SO_ERROR,reinterpret_cast<char *>(&error),&length)==0&&length==sizeof(error);
+#else
+    socklen_t length=sizeof(error);return getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&length)==0&&length==sizeof(error);
 #endif
 }
 }
 #endif
-static PoolTlsCheckReply nativeOpen(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel,std::unique_ptr<PoolTlsConnection> &owned){
+static std::optional<PoolTlsCheckReply> nativeOpen(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel,std::unique_ptr<PoolTlsConnection> &owned,bool plaintext){
     using S=PoolTlsCheckStatus;
     PoolTlsCheckReply out;const auto result=[&](S s){out.status=s;return out;};
     if(!r.enabled)return result(S::Disabled);
     if(cancel.load())return result(S::Cancelled);
-    if(!validPoolTlsCheckRequest(r))return result(S::Invalid);
+    if(!validPoolTlsCheckRequest(r)||(plaintext&&(!r.caPem.empty()||r.windowsPrivateTrust)))return result(S::Invalid);
 #if !defined(CANARY_POOL_TLS_CHECK)
     (void)owned;
     return result(S::Unavailable);
 #else
     using G=PoolTlsCheckStage;using E=PearlTlsError;
     const auto begin=nowMs();if(!begin||begin>UINT64_MAX-r.totalMs)return result(S::Invalid);const auto deadline=begin+r.totalMs;
-    const auto expired=[&]{if(cancel.load()){out.status=S::Cancelled;return true;}if(nowMs()>=deadline){out.status=S::Timeout;return true;}return false;};
+    bool localFailure=false,networkFailure=false;
+    const auto unavailable=[&]{out={S::Unavailable,G::None,E::None};return out;};
+    const auto expired=[&]{if(cancel.load()){out.status=S::Cancelled;return true;}if(nowMs()>=deadline){
+        if(localFailure)out=unavailable();else out.status=S::Timeout;return true;}return false;};
     auto platform=std::make_shared<Platform>();
     if(!platform->ok)return result(S::Unavailable);
     out.stage=G::Resolve;
@@ -108,17 +161,22 @@ static PoolTlsCheckReply nativeOpen(const PoolTlsCheckRequest &r,const std::atom
     addrinfo *addresses=nullptr;const auto port=std::to_string(r.port);
     const int resolved=getaddrinfo(r.host.c_str(),port.c_str(),&hints,&addresses);
     std::unique_ptr<addrinfo,decltype(&freeaddrinfo)> list(addresses,freeaddrinfo);
+    if(resolved&&!networkDnsError(resolved))return unavailable();
     if(expired())return out;
-    if(resolved||!addresses)return result(S::Dns);
+    if(resolved)return result(S::Dns);
+    if(!addresses)return unavailable();
     out.stage=G::Connect;std::unique_ptr<Socket> socket;std::vector<std::unique_ptr<Socket>> pending;
-    bool madeSocket=false;unsigned attempts=0;auto *next=addresses;uint64_t nextAttempt=0;
+    unsigned attempts=0;auto *next=addresses;uint64_t nextAttempt=0;
     while(!socket){
         if(expired())return out;
         // A quiet first-family connect must not consume the entire shared deadline before another
         // address is attempted. Keep at most sixteen owned candidates; stagger starts, never renew the budget.
         for(auto i=pending.begin();i!=pending.end();){const auto ready=(*i)->waitWritable(0);
             if(ready==W::Timeout){++i;continue;}
-            if(ready==W::Ready&&connected((*i)->fd)){socket=std::move(*i);pending.erase(i);break;}
+            int error=0;
+            if(ready!=W::Ready||!connectResult((*i)->fd,error))localFailure=true;
+            else if(!error){socket=std::move(*i);pending.erase(i);break;}
+            else if(networkConnectError(error))networkFailure=true;else localFailure=true;
             i=pending.erase(i);
         }
         if(socket)break;
@@ -131,11 +189,11 @@ static PoolTlsCheckReply nativeOpen(const PoolTlsCheckRequest &r,const std::atom
 #else
             candidate->fd=::socket(address->ai_family,SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK,IPPROTO_TCP);
 #endif
-            if(!candidate->isOpen())continue;
-            madeSocket=true;if(!candidate->setNonblocking(true))continue;
+            if(!candidate->isOpen()||!candidate->setNonblocking(true)){localFailure=true;continue;}
             if(expired())return out;
             if(::connect(candidate->fd,address->ai_addr,static_cast<int>(address->ai_addrlen))==0){socket=std::move(candidate);break;}
-            if(!pendingConnect())continue;
+            const int error=socketError();
+            if(!pendingConnect(error)){if(networkConnectError(error))networkFailure=true;else localFailure=true;continue;}
             pending.push_back(std::move(candidate));nextAttempt=current+250;continue;
         }
         if(pending.empty()&&(!next||attempts>=16))break;
@@ -145,8 +203,10 @@ static PoolTlsCheckReply nativeOpen(const PoolTlsCheckRequest &r,const std::atom
         std::this_thread::sleep_for(std::chrono::milliseconds(wait));
     }
     if(expired())return out;
-    if(!socket)return result(madeSocket?S::Connect:S::Socket);
+    if(!socket)return localFailure||!networkFailure?unavailable():result(S::Connect);
     pending.clear(); // losers never receive a ClientHello or application data
+    if(plaintext){owned=std::make_unique<PlainConnected>(platform,std::move(socket),cancel);return std::nullopt;}
+    localFailure=false; // connection succeeded; later failures belong exclusively to the handshake
     out.stage=G::Handshake;auto retained=std::make_unique<Connected>(platform,std::move(socket),cancel);auto &tls=retained->tls;PearlTlsPolicy policy;
     policy.enabled=true;policy.serverName=r.host;policy.caPem=r.caPem;policy.windowsPrivateTrust=r.windowsPrivateTrust;policy.handshakeDeadlineMonoMs=deadline;
     const auto failed=[&]{if(expired())return out;out.tlsError=tls.error();if(out.tlsError==E::None)out.tlsError=E::Protocol;return result(S::Tls);};
@@ -158,9 +218,14 @@ static PoolTlsCheckReply nativeOpen(const PoolTlsCheckRequest &r,const std::atom
     }
     if(expired())return out;
     if(tls.state()!=PearlTlsState::VerifiedOpen)return failed();
-    out.stage=G::Complete;owned=std::move(retained);return result(S::Verified);
+    owned=std::move(retained);return std::nullopt;
 #endif
 }
-PoolTlsOpenResult openPoolTlsConnection(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){PoolTlsOpenResult result;result.reply=nativeOpen(r,cancel,result.connection);return result;}
-PoolTlsCheckReply executePoolTlsCheck(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){return openPoolTlsConnection(r,cancel).reply;} // temporary owner closes before the one-shot helper can publish
+PoolTlsOpenResult openPoolTlsConnection(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){PoolTlsOpenResult result;result.failure=nativeOpen(r,cancel,result.connection,false);return result;}
+PoolTlsOpenResult openPoolPlaintextConnection(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){PoolTlsOpenResult result;result.failure=nativeOpen(r,cancel,result.connection,true);return result;}
+PoolTlsCheckReply executePoolTlsCheck(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){
+    auto result=openPoolTlsConnection(r,cancel);
+    return result.connection?PoolTlsCheckReply{PoolTlsCheckStatus::Verified,PoolTlsCheckStage::Complete,PearlTlsError::None}:
+        result.failure.value_or(PoolTlsCheckReply{});
+} // temporary TLS owner closes before the one-shot helper can publish
 } // namespace om

@@ -1,5 +1,5 @@
 // config-v1 parsing, strict JSON, CLI subcommands/overrides, effective-config redaction.
-//   argv[1] (optional): path of config/config.example.json, which must parse and validate for a run.
+//   argv[1..] (optional): example config paths, which must parse and validate for a run.
 
 #include <string>
 #include <vector>
@@ -124,6 +124,10 @@ int main(int argc, char **argv) {
     CHECK(c.tuning.ocDelaySet && c.tuning.ocDelaySeconds == 5 && !c.tuning.ocResetOnly);
     CHECK(parses("{\"schema_version\":1,\"tuning\":{\"oc_reset_only\":true}}", &c) && c.tuning.ocResetOnly);
     CHECK(contains(errorOf("{\"schema_version\":1,\"tuning\":{\"oc_delay\":4294967296}}"), "between 0 and 4294967295"));
+    CHECK(parses("{\"schema_version\":1,\"donation\":false,\"pools\":[{\"url\":\"kryptex-tls\",\"compression\":\"off\","
+                 "\"target_semantics\":\"final-adjusted-bound\"}]}", &c));
+    CHECK(c.schemaVersion == 1 && !c.donation && c.pools[0].tls && c.pools[0].preset == "kryptex" &&
+          c.pools[0].port == 8048 && c.pools[0].compression == "off" && c.pools[0].targetSemantics == "final-adjusted-bound");
 
     // cross-field validation
     ProductConfig d;
@@ -149,12 +153,12 @@ int main(int argc, char **argv) {
     CHECK(!validateConfig(d, false, &e));
 
     // example file: parses, validates for a run, and carries no real address
-    if (argc > 1) {
+    for (int i = 1; i < argc; ++i) {
         ProductConfig ex;
         std::string err;
-        CHECK_MSG("config.example.json loads", loadProductConfig(argv[1], &ex, &err));
-        CHECK_MSG("config.example.json validates for a run", validateConfig(ex, true, &err));
-        CHECK_MSG("config.example.json has a placeholder wallet", ex.wallet.find("REPLACE") != std::string::npos);
+        CHECK_MSG(argv[i], loadProductConfig(argv[i], &ex, &err));
+        CHECK_MSG("example validates for a run", validateConfig(ex, true, &err));
+        CHECK_MSG("example has a placeholder wallet", ex.wallet.find("REPLACE") != std::string::npos);
     }
     {
         ProductConfig ex;

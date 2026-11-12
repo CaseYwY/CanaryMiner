@@ -97,8 +97,8 @@ struct FrameChars {
 inline FrameChars frameChars() {
     if (g_asciiOnly)
         return {"+", "+", "+", "+", "-", "|", "+", "+"};
-    return {"\u250c", "\u2510", "\u2514", "\u2518",
-            "\u2500", "\u2502", "\u251c", "\u2524"};
+    return {u8"\u250c", u8"\u2510", u8"\u2514", u8"\u2518",
+            u8"\u2500", u8"\u2502", u8"\u251c", u8"\u2524"};
 }
 
 inline bool stdoutIsTty() {
@@ -602,16 +602,16 @@ inline std::string formatCount(double n) {
 // it reads at a glance from across a room, matches the ASCII banner, and does
 // not look like a "loading" throbber, which would imply the miner is waiting
 // on something.
-static const char *const kPulse[] = {"\u25B0\u25B1\u25B1\u25B1",
-                                     "\u25B1\u25B0\u25B1\u25B1",
-                                     "\u25B1\u25B1\u25B0\u25B1",
-                                     "\u25B1\u25B1\u25B1\u25B0"};
+static const char *const kPulse[] = {u8"\u25B0\u25B1\u25B1\u25B1",
+                                     u8"\u25B1\u25B0\u25B1\u25B1",
+                                     u8"\u25B1\u25B1\u25B0\u25B1",
+                                     u8"\u25B1\u25B1\u25B1\u25B0"};
 static const unsigned kPulseFrames = 4;
 
 /** A unicode sparkline of recent hashrate, scaled to its own min/max. */
 inline std::string sparkline(const std::vector<double> &v) {
-    static const char *uni[] = {"\u2581", "\u2582", "\u2583", "\u2584",
-                                "\u2585", "\u2586", "\u2587", "\u2588"};
+    static const char *uni[] = {u8"\u2581", u8"\u2582", u8"\u2583", u8"\u2584",
+                                u8"\u2585", u8"\u2586", u8"\u2587", u8"\u2588"};
     static const char *ascii[] = {"_", ".", ",", "-", "=", "+", "*", "#"};
     const char *const *bars = g_asciiOnly ? ascii : uni;
     if (v.size() < 2) return "";

@@ -3,7 +3,8 @@
 #include <charconv>
 namespace om {
 namespace {
-using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using S=PearlTlsState;using E=PearlTlsError;using I=PearlPoolInterest;
+using O=PoolTlsRpcOperation;using T=PearlPoolTransferStatus;using S=PoolTlsRpcState;using E=PearlTlsError;using I=PearlPoolInterest;
+bool opening(O op){return op==O::Open||op==O::OpenPlaintext;}
 void number(std::string &s,uint64_t n){s+=std::to_string(n);s+=' ';}
 bool integer(std::string_view s,uint64_t maximum,uint64_t &out){
     if(s.empty()||s.size()>20||(s.size()>1&&s[0]=='0')||s[0]<'0'||s[0]>'9')return false;
@@ -20,9 +21,14 @@ template<std::size_t N> bool fields(std::string_view wire,std::string_view magic
     payload=wire.substr(end+1);return true;
 }
 bool validReply(const PoolTlsRpcCommand &c,const PoolTlsRpcReply &r){
-    if(!validPoolTlsRpcCommand(c)||r.sequence!=c.sequence||static_cast<unsigned>(r.state)>static_cast<unsigned>(S::Failed)||
+    if(!validPoolTlsRpcCommand(c)||r.sequence!=c.sequence||static_cast<unsigned>(r.state)>static_cast<unsigned>(S::PlaintextOpen)||
         static_cast<unsigned>(r.error)>static_cast<unsigned>(E::Capacity)||static_cast<unsigned>(r.transfer.status)>static_cast<unsigned>(T::Progress))return false;
     const auto &t=r.transfer;
+    if(r.openFailure){std::string checked;
+        if(!opening(c.operation)||r.state!=S::Failed||r.openFailure->status==PoolTlsCheckStatus::Verified||
+            !encodePoolTlsCheckReply(*r.openFailure,&checked)||r.error!=poolTlsRpcOpenError(*r.openFailure))return false;
+        if(c.operation==O::OpenPlaintext&&(r.openFailure->stage==PoolTlsCheckStage::Handshake||r.openFailure->tlsError!=E::None))return false;
+    }
     if(static_cast<unsigned>(r.ready)>static_cast<unsigned>(PoolTlsRpcReady::Timeout)||
         (c.operation!=O::Wait&&r.ready!=PoolTlsRpcReady::NotWait))return false;
     if((r.state==S::Failed||r.state==S::Closed)&&(r.bufferedRead||r.ready!=PoolTlsRpcReady::NotWait))return false;
@@ -30,23 +36,33 @@ bool validReply(const PoolTlsRpcCommand &c,const PoolTlsRpcReply &r){
     if(r.error!=E::None||r.state==S::Dormant||t.status==T::Error)return false;
     if(t.status==T::EndOfStream)return c.operation==O::Read&&r.state==S::Closed&&!t.bytes&&t.interest==I::None&&r.payload.empty();
     if(c.operation==O::Abort)return r.state==S::Closed&&t.status==T::Progress&&!t.bytes&&t.interest==I::None&&r.payload.empty();
-    if(r.state!=S::VerifiedOpen&&r.state!=S::Handshaking)return false;
-    if(c.operation==O::Open)return t.status==T::Progress&&!t.bytes&&t.interest==I::None&&r.state==S::VerifiedOpen&&r.payload.empty();
+    if(r.state!=S::VerifiedOpen&&r.state!=S::Handshaking&&r.state!=S::PlaintextOpen)return false;
+    if(opening(c.operation))return t.status==T::Progress&&!t.bytes&&t.interest==I::None&&
+        r.state==(c.operation==O::Open?S::VerifiedOpen:S::PlaintextOpen)&&r.payload.empty();
     if(c.operation==O::Wait)return r.ready!=PoolTlsRpcReady::NotWait&&t.status==T::Progress&&!t.bytes&&t.interest==I::None&&r.payload.empty();
     if(t.status==T::WouldBlock)return !t.bytes&&validPearlPoolInterest(t.interest)&&r.payload.empty();
     if(t.interest!=I::None)return false;
     if(t.status==T::Progress)return !t.bytes&&r.payload.empty();
-    if(t.status!=T::Bytes||!t.bytes||r.state!=S::VerifiedOpen)return false;
+    if(t.status!=T::Bytes||!t.bytes||(r.state!=S::VerifiedOpen&&r.state!=S::PlaintextOpen))return false;
     if(c.operation==O::Write)return t.bytes==c.payload.size()&&r.payload.empty();
     return c.operation==O::Read&&t.bytes<=c.maximum&&t.bytes==r.payload.size();
 }
 std::string wrap(const std::string &body){return std::to_string(body.size())+"\n"+body;}
 }
+PearlTlsError poolTlsRpcOpenError(const PoolTlsCheckReply &r){
+    if(r.tlsError!=E::None)return r.tlsError;
+    if(r.status==PoolTlsCheckStatus::Timeout)return E::Timeout;
+    if(r.status==PoolTlsCheckStatus::Cancelled)return E::Cancelled;
+    if(r.status==PoolTlsCheckStatus::Invalid)return E::InvalidPolicy;
+    if(r.status==PoolTlsCheckStatus::Unavailable||r.status==PoolTlsCheckStatus::Disabled)return E::Unavailable;
+    return E::Transport;
+}
 bool validPoolTlsRpcCommand(const PoolTlsRpcCommand &c){
     if(!c.sequence||!c.issuedMonoMs||c.deadlineMonoMs<=c.issuedMonoMs||c.deadlineMonoMs-c.issuedMonoMs>60000||
-        static_cast<unsigned>(c.operation)>static_cast<unsigned>(O::Abort)||c.payload.size()>localTaskRequestLimit)return false;
-    if(c.operation==O::Open){PoolTlsCheckRequest request;uint64_t parent=0;
+        static_cast<unsigned>(c.operation)>static_cast<unsigned>(O::OpenPlaintext)||c.payload.size()>localTaskRequestLimit)return false;
+    if(opening(c.operation)){PoolTlsCheckRequest request;uint64_t parent=0;
         return c.sequence==1&&!c.maximum&&c.interest==I::None&&!c.waitMs&&decodePoolTlsCheckRequest(c.payload,&request,&parent)&&request.enabled&&
+            (c.operation!=O::OpenPlaintext||(request.caPem.empty()&&!request.windowsPrivateTrust))&&
             request.totalMs<=c.deadlineMonoMs-c.issuedMonoMs;}
     if(c.sequence==1)return false;
     if(c.operation==O::Write)return !c.payload.empty()&&c.payload.size()<=poolTlsRpcPayloadLimit&&!c.maximum&&c.interest==I::None&&!c.waitMs;
@@ -57,26 +73,32 @@ bool validPoolTlsRpcCommand(const PoolTlsRpcCommand &c){
 }
 bool encodePoolTlsRpcCommand(const PoolTlsRpcCommand &c,std::string *out){
     if(!out||!validPoolTlsRpcCommand(c))return false;
-    std::string s="CMTLSC1 ";for(uint64_t n:{c.sequence,c.issuedMonoMs,c.deadlineMonoMs,static_cast<uint64_t>(c.operation),static_cast<uint64_t>(c.maximum),static_cast<uint64_t>(c.interest),static_cast<uint64_t>(c.waitMs)})number(s,n);
+    std::string s="CMTLSC2 ";for(uint64_t n:{c.sequence,c.issuedMonoMs,c.deadlineMonoMs,static_cast<uint64_t>(c.operation),static_cast<uint64_t>(c.maximum),static_cast<uint64_t>(c.interest),static_cast<uint64_t>(c.waitMs)})number(s,n);
     s+='\n';s+=c.payload;if(s.size()>poolTlsRpcFrameLimit)return false;*out=wrap(s);return true;
 }
 bool decodePoolTlsRpcCommand(std::string_view wire,PoolTlsRpcCommand *out){
     if(!out)return false;
-    std::array<uint64_t,7> n{};std::string_view payload;if(!fields(wire,"CMTLSC1 ",n,payload)||n[3]>4||n[4]>poolTlsRpcPayloadLimit||n[5]>3||n[6]>25)return false;
+    std::array<uint64_t,7> n{};std::string_view payload;if(!fields(wire,"CMTLSC2 ",n,payload)||n[3]>5||n[4]>poolTlsRpcPayloadLimit||n[5]>3||n[6]>25)return false;
     PoolTlsRpcCommand c{n[0],n[1],n[2],static_cast<O>(n[3]),static_cast<std::size_t>(n[4]),static_cast<I>(n[5]),static_cast<unsigned>(n[6]),std::string(payload)};
     if(!validPoolTlsRpcCommand(c))return false;
     *out=std::move(c);return true;
 }
 bool encodePoolTlsRpcReply(const PoolTlsRpcCommand &c,const PoolTlsRpcReply &r,std::string *out){
     if(!out||!validReply(c,r))return false;
-    std::string s="CMTLSR1 ";
+    std::string s="CMTLSR2 ";
     for(uint64_t n:{r.sequence,static_cast<uint64_t>(r.transfer.status),static_cast<uint64_t>(r.transfer.bytes),static_cast<uint64_t>(r.transfer.interest),static_cast<uint64_t>(r.state),static_cast<uint64_t>(r.error),static_cast<uint64_t>(r.ready),r.bufferedRead?uint64_t{1}:uint64_t{0}})number(s,n);
+    number(s,r.openFailure?1:0);
+    number(s,r.openFailure?static_cast<uint64_t>(r.openFailure->status):0);
+    number(s,r.openFailure?static_cast<uint64_t>(r.openFailure->stage):0);
+    number(s,r.openFailure?static_cast<uint64_t>(r.openFailure->tlsError):0);
     s+='\n';s+=r.payload;*out=wrap(s);return true;
 }
 bool decodePoolTlsRpcReply(const PoolTlsRpcCommand &c,std::string_view wire,PoolTlsRpcReply *out){
     if(!out)return false;
-    std::array<uint64_t,8> n{};std::string_view payload;if(!fields(wire,"CMTLSR1 ",n,payload)||n[1]>4||n[2]>poolTlsRpcPayloadLimit||n[3]>3||n[4]>4||n[5]>static_cast<unsigned>(E::Capacity)||n[6]>2||n[7]>1)return false;
+    std::array<uint64_t,12> n{};std::string_view payload;if(!fields(wire,"CMTLSR2 ",n,payload)||n[1]>4||n[2]>poolTlsRpcPayloadLimit||n[3]>3||n[4]>5||n[5]>static_cast<unsigned>(E::Capacity)||n[6]>2||n[7]>1||n[8]>1||n[9]>static_cast<unsigned>(PoolTlsCheckStatus::Verified)||n[10]>static_cast<unsigned>(PoolTlsCheckStage::Complete)||n[11]>static_cast<unsigned>(E::Capacity))return false;
+    if(!n[8]&&(n[9]||n[10]||n[11]))return false;
     PoolTlsRpcReply r{n[0],{static_cast<T>(n[1]),static_cast<std::size_t>(n[2]),static_cast<I>(n[3])},static_cast<S>(n[4]),static_cast<E>(n[5]),std::string(payload),static_cast<PoolTlsRpcReady>(n[6]),n[7]!=0};
+    if(n[8])r.openFailure=PoolTlsCheckReply{static_cast<PoolTlsCheckStatus>(n[9]),static_cast<PoolTlsCheckStage>(n[10]),static_cast<E>(n[11])};
     if(!validReply(c,r))return false;
     *out=std::move(r);return true;
 }
@@ -95,14 +117,17 @@ bool PoolTlsRpcGate::time(uint64_t now){if(stopped_)return false;if(!now||now<la
 bool PoolTlsRpcGate::issue(const PoolTlsRpcCommand &c,uint64_t now){
     if(!time(now))return false;
     if(pending_||!validPoolTlsRpcCommand(c)||c.issuedMonoMs>now||now>=c.deadlineMonoMs||sequence_==UINT64_MAX||c.sequence!=sequence_+1||
-        (!attempted_&&c.operation!=O::Open)||(attempted_&&(!opened_||c.operation==O::Open))||
+        (!attempted_&&!opening(c.operation))||(attempted_&&(!opened_||opening(c.operation)))||
         (retryWrite_&&((c.operation==O::Write&&c.payload!=*retryWrite_)||c.operation==O::Read))){stop();return false;}
+    if(!attempted_)mode_=c.operation==O::OpenPlaintext?PoolTlsTransportMode::Plaintext:PoolTlsTransportMode::Tls;
     attempted_=true;sequence_=c.sequence;pending_=c;settled_.reset();return true;
 }
 bool PoolTlsRpcGate::settle(const PoolTlsRpcReply &r,uint64_t now){
     if(!time(now))return false;
     if(!pending_||!validReply(*pending_,r)){stop();return false;}
-    const bool open=pending_->operation==O::Open;
+    if((mode_==PoolTlsTransportMode::Tls&&r.state==S::PlaintextOpen)||
+        (mode_==PoolTlsTransportMode::Plaintext&&(r.state==S::VerifiedOpen||r.state==S::Handshaking))){stop();return false;}
+    const bool open=opening(pending_->operation);
     if(pending_->operation==O::Write){if(r.transfer.status==T::Bytes)retryWrite_.reset();else if(r.state!=S::Failed)retryWrite_=pending_->payload;}
     settled_=r;pending_.reset();if(open)opened_=true;
     if(r.state==S::Failed||r.state==S::Closed)stopped_=true;

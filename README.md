@@ -20,6 +20,8 @@ off). This README says plainly what has and has not been tested.
 | Other Pearl pools | configurable | not tested |
 | HiveOS and other mining distributions | not supported yet | no |
 
+Local development builds can opt into [strict user-pool TLS](docs/pool-tls-presets.md) with `kryptex-tls` and donation off. This feature is separate from the public-release qualifications above; default builds refuse TLS, and Linux TLS requires glibc 2.40 or newer.
+
 ### Measured speed and power
 
 | | RTX 5080 |
@@ -210,7 +212,8 @@ the miner; see [GPU tuning](#gpu-tuning-clocks-power-fans).
 - **F2Pool logs in with your F2Pool account name, not a PRL address.** Create an F2Pool account, set your PRL payout
   address in its settings, and pass `--wallet YOUR_F2POOL_ACCOUNT.rig1`. A prl1 address on F2Pool is refused at start-up.
   Kryptex and HeroMiners take your prl1 address directly.
-- **Not supported yet:** TLS (`stratum+ssl://`) and pool failover (only the first pool is used).
+- **TLS in opt-in local builds:** `-DCANARY_ENABLE_POOL_TLS_RUNTIME=ON` connects an explicit `stratum+ssl://DNS:PORT` user pool through system trust. Donation must be explicitly disabled. Explicit SSL URLs stay strict; saved Prefer TLS can use [separately consented same-host fallback](docs/pool-tls-fallback.md) after qualified pre-handshake network failures. See [entry, build and acceptance limits](docs/pool-tls-runtime.md). Donation TLS remains unavailable.
+- **Pool failover:** only the first pool is used. Secure requests for unused slots are refused.
 
 ## Several GPUs
 
