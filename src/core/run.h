@@ -27,14 +27,15 @@
 #include "platform.h"
 #include "pearl_job_context.h"
 #include "telemetry.h"
+#include "pool_transport_observation.h"
 
 namespace om {
 
 class PearlSourceObservability;
 
-/** Read-only view of the run loop for the product layer (stats endpoint). Called on the run-loop thread, once per report
- *  interval, with the numbers the readout prints. Must not block. */
-class RunObserver {
+/** Read-only view on the run-loop thread. Reports follow the readout interval;
+ *  transport observations also arrive before the first job and on connection changes. Must not block. */
+class RunObserver : public PoolTransportObserver {
    public:
     virtual ~RunObserver() = default;
     virtual void onReport(const MinerStats &stats, const GpuTelemetry &gpu) = 0;

@@ -123,6 +123,19 @@ bool prepare(const TerminalGameValueMessageRequest &request,TerminalMessageReque
     for(const auto &pack:i18n::gameValueLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
     message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
 }
+bool prepare(const TerminalPoolTransportMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
+    if(!bounded(request.language,request.arguments)||request.arguments.size()>1)return false;
+    i18n::MessageArguments values;
+    for(const auto &argument:request.arguments){
+        if(!argument.value.content.invariant||!i18n::validPoolTransportMessageArgument(argument.name,argument.value.content.text))return false;
+        values.emplace_back(argument.name,argument.value.content.text);
+    }
+    if(i18n::poolTransportEnglish(request.key,values).empty())return false;
+    templates.requested=i18n::poolTransportMessage(request.language,request.key);templates.english=i18n::poolTransportMessage("en",request.key);
+    if(templates.requested.text.empty()||templates.english.text.empty())return false;
+    for(const auto &pack:i18n::poolTransportLocalePacks())if(pack.id==request.language)templates.requestedReview=pack.review;
+    message.language=request.language;message.literalTone=request.literalTone;message.arguments=request.arguments;return true;
+}
 bool prepare(const TerminalPoolFieldMessageRequest &request,TerminalMessageRequest &message,terminal_message_detail::Templates &templates){
     if(!terminal_message_detail::validLanguageTag(request.language))return false;
     templates.requested=i18n::poolFieldMessage(request.language,request.key);templates.english=i18n::poolFieldMessage("en",request.key);
@@ -556,6 +569,18 @@ bool renderTerminalGameValueMessage(const TerminalGameValueMessageRequest &reque
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
 }
 bool renderWrappedTerminalGameValueMessage(const TerminalGameValueMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
+}
+bool layoutTerminalPoolTransportMessage(const TerminalPoolTransportMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::layoutTemplate(message,templates,policy,out);
+}
+bool wrapTerminalPoolTransportMessage(const TerminalPoolTransportMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,TerminalMessageRows *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::wrapTemplate(message,templates,policy,maximumLines,out);
+}
+bool renderTerminalPoolTransportMessage(const TerminalPoolTransportMessageRequest &request,const TerminalTextPolicy &policy,ColorLevel color,PaintedTerminalMessageLine *out){
+    TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderTemplate(message,templates,policy,color,out);
+}
+bool renderWrappedTerminalPoolTransportMessage(const TerminalPoolTransportMessageRequest &request,const TerminalTextPolicy &policy,std::size_t maximumLines,ColorLevel color,PaintedTerminalMessageRows *out){
     TerminalMessageRequest message;terminal_message_detail::Templates templates;return out&&prepare(request,message,templates)&&terminal_message_detail::renderWrappedTemplate(message,templates,policy,maximumLines,color,out);
 }
 bool layoutTerminalPoolFieldMessage(const TerminalPoolFieldMessageRequest &request,const TerminalTextPolicy &policy,TerminalMessageLine *out){

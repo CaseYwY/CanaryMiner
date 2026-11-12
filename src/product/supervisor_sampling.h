@@ -31,7 +31,7 @@ inline bool displaySampleInterval(DisplaySampleTime a,DisplaySampleTime b,uint64
 }
 struct DisplaySampleTarget {std::string uuid;int port=0;};
 struct DisplaySampleReading {
-    DisplaySampleTime statsObserved,powerBegan,powerFinished;
+    DisplaySampleTime statsBegan,statsObserved,powerBegan,powerFinished;
     std::optional<StatsSnapshot> stats;
     std::optional<uint64_t> accepted;
     GpuTelemetry telemetry;
@@ -56,11 +56,12 @@ class NativeDisplaySampleReader final:public DisplaySampleReader {
         if(!current(cancel)||slot>=targets_.size())return {};
         DisplaySampleReading out;
         int status=0;std::string body,error;
+        out.statsBegan=displaySampleTime();
         const bool received=httpGetLocal("127.0.0.1",targets_[slot].port,"/api/v1/stats",&status,&body,&error,1);
         out.statsObserved=displaySampleTime();
         if(!current(cancel))return {};
         if(received&&status==200){JsonValue root;StatsSnapshot stats;
-            if(parseJsonStrict(body,&root,&error)&&statsFromJson(root,&stats,&error)){
+            if(parseJsonStrict(body,&root,&error)&&statsFromJson(root,&stats,&error,out.statsBegan.monotonicMs)){
                 uint64_t accepted=0;if(acceptedHistoryCounter(root,&accepted))out.accepted=accepted;
                 out.stats=std::move(stats);
             }

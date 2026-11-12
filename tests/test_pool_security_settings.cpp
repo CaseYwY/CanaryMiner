@@ -94,6 +94,20 @@ void panel(const std::filesystem::path &dir){
     auto values=PoolSecurityPreferences{};values.users[0]=rule();p.open(values);
     for(int width:{20,40,80,120})for(int rows:{12,16,24}){p.field=6;p.page=PoolSecuritySettingsPage::Browse;const auto frame=p.render(width,rows,ColorLevel::None);CHECK(frame.find("Remove user")!=frame.npos&&std::count(frame.begin(),frame.end(),'\n')<rows);
         p.key('v');for(unsigned i=0;i<500;++i)p.key(kKeyPageDown);CHECK(p.render(width,rows,ColorLevel::None).find("[End of TLS review]")!=std::string::npos);p.key(27);}
+    PoolSecuritySettingsContext observed;observed.running=true;observed.effective=PoolTransportPolicy::StrictTls;observed.frozenHost="pool-fixture.test";
+    observed.current={{PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,poolTransportNowMs()},false};
+    p.open({},observed);p.draft.users[0].mode=PoolSecurityMode::StrictTls; // deliberately invalid draft, no TLS URL
+    p.key('v');CHECK(p.page==PoolSecuritySettingsPage::Browse);
+    for(unsigned selected=0;selected<7;++selected){p.field=selected;p.browseScroll=false;const auto before=p.draft;
+        p.key(kKeyPageUp);bool sawCurrent=false,sawHost=false;
+        for(unsigned page=0;page<15;++page){auto frame=p.render(20,12,ColorLevel::None);CHECK(std::count(frame.begin(),frame.end(),'\n')<12);
+            std::replace(frame.begin(),frame.end(),'\n',' ');sawCurrent=sawCurrent||frame.find("Verified TLS")!=frame.npos;
+            sawHost=sawHost||frame.find("pool-fixture.test")!=frame.npos;p.key(kKeyPageDown);}
+        CHECK(sawCurrent&&sawHost&&p.draft==before);
+        p.key('\t');CHECK(!p.browseScroll&&p.field==(selected+1)%7);}
+    p.context.current.observation.observedMonoMs=poolTransportNowMs()-5000;p.key(kKeyPageUp);
+    CHECK(p.render(120,24,ColorLevel::None).find("Unknown")!=std::string::npos);
+    CHECK(p.context.effective==PoolTransportPolicy::StrictTls&&p.context.frozenHost=="pool-fixture.test");
     SettingsPanel root;root.open({});root.draft.color=false;root.group=6;root.groupsFocused=false;CHECK(root.key('\r',{})==SettingsResult::OpenPoolSecurity&&root.fields()==1);
     PoolSecurityPreferencesStore store(dir/"independent-pools.json");openPoolSecurityControls(&root,&store,{});CHECK(root.poolSecurity.visible&&root.dirty());
     root.poolSecurity.draft.users[0]=rule();unsigned ui=0,pool=0;const auto key=[&](int ch){return root.key(ch,[&](const UiPreferences &,std::string *){++ui;return true;},{},{},0,{},{},{},[&](const PoolSecurityPreferences &v,std::string *error){++pool;return store.save(v,error);});};

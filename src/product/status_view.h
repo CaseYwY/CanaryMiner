@@ -9,6 +9,7 @@
 
 #include "json_dom.h"
 #include "stats.h"
+#include "pool_transport_display.h"
 
 namespace om {
 
@@ -32,13 +33,16 @@ inline std::string fixed1(double v) {
 }  // namespace status_detail
 
 /** False when `root` is not a stats-v1 document (the reason is in *error). */
-inline bool renderStatusText(const JsonValue &root, std::string *text, std::string *error) {
+inline bool renderStatusText(const JsonValue &root, std::string *text, std::string *error,
+                             uint64_t observationReferenceMonoMs = poolTransportNowMs()) {
     using namespace status_detail;
     if (!root.isObject() || str(root.find("schema")) != kStatsSchemaId) {
         if (error) *error = std::string("the endpoint did not return a ") + kStatsSchemaId + " document";
         return false;
     }
     std::string t;
+    StatsSnapshot snapshot;
+    if (!statsFromJson(root, &snapshot, error, observationReferenceMonoMs)) return false;
     const long up = static_cast<long>(num(root.find("uptime_seconds")));
     char dur[48];
     snprintf(dur, sizeof(dur), "%02ld:%02ld:%02ld", up / 3600, (up / 60) % 60, up % 60);
@@ -48,6 +52,9 @@ inline bool renderStatusText(const JsonValue &root, std::string *text, std::stri
              (str(pool->find("preset")).empty() ? "" : " (" + str(pool->find("preset")) + ")") + "  " + str(pool->find("state"));
         if (!str(pool->find("last_error")).empty()) t += "  last error: " + str(pool->find("last_error"));
         t += "\n";
+        t += poolTransportText(snapshot.poolTransport)+"\n";
+        const auto transportError=poolTransportErrorText(snapshot.poolTransport);
+        if(!transportError.empty())t+=transportError+"\n";
     }
     if (const JsonValue *devs = root.find("devices")) {
         for (const JsonValue &d : devs->items) {

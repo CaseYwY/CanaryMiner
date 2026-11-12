@@ -21,6 +21,37 @@
 #include <thread>
 
 namespace om {
+namespace {
+// Lives longer than the source and its helper owner. Every early return revokes the last connection view.
+class RunPoolTransportObserver final : public PoolTransportObserver {
+public:
+    RunPoolTransportObserver(RunObserver *observer, bool pool, const volatile sig_atomic_t *stop)
+        : observer_(observer), pool_(pool), stop_(stop) {
+        onPoolTransportObservation({});
+    }
+    ~RunPoolTransportObserver() override {
+        last_.security = pool_ ? PoolTransportSecurity::Disconnected : PoolTransportSecurity::Unknown;
+        last_.effectivePort = 0;
+        onPoolTransportObservation(last_);
+    }
+    void onPoolTransportObservation(const PoolTransportObservation &value) noexcept override {
+        if (!observer_) return;
+        last_ = value;
+        if (pool_ && stop_ && *stop_) {
+            last_.security = PoolTransportSecurity::Disconnected;
+            last_.effectivePort = 0;
+            if (last_.error == PoolTransportError::None) last_.error = PoolTransportError::Cancelled;
+        }
+        last_.observedMonoMs = poolTransportNowMs();
+        observer_->onPoolTransportObservation(last_);
+    }
+private:
+    RunObserver *observer_;
+    bool pool_;
+    const volatile sig_atomic_t *stop_;
+    PoolTransportObservation last_;
+};
+}
 #if defined(CANARY_WORK_PAUSE_TESTING)
 #if CANARY_WORK_PAUSE_TESTING != 1
 #error "CANARY_WORK_PAUSE_TESTING must be exactly 1"
@@ -136,6 +167,7 @@ static void applyMemOc(GpuMonitor &gpu, const char *gpuName) {
 int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
              double gpuMemGB, const char *archLabel, volatile sig_atomic_t *stop,
              const char *gpuUuid, unsigned telemetryDeviceIndex) {
+    RunPoolTransportObserver transportObserver(opt.observer, !opt.bench && !opt.poolHost.empty(), stop);
     if (!opt.poolPlaintextFallbackUrl.empty() && !opt.poolTls) {
         fprintf(stderr, "pool fallback requires its frozen TLS-first user policy\n");
         return 1;
@@ -570,6 +602,15 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     }
 #endif
 
+    if (opt.observer) {
+        if (auto *pool = dynamic_cast<PearlPoolSource *>(source.get())) pool->setTransportObserver(&transportObserver);
+    }
+    const auto observePoolTransport = [&]() {
+        if (opt.observer) {
+            if (auto *pool = dynamic_cast<PearlPoolSource *>(source.get())) pool->observeTransport();
+        }
+    };
+
     // Construct after source so borrowed callbacks are unbound before source
     // destruction on every return or exception. Synthetic runs have no source.
     std::unique_ptr<PearlRunSession> pearlSession;
@@ -679,6 +720,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
     bool workWaitDue = false;
 
     while (!*stop) {
+        observePoolTransport();
 #ifdef CANARY_PEARL_ASYNC_SUBMIT_EXPERIMENT
         if(!pumpDeferred(false))return 1;
         // Stop can arrive while a deferred reply is being polled. Production
@@ -744,6 +786,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
                     return 1;
                 }
             } else fetched = source->fetch(&fresh);
+            observePoolTransport();
 #if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
             if (auto *tlsOwner = dynamic_cast<PoolTlsRuntimeTransport *>(poolTransport.get())) {
                 const auto count = tlsOwner->plaintextConnections();
@@ -1139,6 +1182,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             const bool restartable = !pearlSession->retiredAfterDisconnect() && !pearlSession->snapshot().sourceQuarantined;
             return restartable ? kRunGuardStop : 1;
         }
+        observePoolTransport();
         if(opt.completedWork){const auto completedAfter=algo->completedSearchAttempts();
             if(completedAfter<completedBefore||completedAfter-completedBefore!=batch.nonces||algo->exactMacsPerUnit()!=exactMacs||
                 batch.workUnits/batch.nonces!=algo->workUnitsPerNonce()||
@@ -1270,6 +1314,7 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
             if (sample.valid)
                 stats.addPowerSample(sample.powerMilliwatts / 1000.0, el);
             printReadout(stats, sample, tty);
+            observePoolTransport();
             if (opt.observer) opt.observer->onReport(stats, sample);
             intervalHashes = 0;
             intervalAttempts = 0;

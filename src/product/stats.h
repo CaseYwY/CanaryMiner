@@ -16,10 +16,93 @@
 #include <vector>
 
 #include "json_dom.h"
+#include "../core/pool_transport_observation.h"
 
 namespace om {
 
 constexpr const char *kStatsSchemaId = "canaryminer-stats-v1";
+
+// Mixed is a display aggregate only; a single transport never produces it.
+struct StatsPoolTransport {
+    PoolTransportObservation observation;
+    bool mixed = false;
+};
+
+inline const char *poolTransportErrorName(PoolTransportError error) {
+    switch (error) {
+    case PoolTransportError::None: return "none";
+    case PoolTransportError::Dns: return "dns";
+    case PoolTransportError::Socket: return "socket";
+    case PoolTransportError::Connect: return "connect";
+    case PoolTransportError::Policy: return "policy";
+    case PoolTransportError::Unavailable: return "unavailable";
+    case PoolTransportError::Verification: return "verification";
+    case PoolTransportError::Protocol: return "protocol";
+    case PoolTransportError::Transport: return "transport";
+    case PoolTransportError::Timeout: return "timeout";
+    case PoolTransportError::Cancelled: return "cancelled";
+    case PoolTransportError::Clock: return "clock";
+    case PoolTransportError::Capacity: return "capacity";
+    case PoolTransportError::Authentication: return "authentication";
+    }
+    return nullptr;
+}
+
+inline const char *poolTransportSecurityName(PoolTransportSecurity security) {
+    switch (security) {
+    case PoolTransportSecurity::Unknown: return "unknown";
+    case PoolTransportSecurity::Disconnected: return "disconnected";
+    case PoolTransportSecurity::Connecting: return "connecting";
+    case PoolTransportSecurity::VerifiedTls: return "verified_tls";
+    case PoolTransportSecurity::Plaintext: return "plaintext";
+    }
+    return nullptr;
+}
+
+inline StatsPoolTransport currentPoolTransport(StatsPoolTransport value, uint64_t nowMs) {
+    const auto &o = value.observation;
+    if (!o.observedMonoMs || nowMs < o.observedMonoMs ||
+        nowMs - o.observedMonoMs >= kPoolTransportObservationMaxAgeMs ||
+        !poolTransportErrorName(o.error) || !poolTransportSecurityName(o.security)) return {};
+    if (value.mixed) return o.security == PoolTransportSecurity::Unknown && o.error == PoolTransportError::None && !o.effectivePort ? value : StatsPoolTransport{};
+    if (o.security == PoolTransportSecurity::Unknown) return {};
+    const bool open = o.security == PoolTransportSecurity::VerifiedTls || o.security == PoolTransportSecurity::Plaintext;
+    if (open ? (!o.effectivePort || o.error != PoolTransportError::None) : o.effectivePort != 0) return {};
+    if (o.security == PoolTransportSecurity::Connecting && o.error != PoolTransportError::None) return {};
+    return value;
+}
+
+inline std::string poolTransportJson(StatsPoolTransport value, uint64_t nowMs) {
+    value = currentPoolTransport(value, nowMs);
+    const auto &o = value.observation;
+    return "{\"state\":" + jsonQuote(value.mixed ? "mixed" : poolTransportSecurityName(o.security)) +
+        ",\"error\":" + jsonQuote(poolTransportErrorName(o.error)) + ",\"port\":" + std::to_string(o.effectivePort) +
+        ",\"age_ms\":" + (o.observedMonoMs ? std::to_string(nowMs - o.observedMonoMs) : std::string("null")) + "}";
+}
+
+inline StatsPoolTransport poolTransportFromJson(const JsonValue *value, uint64_t referenceMonoMs) {
+    if (!value || !value->isObject()) return {};
+    const auto *state = value->find("state"), *error = value->find("error"), *port = value->find("port"), *age = value->find("age_ms");
+    if (!state || !state->isString() || !error || !error->isString()) return {};
+    StatsPoolTransport result;
+    bool knownState = false, knownError = false;
+    if (state->text == "mixed") { result.mixed = true; knownState = true; }
+    for (const auto security : {PoolTransportSecurity::Unknown, PoolTransportSecurity::Disconnected, PoolTransportSecurity::Connecting,
+                               PoolTransportSecurity::VerifiedTls, PoolTransportSecurity::Plaintext})
+        if (state->text == poolTransportSecurityName(security)) { result.observation.security = security; knownState = true; }
+    for (const auto code : {PoolTransportError::None, PoolTransportError::Dns, PoolTransportError::Socket, PoolTransportError::Connect,
+                           PoolTransportError::Policy, PoolTransportError::Unavailable, PoolTransportError::Verification, PoolTransportError::Protocol,
+                           PoolTransportError::Transport, PoolTransportError::Timeout, PoolTransportError::Cancelled, PoolTransportError::Clock,
+                           PoolTransportError::Capacity, PoolTransportError::Authentication})
+        if (error->text == poolTransportErrorName(code)) { result.observation.error = code; knownError = true; }
+    uint64_t portValue = 0, ageValue = 0;
+    if (!knownState || !knownError || !port || !port->asUint64(&portValue) || portValue > 65535 ||
+        !age || !age->asUint64(&ageValue) || ageValue >= kPoolTransportObservationMaxAgeMs || referenceMonoMs <= ageValue) return {};
+    result.observation.effectivePort = static_cast<uint16_t>(portValue);
+    // The reference is the HTTP request's original start, never its completion/delivery time.
+    result.observation.observedMonoMs = referenceMonoMs - ageValue;
+    return currentPoolTransport(result, referenceMonoMs);
+}
 
 struct StatsOutcomes {
     uint64_t submitted = 0, acknowledged = 0, accepted = 0, rejected = 0, stale = 0, unknown = 0, pending = 0, guardRetired = 0;
@@ -57,6 +140,7 @@ struct StatsSnapshot {
     std::string state = "starting";  // starting | running | draining | stopped
     double uptimeSeconds = 0;
     std::string poolEndpoint, poolPreset, poolState = "none", poolLastError;
+    StatsPoolTransport poolTransport;
     std::vector<StatsDevice> devices;
     StatsFee fee;
 };
@@ -95,11 +179,12 @@ inline std::string outcomesJson(const StatsOutcomes &o) {
            ",\"local_stale\":" + std::to_string(o.localStale) + "}";
 }
 
-inline std::string statsToJson(const StatsSnapshot &s) {
+inline std::string statsToJson(const StatsSnapshot &s, uint64_t nowMs = poolTransportNowMs()) {
     std::string j = "{\"schema\":" + jsonQuote(kStatsSchemaId) + ",\"version\":" + jsonQuote(s.version) + ",\"state\":" + jsonQuote(s.state) +
                     ",\"uptime_seconds\":" + statsNumber(s.uptimeSeconds);
     j += ",\"pool\":{\"endpoint\":" + jsonQuote(s.poolEndpoint) + ",\"preset\":" + jsonQuote(s.poolPreset) + ",\"state\":" +
-         jsonQuote(s.poolState) + ",\"last_error\":" + jsonQuote(s.poolLastError) + "}";
+         jsonQuote(s.poolState) + ",\"last_error\":" + jsonQuote(s.poolLastError) + ",\"transport\":" +
+         poolTransportJson(s.state == "running" ? s.poolTransport : StatsPoolTransport{}, nowMs) + "}";
     j += ",\"devices\":[";
     for (size_t i = 0; i < s.devices.size(); ++i) {
         const StatsDevice &d = s.devices[i];
@@ -129,7 +214,8 @@ inline std::string statsToJson(const StatsSnapshot &s) {
 
 /** Reads one stats-v1 document back into a snapshot (the supervisor aggregates its workers' endpoints this way). Unknown members are
  *  ignored; numbers that are missing read as zero, and power/temperature `null` read as "not available" (-1). */
-inline bool statsFromJson(const JsonValue &root, StatsSnapshot *out, std::string *error) {
+inline bool statsFromJson(const JsonValue &root, StatsSnapshot *out, std::string *error,
+                          uint64_t observationReferenceMonoMs = poolTransportNowMs()) {
     auto str = [](const JsonValue *v) { return v && v->isString() ? v->text : std::string(); };
     auto num = [](const JsonValue *v) { return v && v->isNumber() ? atof(v->text.c_str()) : 0.0; };
     auto u64 = [](const JsonValue *v) {
@@ -165,6 +251,7 @@ inline bool statsFromJson(const JsonValue &root, StatsSnapshot *out, std::string
         s.poolPreset = str(pool->find("preset"));
         s.poolState = str(pool->find("state"));
         s.poolLastError = str(pool->find("last_error"));
+        if (s.state == "running") s.poolTransport = poolTransportFromJson(pool->find("transport"), observationReferenceMonoMs);
     }
     if (const JsonValue *devs = root.find("devices")) {
         for (const JsonValue &d : devs->items) {
@@ -222,9 +309,11 @@ class StatsPublisher {
         std::lock_guard<std::mutex> lock(mu_);
         mutate(&snap_);
     }
-    StatsSnapshot snapshot() const {
+    StatsSnapshot snapshot(uint64_t nowMs = poolTransportNowMs()) const {
         std::lock_guard<std::mutex> lock(mu_);
-        return snap_;
+        StatsSnapshot result = snap_;
+        result.poolTransport = result.state == "running" ? currentPoolTransport(result.poolTransport, nowMs) : StatsPoolTransport{};
+        return result;
     }
 
    private:

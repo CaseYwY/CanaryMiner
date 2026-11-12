@@ -16,6 +16,7 @@
 #endif
 
 #include "platform.h"
+#include "pool_transport_observation.h"
 
 namespace om {
 
@@ -51,6 +52,8 @@ class PearlPoolTransport {
     virtual PearlPoolTransfer receive(char *out, std::size_t maximum) = 0;
     virtual PearlPoolTransfer send(const char *data, std::size_t length) = 0;
     virtual bool setNonblocking(bool enabled) = 0;
+    // Owner-thread-only, no network IO. Unsupported transports make no security assertion.
+    virtual PoolTransportObservation observation() const { return {}; }
     // Opt-in contract: receive/send are ALWAYS bounded nonblocking steps, including before a socket wait.
     // Progress consumes no application bytes; Bytes on send means that chunk's owned TLS output was flushed.
     // Retried send arguments must remain stable until positive consumption. Legacy TCP stays on its original path.
@@ -77,32 +80,47 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
 
     PearlPoolConnectStatus open(const std::string &host, int port) override {
         close();
+        observedError_ = PoolTransportError::None;
         struct addrinfo hints {};
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_STREAM;
         struct addrinfo *res = nullptr;
         const std::string portText = std::to_string(port);
-        if (getaddrinfo(host.c_str(), portText.c_str(), &hints, &res) != 0)
+        if (getaddrinfo(host.c_str(), portText.c_str(), &hints, &res) != 0) {
+            observedError_ = PoolTransportError::Dns;
             return PearlPoolConnectStatus::DnsFailure;
+        }
         fd_ = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
         if (fd_ == OM_INVALID_SOCKET) {
+            observedError_ = PoolTransportError::Socket;
             freeaddrinfo(res);
             return PearlPoolConnectStatus::SocketFailure;
         }
         socketTimeout(fd_, 20);
         if (::connect(fd_, res->ai_addr, (int)res->ai_addrlen) != 0) {
+            observedError_ = PoolTransportError::Connect;
             OM_CLOSESOCKET(fd_);
             fd_ = OM_INVALID_SOCKET;
             freeaddrinfo(res);
             return PearlPoolConnectStatus::ConnectFailure;
         }
         freeaddrinfo(res);
+        observedConnected_ = true;
+        observedPort_ = port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : 0;
         return PearlPoolConnectStatus::Connected;
     }
 
     bool isOpen() const override { return fd_ != OM_INVALID_SOCKET; }
 
+    PoolTransportObservation observation() const override {
+        const bool connected = isOpen() && observedConnected_ && observedPort_;
+        return {connected ? PoolTransportSecurity::Plaintext : PoolTransportSecurity::Disconnected,
+                observedError_, connected ? observedPort_ : uint16_t{0}, poolTransportNowMs()};
+    }
+
     void close() override {
+        observedConnected_ = false;
+        observedPort_ = 0;
         if (fd_ != OM_INVALID_SOCKET) OM_CLOSESOCKET(fd_);
         fd_ = OM_INVALID_SOCKET;
         savedFlagsValid_ = false;
@@ -117,6 +135,7 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
                                  (milliseconds % 1000) * 1000 };
         const int result =
             select((int)fd_ + 1, &readSet, nullptr, nullptr, &timeout);
+        if (result < 0) observeFailure();
         return result > 0 ? PearlPoolWaitStatus::Ready
                           : result == 0 ? PearlPoolWaitStatus::Timeout
                                         : PearlPoolWaitStatus::Error;
@@ -131,6 +150,7 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
                                  (milliseconds % 1000) * 1000 };
         const int result =
             select((int)fd_ + 1, nullptr, &writeSet, nullptr, &timeout);
+        if (result < 0) observeFailure();
         return result > 0 ? PearlPoolWaitStatus::Ready
                           : result == 0 ? PearlPoolWaitStatus::Timeout
                                         : PearlPoolWaitStatus::Error;
@@ -143,7 +163,7 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
         if (count > 0)
             return {PearlPoolTransferStatus::Bytes,
                     static_cast<std::size_t>(count)};
-        if (count == 0) return {PearlPoolTransferStatus::EndOfStream, 0};
+        if (count == 0) { observedConnected_ = false; return {PearlPoolTransferStatus::EndOfStream, 0}; }
 #if defined(_WIN32)
         const int error = WSAGetLastError();
         if (error == WSAEWOULDBLOCK || error == WSAEINTR)
@@ -152,6 +172,7 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return {PearlPoolTransferStatus::WouldBlock, 0};
 #endif
+        observeFailure();
         return {PearlPoolTransferStatus::Error, 0};
     }
 
@@ -177,7 +198,7 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
         if (count > 0)
             return {PearlPoolTransferStatus::Bytes,
                     static_cast<std::size_t>(count)};
-        if (count == 0) return {PearlPoolTransferStatus::EndOfStream, 0};
+        if (count == 0) { observedConnected_ = false; return {PearlPoolTransferStatus::EndOfStream, 0}; }
 #if defined(_WIN32)
         const int error = WSAGetLastError();
         if (error == WSAEWOULDBLOCK || error == WSAEINTR)
@@ -186,6 +207,7 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return {PearlPoolTransferStatus::WouldBlock, 0};
 #endif
+        observeFailure();
         return {PearlPoolTransferStatus::Error, 0};
     }
 
@@ -211,6 +233,10 @@ class PearlPoolSocketTransport final : public PearlPoolTransport {
     }
 
    private:
+    void observeFailure() { observedConnected_ = false; observedError_ = PoolTransportError::Transport; }
+    bool observedConnected_ = false;
+    uint16_t observedPort_ = 0;
+    PoolTransportError observedError_ = PoolTransportError::None;
     socket_t fd_ = OM_INVALID_SOCKET;
 #if !defined(_WIN32)
     int savedFlags_ = 0;

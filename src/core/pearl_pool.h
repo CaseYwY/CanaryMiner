@@ -1470,6 +1470,33 @@ class PearlPoolSource : public JobSource {
     const char *describe() const override { return desc_.c_str(); }
     const std::string &lastError() const { return lastError_; }
 
+    // Borrowed by the source's owning run thread; the observer must outlive the source.
+    void setTransportObserver(PoolTransportObserver *observer) {
+        transportObserver_ = observer;
+        observeTransport();
+    }
+    PoolTransportObservation transportObservation() const {
+        PoolTransportObservation value;
+        if (transportAttempted_) {
+            if (transportConnected_) {
+                value = transport_->observation();
+                if (!transport_->isOpen()) {
+                    value.security = PoolTransportSecurity::Disconnected;
+                    value.effectivePort = 0;
+                }
+                if (value.error == PoolTransportError::None) value.error = transportError_;
+            } else {
+                value.security = PoolTransportSecurity::Disconnected;
+                value.error = transportError_;
+            }
+        }
+        value.observedMonoMs = poolTransportNowMs();
+        return value;
+    }
+    void observeTransport() const {
+        if (transportObserver_) transportObserver_->onPoolTransportObservation(transportObservation());
+    }
+
     /** H-019 task 3 (H-002 task 2): `offer` asks the pool for the gzip v2 dialect at login.
      * The dialect is used only when the pool's authorize reply says `"type":"v2"`.
      * `upstreamAccount` (may be empty) is the login sent as `worker`; empty means the payout address. */
@@ -2721,6 +2748,11 @@ class PearlPoolSource : public JobSource {
         if (!sourcePolicyValid()) return false;
         if (transport_->isOpen() || sessionToken_ != 0)
             closeConnection(PearlSourceReason::Shutdown, false);
+        transportAttempted_ = true;
+        transportConnected_ = false;
+        transportError_ = PoolTransportError::None;
+        if (transportObserver_) transportObserver_->onPoolTransportObservation(
+            {PoolTransportSecurity::Connecting, PoolTransportError::None, 0, poolTransportNowMs()});
         const std::string port = std::to_string(port_);
         if (observabilityEnabled_) {
             sessionToken_ = afterMailboxPublication(
@@ -2728,6 +2760,8 @@ class PearlPoolSource : public JobSource {
         }
         const PearlPoolConnectStatus status = transport_->open(host_, port_);
         if (status != PearlPoolConnectStatus::Connected) {
+            transportError_ = status == PearlPoolConnectStatus::DnsFailure ? PoolTransportError::Dns :
+                status == PearlPoolConnectStatus::SocketFailure ? PoolTransportError::Socket : PoolTransportError::Connect;
             if (status == PearlPoolConnectStatus::DnsFailure)
                 lastError_ = "DNS lookup failed for " + host_ + ":" + port;
             else if (status == PearlPoolConnectStatus::SocketFailure)
@@ -2738,6 +2772,8 @@ class PearlPoolSource : public JobSource {
             closeConnection(PearlSourceReason::Transport, true);
             return false;
         }
+        transportConnected_ = true;
+        observeTransport(); // verified transport is distinct from the later mining.authorize result
         if (connectionGeneration_ != UINT64_MAX) ++connectionGeneration_;
         pending_.clear();
         if (observabilityEnabled_ && sessionToken_ != 0)
@@ -2747,6 +2783,16 @@ class PearlPoolSource : public JobSource {
     }
 
     void closeConnection(PearlSourceReason reason, bool faulted) {
+        const auto observed = transport_->observation();
+        if (observed.error != PoolTransportError::None) transportError_ = observed.error;
+        else if (faulted && transportError_ == PoolTransportError::None) {
+            transportError_ = reason == PearlSourceReason::Authentication ? PoolTransportError::Authentication :
+                reason == PearlSourceReason::Protocol ? PoolTransportError::Protocol :
+                reason == PearlSourceReason::Timeout ? PoolTransportError::Timeout : PoolTransportError::Transport;
+        }
+        transportAttempted_ = true;
+        transportConnected_ = false;
+        observeTransport(); // revoke before an early return or a potentially blocking helper reap
         if (!transport_->isOpen() && sessionToken_ == 0 && !haveJob_ &&
             !issued_.valid)
             return;
@@ -2971,6 +3017,9 @@ class PearlPoolSource : public JobSource {
     PearlPoolSteadyClock defaultClock_;
     PearlPoolSocketTransport defaultTransport_;
     PearlPoolTransport *transport_ = nullptr;
+    PoolTransportObserver *transportObserver_ = nullptr;
+    bool transportAttempted_ = false, transportConnected_ = false;
+    PoolTransportError transportError_ = PoolTransportError::None;
     PearlSourceMonotonicClock *clock_ = nullptr;
     PearlSourceObservabilityMailbox defaultObservability_;
     PearlSourceObservabilityMailbox *observability_ = nullptr;

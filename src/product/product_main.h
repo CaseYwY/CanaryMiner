@@ -141,9 +141,16 @@ inline int commandStatus(const ProductConfig &cfg, bool rawJson) {
         fprintf(stderr, "status: the stats endpoint is disabled in this configuration\n");
         return kExitStatusDown;
     }
+    if (!platformInit()) {
+        fprintf(stderr, "status: network initialization unavailable\n");
+        return kExitStatusDown;
+    }
+    // The status command returns before the mining entry point initializes Winsock. Own one balanced reference here.
+    struct NetworkScope { ~NetworkScope() { platformShutdown(); } } network;
     int code = 0;
     std::string body, err;
     const std::string host = cfg.api.bind == "localhost" ? std::string("127.0.0.1") : cfg.api.bind;
+    const uint64_t observationReferenceMonoMs = poolTransportNowMs();
     if (!httpGetLocal(host, cfg.api.port, "/api/v1/stats", &code, &body, &err)) {
         fprintf(stderr, "status: %s\n", err.c_str());
         return kExitStatusDown;
@@ -152,7 +159,7 @@ inline int commandStatus(const ProductConfig &cfg, bool rawJson) {
     if (rawJson) { printf("%s\n", body.c_str()); return kExitOk; }
     JsonValue root;
     std::string text;
-    if (!parseJsonStrict(body, &root, &err) || !renderStatusText(root, &text, &err)) {
+    if (!parseJsonStrict(body, &root, &err) || !renderStatusText(root, &text, &err, observationReferenceMonoMs)) {
         fprintf(stderr, "status: %s\n", err.c_str());
         return kExitStatusDown;
     }
@@ -165,6 +172,15 @@ class StatsObserver final : public RunObserver {
    public:
     StatsObserver(StatsPublisher *pub, const StatsDevice &base, const std::string &poolEndpoint, const std::string &poolPreset)
         : pub_(pub), base_(base), poolEndpoint_(poolEndpoint), poolPreset_(poolPreset) {}
+
+    void onPoolTransportObservation(const PoolTransportObservation &observation) noexcept override {
+        try {
+            pub_->update([&](StatsSnapshot *snap) {
+                snap->poolTransport = currentPoolTransport({observation, false}, poolTransportNowMs());
+                if (snap->state == "starting") snap->state = "running";
+            });
+        } catch (...) { /* A failed display update cannot grant control; prior observations still expire. */ }
+    }
 
     void onReport(const MinerStats &s, const GpuTelemetry &g) override {
         StatsDevice d = base_;
@@ -197,6 +213,7 @@ class StatsObserver final : public RunObserver {
         carry_.pending = 0;
         carryUptime_ = lastUptime_;
         last_ = StatsOutcomes{};
+        onPoolTransportObservation({PoolTransportSecurity::Disconnected, PoolTransportError::None, 0, poolTransportNowMs()});
     }
 
     static StatsOutcomes statsOutcomesFromRun(const MinerStats &s) {

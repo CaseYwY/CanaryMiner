@@ -8,6 +8,7 @@
 #include "../src/product/stats_server.h"
 #include "../src/product/status_view.h"
 #include "../src/core/submit_outcome.h"
+#include "../src/core/pearl_pool.h"
 #include "product_test_util.h"
 
 using namespace om;
@@ -55,7 +56,98 @@ static StatsSnapshot sample() {
     return s;
 }
 
-int main() {
+static std::string captureStatus(const ProductConfig &cfg) {
+    std::fflush(stdout);
+    FILE *file=std::tmpfile();CHECK(file!=nullptr);if(!file)return {};
+#if defined(_WIN32)
+    const int saved=_dup(_fileno(stdout));CHECK(saved>=0);
+    CHECK(_dup2(_fileno(file),_fileno(stdout))==0);
+#else
+    const int saved=dup(fileno(stdout));CHECK(saved>=0);
+    CHECK(dup2(fileno(file),fileno(stdout))>=0);
+#endif
+    const int code=commandStatus(cfg,false);std::fflush(stdout);
+#if defined(_WIN32)
+    CHECK(_dup2(saved,_fileno(stdout))==0);_close(saved);
+#else
+    CHECK(dup2(saved,fileno(stdout))>=0);close(saved);
+#endif
+    CHECK(code==kExitOk);std::rewind(file);std::string result;char buffer[512];
+    for(std::size_t n;(n=std::fread(buffer,1,sizeof(buffer),file))!=0;)result.append(buffer,n);
+    std::fclose(file);return result;
+}
+
+static void testPoolTransport() {
+    const uint64_t began=10000;
+    StatsSnapshot value=sample();value.poolTransport={{PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,began},false};
+    CHECK(has(statsToJson(value,began+4999),"\"state\":\"verified_tls\""));
+    CHECK(!has(statsToJson(value,began+5000),"verified_tls"));
+    CHECK(!has(statsToJson(value,began-1),"verified_tls"));
+    value.state="draining";CHECK(!has(statsToJson(value,began),"verified_tls"));value.state="running";
+    JsonValue wire;std::string error;StatsSnapshot decoded;
+    CHECK(parseJsonStrict(statsToJson(value,began+1000),&wire,&error)&&statsFromJson(wire,&decoded,&error,20000));
+    CHECK(decoded.poolTransport.observation.observedMonoMs==19000&&decoded.poolTransport.observation.effectivePort==8048);
+    CHECK(currentPoolTransport(decoded.poolTransport,23999).observation.security==PoolTransportSecurity::VerifiedTls);
+    CHECK(currentPoolTransport(decoded.poolTransport,24000).observation.security==PoolTransportSecurity::Unknown);
+    // Parsing older or malformed optional observations must retain unrelated counters, never invent encryption.
+    for(const auto &transport:std::vector<std::string>{"",",\"transport\":null",",\"transport\":{}",
+        ",\"transport\":{\"state\":\"verified_tls\",\"error\":\"none\",\"port\":8048,\"age_ms\":null}",
+        ",\"transport\":{\"state\":\"verified_tls\",\"error\":\"none\",\"port\":8048,\"age_ms\":5000}",
+        ",\"transport\":{\"state\":\"verified_tls\",\"error\":\"none\",\"port\":0,\"age_ms\":0}",
+        ",\"transport\":{\"state\":\"verified_tls\",\"error\":\"verification\",\"port\":8048,\"age_ms\":0}",
+        ",\"transport\":{\"state\":\"verified_tls\",\"error\":\"PRIVATE-secret\",\"port\":8048,\"age_ms\":0}",
+        ",\"transport\":{\"state\":\"PRIVATE-secret\",\"error\":\"none\",\"port\":8048,\"age_ms\":0}",
+        ",\"transport\":{\"state\":\"plaintext\",\"error\":\"none\",\"port\":65536,\"age_ms\":-1}"}){
+        CHECK(parseJsonStrict("{\"schema\":\"canaryminer-stats-v1\",\"state\":\"running\",\"uptime_seconds\":17,\"pool\":{\"state\":\"mining\""+transport+"}}",&wire,&error));
+        CHECK(statsFromJson(wire,&decoded,&error,began)&&decoded.uptimeSeconds==17&&decoded.poolTransport.observation.security==PoolTransportSecurity::Unknown&&!decoded.poolTransport.mixed);
+        CHECK(!has(statsToJson(decoded,began),"PRIVATE-secret"));
+    }
+    value.poolTransport={{PoolTransportSecurity::Unknown,PoolTransportError::None,0,began},true};
+    CHECK(parseJsonStrict(statsToJson(value,began+100),&wire,&error)&&statsFromJson(wire,&decoded,&error,began+200));
+    CHECK(decoded.poolTransport.mixed&&has(statsToJson(decoded,began+300),"\"state\":\"mixed\""));
+    StatsPublisher publisher;StatsObserver observer(&publisher,{},"pool-fixture.test:8048","");
+    const auto now=poolTransportNowMs();observer.onPoolTransportObservation({PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,now});
+    CHECK(publisher.snapshot(now+4999).poolTransport.observation.security==PoolTransportSecurity::VerifiedTls);
+    CHECK(publisher.snapshot(now+5000).poolTransport.observation.security==PoolTransportSecurity::Unknown);
+    observer.foldRun();CHECK(publisher.snapshot().poolTransport.observation.security==PoolTransportSecurity::Disconnected);
+    class Refused final:public PearlPoolTransport {
+        bool attempted=false;
+    public:
+        unsigned writes=0;
+        PearlPoolConnectStatus open(const std::string &,int)override{attempted=true;return PearlPoolConnectStatus::ConnectFailure;}
+        bool isOpen()const override{return false;}void close()override{}
+        PearlPoolWaitStatus waitReadable(int)override{return PearlPoolWaitStatus::Error;}
+        PearlPoolWaitStatus waitWritable(int)override{return PearlPoolWaitStatus::Error;}
+        PearlPoolTransfer receive(char *,std::size_t)override{return {};}
+        PearlPoolTransfer send(const char *,std::size_t)override{++writes;return {};}
+        bool setNonblocking(bool)override{return false;}
+        PoolTransportObservation observation()const override{return {PoolTransportSecurity::Disconnected,attempted?PoolTransportError::Verification:PoolTransportError::None,0,poolTransportNowMs()};}
+    } refused;
+    {
+        PearlPoolSource source("pool-fixture.test",8048,"PRIVATE-wallet","PRIVATE-worker",{PearlNetwork::Mainnet,PearlTargetSemantics::BaseBeforePenalty},"",&refused);
+        source.setTransportObserver(&observer);Job job;CHECK(!source.fetch(&job)&&refused.writes==0);
+        const auto failed=publisher.snapshot();CHECK(failed.poolTransport.observation.security==PoolTransportSecurity::Disconnected&&failed.poolTransport.observation.error==PoolTransportError::Verification);
+        const auto document=statsToJson(failed);CHECK(has(document,"verification")&&!has(document,"PRIVATE-wallet")&&!has(document,"PRIVATE-worker"));
+    }
+    // Exercise commandStatus itself: a successful HTTP response must not renew an old producer observation.
+    CHECK(platformInit());StatsServer server;std::atomic<bool> delayed{true};
+    CHECK(server.start("127.0.0.1",0,[&]{auto s=sample();const auto at=poolTransportNowMs();
+        s.poolTransport={{PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,at-(delayed?4800:0)},false};
+        auto text=statsToJson(s,at);if(delayed)std::this_thread::sleep_for(std::chrono::milliseconds(300));return text;},"{}",&error));
+    ProductConfig cfg;cfg.api.port=server.port();const auto aged=captureStatus(cfg);
+    CHECK(has(aged,"First user pool transport: Unknown")&&!has(aged,"Verified TLS"));
+    delayed=false;const auto fresh=captureStatus(cfg);CHECK(has(fresh,"Verified TLS (port 8048)"));
+    server.stop();platformShutdown();
+}
+
+int main(int argc, char **argv) {
+    // A fresh process intentionally has no external platformInit: Python owns the listening socket.
+    if(argc==3&&std::string(argv[1])=="--status-test"){
+        char *end=nullptr;const auto port=std::strtoul(argv[2],&end,10);
+        if(!end||*end||port==0||port>65535)return 2;
+        ProductConfig cfg;cfg.api.port=static_cast<int>(port);return commandStatus(cfg,false);
+    }
+    testPoolTransport();
     // ---- JSON document
     const StatsSnapshot snap = sample();
     const std::string json = statsToJson(snap);
