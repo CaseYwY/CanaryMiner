@@ -1,5 +1,6 @@
 // Synthetic policy, frozen worker arguments and donation isolation. No device, network, helper or store access.
 #include "../src/product/pool_tls_runtime_policy.h"
+#include "../src/product/pool_tls_migration.h"
 #include "../src/product/supervisor.h"
 #include "../src/product/fee_session.h"
 #include "product_test_util.h"
@@ -153,6 +154,51 @@ int main(){
         CHECK(std::find(presetArgs.begin(),presetArgs.end(),presetPolicy.frozenUrl)!=presetArgs.end());
         CHECK(std::count(presetArgs.begin(),presetArgs.end(),"--no-donation")==1&&
               std::find(presetArgs.begin(),presetArgs.end(),"--worker-pool-fallback")==presetArgs.end());
+    }
+
+    // The migration proposal follows the configured first tuple, and the saved rule uses existing strict admission.
+    {
+        ProductConfig legacy;
+        legacy.donation=false;
+        CHECK(poolTlsMigrationCandidate(legacy)==PoolTlsMigrationCandidate::None);
+        legacy.pools.resize(1);
+        CHECK(parsePoolSpec("kryptex",&legacy.pools.front(),&error));
+        const auto candidate=poolTlsMigrationCandidate(legacy);
+        const char *sourceUrl=poolTlsMigrationSource(candidate);
+        const char *targetUrl=poolTlsMigrationTarget(candidate);
+        CHECK(candidate==PoolTlsMigrationCandidate::KryptexUsTcp7048);
+        CHECK(sourceUrl&&std::string(sourceUrl)=="stratum+tcp://prl-us.kryptex.network:7048");
+        CHECK(targetUrl&&std::string(targetUrl)=="stratum+ssl://prl-us.kryptex.network:8048");
+        CHECK(!poolTlsMigrationSource(PoolTlsMigrationCandidate::None)&&!poolTlsMigrationTarget(PoolTlsMigrationCandidate::None));
+        for(const auto &other:{"prl-us.kryptex.network:7000","prl-us.kryptex.network.example:7048",
+                              "prl-hk.kryptex.network:7048","stratum+ssl://prl-us.kryptex.network:7048","kryptex-tls"}){
+            auto changed=legacy;
+            changed.pools.insert(changed.pools.begin(),PoolEntry{});
+            CHECK(parsePoolSpec(other,&changed.pools.front(),&error));
+            CHECK(poolTlsMigrationCandidate(changed)==PoolTlsMigrationCandidate::None);
+        }
+        auto &source=legacy.pools.front();
+        source.account="synthetic-account";
+        source.compression="off";
+        source.targetSemantics="final-adjusted-bound";
+        auto explicitTcp=legacy;
+        CHECK(parsePoolSpec("stratum+tcp://prl-us.kryptex.network:7048",&explicitTcp.pools.front(),&error));
+        CHECK(poolTlsMigrationCandidate(explicitTcp)==candidate);
+        PoolSecurityPreferences migration;
+        migration.users[0]={PoolSecurityMode::StrictTls,targetUrl?targetUrl:"",{},false};
+        PoolTlsRuntimePolicy resolved;
+        CHECK(resolvePoolTlsRuntimePolicy(legacy,migration,true,true,&resolved,&error));
+        CHECK(resolved.tls&&resolved.port==8048&&resolved.frozenUrl==migration.users[0].tlsUrl&&resolved.fallbackUrl.empty());
+        CHECK(!resolvePoolTlsRuntimePolicy(legacy,migration,true,false,&resolved,&error)&&error.find("unavailable")!=error.npos);
+        auto withDonation=legacy;withDonation.donation=true;
+        CHECK(!resolvePoolTlsRuntimePolicy(withDonation,migration,true,true,&resolved,&error)&&error.find("--no-donation")!=error.npos);
+        auto workerConfig=legacy;
+        CHECK(applyFrozenPoolTlsEndpoint(resolved.frozenUrl,&workerConfig));
+        const auto &workerPool=workerConfig.pools.front();
+        CHECK(workerPool.tls&&workerPool.port==8048&&workerPool.preset=="kryptex"&&poolPresetSpeaksV2(workerPool.preset));
+        CHECK(workerPool.network==source.network&&workerPool.targetSemantics==source.targetSemantics&&
+              workerPool.compression==source.compression&&workerPool.account==source.account);
+        CHECK(source.port==7048&&!source.tls&&poolTlsMigrationCandidate(legacy)==candidate);
     }
 
     // The early refusal must precede every scheduler clock, storage or run callback, even if miscalled internally.

@@ -7,6 +7,8 @@
 #include "pool_panel_messages.h"
 #include "pool_value_messages.h"
 #include "pool_rule_messages.h"
+#include "pool_migration_messages.h"
+#include "pool_tls_migration.h"
 #include <functional>
 namespace om {
 enum class PoolSecuritySettingsResult { None, Close, Quit };
@@ -16,6 +18,9 @@ struct PoolSecuritySettingsContext {
     PoolTransportPolicy effective=PoolTransportPolicy::Unknown;
     StatsPoolTransport current{};
     std::string frozenHost{};
+    PoolTlsMigrationCandidate migrationCandidate=PoolTlsMigrationCandidate::None;
+    bool migrationRuntimeAvailable=false;
+    bool migrationDonationEnabled=false;
 };
 class PoolSecuritySettingsPanel {
    public:
@@ -45,6 +50,7 @@ class PoolSecuritySettingsPanel {
             return PoolSecuritySettingsResult::None;
         }
         if(key=='q'||key=='Q')return PoolSecuritySettingsResult::Quit;
+        if(page==PoolSecuritySettingsPage::Browse&&(key=='m'||key=='M')){migrate();return PoolSecuritySettingsResult::None;}
         if(page==PoolSecuritySettingsPage::Browse&&(key==kKeyPageUp||key==kKeyPageDown)){
             if(!browseScroll){browseScroll=true;browseOffset=0;}
             else if(key==kKeyPageUp)browseOffset=browseOffset>3?browseOffset-3:0;
@@ -82,10 +88,20 @@ class PoolSecuritySettingsPanel {
         using ValueKey=i18n::PoolValueMessageKey;
         if(rows>0&&rows<12)return i18n::poolPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::poolPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::poolPanelEnglish(PanelKey::ShortKeys)+"\n";
         const auto footer=wrapText(i18n::poolPanelEnglish(page==PoolSecuritySettingsPage::Edit?PanelKey::FooterEdit:page==PoolSecuritySettingsPage::Review?
-            PanelKey::FooterReview:PanelKey::FooterBrowse)+(page==PoolSecuritySettingsPage::Browse?" "+i18n::poolTransportEnglish(i18n::PoolTransportMessageKey::Scroll):std::string{}),width);
+            PanelKey::FooterReview:PanelKey::FooterBrowse)+(page==PoolSecuritySettingsPage::Browse?" "+i18n::poolTransportEnglish(i18n::PoolTransportMessageKey::Scroll)+
+                (poolTlsMigrationTarget(context.migrationCandidate)?" "+i18n::poolMigrationEnglish(i18n::PoolMigrationMessageKey::Action):std::string{}):std::string{}),width);
         const auto budget=rows>0?static_cast<std::size_t>(std::max(1,rows-static_cast<int>(footer.size())-2)):4096;
         std::vector<std::string> body;std::size_t focus=0;auto add=[&](const std::string &s){const auto lines=wrapText(s,width);body.insert(body.end(),lines.begin(),lines.end());};
         add(page==PoolSecuritySettingsPage::Edit&&field==4?i18n::poolPanelEnglish(PanelKey::PlaintextRisk):i18n::poolPanelEnglish(PanelKey::Title)+(dirty()?i18n::poolPanelEnglish(PanelKey::UnsavedSuffix):std::string{}));
+        if(page==PoolSecuritySettingsPage::Review&&migrationDraft()){
+            using Key=i18n::PoolMigrationMessageKey;
+            add(i18n::poolMigrationEnglish(Key::Heading));
+            add(i18n::poolMigrationEnglish(Key::Source,{{"endpoint",poolTlsMigrationSource(context.migrationCandidate)}}));
+            add(i18n::poolMigrationEnglish(Key::Target,{{"endpoint",poolTlsMigrationTarget(context.migrationCandidate)}}));
+            add(i18n::poolMigrationEnglish(Key::Fallback));add(i18n::poolMigrationEnglish(Key::Preserved));
+            if(!context.migrationRuntimeAvailable)add(i18n::poolMigrationEnglish(Key::RuntimeUnavailable));
+            if(context.migrationDonationEnabled)add(i18n::poolMigrationEnglish(Key::DonationEnabled));
+        }
         if(page==PoolSecuritySettingsPage::Browse||page==PoolSecuritySettingsPage::Review){
             add(poolTransportText(context.running?context.current:StatsPoolTransport{}));
             add(poolTransportPolicyText(context.effective));
@@ -123,6 +139,24 @@ class PoolSecuritySettingsPanel {
         return result;
     }
    private:
+    bool migrationDraft()const{
+        const auto target=poolTlsMigrationTarget(context.migrationCandidate);
+        if(!target||!poolTlsMigrationSource(context.migrationCandidate)||active.users.empty()||active.users.front()!=PoolSecurityRule{}||
+            draft.users.size()!=active.users.size()||draft.donation!=active.donation)return false;
+        if(draft.users.front()!=PoolSecurityRule{PoolSecurityMode::StrictTls,target,{},false})return false;
+        return std::equal(active.users.begin()+1,active.users.end(),draft.users.begin()+1);
+    }
+    void migrate(){
+        using Key=i18n::PoolMigrationMessageKey;
+        const auto target=poolTlsMigrationTarget(context.migrationCandidate);
+        if(!target||!poolTlsMigrationSource(context.migrationCandidate)){message=i18n::poolMigrationEnglish(Key::NoCandidate);return;}
+        if(dirty()){message=i18n::poolMigrationEnglish(Key::DraftBlocked);return;}
+        if(active.users.empty()||active.users.front()!=PoolSecurityRule{}||!validPoolSecurityPreferences(active)){
+            message=i18n::poolMigrationEnglish(Key::DeclarationBlocked);return;}
+        // Only a copied first-user declaration changes; saving still requires the ordinary explicit Review action.
+        auto next=draft;next.users.front()={PoolSecurityMode::StrictTls,target,{},false};draft=std::move(next);
+        donation=false;slot=field=0;browseScroll=false;review();
+    }
     PoolSecurityRule &selected(){return donation?draft.donation:draft.users[slot];}
     const PoolSecurityRule &selected()const{return donation?draft.donation:draft.users[slot];}
     static std::string reviewRule(const PoolSecurityRule &r,bool before){

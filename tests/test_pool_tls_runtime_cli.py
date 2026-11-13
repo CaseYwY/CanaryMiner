@@ -73,6 +73,16 @@ def main():
         case('strict preset worker rejects inherited fallback', config=secure_preset,
              args=secure_worker + ['--worker-pool-fallback', plain_url])
         case('legacy preset retains TCP compatibility', config={**base, 'pools': ['kryptex']}, code=97)
+        migrated_source = {**base, 'pools': ['kryptex']}
+        migrated_rule = {**strict, 'tls_url': secure_url}
+        migrated = dict(schema_version=1, user_pools=[migrated_rule], donation=empty)
+        result = case('saved legacy migration enters strict admission', config=migrated_source, prefs=migrated, admitted=True)
+        marker = (b'Strict user-pool TLS: system trust and DNS verification; no plaintext fallback'
+                  if available else b'pool TLS runtime is unavailable in this build')
+        assert marker in result.stderr
+        result = case('saved legacy migration still requires donation off',
+                      config={**migrated_source, 'donation': True}, prefs=migrated)
+        assert (b'user-pool TLS requires --no-donation' if available else marker) in result.stderr
         case('f2pool account only', config={**base, 'wallet': '', 'pools': [dict(url='stratum+ssl://pearl.f2pool.com:5501', account='synthetic_account')]}, admitted=True)
         prefs = dict(schema_version=1, user_pools=[strict], donation=empty)
         tcp = {**base, 'pools': ['pool-fixture.invalid:1']}

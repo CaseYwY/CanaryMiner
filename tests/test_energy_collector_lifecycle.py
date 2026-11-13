@@ -72,7 +72,8 @@ def main():
             try:
                 fields = Path('/proc', str(self.pid), 'stat').read_text().split(') ', 1)[1].split()
                 return fields[0], fields[19]
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
+                # procfs can report ESRCH if the task exits between open and read.
                 return '', ''
 
         def exited(self):

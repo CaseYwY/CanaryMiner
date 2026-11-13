@@ -39,6 +39,7 @@
 #include "../product/prerun_preferences.h"
 #include "../product/startup_config.h"
 #include "../product/pool_tls_runtime_policy.h"
+#include "../product/pool_tls_migration.h"
 #include "../product/manual_market.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
@@ -152,6 +153,8 @@ int main(int argc, char **argv) {
             return kExitConfig;
         }
     }
+    // Capture the configured source after CLI overrides, before the session applies an effective TLS endpoint.
+    const auto migrationCandidate=poolTlsMigrationCandidate(cfg);
     LanguageSettingsContext languageContext;
     languageContext.cliOverrides=explicitPresentation;
     const auto loadLanguageContext=[&](const LanguagePreferences &saved,bool available){
@@ -174,11 +177,15 @@ int main(int argc, char **argv) {
         if(g_stop)return kExitOk;
         if(!nativeProcessEpochCurrent(inspected.nativeEpoch))return kExitFaultLatched;
         loadLanguageContext(inspected.language,inspected.languageAvailable);
+        PoolSecuritySettingsContext poolContext;
+        poolContext.migrationCandidate=migrationCandidate;
+        poolContext.migrationRuntimeAvailable=poolTlsRuntimeAvailable();
+        poolContext.migrationDonationEnabled=cfg.donation;
 #if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
         const auto factory=[state=cfg.stateDir](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices,{},languageContext);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices,{},languageContext,poolContext);
 #else
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy,{},{},{},{},{},{},languageContext);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy,{},{},{},{},{},{},languageContext,poolContext);
 #endif
     }
 
@@ -1056,6 +1063,9 @@ int main(int argc, char **argv) {
         so.runtimeContext = runtimeContext;
         so.gamePreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "game-preferences.json").u8string();
         so.poolSecurityPreferencesPath=(std::filesystem::u8path(cfg.stateDir)/"pool-security-preferences.json").u8string();
+        so.poolMigrationCandidate=migrationCandidate;
+        so.poolMigrationRuntimeAvailable=poolTlsRuntimeAvailable();
+        so.poolMigrationDonationEnabled=cfg.donation;
         so.languagePreferencesPath=(std::filesystem::u8path(cfg.stateDir)/"language-preferences.json").u8string();
         so.languageContext=languageContext;so.languageContext.running=true;
         so.gameContext.running=true;so.gameContext.effective=gameDefaults;
