@@ -83,6 +83,22 @@ def main():
         result = case('saved legacy migration still requires donation off',
                       config={**migrated_source, 'donation': True}, prefs=migrated)
         assert (b'user-pool TLS requires --no-donation' if available else marker) in result.stderr
+        hk_url = 'stratum+ssl://prl-hk.kryptex.network:8048'
+        hk_plain = 'stratum+tcp://prl-hk.kryptex.network:7048'
+        hk_preset = {**base, 'pools': ['kryptex-hk-tls']}
+        hk_migrated = {**migrated, 'user_pools': [{**migrated_rule, 'tls_url': hk_url}]}
+        hk_prefer = {**migrated, 'user_pools': [dict(mode='prefer_tls', tls_url=hk_url,
+                                                    plaintext_url=hk_plain, plaintext_consent=True)]}
+        result = case('Hong Kong preset stays strict with saved fallback consent', config=hk_preset,
+                      prefs=hk_prefer, admitted=True)
+        assert marker in result.stderr
+        case('Hong Kong preset CLI', args=['--pool', 'kryptex-hk-tls'], admitted=True)
+        case('Hong Kong preset requires donation off', config={**hk_preset, 'donation': True})
+        result = case('Hong Kong migration admission', config={**base, 'pools': [hk_plain]},
+                      prefs=hk_migrated, admitted=True)
+        assert marker in result.stderr
+        case('Hong Kong migration cannot redirect a US source', config=migrated_source, prefs=hk_migrated)
+        case('US declaration conflicts with Hong Kong preset', config=hk_preset, prefs=migrated)
         case('f2pool account only', config={**base, 'wallet': '', 'pools': [dict(url='stratum+ssl://pearl.f2pool.com:5501', account='synthetic_account')]}, admitted=True)
         prefs = dict(schema_version=1, user_pools=[strict], donation=empty)
         tcp = {**base, 'pools': ['pool-fixture.invalid:1']}

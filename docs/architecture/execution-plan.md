@@ -73,6 +73,10 @@ At `1278d24`, the complete Linux/WSL `tools/test_all.sh` passed with 622 CTests 
 
 [P-12m](../pool-tls-migration.md) adds an explicit review and save for the configured legacy Kryptex US first pool. The existing preference owner saves a strict same-host declaration for the next explicit start, with fallback disabled and the ordinary startup checks intact. The pinned Linux gate passed 626 entries with one environment skip, and the original skipped test passed 35 checks separately. Actual Windows and Linux idle settings each passed three migration scenarios.
 
+## P-12n Hong Kong strict preset and migration review
+
+`kryptex-hk-tls` selects the official Hong Kong strict endpoint. The first user pool at `prl-hk.kryptex.network:7048` can review a same-host migration to TLS 8048 through the existing explicit Save flow. [Presets](../pool-tls-presets.md) · [Migration](../pool-tls-migration.md)
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

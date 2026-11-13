@@ -171,7 +171,9 @@ int main(){
         CHECK(targetUrl&&std::string(targetUrl)=="stratum+ssl://prl-us.kryptex.network:8048");
         CHECK(!poolTlsMigrationSource(PoolTlsMigrationCandidate::None)&&!poolTlsMigrationTarget(PoolTlsMigrationCandidate::None));
         for(const auto &other:{"prl-us.kryptex.network:7000","prl-us.kryptex.network.example:7048",
-                              "prl-hk.kryptex.network:7048","stratum+ssl://prl-us.kryptex.network:7048","kryptex-tls"}){
+                              "prl-hk.kryptex.network:8048","prl-hk.kryptex.network.example:7048",
+                              "stratum+ssl://prl-hk.kryptex.network:7048","stratum+ssl://prl-us.kryptex.network:7048",
+                              "kryptex-tls","kryptex-hk-tls"}){
             auto changed=legacy;
             changed.pools.insert(changed.pools.begin(),PoolEntry{});
             CHECK(parsePoolSpec(other,&changed.pools.front(),&error));
@@ -199,6 +201,19 @@ int main(){
         CHECK(workerPool.network==source.network&&workerPool.targetSemantics==source.targetSemantics&&
               workerPool.compression==source.compression&&workerPool.account==source.account);
         CHECK(source.port==7048&&!source.tls&&poolTlsMigrationCandidate(legacy)==candidate);
+
+        auto hongKong=legacy;
+        CHECK(parsePoolSpec("stratum+tcp://prl-hk.kryptex.network:7048",&hongKong.pools.front(),&error));
+        const auto hk=poolTlsMigrationCandidate(hongKong);
+        CHECK(hk==PoolTlsMigrationCandidate::KryptexHkTcp7048);
+        const auto hkSource=poolTlsMigrationSource(hk), hkTarget=poolTlsMigrationTarget(hk);
+        CHECK(hkSource&&std::string(hkSource)=="stratum+tcp://prl-hk.kryptex.network:7048");
+        CHECK(hkTarget&&std::string(hkTarget)=="stratum+ssl://prl-hk.kryptex.network:8048");
+        CHECK(!resolvePoolTlsRuntimePolicy(hongKong,migration,true,true,&resolved,&error));
+        migration.users[0].tlsUrl=hkTarget?hkTarget:"";
+        CHECK(resolvePoolTlsRuntimePolicy(hongKong,migration,true,true,&resolved,&error));
+        CHECK(resolved.tls&&resolved.host=="prl-hk.kryptex.network"&&resolved.port==8048&&resolved.fallbackUrl.empty());
+        CHECK(!resolvePoolTlsRuntimePolicy(legacy,migration,true,true,&resolved,&error));
     }
 
     // The early refusal must precede every scheduler clock, storage or run callback, even if miscalled internally.

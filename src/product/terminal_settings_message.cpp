@@ -127,7 +127,7 @@ bool prepare(const TerminalPoolMigrationMessageRequest &request,TerminalMessageR
     if(!bounded(request.language,request.arguments)||request.arguments.size()>1)return false;
     i18n::MessageArguments values;
     for(const auto &argument:request.arguments){
-        if(!argument.value.content.invariant||!i18n::validPoolMigrationMessageArgument(argument.name,argument.value.content.text))return false;
+        if(!argument.value.content.invariant||!i18n::validPoolMigrationMessageArgument(request.key,argument.name,argument.value.content.text))return false;
         values.emplace_back(argument.name,argument.value.content.text);
     }
     if(i18n::poolMigrationEnglish(request.key,values).empty())return false;

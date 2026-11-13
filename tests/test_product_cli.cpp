@@ -49,6 +49,9 @@ int main() {
               e.preset == "kryptex" && e.policyKnown && e.network == "mainnet" && e.targetSemantics == "base-before-penalty" &&
               e.compression == "auto" && poolPresetSpeaksV2(e.preset));
         CHECK(parsePoolSpec("kryptex", &e, &err) && !e.tls && e.port == 7048 && e.preset == "kryptex");
+        CHECK(parsePoolSpec("kryptex-hk-tls", &e, &err) && e.tls && e.host == "prl-hk.kryptex.network" && e.port == 8048 &&
+              e.preset == "kryptex" && e.policyKnown && e.network == "mainnet" && e.targetSemantics == "base-before-penalty" &&
+              e.compression == "auto" && poolPresetSpeaksV2(e.preset));
         CHECK(parsePoolSpec("stratum+tcp://prl-us.kryptex.network:8048", &e, &err) && !e.tls && e.port == 8048);
         CHECK(parsePoolSpec("stratum+ssl://prl-us.kryptex.network:7048", &e, &err) && e.tls && e.port == 7048);
         CHECK(!parsePoolSpec("KRYPTEX-TLS", &e, &err));
@@ -178,7 +181,7 @@ int main() {
             pool.port = 7;
             CHECK(!parsePoolSpec("stratum+tcp://fixture-user:" + payload + "@fixture.invalid:3333", &pool, &err) &&
                   pool.host == "fixture-kept.invalid" && pool.port == 7 &&
-                  err == "pool is neither a preset (kryptex, kryptex-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted");
+                  err == "pool is neither a preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted");
         }
     }
 
@@ -201,7 +204,7 @@ int main() {
         for (const char *word : {"Pool", "Devices", "API", "Donation", "Other", "--pool", "--wallet", "--api-enable", "--gpu-id",
                                  "--no-donation", "--gpu-cclock", "--gpu-mclock", "--gpu-coffset", "--gpu-moffset", "--gpu-plimit", "--gpu-fan",
                                  "--oc-delay", "--oc-reset-only", "tuning.gpu_cclock", "Windows:", "Linux:", "mined on F2Pool to the developer",
-                                 "kryptex-tls", "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
+                                 "kryptex-tls", "kryptex-hk-tls", "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
             CHECK_MSG(word, contains(help, word));
         // Amendment 2: the rendered help must not show the donation account or payout address (values come from fee.h)
         CHECK_MSG("help hides donation account", !contains(help, CANARY_FEE_POOL_ACCOUNT));

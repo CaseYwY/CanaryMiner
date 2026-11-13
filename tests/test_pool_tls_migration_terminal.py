@@ -21,6 +21,12 @@ def main():
     import termios
 
     executable = str(Path(sys.argv[1]).resolve(strict=True))
+    pool, host = {
+        "us": ("kryptex", "prl-us.kryptex.network"),
+        "hk": ("stratum+tcp://prl-hk.kryptex.network:7048", "prl-hk.kryptex.network"),
+    }[sys.argv[2] if len(sys.argv) > 2 else "us"]
+    source = f"stratum+tcp://{host}:7048"
+    target = f"stratum+ssl://{host}:8048"
     checks = 0
     default_rule = {"mode": "unchanged", "tls_url": "", "plaintext_url": "", "plaintext_consent": False}
     original = {
@@ -33,7 +39,7 @@ def main():
     }
     migrated = copy.deepcopy(original)
     migrated["user_pools"][0] = {
-        "mode": "strict_tls", "tls_url": "stratum+ssl://prl-us.kryptex.network:8048",
+        "mode": "strict_tls", "tls_url": target,
         "plaintext_url": "", "plaintext_consent": False,
     }
 
@@ -47,7 +53,7 @@ def main():
             self.config = state / "config.json"
             self.config_bytes = (json.dumps({
                 "schema_version": 1, "wallet": "MIGRATION-CPU-FIXTURE", "worker": "cpu-only",
-                "pools": ["kryptex"], "donation": False, "state_dir": str(state),
+                "pools": [pool], "donation": False, "state_dir": str(state),
             }) + "\n").encode()
             self.config.write_bytes(self.config_bytes)
             (state / "runtime-preferences.json").write_text(json.dumps({
@@ -132,7 +138,7 @@ def main():
             text = " ".join(frame.split())
             assert "First user pool transport: Plaintext (port 7048)" in text
             assert "Effective first-user policy: Plaintext" in text
-            assert "First-user host (frozen): prl-us.kryptex.network" in text
+            assert f"First-user host (frozen): {host}" in text
             assert "Verified TLS" not in text
 
         def finish(self):
@@ -162,8 +168,8 @@ def main():
             floor = session.send(b"m")
             frame = session.until("Strict TLS migration review", "Review pool-security-preferences.json only", after=floor)
             session.current_plaintext(frame)
-            assert "Configured source: stratum+tcp://prl-us.kryptex.network:7048" in " ".join(frame.split())
-            assert "Proposed TLS: stratum+ssl://prl-us.kryptex.network:8048" in " ".join(frame.split())
+            assert f"Configured source: {source}" in " ".join(frame.split())
+            assert f"Proposed TLS: {target}" in " ".join(frame.split())
             assert session.preferences.read_bytes() == session.original
             session.unchanged_session()
             checks += 5
@@ -192,8 +198,8 @@ def main():
             compact = "".join(compact_frames)
             assert "Before:" in compact and "After:" in compact
             # Rejoin wrapped pieces within one complete frame, never unrelated prefixes from different pages.
-            assert any("stratum+tcp://prl-us.kryptex.network:7048" in frame for frame in compact_frames)
-            assert any("stratum+ssl://prl-us.kryptex.network:8048" in frame for frame in compact_frames)
+            assert any(source in frame for frame in compact_frames)
+            assert any(target in frame for frame in compact_frames)
             assert session.preferences.read_bytes() == session.original
             checks += 5
 
@@ -222,7 +228,7 @@ def main():
             session.preferences.write_bytes(external)  # same values, genuinely different current-original bytes
             floor = session.send(b"\r")
             frame = session.until("Preferences UNKNOWN", "NOT Saved", after=floor)
-            assert "prl-us.kryptex.network" not in frame  # private documents are hidden until explicit reveal
+            assert host not in frame  # private documents are hidden until explicit reveal
             assert session.preferences.read_bytes() == external
             session.unchanged_session()
             checks += 3
