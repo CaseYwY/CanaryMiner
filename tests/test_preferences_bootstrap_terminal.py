@@ -61,7 +61,8 @@ def main():
                 assert not starts.exists(), 'worker launched before all initial preferences settled'
             (state / 'fixture-preference-release-4').touch()
             wait(lambda: loads() == ['2:ui', '3:manual', '4:electricity', '5:ui'])
-            wait(starts.exists)
+            # The worker can create the append file before its first record is visible.
+            wait(lambda: starts.exists() and starts.read_text().endswith('\n'))
             assert starts.read_text().splitlines() == ['start']
             (state / 'fixture-preference-release-5').touch()
             transcript = b''
