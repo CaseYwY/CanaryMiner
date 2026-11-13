@@ -441,6 +441,7 @@ inline std::string productHelpText() {
         "  -o, --pool SPEC       HOST:PORT, stratum+tcp://HOST:PORT, or a preset: f2pool, kryptex,\n"
         "                        herominers. Known pool hosts are recognised automatically.\n"
         "                        kryptex-tls selects strict TLS at prl-us.kryptex.network:8048.\n"
+        "                        kryptex-hk-tls selects strict TLS at prl-hk.kryptex.network:8048.\n"
         "                        stratum+ssl://DNS:PORT requests strict user-pool TLS; requires --no-donation.\n"
         "                        Both TLS forms require --no-donation and a compiled native runtime.\n"
         "                        No IP identity or TCP fallback; legacy presets keep their TCP endpoints.\n"

@@ -4,6 +4,8 @@ M-TLS/M-CONFIG; R-TLS-001/003/004; T-TLS/T-CONFIG/T-INTENT.
 
 The `kryptex-tls` preset selects strict TLS for the first user pool. It expands to `stratum+ssl://prl-us.kryptex.network:8048`, using the US endpoint and TLS port in the [official Kryptex instructions](https://pool.kryptex.com/articles/pearl-miners-en). The parsed pool identity remains `kryptex`, so its existing network, target and gzip-v2 negotiation rules still apply.
 
+Use `kryptex-hk-tls` to select `stratum+ssl://prl-hk.kryptex.network:8048` with the same strict policy and Kryptex protocol identity. The first user pool must use a TLS-enabled build with donation off. Existing Hong Kong TCP configurations can be reviewed in the migration panel. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en) · [Migration instructions](pool-tls-migration.md)
+
 Use it in a [TLS-enabled local build](pool-tls-runtime.md), with donation explicitly off:
 
 ```sh

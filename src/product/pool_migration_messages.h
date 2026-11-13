@@ -1,6 +1,7 @@
 // Explicit local migration review text; no endpoint discovery or transport authority.
 #pragma once
 #include "localization.h"
+#include "pool_tls_migration.h"
 namespace om { namespace i18n {
 
 enum class PoolMigrationMessageKey { Action, Heading, Source, Target, Fallback, Preserved, RuntimeUnavailable, DonationEnabled, NoCandidate, DraftBlocked, DeclarationBlocked, Count };
@@ -37,15 +38,21 @@ inline LocalizedMessage poolMigrationMessage(std::string_view language,PoolMigra
     if(selected->id!=language||!validTemplateTranslation(source.messages[i],selected->messages[i]))return {source.messages[i],source.id,source.review,true,false};
     return {selected->messages[i],selected->id,selected->review,false,selected->rtl};
 }
-inline bool validPoolMigrationMessageArgument(std::string_view name,std::string_view value){
-    return name=="endpoint"&&(value=="stratum+tcp://prl-us.kryptex.network:7048"||value=="stratum+ssl://prl-us.kryptex.network:8048");
+inline bool validPoolMigrationMessageArgument(PoolMigrationMessageKey key,std::string_view name,std::string_view value){
+    if(name!="endpoint")return false;
+    using Candidate=PoolTlsMigrationCandidate;
+    if(key==PoolMigrationMessageKey::Source)
+        return value==poolTlsMigrationSource(Candidate::KryptexUsTcp7048)||value==poolTlsMigrationSource(Candidate::KryptexHkTcp7048);
+    if(key==PoolMigrationMessageKey::Target)
+        return value==poolTlsMigrationTarget(Candidate::KryptexUsTcp7048)||value==poolTlsMigrationTarget(Candidate::KryptexHkTcp7048);
+    return false;
 }
 inline std::string poolMigrationEnglish(PoolMigrationMessageKey key,const MessageArguments &arguments={}){
     const auto message=poolMigrationMessage("en",key);if(message.text.empty()||arguments.size()>1)return {};
     std::vector<std::string_view> expected;if(!templateParameters(message.text,&expected)||expected.size()!=arguments.size())return {};
     std::string text(message.text);
     if(!arguments.empty()){
-        const auto &a=arguments[0];if(a.first!=expected[0]||!validPoolMigrationMessageArgument(a.first,a.second))return {};
+        const auto &a=arguments[0];if(a.first!=expected[0]||!validPoolMigrationMessageArgument(key,a.first,a.second))return {};
         const auto token="{"+a.first+"}";const auto at=text.find(token);if(at==text.npos)return {};text.replace(at,token.size(),a.second);
     }
     return text;

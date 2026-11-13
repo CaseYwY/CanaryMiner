@@ -50,6 +50,10 @@ void migrationMessages(){
         }
     }
     CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+ssl://prl-us.kryptex.network:8048"}})=="Proposed TLS: stratum+ssl://prl-us.kryptex.network:8048");
+    CHECK(i18n::poolMigrationEnglish(Key::Source,{{"endpoint","stratum+tcp://prl-hk.kryptex.network:7048"}})=="Configured source: stratum+tcp://prl-hk.kryptex.network:7048");
+    CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+ssl://prl-hk.kryptex.network:8048"}})=="Proposed TLS: stratum+ssl://prl-hk.kryptex.network:8048");
+    CHECK(i18n::poolMigrationEnglish(Key::Source,{{"endpoint","stratum+ssl://prl-hk.kryptex.network:8048"}}).empty());
+    CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+tcp://prl-hk.kryptex.network:7048"}}).empty());
     for(const auto value:{"stratum+ssl://wallet:password@prl-us.kryptex.network:8048","stratum+ssl://other.test:8048","PRIVATE-error","stratum+ssl://prl-us.kryptex.network:8048\n"})
         CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint",value}}).empty());
     CHECK(i18n::poolMigrationEnglish(Key::Count).empty()&&i18n::poolMigrationEnglish(Key::Target).empty());
@@ -57,6 +61,11 @@ void migrationMessages(){
     TerminalTextPolicy policy;TerminalMessageLine line;line.line.line.text="retained";
     CHECK(!layoutTerminalPoolMigrationMessage(bad,policy,&line)&&line.line.line.text=="retained");
     bad.arguments[0].value.content.text="stratum+ssl://prl-us.kryptex.network:8048";bad.arguments[0].value.content.invariant=false;
+    CHECK(!layoutTerminalPoolMigrationMessage(bad,policy,&line));
+    bad.arguments[0].value.content={{"stratum+ssl://prl-hk.kryptex.network:8048"},{},true};
+    policy.columns=80;
+    CHECK(layoutTerminalPoolMigrationMessage(bad,policy,&line)&&line.line.line.text.find("prl-hk.kryptex.network:8048")!=std::string::npos);
+    bad.key=Key::Source;
     CHECK(!layoutTerminalPoolMigrationMessage(bad,policy,&line));
 }
 int main(){

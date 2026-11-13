@@ -17,16 +17,16 @@
       "description": "Ordered. Failover is not implemented in this build: the first entry is used.",
       "items": {
         "oneOf": [
-          { "type": "string", "description": "A preset (kryptex, kryptex-tls, herominers, f2pool), HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT. kryptex-tls is strict SSL on prl-us.kryptex.network:8048; runtime support and donation:false are required." },
+          { "type": "string", "description": "A preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool), HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT. The strict TLS Kryptex presets use port 8048 on prl-us.kryptex.network and prl-hk.kryptex.network respectively. They require TLS runtime support and donation:false." },
           {
             "type": "object",
             "additionalProperties": false,
             "required": ["url"],
             "properties": {
-              "url": { "type": "string", "description": "Same endpoint or preset forms as a string pool entry. kryptex-tls requests strict TLS and never authorizes plaintext fallback." },
+              "url": { "type": "string", "description": "Same endpoint or preset forms as a string pool entry. kryptex-tls and kryptex-hk-tls request strict TLS with plaintext fallback disabled." },
               "network": { "enum": ["mainnet"], "default": "mainnet" },
               "target_semantics": { "enum": ["base-before-penalty", "final-adjusted-bound"], "default": "base-before-penalty" },
-              "compression": { "enum": ["auto", "off"], "default": "auto", "description": "auto offers the gzip v2 dialect at login for the kryptex (including kryptex-tls) and f2pool presets only, and uses it only when the pool answers type v2; off never offers it. Custom HOST:PORT endpoints never offer it." },
+              "compression": { "enum": ["auto", "off"], "default": "auto", "description": "auto offers the gzip v2 dialect at login for the Kryptex presets (including kryptex-tls and kryptex-hk-tls) and f2pool only, and uses it only when the pool answers type v2; off never offers it. Custom HOST:PORT endpoints never offer it." },
               "account": { "type": "string", "pattern": "^[A-Za-z0-9_]{0,64}$", "default": "", "description": "v2 login account; empty uses the payout address." }
             }
           }
