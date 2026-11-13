@@ -71,7 +71,7 @@ At `1278d24`, the complete Linux/WSL `tools/test_all.sh` passed with 622 CTests 
 
 ## P-12m explicit migration review
 
-[P-12m](../pool-tls-migration.md) adds an explicit review and save for the configured legacy Kryptex US first pool. The existing preference owner saves a strict same-host declaration for the next explicit start, with fallback disabled and the ordinary startup checks intact.
+[P-12m](../pool-tls-migration.md) adds an explicit review and save for the configured legacy Kryptex US first pool. The existing preference owner saves a strict same-host declaration for the next explicit start, with fallback disabled and the ordinary startup checks intact. The pinned Linux gate passed 626 entries with one environment skip, and the original skipped test passed 35 checks separately. Actual Windows and Linux idle settings each passed three migration scenarios.
 
 ## Current handoff
 
