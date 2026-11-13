@@ -75,7 +75,7 @@ At `1278d24`, the complete Linux/WSL `tools/test_all.sh` passed with 622 CTests 
 
 ## P-12n Hong Kong strict preset and migration review
 
-`kryptex-hk-tls` selects the official Hong Kong strict endpoint. The first user pool at `prl-hk.kryptex.network:7048` can review a same-host migration to TLS 8048 through the existing explicit Save flow. [Presets](../pool-tls-presets.md) · [Migration](../pool-tls-migration.md)
+`kryptex-hk-tls` selects the official Hong Kong strict endpoint. The first user pool at `prl-hk.kryptex.network:7048` can review a same-host migration to TLS 8048 through the existing explicit Save flow. The pinned Linux gate recorded 627 passes and one environment skip. The original skipped script passed 35 checks separately. Production settings passed three Hong Kong cases each on Linux and Windows. [Presets](../pool-tls-presets.md) · [Migration](../pool-tls-migration.md)
 
 ## Current handoff
 

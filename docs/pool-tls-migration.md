@@ -17,6 +17,12 @@ The proposal uses the configured first-pool tuple captured after command-line ov
 
 If the independent preferences file changes after it was loaded, the save can become UNKNOWN. The original review cannot be replayed by restoring the old file bytes. Explicit inspection can establish a new editable baseline, after which **M** and **Enter** are separate actions again.
 
+## Hong Kong migration verification
+
+Linux passed 11 focused groups, including 30 PTY checks each for Hong Kong and US migration. Windows passed seven focused groups. The TLS-enabled production settings command passed three Hong Kong scenarios on each platform. Windows production SASS matched all 67 frozen digests.
+
+The unchanged `tools/test_all.sh` passed at `55eaf0529d900e84a2f9f068fd9a6073923f4e43`. CTest recorded 627 passes, zero failures and one namespace-related skip. The skipped game lifecycle script passed 35 checks separately with the same artifacts. Python discovery recorded 176 passes and 19 skips. The pinned proof verifier, protocol comparisons, secret scan and 67 Linux SASS comparisons passed. The local receipt is at `build/p12n-gate-evidence/receipt.json`.
+
 ## US migration verification
 
 The Linux TLS-enabled host build passed seven focused groups after rerunning the affected message tests. The initial message test incorrectly expected a 41-cell atomic URL to wrap at 19 cells. The corrected test verifies refusal at 19 and 40 cells and full display at 41. Independent review also found that the PTY test could accept a buffered wide frame. The 30-check rerun verifies the bounds of each accepted 20×12 review frame, both complete endpoints, the review end marker and explicit Save. The previous nine-check pool-security PTY regression also passed.
