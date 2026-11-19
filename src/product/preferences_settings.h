@@ -93,7 +93,7 @@ class PreferencesSettings {
             const auto status=receipt_->status;
             if(status==PreferencesReplyStatus::Loaded&&inspecting_){inspection_=receipt_;ticket_=0;receipt_.reset();view_=owner_.snapshot();return {};}
             if(status==PreferencesReplyStatus::Loaded||status==PreferencesReplyStatus::Saved){
-                SettingsPanel next=panel_;if(!apply(next,*receipt_,pendingContext_,privacyRuntime_))return failReply();
+                SettingsPanel next=panel_;if(!apply(next,*receipt_,pendingContext_,runtimeSection_))return failReply();
                 auto result=std::make_shared<PreferencesSettingsCompletion>();result->reply=receipt_;result->submittedUtc=submittedUtc_;result->submittedMono=submittedMono_;
                 if(receipt_->kind==PreferencesKind::Manual&&status==PreferencesReplyStatus::Saved)result->manualValue=next.manual.active;
                 const auto current=owner_.snapshot();if(current.state==PreferencesOwnerState::Stopped||current.state==PreferencesOwnerState::Faulted)return {};
@@ -139,7 +139,8 @@ class PreferencesSettings {
   private:
     PreferencesOwner &owner_;SettingsPanel &panel_;PreferencesOwnerSnapshot view_;
     PreferencesSettingsContext pendingContext_;uint64_t ticket_=0,submittedUtc_=0,submittedMono_=0;
-    bool inspecting_=false,privacyRuntime_=false,reveal_=false,currentData_=false,acknowledged_=false;
+    bool inspecting_=false,reveal_=false,currentData_=false,acknowledged_=false;
+    RuntimeSettingsSection runtimeSection_=RuntimeSettingsSection::Controls;
     size_t offset_=0;mutable size_t rowBytes_=1;mutable bool originalEnd_=false,currentEnd_=false;
     std::shared_ptr<const PreferencesReply> receipt_,inspection_;
     std::shared_ptr<PreferencesSettingsCompletion> completion_;ManualMarketProjector manualProjection_;
@@ -154,7 +155,10 @@ class PreferencesSettings {
             auto frozen=context; // allocate before admission; a failed copy must not lose an issued operation's context
             const auto result=operation==PreferencesOperation::Load?owner_.load(kind):owner_.save(kind,review,document);
             if(result.status!=PreferencesAdmission::Queued){notice("Preference request unavailable; no operation admitted. Wait for readiness or explicitly reopen after workers stop.");return false;}
-            pendingContext_=std::move(frozen);ticket_=result.ticket;inspecting_=inspecting;privacyRuntime_=panel_.group==8;receipt_.reset();view_=owner_.snapshot();notice("Preference operation QUEUED; NOT Saved. No duplicate request or automatic retry.");return true;
+            pendingContext_=std::move(frozen);ticket_=result.ticket;inspecting_=inspecting;
+            if(kind==PreferencesKind::Runtime&&!inspecting)
+                runtimeSection_=panel_.group==8?RuntimeSettingsSection::History:panel_.group==3?RuntimeSettingsSection::PublicTickers:RuntimeSettingsSection::Controls;
+            receipt_.reset();view_=owner_.snapshot();notice("Preference operation QUEUED; NOT Saved. No duplicate request or automatic retry.");return true;
         }catch(...){notice("Preference admission unavailable; draft retained without confirmed Save.");return false;}
     }
     bool save(PreferencesKind kind,const std::string &document,std::string *error){
@@ -166,18 +170,18 @@ class PreferencesSettings {
     void acknowledge(){
         if(!acknowledged_||!reveal_||!inspection_||!originalEnd_||!currentEnd_)return;
         try{
-            SettingsPanel next=panel_;if(!apply(next,*inspection_,context,privacyRuntime_))return;
+            SettingsPanel next=panel_;if(!apply(next,*inspection_,context,runtimeSection_))return;
             auto result=std::make_shared<PreferencesSettingsCompletion>();result->reply=inspection_;
             if(!owner_.acknowledgeInspection(inspection_->kind,inspection_->review))return;
             panel_=std::move(next);completion_=std::move(result);inspection_.reset();view_=owner_.snapshot();reveal_=acknowledged_=originalEnd_=currentEnd_=false;offset_=0;
             notice("Current file accepted as a new editable baseline; historical write outcome remains UNKNOWN. No retry or deletion.");
         }catch(...){notice("Inspection acknowledgement unavailable; original and block preserved.");}
     }
-    static bool apply(SettingsPanel &panel,const PreferencesReply &reply,const PreferencesSettingsContext &context,bool privacyRuntime){
+    static bool apply(SettingsPanel &panel,const PreferencesReply &reply,const PreferencesSettingsContext &context,RuntimeSettingsSection runtimeSection){
         const bool saved=reply.status==PreferencesReplyStatus::Saved;
         switch(reply.kind){
             case PreferencesKind::Ui:{UiPreferences p;if(!parseUiPreferences(reply.document,&p,nullptr))return false;if(saved){panel.active=panel.draft=p;panel.page=SettingsPage::Browse;panel.message=i18n::settingsEnglish(i18n::SettingsMessageKey::Saved);}else panel.open(p);break;}
-            case PreferencesKind::Runtime:{RuntimePreferences p;if(!parseRuntimePreferences(reply.document,&p,nullptr))return false;if(saved)panel.runtime.confirmSaved(p);else{panel.runtime.open(p,context.runtime);if(privacyRuntime)panel.runtime.field=1;}break;}
+            case PreferencesKind::Runtime:{RuntimePreferences p;if(!parseRuntimePreferences(reply.document,&p,nullptr))return false;if(saved)panel.runtime.confirmSaved(p);else panel.runtime.open(p,context.runtime,runtimeSection);break;}
             case PreferencesKind::Manual:{ManualMarketPreferences p;if(!parseManualMarket(reply.document,&p,nullptr))return false;if(saved){panel.manual.active=panel.manual.draft=p;if(panel.manual.context.running&&!panel.manual.context.cliDisabled)panel.manual.context.effective=p;panel.manual.page=ManualMarketSettingsPage::Browse;panel.manual.message=i18n::manualMarketNoticeEnglish(panel.manual.context.cliDisabled?i18n::ManualMarketNoticeMessageKey::SavedCliDisabled:i18n::ManualMarketNoticeMessageKey::Saved);}else panel.manual.open(p,context.manual);break;}
             case PreferencesKind::Electricity:{ElectricityPreferences p;if(!parseElectricityPreferences(reply.document,&p,nullptr))return false;if(saved){panel.electricity.active=panel.electricity.draft=p;panel.electricity.page=ElectricitySettingsPage::Browse;panel.electricity.message=i18n::electricityNoticeEnglish(i18n::ElectricityNoticeMessageKey::Saved);}else panel.electricity.open(p,context.electricity);break;}
             case PreferencesKind::Game:{GamePreferences p;if(!parseGamePreferences(reply.document,&p,nullptr))return false;if(saved){panel.game.active=panel.game.draft=p;panel.game.page=GameSettingsPage::Browse;panel.game.message=i18n::gamePanelEnglish(i18n::GamePanelMessageKey::Saved);}else panel.game.open(std::move(p),context.game);break;}

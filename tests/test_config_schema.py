@@ -152,11 +152,14 @@ class RuntimePreferencesSchemaTests(unittest.TestCase):
         for number in (0, 1, 345, 1000):
             self.assertEqual(validate({'schema_version': 1, 'work_wait_ms': number, 'history_enabled': False}, schema, schema), [])
         self.assertIs(schema['properties']['economic_mode_requested']['default'], False)
+        self.assertIs(schema['properties']['public_tickers_requested']['default'], False)
         for requested in (True, False):
             self.assertEqual(validate({'schema_version': 1, 'economic_mode_requested': requested}, schema, schema), [])
+            self.assertEqual(validate({'schema_version': 1, 'public_tickers_requested': requested}, schema, schema), [])
         for bad in ({}, {'schema_version': 2}, {'schema_version': 1, 'work_wait_ms': -1},
                     {'schema_version': 1, 'work_wait_ms': 1001}, {'schema_version': 1, 'work_wait_ms': True},
                     {'schema_version': 1, 'economic_mode_requested': 0},
+                    {'schema_version': 1, 'public_tickers_requested': 'on'},
                     {'schema_version': 1, 'history_enabled': 1}, {'schema_version': 1, 'wallet': 'synthetic'}):
             self.assertTrue(validate(bad, schema, schema))
         with open(os.path.join(ROOT, 'src', 'product', 'runtime_preferences.h'), encoding='utf8') as stream:

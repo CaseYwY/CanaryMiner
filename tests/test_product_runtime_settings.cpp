@@ -100,11 +100,13 @@ static void storeTests(const std::filesystem::path &directory) {
     std::string error;
     CHECK(parseRuntimePreferences(runtimePreferencesJson(value), &value, &error));
     CHECK(parseRuntimePreferences("{\"schema_version\":1}", &value, &error) && value.workWaitMs == 0 && value.historyEnabled &&
-          !value.economicModeRequested);
+          !value.economicModeRequested && !value.publicTickersRequested);
     for (const auto &text : {"{}", "[]", "{\"schema_version\":2}", "{\"schema_version\":1,\"work_wait_ms\":1001}",
             "{\"schema_version\":1,\"work_wait_ms\":-1}", "{\"schema_version\":1,\"work_wait_ms\":1.5}",
             "{\"schema_version\":1,\"history_enabled\":1}", "{\"schema_version\":1,\"schema_version\":1}",
             "{\"schema_version\":1,\"economic_mode_requested\":1}",
+            "{\"schema_version\":1,\"public_tickers_requested\":\"on\"}",
+            "{\"schema_version\":1,\"public_tickers_requested\":true,\"public_tickers_requested\":false}",
             "{\"schema_version\":1,\"unknown\":true}"}) {
         const auto prior = value;
         CHECK(!parseRuntimePreferences(text, &value, &error));
@@ -126,17 +128,20 @@ static void storeTests(const std::filesystem::path &directory) {
     value.workWaitMs = 345;
     value.historyEnabled = false;
     value.economicModeRequested = true;
+    value.publicTickersRequested = true;
     CHECK(store.save(value, &error));
     RuntimePreferencesStore second(path);
     RuntimePreferences loaded;
     CHECK(second.load(&loaded, &error) && loaded == value);
-    CHECK(loaded.economicModeRequested);
+    CHECK(loaded.economicModeRequested && loaded.publicTickersRequested);
     value.workWaitMs = 50;
     value.economicModeRequested = false;
+    value.publicTickersRequested = false;
     CHECK(store.save(value, &error));
     CHECK(!second.save(loaded, &error) && error.find("externally") != std::string::npos);
     CHECK(second.load(&loaded, &error) && loaded == value);
     CHECK(runtimePreferencesJson(loaded).find("economic_mode_requested") == std::string::npos);
+    CHECK(runtimePreferencesJson(loaded).find("public_tickers_requested") == std::string::npos);
     auto lockPath = path; lockPath += ".lock";
     {
         RuntimePreferencesLease lease;
@@ -152,6 +157,55 @@ static void storeTests(const std::filesystem::path &directory) {
     CHECK(!second.save(value, &error));
     std::ifstream file(path);
     CHECK(std::string(std::istreambuf_iterator<char>(file), {}) == "{\"schema_version\":99}");
+}
+
+static void publicTickerTests() {
+    SettingsPanel root;
+    root.open({});
+    root.group=3;
+    root.groupsFocused=false;
+    root.field=2;
+    CHECK(root.fields()==3 && root.key('\r',{})==SettingsResult::OpenRuntime);
+    RuntimeContext context;
+    context.running=true;
+    context.cliNoMarket=true;
+    RuntimePreferences original;
+    original.workWaitMs=123;
+    original.historyEnabled=false;
+    root.runtime.open(original,context,RuntimeSettingsSection::PublicTickers);
+    const auto save=[&](const RuntimePreferences &value,std::string *) {
+        CHECK(value.publicTickersRequested && !value.economicModeRequested);
+        CHECK(value.workWaitMs==123 && !value.historyEnabled);
+        return true;
+    };
+    CHECK(root.runtime.render(60,12,ColorLevel::None).find("> Public tickers [off]")!=std::string::npos);
+    const auto narrowBrowse=root.runtime.render(20,12,ColorLevel::None);
+    CHECK(narrowBrowse.find("> Tickers [off]")!=std::string::npos);
+    CHECK(narrowBrowse.find("Session req: off")!=std::string::npos && narrowBrowse.find("CLI: --no-market")!=std::string::npos);
+    CHECK(narrowBrowse.find("Polling unavailable")!=std::string::npos && narrowBrowse.find("Next explicit run")!=std::string::npos);
+    CHECK(narrowBrowse.find("Latest refs only")!=std::string::npos && narrowBrowse.find("Manual+public clash")!=std::string::npos);
+    root.key(' ',{},save);
+    root.key('v',{},save);
+    const auto review=root.runtime.render(80,16,ColorLevel::None);
+    CHECK(review.find("Public tickers: off -> on")!=std::string::npos);
+    CHECK(review.find("--no-market")!=std::string::npos);
+    CHECK(review.find("Polling unavailable")!=std::string::npos);
+    const auto narrowReview=root.runtime.render(20,12,ColorLevel::None);
+    CHECK(narrowReview.find("Ticker: off -> on")!=std::string::npos && narrowReview.find("Polling unavailable")!=std::string::npos);
+    CHECK(narrowReview.find("Gate PRL/USDT")!=std::string::npos && narrowReview.find("Kraken USDT/USD")!=std::string::npos);
+    CHECK(narrowReview.find("Manual+public clash")!=std::string::npos);
+    CHECK(narrowReview.find("Arrows Enter Esc Q")!=std::string::npos);
+    CHECK(std::count(narrowReview.begin(),narrowReview.end(),'\n')<12);
+    root.key('\r',{},save);
+    CHECK(root.runtime.active.publicTickersRequested && !root.runtime.context.effective.publicTickersRequested);
+    CHECK(root.runtime.message=="Request saved.");
+    root.key(' ',{},save);
+    root.key(27,{},save);
+    root.key('d',{},save);
+    CHECK(!root.runtime.visible && root.runtime.active.publicTickersRequested && !root.runtime.dirty());
+    const auto english=i18n::marketTickerSettingsMessage("en",i18n::MarketTickerSettingsKey::Entry);
+    const auto fallback=i18n::marketTickerSettingsMessage("zh-Hans",i18n::MarketTickerSettingsKey::Entry);
+    CHECK(english.review==i18n::ReviewStatus::Source && !english.fallback && fallback.fallback && english.text==fallback.text);
 }
 
 static void independentTargets(const std::filesystem::path &directory) {
@@ -178,6 +232,7 @@ static void independentTargets(const std::filesystem::path &directory) {
 int main() {
     const auto directory = std::filesystem::path(makeScratchDir("runtime-preferences"));
     panelTests();
+    publicTickerTests();
     storeTests(directory);
     independentTargets(directory);
     std::error_code ignored;

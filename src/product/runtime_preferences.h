@@ -43,9 +43,10 @@ struct RuntimePreferences {
     unsigned workWaitMs = 0;
     bool historyEnabled = true;
     bool economicModeRequested = false;
+    bool publicTickersRequested = false;
     bool operator==(const RuntimePreferences &other) const {
         return workWaitMs == other.workWaitMs && historyEnabled == other.historyEnabled &&
-               economicModeRequested == other.economicModeRequested;
+               economicModeRequested == other.economicModeRequested && publicTickersRequested == other.publicTickersRequested;
     }
     bool operator!=(const RuntimePreferences &other) const { return !(*this == other); }
 };
@@ -55,6 +56,7 @@ struct RuntimeContext {
     RuntimePreferences effective;
     std::optional<unsigned> cliWorkWait;
     bool cliNoHistory = false;
+    bool cliNoMarket = false;
 };
 
 inline RuntimePreferences effectiveRuntimePreferences(RuntimePreferences configured, const RuntimeContext &context) {
@@ -66,7 +68,8 @@ inline RuntimePreferences effectiveRuntimePreferences(RuntimePreferences configu
 inline std::string runtimePreferencesJson(const RuntimePreferences &value) {
     return "{\n  \"schema_version\": 1,\n  \"work_wait_ms\": " + std::to_string(value.workWaitMs) +
         ",\n  \"history_enabled\": " + (value.historyEnabled ? "true" : "false") +
-        (value.economicModeRequested ? ",\n  \"economic_mode_requested\": true" : "") + "\n}\n";
+        (value.economicModeRequested ? ",\n  \"economic_mode_requested\": true" : "") +
+        (value.publicTickersRequested ? ",\n  \"public_tickers_requested\": true" : "") + "\n}\n";
 }
 
 inline bool parseRuntimePreferences(const std::string &text, RuntimePreferences *out, std::string *error) {
@@ -78,7 +81,7 @@ inline bool parseRuntimePreferences(const std::string &text, RuntimePreferences 
     if (!root.isObject() || !schema || !schema->asUint64(&version) || version != 1) return fail("unsupported runtime preferences schema");
     for (const auto &item : root.members)
         if (item.first != "schema_version" && item.first != "work_wait_ms" && item.first != "history_enabled" &&
-            item.first != "economic_mode_requested") return fail("unknown runtime preference");
+            item.first != "economic_mode_requested" && item.first != "public_tickers_requested") return fail("unknown runtime preference");
     RuntimePreferences value;
     if (const auto *wait = root.find("work_wait_ms")) {
         uint64_t number = 0;
@@ -92,6 +95,10 @@ inline bool parseRuntimePreferences(const std::string &text, RuntimePreferences 
     if (const auto *economy = root.find("economic_mode_requested")) {
         if (!economy->isBool()) return fail("economic_mode_requested must be true or false");
         value.economicModeRequested = economy->boolean;
+    }
+    if (const auto *publicTickers = root.find("public_tickers_requested")) {
+        if (!publicTickers->isBool()) return fail("public_tickers_requested must be true or false");
+        value.publicTickersRequested = publicTickers->boolean;
     }
     *out = value;
     return true;

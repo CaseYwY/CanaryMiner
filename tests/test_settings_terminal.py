@@ -36,12 +36,12 @@ def main():
         assert not preferences.exists()
         checks = 3
 
-        def session(edit, expected, supervisor=None, history_count=2, rows=24):
+        def session(edit, expected, supervisor=None, history_count=2, rows=24, flags=()):
             nonlocal checks
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, 100, 0, 0))
             command = [executable, "settings", "--config", str(config)] if supervisor is None else [supervisor, "--dashboard-session-test", str(root / "state")]
-            process = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
+            process = subprocess.Popen([*command, *flags], stdin=slave, stdout=slave, stderr=slave,
                                        start_new_session=True)
             os.close(slave)
             transcript = b""
@@ -53,7 +53,7 @@ def main():
                 deadline = time.monotonic() + 8
                 while text not in transcript:
                     if time.monotonic() > deadline:
-                        raise AssertionError("terminal readiness deadline exceeded")
+                        raise AssertionError("terminal readiness deadline exceeded: " + text.decode('ascii'))
                     ready, _, _ = select.select([master], [], [], 0.1)
                     if ready:
                         try:
@@ -176,6 +176,78 @@ def main():
                 assert database.execute("SELECT total FROM meta WHERE id=1").fetchone()[0] == 4
                 assert database.execute("SELECT COUNT(*) FROM sessions WHERE ended IS NULL").fetchone()[0] == 0
                 assert database.execute("SELECT gaps FROM meta WHERE id=1").fetchone()[0] == 1
+
+            runtime_file = root / "state" / "runtime-preferences.json"
+            manual_file = root / "state" / "manual-market-preferences.json"
+
+            def open_tickers(terminal, until):
+                os.write(terminal, b"\x1b[C" * 3 + b"\t\x1b[B\x1b[B\r")
+                until(b"CanaryMiner / Public ticker request", fresh=True)
+
+            def ticker_on(process, terminal, until):
+                open_tickers(terminal, until)
+                until(b"Public tickers [off]")
+                until(b"This launch: --no-market")
+                os.write(terminal, b" v")
+                until(b"Public tickers: off -> on", fresh=True)
+                assert not runtime_file.exists()
+                os.write(terminal, b"\r")
+                until(b"Request saved.", fresh=True)
+                assert json.loads(runtime_file.read_text()) == {
+                    "schema_version": 1, "work_wait_ms": 0, "history_enabled": True, "public_tickers_requested": True}
+                assert not manual_file.exists()
+                os.write(terminal, b"q")
+
+            session(ticker_on, 100, flags=("--no-market",))
+            ticker_on_bytes = runtime_file.read_bytes()
+
+            def ticker_revoke(process, terminal, until):
+                until(b"Public ticker request saved; polling unavailable in this build.")
+                open_tickers(terminal, until)
+                until(b"Current session request: on")
+                os.write(terminal, b" v")
+                until(b"Public tickers: on -> off", fresh=True)
+                assert runtime_file.read_bytes() == ticker_on_bytes
+                os.write(terminal, b"\r")
+                until(b"Request saved.", fresh=True)
+                until(b"Current session request: on")
+                assert "public_tickers_requested" not in json.loads(runtime_file.read_text())
+                os.write(terminal, b"\x1b")
+                until(b"> Public ticker request", fresh=True)
+                os.write(terminal, b"\x1b[A\x1b[A\r")
+                until(b"Manual/offline market", fresh=True)
+                os.write(terminal, b" \t\r2.5\r\tnv\r")
+                until(b"Public references requested for this parent", fresh=True)
+                assert not manual_file.exists()
+                os.write(terminal, b"q")
+
+            supervisor = str(Path(sys.argv[2]).resolve())
+            session(ticker_revoke, 100, supervisor, history_count=6, rows=56)
+
+            manual_file.write_text(json.dumps({
+                "schema_version": 1, "asset": "pearl-mainnet-native-prl", "token_quote": "USDT",
+                "fx_base": "USDT", "fx_quote": "USD", "enabled": True, "fx_enabled": False,
+                "prl_usdt": "3", "prl_as_of_utc": int(time.time()), "usdt_usd": "", "fx_as_of_utc": 0,
+                "confirmed_utc": int(time.time()), "validity_seconds": 3600, "max_fx_skew_seconds": 30,
+            }))
+            manual_bytes = manual_file.read_bytes()
+
+            def ticker_conflict(process, terminal, until):
+                frame=until(b"Public and manual market sources both requested")
+                assert b"PUBLIC MARKET REFERENCES" not in frame and b"MANUAL/OFFLINE PRICE REFERENCES" not in frame
+                assert manual_file.read_bytes() == manual_bytes
+                os.write(terminal, b"q")
+
+            runtime_file.write_bytes(ticker_on_bytes)
+            session(ticker_conflict, 100, supervisor, history_count=8, rows=56)
+
+            def revert_to_manual(process, terminal, until):
+                frame=until(b"MANUAL/OFFLINE PRICE REFERENCES")
+                assert b"PUBLIC MARKET REFERENCES" not in frame
+                os.write(terminal, b"q")
+
+            runtime_file.write_text('{"schema_version":1}')
+            session(revert_to_manual, 100, supervisor, history_count=10, rows=56)
         assert set(json.loads(preferences.read_text())) == {
             "schema_version", "refresh_ms", "show_events", "hide_worker", "color", "details_enabled", "log_enabled",
             "details_identity", "details_pool", "details_restarts", "details_errors", "log_severity", "log_unclassified",

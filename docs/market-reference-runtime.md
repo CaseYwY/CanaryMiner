@@ -45,6 +45,22 @@ not the future complete source-selection/configuration UI. With no public factor
 one-hour evidence separately, and the use/deployment status. The review is read-only and works with `--no-market`.
 The manual reference editor keeps its own entry and save target.
 
+### Save a public ticker request
+
+**Settings → Market and timing → Public ticker request** configures the request for Gate PRL/USDT and Kraken
+USDT/USD latest prices. Space changes the draft, V shows its old and proposed values, and Enter confirms the
+save. The default is off, including for existing configurations. Saving off removes the optional
+`public_tickers_requested` field from `runtime-preferences.json`. Use that off setting before downgrading to
+a strict decoder that predates the field.
+
+The next explicit Dashboard session reads the saved request. When both public tickers and manual references are
+requested, that session withholds both and reports the conflict. A saved public-only request shows polling
+unavailable in ordinary builds while source-use and deployment approval are pending. Disabling the request from
+inside a running session applies on the next start. `--no-market` suppresses both sources for its launch.
+
+The request covers latest display references. One-hour coverage, reward data and economic-mode activation each
+have separate qualifications. Economic mode defaults off.
+
 The [Gate Spot REST contract](https://www.gate.com/docs/developers/apiv4/en/spot/#market-candlesticks) still lacks an
 unambiguous returned time anchor and consistent candle row definition. [Kraken Spot REST](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
 identifies the last row as provisional and leaves the other rows' timestamps unspecified as start or end.
@@ -65,6 +81,6 @@ CLI/PTY/privacy results are recorded in the [execution ledger](architecture/exec
 The actual-owner/parser PTY separately checks a live manual-enable refusal without file writes, source-conflict and CLI
 suppression with exact original files, unchanged inert-child start count and a real controlling-terminal SIGINT.
 
-Saved opt-in source/terms/capability controls, native helper deployment/trust/auxiliary egress, qualified live averages/latest
+Source-use and capability approval, native helper deployment/trust/auxiliary egress, qualified live averages/latest
 sources, archives, actual credit/reward collection, economic/forecast source wiring and production/physical qualification
 remain unfinished. P-06 and the affected requirements remain partial.
