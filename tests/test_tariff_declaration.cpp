@@ -27,9 +27,127 @@ std::string awaitComparison(const TariffSettingsPanel &panel) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
+void monthlyCycles(const JsonValue &original) {
+    using Message=i18n::TariffMonthlyMessageKey;
+    for(size_t i=0;i<static_cast<size_t>(Message::Count);++i) {
+        const auto key=static_cast<Message>(i);
+        const auto source=i18n::tariffMonthlyMessage("en",key);
+        const auto fallback=i18n::tariffMonthlyMessage("zh-Hans",key);
+        CHECK(!source.text.empty()&&!source.fallback&&source.review==i18n::ReviewStatus::Source);
+        CHECK(fallback.text==source.text&&fallback.fallback&&fallback.locale=="en");
+    }
+    CHECK(i18n::tariffMonthlyMessage("en",Message::Count).text.empty());
+    constexpr int64_t jan2023=1675123200000, feb2023=1677542400000, mar2023=1680220800000;
+    constexpr int64_t jan2024=1706659200000, feb2024=1709164800000, mar2024=1711843200000;
+    const auto utc=json(R"({"monthly_day":31,"clock":{"kind":"utc","fixed_offset_seconds":0}})");
+    TariffCycleBounds bounds;
+    TariffProblem error;
+    const auto check=[&](const JsonValue &policy,int64_t through,int64_t begin,int64_t end){
+        CHECK(deriveTariffMonthlyCycle(policy,json(std::to_string(through)),bounds,&error));
+        CHECK(error.path.empty()&&bounds.beginUtcMs==begin&&bounds.endUtcMs==end);
+    };
+    check(utc,feb2023-1,jan2023,feb2023);
+    check(utc,feb2023,feb2023,mar2023);
+    check(utc,feb2024-1,jan2024,feb2024);
+    check(utc,feb2024,feb2024,mar2024);
+    auto fixed=utc;
+    set(member(fixed,"clock"),"kind","\"fixed_standard\"");
+    set(member(fixed,"clock"),"fixed_offset_seconds","19800");
+    check(fixed,feb2024-19800001,jan2024-19800000,feb2024-19800000);
+    check(fixed,feb2024-19800000,feb2024-19800000,mar2024-19800000);
+    set(fixed,"monthly_day","1");
+    set(member(fixed,"clock"),"fixed_offset_seconds","-12600");
+    check(fixed,1735689600000+12600000,1735689600000+12600000,1738368000000+12600000);
+    const auto prior=bounds;
+    for(const auto &instant:std::vector<std::string>{"0","253402300799999","253402300800000","true","\"1709164800000\""}) {
+        CHECK(!deriveTariffMonthlyCycle(utc,json(instant),bounds,&error)&&error.path=="opening.through_utc_ms");
+        CHECK(bounds.beginUtcMs==prior.beginUtcMs&&bounds.endUtcMs==prior.endUtcMs);
+    }
+    for(const auto &day:std::vector<std::string>{"0","32","true","31.0","\"31\""}) {
+        auto policy=utc;
+        set(policy,"monthly_day",day);
+        CHECK(!deriveTariffMonthlyCycle(policy,json(std::to_string(feb2024)),bounds,&error)&&error.path=="reset_policy.monthly_day");
+    }
+    auto named=utc;
+    set(member(named,"clock"),"kind","\"named_iana\"");
+    CHECK(!deriveTariffMonthlyCycle(named,json(std::to_string(feb2024)),bounds,&error)&&error.path=="reset_policy.clock.kind");
+
+    auto v=original;
+    auto &plan=member(v,"plan");
+    auto &opening=member(v,"opening");
+    auto &revision=member(plan,"revisions").items[0];
+    set(plan,"tiers","\"none\"");
+    set(revision,"time_mode","\"constant\"");
+    set(revision,"charge_per_civil_day","\"0\"");
+    set(revision,"calendar","[]");
+    set(revision,"bands","[]");
+    set(revision,"begin_utc_ms",std::to_string(jan2024));
+    set(revision,"end_utc_ms",std::to_string(mar2024));
+    set(revision,"published_utc_ms","1700000000000");
+    set(opening,"cycle_begin_utc_ms",std::to_string(jan2024));
+    set(opening,"cycle_end_utc_ms",std::to_string(mar2024));
+    set(opening,"through_utc_ms","1711756800000"); // March 30 at 00:00 UTC
+    set(opening,"imported_kwh","\"24\"");
+    set(opening,"accrued_subtotal","\"2\"");
+    TariffDeclaration decoded;
+    CHECK(decodeTariffDeclaration(v,&decoded,&error));
+    TariffSettingsPanel panel;
+    panel.open(v);
+    enter(panel,"reset_policy");
+    CHECK(panel.render(60,12,ColorLevel::None).find("[M] Cycle policy")!=std::string::npos);
+    panel.key('m',{},T/1000);
+    frame(panel,60,12);
+    panel.key('g',{},T/1000);
+    CHECK(panel.message.find("reset_policy.monthly_day")!=std::string::npos);
+    enter(panel,"monthly_day");
+    type(panel,"31");
+    const auto before=tariffJson(panel.draft);
+    panel.key('g',{},T/1000);
+    CHECK(tariffJson(panel.draft)==before&&panel.path()=="opening"&&panel.message.find("Clear both")!=std::string::npos);
+    enter(panel,"cycle_begin_utc_ms");
+    CHECK(panel.page==TariffSettingsPage::Browse);
+    enter(panel,"imported_kwh");
+    panel.key(127,{},T/1000);
+    type(panel,"");
+    panel.key('g',{},T/1000);
+    CHECK(panel.message.find("Clear both")!=std::string::npos);
+    enter(panel,"accrued_subtotal");
+    panel.key(127,{},T/1000);
+    type(panel,"");
+    panel.key('g',{},T/1000);
+    CHECK(panel.message.find("Draft cycle dates derived")!=std::string::npos);
+    CHECK(panel.draft.find("opening")->find("cycle_begin_utc_ms")->text==std::to_string(feb2024));
+    CHECK(panel.draft.find("opening")->find("cycle_end_utc_ms")->text==std::to_string(mar2024));
+    CHECK(panel.draft.find("opening")->find("through_utc_ms")->text=="1711756800000");
+    enter(panel,"imported_kwh");type(panel,"21");
+    enter(panel,"accrued_subtotal");type(panel,"2");
+    panel.key('v',{},T/1000);
+    const auto review=panel.render(120,100,ColorLevel::None);
+    CHECK(review.find("Monthly reset at 00:00")!=std::string::npos);
+    CHECK(review.find("reset_policy: \"explicit_cycle_only\" -> {")!=std::string::npos);
+    auto mismatched=panel.draft;
+    set(member(mismatched,"opening"),"cycle_end_utc_ms",std::to_string(mar2024-1));
+    CHECK(!decodeTariffDeclaration(mismatched,&decoded,&error)&&error.path=="opening");
+    CHECK(decoded.opening.cycleBeginUtcMs==jan2024);
+    CHECK(decodeTariffDeclaration(panel.draft,&decoded,&error));
+    CHECK(decoded.opening.cycleBeginUtcMs==feb2024&&decoded.opening.cycleEndUtcMs==mar2024);
+    panel.open(panel.draft);
+    panel.key('p',{},T/1000);
+    for(char c:std::string("0\t1000\r"))panel.key(c,{},T/1000);
+    CHECK(awaitComparison(panel).find("5.280000 USD")!=std::string::npos);
+    panel.key(27,{},T/1000);
+    enter(panel,"reset_policy");
+    CHECK(panel.path()=="reset_policy");
+    panel.key(27,{},T/1000);
+    panel.key('m',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="1");
+    CHECK(panel.draft.find("reset_policy")->text=="explicit_cycle_only");
+    CHECK(decodeTariffDeclaration(panel.draft,&decoded,&error));
+}
 }
 int main(){
     auto original=fixture();TariffDeclaration d;TariffProblem error;CHECK(decodeTariffDeclaration(original,&d,&error));
+    monthlyCycles(original);
     CHECK(d.plan.tiers==TierMode::Progressive&&d.plan.revisions[0].timeMode==TimeRateMode::Calendar&&d.opening.evidence.origin==PowerOrigin::DeclaredForecast);
     CHECK(d.opening.planKey==d.plan.key&&d.sourceReference.find("SYNTHETIC")!=std::string::npos);
     PowerTrace trace{d.opening.evidence,{{static_cast<int64_t>(T),static_cast<int64_t>(T+86400000),dec("1000")}}};

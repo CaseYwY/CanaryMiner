@@ -38,8 +38,57 @@ void boundedArray(const JsonValue &v,const std::string &path,size_t max,size_t &
 bool null(const JsonValue &v){return v.type==JsonValue::Type::Null;}
 JsonValue literal(const std::string &s){JsonValue v;parseJsonStrict(s,&v,nullptr);return v;}
 std::string child(const std::string &path,const std::string &name){return path.empty()?name:path+"."+name;}
+CivilClock decodeClock(const JsonValue &clock,const std::string &path){
+    keys(clock,path,{"kind","fixed_offset_seconds"});
+    const auto kind=choice(*clock.find("kind"),child(path,"kind"),{"utc","fixed_standard"});
+    const auto offsetPath=child(path,"fixed_offset_seconds");
+    const auto &offset=*clock.find("fixed_offset_seconds");
+    auto absolute=offset;
+    const bool negative=!offset.text.empty()&&offset.text.front()=='-';
+    if(negative)absolute.text.erase(0,1);
+    const auto magnitude=integer(absolute,offsetPath,64800);
+    if(magnitude%60||(kind=="utc"&&magnitude)||offset.text=="-0")
+        bad(offsetPath,"Whole-minute STANDARD offset within +/-18h; UTC requires zero.",TariffProblemKind::FixedOffset);
+    CivilClock result;
+    result.kind=kind=="utc"?CivilClockKind::Utc:CivilClockKind::FixedStandardOffset;
+    result.fixedOffsetSeconds=static_cast<int32_t>(magnitude)*(negative?-1:1);
+    return result;
+}
+CivilDate adjacentMonth(CivilDate date,int direction){
+    const int month=static_cast<int>(date.month)+direction;
+    if(month==0)return {date.year-1,12,1};
+    if(month==13)return {date.year+1,1,1};
+    return {date.year,static_cast<unsigned>(month),1};
+}
+CivilDate monthlyDate(CivilDate month,unsigned day){
+    month.day=1;
+    if(!validCivilDate(month))return month;
+    month.day=day;
+    while(!validCivilDate(month))--month.day;
+    return month;
+}
+TariffCycleBounds monthlyCycle(const JsonValue &policy,int64_t through){
+    keys(policy,"reset_policy",{"monthly_day","clock"});
+    const auto day=static_cast<unsigned>(integer(*policy.find("monthly_day"),"reset_policy.monthly_day",31));
+    if(!day)bad("reset_policy.monthly_day","Enter a monthly reset day from 1 to 31.",TariffProblemKind::Unknown);
+    const auto clock=decodeClock(*policy.find("clock"),"reset_policy.clock");
+    const auto stamp=civilAt(clock,through);
+    if(stamp.status!=CivilStatus::Ok)
+        bad("opening.through_utc_ms","Through-time is outside the reset clock range.",TariffProblemKind::Unknown);
+    auto first=monthlyDate(stamp.date,day);
+    if(stamp.date.day<first.day)first=monthlyDate(adjacentMonth(first,-1),day);
+    const auto next=monthlyDate(adjacentMonth(first,1),day);
+    const auto begin=civilResolve(clock,first,0),end=civilResolve(clock,next,0);
+    if(!begin.utcMs||!end.utcMs)
+        bad("opening.through_utc_ms","Monthly cycle requires two boundaries in the supported UTC range.",TariffProblemKind::Unknown);
+    return {*begin.utcMs,*end.utcMs};
+}
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
     if(tariffJson(a)==tariffJson(b))return;
+    if(path=="reset_policy"&&!null(a)&&!null(b)&&a.isObject()!=b.isObject()){
+        out.push_back({TariffDeclarationChange::Kind::Value,path,tariffJson(a),tariffJson(b),0,0});
+        return;
+    }
     if(a.isObject()&&b.isObject()){
         for(const auto &m:b.members){const auto *old=a.find(m.first);changes(old?*old:JsonValue{},m.second,child(path,m.first),out);}return;
     }
@@ -75,13 +124,22 @@ JsonValue tariffDeclarationTemplate(){
     for(auto &m:v.members)if(m.first=="plan")for(auto &p:m.second.members)if(p.first=="revisions")p.second.items.push_back(tariffRowTemplate("revisions"));
     return v;
 }
+bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
+    try{
+        bounds=monthlyCycle(policy,static_cast<int64_t>(integer(through,"opening.through_utc_ms")));
+        if(problem)*problem={};
+        return true;
+    }catch(const Invalid &e){if(problem)*problem=e.problem;return false;}
+}
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem){
     try{
         if(!out)bad("","No declaration output.",TariffProblemKind::NoOutput);
         if(tariffJson(root).size()>tariffDeclarationMaxBytes)bad("","Declaration exceeds 64 KiB.",TariffProblemKind::Oversized);
         keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"});
-        if(integer(*root.find("schema_version"),"schema_version",1)!=1)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
-        choice(*root.find("reset_policy"),"reset_policy",{"explicit_cycle_only"});
+        const auto version=integer(*root.find("schema_version"),"schema_version",2);
+        if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
+        const auto &policy=*root.find("reset_policy");
+        if(version==1)choice(policy,"reset_policy",{"explicit_cycle_only"});
         const auto &ack=*root.find("acknowledged");if(!ack.isBool()||!ack.boolean)bad("acknowledged","Acknowledge declared-model exclusions before saving.",TariffProblemKind::Acknowledgement);
         TariffDeclaration d;d.country=label(*root.find("country"),"country");d.sourceReference=label(*root.find("source_reference"),"source_reference");
         d.confirmedUtc=integer(*root.find("confirmed_utc"),"confirmed_utc",lastMs/1000);if(!d.confirmedUtc)bad("confirmed_utc","Explicit review confirmation required.",TariffProblemKind::Confirmation);
@@ -92,12 +150,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         for(const auto &binding:std::vector<std::pair<const char *,std::string *>>{{"key",&p.key},{"territory",&p.territory},{"supplier",&p.supplier},{"product",&p.product},{"currency",&p.currency}})
             *binding.second=label(*plan.find(binding.first),child("plan",binding.first));
         if(p.currency.size()!=3||p.currency.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")!=std::string::npos)bad("plan.currency","Three uppercase letters required; no currency/FX inference.",TariffProblemKind::Currency);
-        const auto &clock=*plan.find("clock");keys(clock,"plan.clock",{"kind","fixed_offset_seconds"});
-        const auto kind=choice(*clock.find("kind"),"plan.clock.kind",{"utc","fixed_standard"});
-        const auto &offset=*clock.find("fixed_offset_seconds");auto abs=offset;const bool negative=!offset.text.empty()&&offset.text.front()=='-';if(negative)abs.text.erase(0,1);
-        const auto magnitude=integer(abs,"plan.clock.fixed_offset_seconds",64800);
-        if(magnitude%60||(kind=="utc"&&magnitude)||offset.text=="-0")bad("plan.clock.fixed_offset_seconds","Whole-minute STANDARD offset within +/-18h; UTC requires zero.",TariffProblemKind::FixedOffset);
-        p.clock.kind=kind=="utc"?CivilClockKind::Utc:CivilClockKind::FixedStandardOffset;p.clock.fixedOffsetSeconds=static_cast<int32_t>(magnitude)*(negative?-1:1);
+        p.clock=decodeClock(*plan.find("clock"),"plan.clock");
         const auto tiers=choice(*plan.find("tiers"),"plan.tiers",{"none","progressive","all_units"});p.tiers=tiers=="none"?TierMode::None:tiers=="progressive"?TierMode::Progressive:TierMode::AllUnits;
         p.cycleCharge=decimal(*plan.find("cycle_charge"),"plan.cycle_charge");
         if(!null(*plan.find("minimum_cycle_subtotal")))p.minimumCycleSubtotal=decimal(*plan.find("minimum_cycle_subtotal"),"plan.minimum_cycle_subtotal");
@@ -143,6 +196,11 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         s.declared=true;s.planKey=p.key;s.evidence={PowerBasis::WholeMeterImport,PowerOrigin::DeclaredForecast,label(*opening.find("scope"),"opening.scope"),label(*opening.find("adapter"),"opening.adapter")};
         d.openingKey=label(*opening.find("key"),"opening.key");s.timeDatabaseVersion=choice(*opening.find("time_database_version"),"opening.time_database_version",{"explicit-fixed-clock"});
         s.cycleBeginUtcMs=integer(*opening.find("cycle_begin_utc_ms"),"opening.cycle_begin_utc_ms");s.cycleEndUtcMs=integer(*opening.find("cycle_end_utc_ms"),"opening.cycle_end_utc_ms");s.throughUtcMs=integer(*opening.find("through_utc_ms"),"opening.through_utc_ms");
+        if(version==2){
+            const auto bounds=monthlyCycle(policy,s.throughUtcMs);
+            if(s.cycleBeginUtcMs!=bounds.beginUtcMs||s.cycleEndUtcMs!=bounds.endUtcMs)
+                bad("opening","Derive both cycle boundaries from the monthly rule and through-time.",TariffProblemKind::Unknown);
+        }
         auto quantity=electricityKwh(decimal(*opening.find("imported_kwh"),"opening.imported_kwh"));if(!quantity)bad("opening.imported_kwh","Nonnegative whole-meter quantity required.",TariffProblemKind::OpeningQuantity);s.importedKwh=*quantity;
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);

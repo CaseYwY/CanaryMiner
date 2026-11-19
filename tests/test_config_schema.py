@@ -290,6 +290,26 @@ class ElectricityPreferencesSchemaTests(unittest.TestCase):
 
 
 class TariffDeclarationSchemaTests(unittest.TestCase):
+    def test_monthly_reset_pairs_only_with_v2(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 2
+        example['reset_policy'] = {'monthly_day': 31, 'clock': {'kind': 'fixed_standard', 'fixed_offset_seconds': -12600}}
+        self.assertEqual(validate(example, schema, schema), [])
+        for path, value in (
+                (('schema_version',), 1), (('schema_version',), True), (('schema_version',), 3),
+                (('reset_policy',), 'explicit_cycle_only'), (('reset_policy', 'monthly_day'), 0),
+                (('reset_policy', 'monthly_day'), 32), (('reset_policy', 'monthly_day'), True),
+                (('reset_policy', 'rollover'), 'true'), (('reset_policy', 'clock', 'kind'), 'named_iana'),
+                (('acknowledged',), False)):
+            with self.subTest(path=path, value=value):
+                bad = json.loads(json.dumps(example))
+                target = bad
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = value
+                self.assertTrue(validate(bad, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')

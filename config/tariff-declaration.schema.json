@@ -5,15 +5,18 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"const": 1, "type": "integer"},
+    "schema_version": {"enum": [1, 2], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
     "confirmed_utc": {"type": "integer", "minimum": 1, "maximum": 253402300799},
-    "reset_policy": {"const": "explicit_cycle_only"},
+    "reset_policy": {},
     "plan": {"$ref": "#/$defs/plan"},
     "opening": {"$ref": "#/$defs/opening"}
   },
+  "if": {"properties": {"schema_version": {"const": 2}}},
+  "then": {"properties": {"reset_policy": {"$ref": "#/$defs/monthlyReset"}}},
+  "else": {"properties": {"reset_policy": {"const": "explicit_cycle_only"}}},
   "$defs": {
     "label": {"type": "string", "pattern": "^[!-~](?:[ -~]{0,126}[!-~])?$"},
     "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,37})(\\.[0-9]{0,17}[1-9])?$"},
@@ -22,6 +25,13 @@
     "clock": {
       "type": "object", "additionalProperties": false, "required": ["kind", "fixed_offset_seconds"],
       "properties": {"kind": {"enum": ["utc", "fixed_standard"]}, "fixed_offset_seconds": {"type": "integer", "minimum": -64800, "maximum": 64800}}
+    },
+    "monthlyReset": {
+      "type": "object", "additionalProperties": false, "required": ["monthly_day", "clock"],
+      "properties": {
+        "monthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
+        "clock": {"$ref": "#/$defs/clock"}
+      }
     },
     "plan": {
       "type": "object", "additionalProperties": false,
