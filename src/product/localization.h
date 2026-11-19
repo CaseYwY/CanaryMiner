@@ -75,20 +75,25 @@ inline LocalizedMessage message(std::string_view locale,MessageKey key){
     return {translated,selected->id,selected->review,false,selected->rtl};
 }
 using MessageArguments=std::vector<std::pair<std::string,std::string>>;
-inline bool formatMessage(std::string_view locale,MessageKey key,const MessageArguments &arguments,std::string *out,LocalizedMessage *metadata=nullptr){
-    if(!out||arguments.size()>8)return false;
-    const auto selected=message(locale,key);if(selected.text.empty())return false;
-    std::vector<std::string_view> names;if(!templateParameters(selected.text,&names))return false;
+inline bool formatMessageTemplate(std::string_view text,const MessageArguments &arguments,std::string *out){
+    if(!out||text.empty()||arguments.size()>8)return false;
+    std::vector<std::string_view> names;if(!templateParameters(text,&names))return false;
     std::vector<std::string_view> supplied;for(const auto &entry:arguments){if(!safeMessageText(entry.second))return false;supplied.push_back(entry.first);}
     std::sort(supplied.begin(),supplied.end());if(std::adjacent_find(supplied.begin(),supplied.end())!=supplied.end())return false;
     names.erase(std::unique(names.begin(),names.end()),names.end());if(names!=supplied)return false;
     std::string result;
-    for(std::size_t i=0;i<selected.text.size();){if(selected.text[i]!='{'){if(result.size()==4096)return false;result+=selected.text[i++];continue;}
-        const auto end=selected.text.find('}',i+1);const auto name=selected.text.substr(i+1,end-i-1);
+    for(std::size_t i=0;i<text.size();){if(text[i]!='{'){if(result.size()==4096)return false;result+=text[i++];continue;}
+        const auto end=text.find('}',i+1);const auto name=text.substr(i+1,end-i-1);
         const auto value=std::find_if(arguments.begin(),arguments.end(),[&](const auto &entry){return entry.first==name;});
         if(value==arguments.end()||value->second.size()>4096-result.size())return false;
         result+=value->second;i=end+1;
     }
-    *out=std::move(result);if(metadata)*metadata=selected;return true;
+    *out=std::move(result);return true;
+}
+inline bool formatMessage(std::string_view locale,MessageKey key,const MessageArguments &arguments,std::string *out,LocalizedMessage *metadata=nullptr){
+    const auto selected=message(locale,key);
+    if(!formatMessageTemplate(selected.text,arguments,out))return false;
+    if(metadata)*metadata=selected;
+    return true;
 }
 } } // namespace om::i18n

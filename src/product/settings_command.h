@@ -123,7 +123,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     }catch(...){result=3;}
     if(!intent.permits(token)&&!quit&&!(stop&&*stop))result=3;
     const bool terminalFailed=output->snapshot().state==ConsoleOutputState::Faulted;
-    intent.stop();owner->requestStop();output->requestStop(terminalFailed?ConsoleCleanup::IdleTerminalFault:result?ConsoleCleanup::IdleRefused:ConsoleCleanup::IdleClosed);panel.stopBillingReview();
+    intent.stop();panel.tariff.stopComparison();owner->requestStop();output->requestStop(terminalFailed?ConsoleCleanup::IdleTerminalFault:result?ConsoleCleanup::IdleRefused:ConsoleCleanup::IdleClosed);panel.stopBillingReview();
     if(runtime){runtime->requestStop();runtime->stop();}
     owner->stop(); // optional join after revocation; no mining worker exists in this command
     output->stop(); // bounded fixed cleanup only; never a synchronous stdout/stderr fallback

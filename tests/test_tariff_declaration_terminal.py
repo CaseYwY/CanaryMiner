@@ -159,6 +159,22 @@ def main():
         session([cli, 'settings', '--config', str(config)], author)
         saved_bytes = file.read_bytes()
 
+        def compare(send, until, tariff):
+            nonlocal checks
+            until(b'CanaryMiner / Settings')
+            tariff()
+            until(b'[P] Compare whole-meter')
+            send(b'p')
+            until(b'Whole-meter comparison | HYPOTHETICAL', True)
+            send(b'0\t1000\r')
+            result = until(b'Difference (with - without): 9.020000 USD', True)
+            assert b'2.420000 USD' in result and b'11.440000 USD' in result
+            assert file.read_bytes() == saved_bytes and not starts.exists()
+            checks += 3
+            send(b'\rq')  # Queue a second comparison, then stop through the normal input path.
+
+        session([cli, 'settings', '--config', str(config)], compare)
+
         def conflict(send, until, tariff):
             nonlocal checks
             until(b'CanaryMiner / Settings')
@@ -179,6 +195,10 @@ def main():
             send(b's')
             until(b'CanaryMiner / Settings', True)
             tariff()
+            send(b'p')
+            dashboard_tariff = until(b'Combined tariff / declared opening', True)
+            assert b'Compare whole-meter' not in dashboard_tariff
+            checks += 1
             send(b'v\r')  # confirmation only, no model/rate mutation
             until(b'Saved offline declaration + opening ONLY', True)
             assert starts.read_text().splitlines() == ['start']
@@ -205,7 +225,7 @@ def main():
         session([cli, 'settings', '--config', str(config)], stop_editor)
         assert file.read_bytes() == before and not list(state.glob('*credit*'))
         checks += 1
-    print(f'tariff declaration PTY: {checks} checks; nested author/review/save/conflict/active-session/stop passed')
+    print(f'tariff declaration PTY: {checks} checks; author/review/save/comparison/conflict/active-session/stop passed')
 
 
 if __name__ == '__main__':

@@ -31,6 +31,21 @@ A saved opening is an offline scenario assertion, **not** an observed accumulato
 
 Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent resets/annual true-up, proration, threshold revisions, provider intermediate rounding and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
+## Compare two whole-meter scenarios in idle settings
+
+Open Combined tariff from the idle `settings` command and press **P**. Enter the constant whole-meter import watts
+for the **without mining** and **with mining** scenarios. Use **Tab** to change fields and **Enter** to calculate.
+The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
+applies to the full displayed UTC interval from the opening's through-time to the cycle end.
+
+The amounts are the hypothetical remaining charges for both scenarios and their difference, in the plan currency.
+The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
+unavailable result. A background calculation uses the inputs and local time captured at Enter. Escape or stopping
+the command cancels it. The input values and results are local to the panel and are discarded when it closes.
+
+The running Dashboard still supports reviewing and saving the tariff declaration. Open idle settings to calculate
+the comparison. The comparison supplies no observed usage, billing reset, or economic-mode permission.
+
 ## Persistence, privacy and rollback
 
 The file is limited to **64 KiB**, 16 revisions, 32 calendar rules/bands per revision, 256 dynamic rows per revision and 512 total rows: narrower than the pure API. All nested keys/types/bounds are strict. Invalid/newer/unknown/nonregular files are preserved; failed loads disable Save. Missing files return a blank draft without creating data.
