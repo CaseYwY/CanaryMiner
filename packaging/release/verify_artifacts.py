@@ -21,9 +21,11 @@ HOME_PATH = re.compile(r'(?i)[a-z]:[\\/]+Users[\\/]+|/(?:home|Users)/|/mnt/[a-z]
 
 def read_artifact(path, platform):
     mode = path.lstat()
-    if not stat.S_ISREG(mode.st_mode) or not 64 <= mode.st_size <= MAX_ARTIFACT_BYTES:
+    reparse = getattr(mode, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    if reparse or not stat.S_ISREG(mode.st_mode) or not 64 <= mode.st_size <= MAX_ARTIFACT_BYTES:
         raise ValueError(path.name + ': expected bounded nonempty regular artifact, not a link')
-    data = path.read_bytes()
+    with path.open('rb') as stream:
+        data = stream.read(mode.st_size + 1)
     if len(data) != mode.st_size:
         raise ValueError(path.name + ': artifact changed while reading')
     if platform == 'linux':
@@ -73,10 +75,10 @@ def inspect(tool, arguments):
 
 
 def dependency_check(platform, name, metadata, symbols=''):
-    helper = name.startswith('canary_preferences_worker')
+    miner = name in ('canary-miner', 'canary-miner.exe')
     if platform == 'linux':
         needed = [value.strip() for value in re.findall(r'^\s*NEEDED[ \t]+([^\r\n]+)$', metadata, re.M)]
-        allowed = LINUX_SYSTEM | (frozenset() if helper else frozenset(('libcuda.so.1',)))
+        allowed = LINUX_SYSTEM | (frozenset(('libcuda.so.1',)) if miner else frozenset())
         if not needed or any(item not in allowed for item in needed):
             raise ValueError(name + ': unsupported or unreadable native dependencies')
         versions = [tuple(map(int, value.split('.'))) for value in re.findall(r'\bGLIBC_([0-9]+(?:\.[0-9]+)+)\b', symbols)]
@@ -94,7 +96,7 @@ def dependency_check(platform, name, metadata, symbols=''):
             elif started:
                 inside = False
     def allowed(value):
-        return value in WINDOWS_SYSTEM or bool(re.fullmatch(r'api-ms-win-(?:crt|core)-[a-z0-9-]+\.dll', value)) or (not helper and value == 'nvcuda.dll')
+        return value in WINDOWS_SYSTEM or bool(re.fullmatch(r'api-ms-win-(?:crt|core)-[a-z0-9-]+\.dll', value)) or (miner and value == 'nvcuda.dll')
     if not needed or any(not allowed(item) for item in needed):
         raise ValueError(name + ': unsupported or unreadable native dependencies')
     return ()
@@ -102,6 +104,14 @@ def dependency_check(platform, name, metadata, symbols=''):
 
 def verify(platform, stage, source, cache, deny_file, tool):
     check_cache(cache)
+    names = ('canary-miner', 'canary_preferences_worker')
+    if platform == 'windows':
+        names = tuple(name + '.exe' for name in names)
+    floor, _ = verify_images(platform, stage, source, deny_file, tool, names)
+    return '.'.join(map(str, floor))
+
+
+def privacy_policy(source, deny_file):
     spec = importlib.util.spec_from_file_location('release_secret_checks', source / 'tools/check_secrets.py')
     checks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checks)
@@ -114,22 +124,28 @@ def verify(platform, stage, source, cache, deny_file, tool):
     match = re.search(r'^\s*#define CANARY_FEE_DESTINATION "(prl1[a-z0-9]+)"\s*$', fee_source, re.M)
     if not match:
         raise ValueError('declared public fee metadata unavailable')
-    names = ('canary-miner', 'canary_preferences_worker')
-    if platform == 'windows':
-        names = tuple(name + '.exe' for name in names)
+    return checks, local, match.group(1)
+
+
+def verify_images(platform, stage, source, deny_file, tool, names, *, portable=False, payloads=None):
+    policy = privacy_policy(source, deny_file)
+    for name, data in (payloads or {}).items():
+        privacy_check(data, name, *policy)
     images = [(stage / name, read_artifact(stage / name, platform)) for name in names]
     floor = (2, 40) if platform == 'linux' else ()
     for path, data in images:
-        privacy_check(data, path.name, checks, local, match.group(1))
+        privacy_check(data, path.name, *policy)
         if platform == 'linux':
             metadata, symbols = inspect(tool, ['-p', str(path)]), inspect(tool, ['-T', str(path)])
+            if portable and re.search(r'^\s*(?:RPATH|RUNPATH)\s', metadata, re.M):
+                raise ValueError(path.name + ': candidate must use system library paths')
         else:
             metadata, symbols = inspect(tool, ['/DEPENDENTS', str(path)]), ''
         floor = max(floor, dependency_check(platform, path.name, metadata, symbols))
     for path, data in images:
         if read_artifact(path, platform) != data:
             raise ValueError(path.name + ': artifact changed during metadata inspection')
-    return '.'.join(map(str, floor))
+    return floor, {path.name: data for path, data in images}
 
 
 def main():
