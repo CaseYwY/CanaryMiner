@@ -195,10 +195,24 @@ def main():
             send(b's')
             until(b'CanaryMiner / Settings', True)
             tariff()
+            until(b'[P] Compare whole-meter')
             send(b'p')
-            dashboard_tariff = until(b'Combined tariff / declared opening', True)
-            assert b'Compare whole-meter' not in dashboard_tariff
-            checks += 1
+            until(b'Whole-meter comparison | HYPOTHETICAL', True)
+            send(b'0\t1000\r')
+            result = until(b'Difference (with - without): 9.020000 USD', True)
+            assert b'2.420000 USD' in result and b'11.440000 USD' in result
+            assert file.read_bytes() == saved_bytes and starts.read_text().splitlines() == ['start']
+            checks += 3
+            send(b'\r\x1b')  # Cancel the replacement calculation and return to the same tariff page.
+            until(b'Combined tariff / declared opening', True)
+            send(b'p')
+            reopened = until(b'[Tab] Field [Enter] Compare', True)
+            assert b'Without mining (W):' in reopened
+            assert b'9.020000 USD' not in reopened and b'Without mining (W): 0' not in reopened
+            assert file.read_bytes() == saved_bytes and starts.read_text().splitlines() == ['start']
+            checks += 2
+            send(b'\x1b')
+            until(b'Combined tariff / declared opening', True)
             send(b'v\r')  # confirmation only, no model/rate mutation
             until(b'Saved offline declaration + opening ONLY', True)
             assert starts.read_text().splitlines() == ['start']
@@ -213,6 +227,29 @@ def main():
             send(b'q')
 
         session([supervisor, '--dashboard-session-test', str(state)], active)
+
+        def stop_dashboard_comparison(send, until, tariff, stop):
+            until(b'all local 2')
+            send(b's')
+            until(b'CanaryMiner / Settings', True)
+            tariff()
+            send(b'p')
+            until(b'Whole-meter comparison | HYPOTHETICAL', True)
+            send(b'0\t1000\r')
+            until(b'Difference (with - without): 9.020000 USD', True)
+            send(b'\r' + stop)
+
+        for name, stop in (('q', b'q'), ('ctrl-c', b'\x03')):
+            isolated_state = root / ('stop-comparison-' + name)
+            isolated_state.mkdir()
+            before = file.read_bytes()
+            declaration = isolated_state / file.name
+            declaration.write_bytes(before)
+            session([supervisor, '--dashboard-session-test', str(isolated_state)],
+                    lambda send, until, tariff: stop_dashboard_comparison(send, until, tariff, stop))
+            assert declaration.read_bytes() == before
+            assert (isolated_state / starts.name).read_text().splitlines() == ['start']
+            checks += 2
 
         def stop_editor(send, until, tariff):
             until(b'CanaryMiner / Settings')

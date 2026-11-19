@@ -23,7 +23,7 @@ class TariffSettingsPanel {
     TariffSettingsPage page=TariffSettingsPage::Browse;
     std::vector<size_t> route;size_t field=0,reviewOffset=0;
     std::string input,message;std::vector<std::string> review;
-    void open(JsonValue value,bool sessionRunning=false){active=draft=std::move(value);route.clear();field=reviewOffset=0;visible=true;page=TariffSettingsPage::Browse;message.clear();review.clear();running_=sessionRunning;comparison_.close();}
+    void open(JsonValue value){active=draft=std::move(value);route.clear();field=reviewOffset=0;visible=true;page=TariffSettingsPage::Browse;message.clear();review.clear();comparison_.close();}
     void stopComparison(){comparison_.requestStop();}
     bool dirty()const{return tariffJson(active)!=tariffJson(draft);}
     std::string path()const{
@@ -33,9 +33,9 @@ class TariffSettingsPanel {
     }
     TariffSettingsResult key(int key,const Save &save,uint64_t now){
         using NoticeKey=i18n::TariffNoticeMessageKey;
-        if(key==3)return TariffSettingsResult::Quit;
+        if(key==3){stopComparison();return TariffSettingsResult::Quit;}
         if(comparison_.visible) {
-            if(key=='q'||key=='Q')return TariffSettingsResult::Quit;
+            if(key=='q'||key=='Q'){stopComparison();return TariffSettingsResult::Quit;}
             comparison_.key(key,now);
             return TariffSettingsResult::None;
         }
@@ -83,7 +83,7 @@ class TariffSettingsPanel {
             else if(dirty())page=TariffSettingsPage::Leave;
             else{visible=false;return TariffSettingsResult::Close;}
         }else if(key=='v'||key=='V'||key==kKeyF2)beginReview();
-        else if((key=='p'||key=='P')&&!running_)comparison_.open(active);
+        else if(key=='p'||key=='P')comparison_.open(active);
         else if((key=='m'||key=='M')&&onCyclePolicy())toggleCyclePolicy();
         else if((key=='g'||key=='G')&&monthly())deriveCycle();
         else if(key==kKeyDown||key=='\t'){const auto n=count();if(n)field=(field+1)%n;}
@@ -113,7 +113,7 @@ class TariffSettingsPanel {
             using Key=i18n::TariffMonthlyMessageKey;
             if(onCyclePolicy())shortcuts+=i18n::tariffMonthlyEnglish(Key::Toggle)+" ";
             if(monthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
-            if(!running_)shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
+            shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
         }
         const auto footer=wrapText(shortcuts+i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
         auto notice=wrapText(message.empty()?i18n::tariffPanelEnglish(PanelKey::OfflineDefault):message,width);
@@ -150,7 +150,6 @@ class TariffSettingsPanel {
         return text;
     }
    private:
-    bool running_=false;
     TariffComparisonSettings comparison_;
     JsonValue *node(){auto *v=&draft;for(size_t i:route)v=v->isObject()?&v->members[i].second:&v->items[i];return v;}
     const JsonValue *node()const{return const_cast<TariffSettingsPanel *>(this)->node();}

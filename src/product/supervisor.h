@@ -898,6 +898,7 @@ class Supervisor {
     /** Asks every running worker to stop: closing stdin starts each child's own drain. */
     void beginStop() {
         intent_.stop();  // every pending result/retry from this epoch loses permission before draining
+        settings_.tariff.stopComparison();
         // HTTP remains reachable during optional joins: revoke its published observation before any cleanup can wait.
         publisher_.update([](StatsSnapshot *snapshot){snapshot->poolTransport={};snapshot->state="draining";});
         if(output_)output_->requestStop(ConsoleCleanup::SupervisorStopped);

@@ -1,4 +1,4 @@
-// Read-only scenario calculation for idle settings. A declaration is never telemetry.
+// Read-only scenario calculation from a saved tariff and user-entered power.
 #pragma once
 
 #include <array>
@@ -46,7 +46,12 @@ class TariffComparisonSettings {
 
     void close() {
         requestStop();
-        *this = TariffComparisonSettings{};
+        // Retain the one worker slot. Closing the page must not join a running calculation.
+        visible = false;
+        declaration_.reset();
+        focus_ = 0;
+        input_ = {};
+        notice_.clear();
     }
 
     std::string render(int columns, int rows, ColorLevel color) const {
@@ -97,11 +102,19 @@ class TariffComparisonSettings {
     std::string notice_;
     std::shared_ptr<Job> job_;
 
-    bool pending() const { return job_ && !job_->done.load(std::memory_order_acquire); }
-    void clearResult() { job_.reset(); notice_.clear(); }
+    bool busy() const { return job_ && !job_->done.load(std::memory_order_acquire); }
+    bool pending() const { return busy() && !job_->cancel.load(std::memory_order_relaxed); }
+    void clearResult() {
+        if (!busy()) job_.reset();
+        notice_.clear();
+    }
 
     void calculate(uint64_t nowUtc) {
         using i18n::tariffComparisonEnglish;
+        if (busy()) {
+            notice_ = tariffComparisonEnglish(Key::RetryAfterCancel);
+            return;
+        }
         clearResult();
         std::array<ExactDecimal, 2> watts;
         for (size_t i = 0; i < watts.size(); ++i) {

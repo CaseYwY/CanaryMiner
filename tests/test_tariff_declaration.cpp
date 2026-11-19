@@ -222,7 +222,7 @@ int main(){
     enter(panel,"country");panel.key(0xc3,{},T/1000);panel.key('\r',{},T/1000);CHECK(panel.inputRejected&&!panel.dirty());panel.key(27,{},T/1000);
     panel.open(original);enter(panel,"plan");enter(panel,"revisions");panel.key('a',{},T/1000);CHECK(panel.draft.find("plan")->find("revisions")->items.size()==2);panel.key('x',{},T/1000);panel.key(27,{},T/1000);CHECK(panel.draft.find("plan")->find("revisions")->items.size()==2);panel.key('x',{},T/1000);panel.key('\r',{},T/1000);CHECK(!panel.dirty());
     panel.open(tariffDeclarationTemplate());panel.key('v',{},T/1000);panel.key('\r',save,T/1000);CHECK(panel.page==TariffSettingsPage::Browse&&panel.message.find("acknowledged")!=std::string::npos&&panel.field==3);
-    // The idle comparison uses the saved plan, even when a new draft has different fees.
+    // The comparison uses the saved plan, even when a new draft has different fees.
     panel.open(original);
     set(member(panel.draft,"plan"),"cycle_charge","\"9\"");
     const auto savedDraft=tariffJson(panel.draft);
@@ -261,10 +261,15 @@ int main(){
     comparison=awaitComparison(panel);
     CHECK(comparison.find("0.110000 USD")!=std::string::npos&&comparison.find("6.160000 USD")!=std::string::npos&&comparison.find("6.050000 USD")!=std::string::npos);
     panel.key('\r',{},T/1000);
-    panel.stopComparison();
+    CHECK(panel.key('q',{},T/1000)==TariffSettingsResult::Quit);
     CHECK(awaitComparison(panel).find("6.050000 USD")==std::string::npos);
     panel.key(27,{},T/1000);
     CHECK(panel.render(60,12,ColorLevel::None).find("HYPOTHETICAL")==std::string::npos);
+    panel.key('p',{},T/1000);
+    const auto reopened=panel.render(60,12,ColorLevel::None);
+    CHECK(reopened.find("Without mining (W): \n")!=std::string::npos);
+    CHECK(reopened.find("6.050000 USD")==std::string::npos);
+    panel.key(27,{},T/1000);
     auto large=original;
     auto &plan=member(large,"plan");
     set(plan,"tiers","\"none\"");
@@ -288,9 +293,6 @@ int main(){
     panel.open(tariffDeclarationTemplate());
     panel.key('p',{},T/1000);
     CHECK(panel.render(60,12,ColorLevel::None).find("Save a valid combined tariff")!=std::string::npos);
-    panel.open(original,true);
-    panel.key('p',{},T/1000);
-    CHECK(panel.render(100,24,ColorLevel::None).find("Whole-meter comparison")==std::string::npos);
     // Focus remains visible at the supported compact terminal sizes, including deep table routes.
     panel.open(original);enter(panel,"plan");enter(panel,"revisions");panel.key('\r',{},T/1000);enter(panel,"calendar");panel.key('\r',{},T/1000);
     for(int columns:{60,80,120})for(int rows:{12,24})for(size_t i=0;i<9;++i){panel.field=i;frame(panel,columns,rows);CHECK(panel.render(columns,rows,ColorLevel::None).find("> ")!=std::string::npos);}
