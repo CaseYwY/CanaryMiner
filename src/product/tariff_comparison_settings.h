@@ -18,7 +18,10 @@ class TariffComparisonSettings {
         close();
         visible = true;
         TariffDeclaration checked;
-        if (decodeTariffDeclaration(saved, &checked)) declaration_ = std::move(checked);
+        if (decodeTariffDeclaration(saved, &checked)) {
+            declaration_ = std::move(checked);
+            end_ = declaration_->opening.cycleEndUtcMs;
+        }
     }
 
     void key(int key, uint64_t nowUtc) {
@@ -26,6 +29,16 @@ class TariffComparisonSettings {
         if (!declaration_ || pending()) return;
         if (key == '\t' || key == kKeyUp || key == kKeyDown || key == kKeyBackTab) {
             focus_ = 1 - focus_;
+        } else if (key == kKeyLeft || key == kKeyRight) {
+            if (!declaration_->monthlyReset) return;
+            auto cycles = cycles_;
+            if (key == kKeyLeft && cycles > 1) --cycles;
+            if (key == kKeyRight && cycles < maxTariffComparisonCycles) ++cycles;
+            if (cycles != cycles_) {
+                end_ = tariffComparisonEnd(*declaration_, cycles);
+                cycles_ = cycles;
+                clearResult();
+            }
         } else if (key == '\r' || key == '\n') {
             calculate(nowUtc);
         } else if (key == 8 || key == 127) {
@@ -49,6 +62,8 @@ class TariffComparisonSettings {
         // Retain the one worker slot. Closing the page must not join a running calculation.
         visible = false;
         declaration_.reset();
+        end_.reset();
+        cycles_ = 1;
         focus_ = 0;
         input_ = {};
         notice_.clear();
@@ -68,8 +83,11 @@ class TariffComparisonSettings {
         auto add = [&](const std::string &line) {
             for (const auto &part : wrapText(line, width)) out += part + "\n";
         };
-        add(tariffComparisonEnglish(Key::Span, {{"begin", std::to_string(o.throughUtcMs)}, {"end", std::to_string(o.cycleEndUtcMs)}}));
-        add(tariffComparisonEnglish(Key::Instruction));
+        add(end_ ? tariffComparisonEnglish(Key::Span, {{"begin", std::to_string(o.throughUtcMs)}, {"end", std::to_string(*end_)}})
+                 : tariffComparisonEnglish(Key::EndUnavailable));
+        add(declaration_->monthlyReset
+            ? tariffComparisonEnglish(Key::Cycles, {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
+            : tariffComparisonEnglish(Key::Instruction));
         add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(Key::WithoutWatts, {{"watts", input_[0]}}));
         add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithWatts, {{"watts", input_[1]}}));
         if (pending()) add(tariffComparisonEnglish(Key::Pending));
@@ -97,6 +115,8 @@ class TariffComparisonSettings {
     static constexpr size_t inputLimit_ = 20;
     static constexpr size_t amountTextLimit_ = 48;  // at most two lines per result at 60 columns
     std::optional<TariffDeclaration> declaration_;
+    std::optional<int64_t> end_;
+    unsigned cycles_ = 1;
     size_t focus_ = 0;
     std::array<std::string, 2> input_;
     std::string notice_;
@@ -116,6 +136,10 @@ class TariffComparisonSettings {
             return;
         }
         clearResult();
+        if (!end_) {
+            notice_ = tariffComparisonEnglish(Key::EndUnavailable);
+            return;
+        }
         std::array<ExactDecimal, 2> watts;
         for (size_t i = 0; i < watts.size(); ++i) {
             const auto &value = input_[i];
@@ -134,9 +158,9 @@ class TariffComparisonSettings {
             auto owned = std::make_shared<Job>();
             auto *job = owned.get();
             // The worker owns an immutable copy of the reviewed inputs and original decision time.
-            job->worker = std::thread([job, d, watts, decision = static_cast<int64_t>(nowUtc * 1000)] {
+            job->worker = std::thread([job, d, watts, cycles = cycles_, decision = static_cast<int64_t>(nowUtc * 1000)] {
                 try {
-                    auto result = evaluate(d, watts, decision, job->cancel);
+                    auto result = evaluate(d, watts, cycles, decision, job->cancel);
                     if (!job->cancel.load(std::memory_order_relaxed)) job->results = std::move(result);
                 } catch (...) {}  // No partial comparison is published if evaluation fails.
                 job->done.store(true, std::memory_order_release);
@@ -148,19 +172,21 @@ class TariffComparisonSettings {
     }
 
     static std::vector<std::string> evaluate(const TariffDeclaration &d, const std::array<ExactDecimal, 2> &watts,
-                                             int64_t decision, const std::atomic<bool> &cancel) {
+                                             unsigned cycles, int64_t decision, const std::atomic<bool> &cancel) {
         using i18n::tariffComparisonEnglish;
-        const auto &o = d.opening;
-        const PowerTrace base{o.evidence, {{o.throughUtcMs, o.cycleEndUtcMs, watts[0]}}};
-        const PowerTrace with{o.evidence, {{o.throughUtcMs, o.cycleEndUtcMs, watts[1]}}};
-        const auto result = counterfactualBill(d.plan, o, base, with, o.cycleEndUtcMs, decision, &cancel);
+        const auto result = compareTariffCycles(d, watts, cycles, decision, &cancel);
         if (result.status != ElectricityStatus::Ok) {
-            return {tariffComparisonEnglish(Key::ModelStatus, {{"status", electricityStatusName(result.status)}})};
+            const auto cycle = std::to_string(result.failedCycle);
+            if (result.splitsChargedDay) return {tariffComparisonEnglish(Key::ChargedDay, {{"cycle", cycle}})};
+            const auto status = electricityStatusName(result.status);
+            if (cycles > 1 && result.failedCycle)
+                return {tariffComparisonEnglish(Key::CycleStatus, {{"cycle", cycle}, {"status", status}})};
+            return {tariffComparisonEnglish(Key::ModelStatus, {{"status", status}})};
         }
         std::string baseCharge, withCharge, change;
-        if (!result.withoutMining.charge->format(6, &baseCharge) ||
-            !result.withMining.charge->format(6, &withCharge) ||
-            !result.incrementalCharge->format(6, &change) ||
+        if (!result.withoutMining.format(6, &baseCharge) ||
+            !result.withMining.format(6, &withCharge) ||
+            !result.difference.format(6, &change) ||
             baseCharge.size() > amountTextLimit_ || withCharge.size() > amountTextLimit_ ||
             change.size() > amountTextLimit_) {
             return {tariffComparisonEnglish(Key::DisplayRange)};

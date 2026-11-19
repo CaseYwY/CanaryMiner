@@ -27,6 +27,95 @@ std::string awaitComparison(const TariffSettingsPanel &panel) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
+
+void checkComparison(const TariffCycleComparison &value,const char *base,const char *with,const char *delta){
+    CHECK(value.status==ElectricityStatus::Ok);
+    std::string amount;
+    CHECK(value.withoutMining.format(6,&amount)&&amount==base);
+    CHECK(value.withMining.format(6,&amount)&&amount==with);
+    CHECK(value.difference.format(6,&amount)&&amount==delta);
+}
+
+void comparisonHorizon(JsonValue saved){
+    constexpr int64_t march=1711843200000, april=1714435200000, nextFebruary=1740700800000;
+    const std::array<ExactDecimal,2> watts{dec("0"),dec("1000")};
+    TariffDeclaration declaration;
+    CHECK(decodeTariffDeclaration(saved,&declaration));
+    CHECK(declaration.monthlyReset&&declaration.monthlyReset->day==31);
+    CHECK(tariffComparisonEnd(declaration,1)==march&&tariffComparisonEnd(declaration,2)==april);
+    CHECK(tariffComparisonEnd(declaration,12)==nextFebruary);
+    CHECK(!tariffComparisonEnd(declaration,0)&&!tariffComparisonEnd(declaration,13));
+    const auto unavailable=compareTariffCycles(declaration,watts,2,T);
+    CHECK(unavailable.status==ElectricityStatus::Unavailable&&unavailable.failedCycle==2);
+    CHECK(unavailable.withoutMining.numerator.zero()&&unavailable.withMining.numerator.zero()&&unavailable.difference.numerator.zero());
+
+    auto &plan=member(saved,"plan");
+    auto &revision=member(plan,"revisions").items[0];
+    set(revision,"end_utc_ms",std::to_string(april));
+    CHECK(decodeTariffDeclaration(saved,&declaration));
+    checkComparison(compareTariffCycles(declaration,watts,2,T),"2.200000","165.880000","163.680000");
+    CHECK(declaration.opening.cycleEndUtcMs==march&&!declaration.opening.importedKwh.numerator.zero());
+
+    TariffSettingsPanel panel;
+    panel.open(saved);
+    panel.key('p',{},T/1000);
+    panel.key(kKeyRight,{},T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("Cycles 2/12")!=std::string::npos);
+    CHECK(panel.render(60,12,ColorLevel::None).find(std::to_string(april))!=std::string::npos);
+    for(char c:std::string("0\t1000\r"))panel.key(c,{},T/1000);
+    CHECK(awaitComparison(panel).find("163.680000 USD")!=std::string::npos);
+    frame(panel,60,12);
+    panel.key(kKeyRight,{},T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("163.680000 USD")==std::string::npos);
+    panel.key('\r',{},T/1000);
+    const auto failed=awaitComparison(panel);
+    CHECK(failed.find("Comparison unavailable in cycle 3")!=std::string::npos);
+    CHECK(failed.find("Remaining with mining:")==std::string::npos);
+    panel.key(kKeyLeft,{},T/1000);
+    panel.key(kKeyLeft,{},T/1000);
+    panel.key('\r',{},T/1000);
+    CHECK(awaitComparison(panel).find("5.280000 USD")!=std::string::npos);
+    panel.key(27,{},T/1000);
+    CHECK(tariffJson(panel.active)==tariffJson(saved)&&!panel.dirty());
+
+    auto progressive=declaration;
+    progressive.plan.tiers=TierMode::Progressive;
+    progressive.plan.revisions[0].bands={{dec("10"),dec("0.05")},{std::nullopt,dec("0.15")}};
+    checkComparison(compareTariffCycles(progressive,watts,2,T),"2.200000","287.540000","285.340000");
+    progressive.plan.tiers=TierMode::AllUnits;
+    checkComparison(compareTariffCycles(progressive,watts,2,T),"2.200000","288.640000","286.440000");
+    auto minimum=declaration;
+    minimum.plan.minimumCycleSubtotal=dec("8");
+    checkComparison(compareTariffCycles(minimum,watts,2,T),"15.400000","167.200000","151.800000");
+
+    auto fee=declaration;
+    fee.plan.revisions[0].chargePerCivilDay=dec("0.1");
+    checkComparison(compareTariffCycles(fee,watts,2,T),"5.610000","169.290000","163.680000");
+    fee.monthlyReset->clock={CivilClockKind::FixedStandardOffset,{},19800};
+    fee.opening.cycleBeginUtcMs-=19800000;
+    fee.opening.cycleEndUtcMs-=19800000;
+    const auto split=compareTariffCycles(fee,watts,2,T);
+    CHECK(split.status==ElectricityStatus::Unsupported&&split.failedCycle==2&&split.splitsChargedDay);
+    fee.plan.revisions[0].chargePerCivilDay={};
+    const auto unaligned=compareTariffCycles(fee,watts,2,T);
+    CHECK(unaligned.status==ElectricityStatus::Ok&&tariffComparisonEnd(fee,2)==april-19800000);
+
+    auto dynamic=declaration;
+    auto &rates=dynamic.plan.revisions[0];
+    rates.timeMode=TimeRateMode::Dynamic;
+    rates.baseRatePerKwh={};
+    rates.dynamic={{rates.beginUtcMs,march,rates.publishedUtcMs,dec("0.2")}};
+    const auto gap=compareTariffCycles(dynamic,watts,2,T);
+    CHECK(gap.status==ElectricityStatus::MissingPrice&&gap.failedCycle==2&&gap.withMining.numerator.zero());
+    rates.dynamic.push_back({march,april,static_cast<int64_t>(T)+1,dec("0.2")});
+    const auto late=compareTariffCycles(dynamic,watts,2,T);
+    CHECK(late.status==ElectricityStatus::NotYetKnown&&late.failedCycle==2&&late.withMining.numerator.zero());
+    const std::atomic<bool> cancelled{true};
+    CHECK(compareTariffCycles(declaration,watts,2,T,&cancelled).status==ElectricityStatus::Unavailable);
+    declaration.monthlyReset.reset();
+    CHECK(!tariffComparisonEnd(declaration,2));
+}
+
 void monthlyCycles(const JsonValue &original) {
     using Message=i18n::TariffMonthlyMessageKey;
     for(size_t i=0;i<static_cast<size_t>(Message::Count);++i) {
@@ -131,6 +220,7 @@ void monthlyCycles(const JsonValue &original) {
     CHECK(decoded.opening.cycleBeginUtcMs==jan2024);
     CHECK(decodeTariffDeclaration(panel.draft,&decoded,&error));
     CHECK(decoded.opening.cycleBeginUtcMs==feb2024&&decoded.opening.cycleEndUtcMs==mar2024);
+    comparisonHorizon(panel.draft);
     panel.open(panel.draft);
     panel.key('p',{},T/1000);
     for(char c:std::string("0\t1000\r"))panel.key(c,{},T/1000);

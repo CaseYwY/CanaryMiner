@@ -6,7 +6,7 @@ namespace om { namespace i18n {
 enum class TariffComparisonMessageKey {
     Hint, ShortTitle, Resize, Back, Title, NeedDeclaration, Span, Instruction, WithoutWatts, WithWatts,
     Footer, NeedWatts, Clock, Pending, Failed, ModelStatus, DisplayRange, WithoutCharge, WithCharge, Difference,
-    RetryAfterCancel
+    RetryAfterCancel, Cycles, EndUnavailable, CycleStatus, ChargedDay
 };
 
 inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffComparisonMessageKey key) {
@@ -20,7 +20,11 @@ inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffC
         "Comparison unavailable: display range exceeded.",
         "Remaining without mining: {amount} {currency}", "Remaining with mining:    {amount} {currency}",
         "Difference (with - without): {amount} {currency}",
-        "Previous comparison cancelled. Press Enter again to retry."
+        "Previous comparison cancelled. Press Enter again to retry.",
+        "[Left/Right] Cycles {count}/{max} | Constant watts",
+        "UTC end unavailable for this span.",
+        "Comparison unavailable in cycle {cycle}: {status}",
+        "Cycle {cycle} starts within a charged tariff day."
     };
     const auto index = static_cast<size_t>(key);
     if (index >= sizeof(messages) / sizeof(*messages)) return {};

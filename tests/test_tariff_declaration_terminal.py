@@ -311,6 +311,47 @@ def main():
         session([cli, 'settings', '--config', str(config)], monthly)
         monthly_bytes = file.read_bytes()
 
+        horizon_state = root / 'monthly-comparison'
+        horizon_state.mkdir()
+        horizon = json.loads(monthly_bytes)
+        horizon['reset_policy']['clock'] = {'kind': 'utc', 'fixed_offset_seconds': 0}
+        horizon['plan']['tiers'] = 'none'
+        horizon['plan']['revisions'][0].update(
+            begin_utc_ms=1709164800000, end_utc_ms=1714435200000, time_mode='constant',
+            charge_per_civil_day='0', calendar=[], bands=[])
+        horizon['opening'].update(
+            cycle_begin_utc_ms=1709164800000, cycle_end_utc_ms=1711843200000,
+            through_utc_ms=1711756800000, imported_kwh='21', accrued_subtotal='2')
+        horizon_file = horizon_state / file.name
+        horizon_original = json.dumps(horizon).encode()
+        horizon_file.write_bytes(horizon_original)
+
+        def compare_monthly(send, until, tariff):
+            nonlocal checks
+            until(b'all local 2')
+            send(b's')
+            until(b'CanaryMiner / Settings', True)
+            tariff()
+            send(b'p')
+            until(b'Cycles 1/12', True)
+            send(b'\x1b[C')
+            span = until(b'Cycles 2/12', True)
+            assert b'UTC ms 1711756800000 to 1714435200000' in span
+            send(b'0\t1000\r')
+            amounts = until(b'Difference (with - without): 163.680000 USD', True)
+            assert b'2.200000 USD' in amounts and b'165.880000 USD' in amounts
+            send(b'\x1b[C\r')
+            unavailable = until(b'Comparison unavailable in cycle 3', True)
+            assert b'163.680000 USD' not in unavailable
+            send(b'\x1b[D\x1b[D\r')
+            until(b'Difference (with - without): 5.280000 USD', True)
+            assert horizon_file.read_bytes() == horizon_original
+            assert (horizon_state / starts.name).read_text().splitlines() == ['start']
+            checks += 6
+            send(b'q')
+
+        session([supervisor, '--dashboard-session-test', str(horizon_state)], compare_monthly)
+
         def reopen_monthly(send, until, tariff):
             nonlocal checks
             until(b'CanaryMiner / Settings')
