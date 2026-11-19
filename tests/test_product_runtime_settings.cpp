@@ -183,7 +183,7 @@ static void publicTickerTests() {
     CHECK(narrowBrowse.find("> Tickers [off]")!=std::string::npos);
     CHECK(narrowBrowse.find("Session req: off")!=std::string::npos && narrowBrowse.find("CLI: --no-market")!=std::string::npos);
     CHECK(narrowBrowse.find("Polling unavailable")!=std::string::npos && narrowBrowse.find("Next explicit run")!=std::string::npos);
-    CHECK(narrowBrowse.find("Latest refs only")!=std::string::npos && narrowBrowse.find("Both on: withheld")!=std::string::npos);
+    CHECK(narrowBrowse.find("Latest refs only")!=std::string::npos && narrowBrowse.find("Manual+public clash")!=std::string::npos);
     root.key(' ',{},save);
     root.key('v',{},save);
     const auto review=root.runtime.render(80,16,ColorLevel::None);
@@ -193,7 +193,7 @@ static void publicTickerTests() {
     const auto narrowReview=root.runtime.render(20,12,ColorLevel::None);
     CHECK(narrowReview.find("Ticker: off -> on")!=std::string::npos && narrowReview.find("Polling unavailable")!=std::string::npos);
     CHECK(narrowReview.find("Gate PRL/USDT")!=std::string::npos && narrowReview.find("Kraken USDT/USD")!=std::string::npos);
-    CHECK(narrowReview.find("Both on: withheld")!=std::string::npos);
+    CHECK(narrowReview.find("Manual+public clash")!=std::string::npos);
     CHECK(narrowReview.find("Arrows Enter Esc Q")!=std::string::npos);
     CHECK(std::count(narrowReview.begin(),narrowReview.end(),'\n')<12);
     root.key('\r',{},save);

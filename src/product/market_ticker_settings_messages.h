@@ -19,7 +19,7 @@ inline LocalizedMessage marketTickerSettingsMessage(std::string_view locale, Mar
         "[Space] Change [V/F2] Review [Esc] Back [Q] Stop",
         "[Arrows] Scroll [Enter] Save [Esc] Edit [Q] Stop",
         "Public tickers", "Tickers [{request}]", "Review tickers",
-        "Ticker: {before} -> {after}", "Latest refs only", "Both on: withheld", "Polling unavailable",
+        "Ticker: {before} -> {after}", "Latest refs only", "Manual+public clash", "Polling unavailable",
         "Session req: {request}", "CLI: --no-market", "Next explicit run", "Gate PRL/USDT", "Kraken USDT/USD",
         "Space V Esc Q", "Arrows Enter Esc Q"
     }};
