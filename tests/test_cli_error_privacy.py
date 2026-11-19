@@ -59,6 +59,16 @@ def main():
             assert result.returncode == 0 and b'FORBIDDEN_DEVICE_SETUP' not in result.stdout+result.stderr, 'unchanged-positive-help-version'
             assert b'CanaryMiner' in result.stdout
             checks += 1
+        flag = '--allow-public-tickers'
+        for option in ('--pass', '-p', '--pearl-transcript'):
+            result = invoke(['run', option, flag, flag, '--help'])
+            assert result.returncode == 0 and b'CanaryMiner:' in result.stdout, option
+            assert b'FORBIDDEN_DEVICE_SETUP' not in result.stdout + result.stderr, option
+            checks += 1
+        rejected('duplicate ticker permission', ['run', flag, flag, '--help'], 2,
+                 b'--allow-public-tickers is accepted once, for run only\n')
+        rejected('permission value', ['run', flag+'='+marker, '--help'], 2,
+                 b'--allow-public-tickers takes no value\n')
         result = invoke(['list-devices'])
         assert result.returncode == 97 and b'FORBIDDEN_DEVICE_SETUP' in result.stderr, 'valid entry must still reach the inert admission sentinel'
         assert unrelated.read_bytes() == b'fixture-original-preserved' and not (root/'state').exists()

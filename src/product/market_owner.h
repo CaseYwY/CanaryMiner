@@ -15,6 +15,7 @@ struct MarketPollingPolicy {
     uint64_t economicIntervalMs = 3600000;
     MarketFreshnessPolicy freshness;
     PublicHttpsLimits https;
+    bool scheduleEconomicRequests = true;
 };
 bool validMarketPollingPolicy(const MarketPollingPolicy &policy);
 struct MarketFetchTicket {

@@ -129,7 +129,9 @@ class RuntimeSettingsPanel {
                     {{"request",on(context.effective.publicTickersRequested)}}));
             }
             if (context.cliNoMarket) line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactCliBlocked:TickerKey::CliBlocked));
-            line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactUnavailable:TickerKey::Unavailable));
+            if(context.publicTickerRuntimeAvailable)
+                line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactLaunchPermission:TickerKey::LaunchPermission));
+            else line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactUnavailable:TickerKey::Unavailable));
             line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactNextStart:TickerKey::NextStart));
             line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactScope:TickerKey::Scope));
             if(narrowTickers&&page==RuntimeSettingsPage::Review){

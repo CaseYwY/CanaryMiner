@@ -5,7 +5,8 @@ namespace om { namespace i18n {
 enum class MarketTickerSettingsKey {
     Entry, Title, Request, Change, Scope, Conflict, Unavailable, Current, CliBlocked, SaveNotice, NextStart, Footer,
     ReviewFooter, CompactTitle, CompactRequest, CompactReview, CompactChange, CompactScope, CompactConflict,
-    CompactUnavailable, CompactCurrent, CompactCliBlocked, CompactNextStart, CompactGate, CompactKraken, CompactFooter, CompactReviewFooter, Count
+    CompactUnavailable, CompactCurrent, CompactCliBlocked, CompactNextStart, CompactGate, CompactKraken, CompactFooter, CompactReviewFooter,
+    LaunchPermission, CompactLaunchPermission, Count
 };
 
 inline LocalizedMessage marketTickerSettingsMessage(std::string_view locale, MarketTickerSettingsKey key) {
@@ -21,7 +22,8 @@ inline LocalizedMessage marketTickerSettingsMessage(std::string_view locale, Mar
         "Public tickers", "Tickers [{request}]", "Review tickers",
         "Ticker: {before} -> {after}", "Latest refs only", "Manual+public clash", "Polling unavailable",
         "Session req: {request}", "CLI: --no-market", "Next explicit run", "Gate PRL/USDT", "Kraken USDT/USD",
-        "Space V Esc Q", "Arrows Enter Esc Q"
+        "Space V Esc Q", "Arrows Enter Esc Q",
+        "Opt-in build. Launch with --allow-public-tickers.", "Launch opt-in"
     }};
     const auto index=static_cast<size_t>(key);
     if(index>=messages.size())return {};

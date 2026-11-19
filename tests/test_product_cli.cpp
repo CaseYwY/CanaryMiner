@@ -40,6 +40,16 @@ int main() {
     CHECK(parseArgs({"--no-history"}).ov.noHistory);
     CHECK(parseArgs({"settings", "--help"}).help);
     CHECK(contains(productHelpText(), "canary-miner settings"));
+    {
+        std::string error;
+        const auto permitted = parseArgs({"run", "--worker", "--allow-public-tickers", "--allow-public-tickers", "--no-market"}, &error);
+        CHECK(error.empty() && permitted.rest==std::vector<std::string>{"--allow-public-tickers"} && permitted.ov.noMarket);
+        CHECK(permitted.restArgIndices==std::vector<int>{4});
+        CHECK(permitted.ov.worker == "--allow-public-tickers");
+        const auto legacy = parseArgs({"run","-p","--allow-public-tickers","--allow-public-tickers"}, &error);
+        CHECK(error.empty() && legacy.rest.size()==3 && legacy.rest[0]=="--pass" && legacy.rest[1]=="--allow-public-tickers");
+        CHECK((legacy.restArgIndices==std::vector<int>{2,3,4}));
+    }
 
     // ---- pool forms: legacy/strict presets, explicit endpoints, and canonical protocol identity
     {

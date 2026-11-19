@@ -3,10 +3,10 @@
 M-MARKET/M-UI/M-SUPERVISOR; R-MKT-001/002/003, R-SAFE-001/002, R-PRIV-001/002;
 T-MARKET/T-UI/T-INTENT/T-PRIVACY; D-155.
 
-**Default-empty supervisor seam and an independently constructed owner adapter, not public-feed activation.**
+P-06d introduced a default-empty supervisor seam and a separate owner adapter.
 `MarketReferenceSink` exposes one explicit-parent start, a read-only native projection, memory-only revocation and separate
 post-drain settlement. Its header carries no network client, URL, credential, provider JSON or filesystem configuration.
-Ordinary CLI startup installs no factory, adds no switch/preset, requests no public data and remains unchanged.
+Default builds leave the public factory empty.
 
 `makeMarketReferenceRuntime` freezes its owner policy/origin/convention/clock and injected fetch contract. Construction
 and rendering do no fetch work; only the one-use explicit start admits the existing bounded background market owner.
@@ -36,8 +36,8 @@ Public requests and saved enabled manual references cannot silently mix. If both
 factory is called and both reference projections are withheld with an explicit source-conflict notice. Existing manual
 files/times remain untouched. While a public source is requested for this parent, enabling manual references through the
 live manual-save path refuses before store writes or live replacement; changing the selected source requires a new explicit parent.
-Disabling a manual declaration does not start public polling in the current parent. This is a frozen admission boundary,
-not the future complete source-selection/configuration UI. With no public factory, prior manual behavior remains.
+Disabling a manual declaration does not start public polling in the current parent. With neither a saved public request
+nor a supplied public factory, the manual display follows its saved settings.
 
 ## Source qualification is still closed
 
@@ -54,18 +54,32 @@ save. The default is off, including for existing configurations. Saving off remo
 a strict decoder that predates the field.
 
 The next explicit Dashboard session reads the saved request. When both public tickers and manual references are
-requested, that session withholds both and reports the conflict. A saved public-only request shows polling
-unavailable in ordinary builds while source-use and deployment approval are pending. Disabling the request from
-inside a running session applies on the next start. `--no-market` suppresses both sources for its launch.
+requested, that session withholds both and reports the conflict. Disabling the request from inside a running session
+applies on the next start. `--no-market` suppresses both sources for its launch.
 
 The request covers latest display references. One-hour coverage, reward data and economic-mode activation each
 have separate qualifications. Economic mode defaults off.
+
+### Run the opt-in latest ticker path
+
+A build with `CANARY_ENABLE_PUBLIC_HTTPS=ON` can serve a saved request when an ordinary Dashboard launch includes
+`--allow-public-tickers`. The permission lasts for that launch. Startup without the flag leaves the saved request
+pending. Plain mode, automatic tuning, worker processes and `--no-market` withhold polling. The parent consumes the permission flag
+before assembling worker arguments. The installed helper must be beside the executable in its protected directory.
+
+The path uses only the Gate `api.gateio.ws` ticker for `PEARL_USDT` and the Kraken `api.kraken.com` ticker for
+`USDTUSD`. The Dashboard labels local observation times and expires stale references. It uses the existing bounds
+for refresh, timeout and retry. The ticker path excludes minute candles and economic scheduling. The default
+CMake build and current release policy keep the HTTPS capability off.
+
+The installed-path test uses a synthetic helper beside an inert executable. Live provider requests, source-use
+approval and helper trust/deployment qualification require separate evidence.
 
 The [Gate Spot REST contract](https://www.gate.com/docs/developers/apiv4/en/spot/#market-candlesticks) still lacks an
 unambiguous returned time anchor and consistent candle row definition. [Kraken Spot REST](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
 identifies the last row as provisional and leaves the other rows' timestamps unspecified as start or end.
 [Kraken WebSocket v2](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ohlc) defines its own
-`interval_begin` field. The WebSocket contract applies to that transport. No public-feed factory is admitted here.
+`interval_begin` field. The WebSocket contract applies to that transport. Neither candle adapter is admitted for public polling.
 
 The [2026-11-06 primary-source recheck](research/market-source-qualification-2026-11.md) does not settle Gate's REST candle
 shape or either REST minute time anchor. Public-feed use rights, regional/deployment/trust approval and any required

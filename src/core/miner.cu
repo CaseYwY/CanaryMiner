@@ -41,6 +41,7 @@
 #include "../product/pool_tls_runtime_policy.h"
 #include "../product/pool_tls_migration.h"
 #include "../product/manual_market.h"
+#include "../product/market_ticker_runtime.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
 #include "../product/worker_process.h"
@@ -76,6 +77,12 @@ static BOOL WINAPI consoleHandler(DWORD type) {
 #endif
 
 namespace {
+
+#if defined(CANARY_PUBLIC_TICKER_RUNTIME)
+constexpr bool kPublicTickerRuntimeBuilt = true;
+#else
+constexpr bool kPublicTickerRuntimeBuilt = false;
+#endif
 
 // Identity of every CUDA device, as the driver reports it (the runtime API is a thin layer over the driver API).
 bool queryDevices(std::vector<om::DeviceIdentity> *out) {
@@ -183,9 +190,9 @@ int main(int argc, char **argv) {
         poolContext.migrationDonationEnabled=cfg.donation;
 #if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
         const auto factory=[state=cfg.stateDir](bool mining,bool disabled){return makeNativeEnergyRuntime(state,mining,disabled);};
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices,{},languageContext,poolContext);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy, {}, {}, {}, factory, cfg.devices,{},languageContext,poolContext,kPublicTickerRuntimeBuilt);
 #else
-        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy,{},{},{},{},{},{},languageContext,poolContext);
+        return runSettingsCommand(cfg.stateDir, &g_stop, cli.ov.noMarket, cli.ov.noEnergy,{},{},{},{},{},{},languageContext,poolContext,kPublicTickerRuntimeBuilt);
 #endif
     }
 
@@ -203,6 +210,7 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
+    int publicTickerPermissionArg = 0;
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
     bool workerPoolFallbackSeen=false;
@@ -227,7 +235,19 @@ int main(int argc, char **argv) {
         auto next = [&]() -> std::string {
             return (i + 1 < cli.rest.size()) ? cli.rest[++i] : std::string();
         };
-        if (a == "--algo") algoName = next();
+        if (a == "--allow-public-tickers") {
+            // This pass also consumes legacy values, so an identical password/path is never permission.
+            if (cli.command != Command::Run || publicTickerPermissionArg) {
+                fprintf(stderr, "--allow-public-tickers is accepted once, for run only\n");
+                return kExitUsage;
+            }
+            publicTickerPermissionArg = cli.restArgIndices[i];
+        }
+        else if (a.rfind("--allow-public-tickers=", 0) == 0) {
+            fprintf(stderr, "--allow-public-tickers takes no value\n");
+            return kExitUsage;
+        }
+        else if (a == "--algo") algoName = next();
         else if (a == "--work-wait-ms") {
             if (workWaitSeen || !parseWorkWaitMs(next(), &opt.workWaitMs)) {
                 fprintf(stderr, "--work-wait-ms requires one integer from 0 to 1000 milliseconds\n");
@@ -413,7 +433,8 @@ int main(int argc, char **argv) {
                 "  --log-dir DIR     rotating redacted log files\n"
                 "  --no-dashboard    plain timestamped lines instead of the live dashboard\n"
                 "  --no-history      disable local accepted history this run; existing data stays\n"
-                "  --no-market       suppress manual/offline terminal references this run\n"
+                "  --no-market       suppress manual and public references for this run\n"
+                "  --allow-public-tickers  allow saved public tickers in an opt-in dashboard build\n"
                 "  --no-energy       disable optional session board-energy recording this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
                 "                    not duty cycle; runtime defaults can be edited in Settings\n"
@@ -478,6 +499,7 @@ int main(int argc, char **argv) {
     RuntimePreferences runtimeDefaults;
     GamePreferences gameDefaults;
     RuntimeContext runtimeContext;
+    runtimeContext.publicTickerRuntimeAvailable = kPublicTickerRuntimeBuilt;
     const bool ordinaryRuntime = cli.command == Command::Run && !workerChild && !opt.bench && !opt.formalBenchmark.enabled &&
         !opt.pearlProduction && !opt.pearlAcceptedQuota && !opt.pearlSustainedSeconds &&
         !pearlPrivateEnabled(opt.pearlPrivateExecution) && !pearlPublicEnabled(opt.pearlPublicExecution)
@@ -1024,6 +1046,7 @@ int main(int argc, char **argv) {
             return kExitRuntime;
         }
         for (int i = 1; i < argc; i++) {
+            if (i == publicTickerPermissionArg) continue;
             if (std::string(argv[i]) == "--gpu-id") { ++i; continue; }
             so.userArgs.push_back(argv[i]);
         }
@@ -1072,6 +1095,11 @@ int main(int argc, char **argv) {
         so.manualMarketPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "manual-market-preferences.json").u8string();
         so.manualMarketFactory = makeManualMarketProjector;
         so.noMarket = cli.ov.noMarket;
+        if constexpr (kPublicTickerRuntimeBuilt) {
+            const PublicTickerLaunch launch{kPublicTickerRuntimeBuilt, so.runtimeContext.effective.publicTickersRequested,
+                publicTickerPermissionArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket};
+            so.marketReferenceFactory = installedPublicTickerFactory(std::filesystem::u8path(so.exe), launch);
+        }
         so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();
         so.energyFactory = makeSessionEnergyOwner;
 #if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME

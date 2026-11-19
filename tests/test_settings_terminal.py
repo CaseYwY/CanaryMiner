@@ -188,6 +188,8 @@ def main():
                 open_tickers(terminal, until)
                 until(b"Public tickers [off]")
                 until(b"This launch: --no-market")
+                capable = len(sys.argv) > 3 and sys.argv[3] == "1"
+                until(b"Launch with --allow-public-tickers" if capable else b"Polling unavailable.")
                 os.write(terminal, b" v")
                 until(b"Public tickers: off -> on", fresh=True)
                 assert not runtime_file.exists()
