@@ -4,7 +4,7 @@ import importlib
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import stat
 import sys
 import tempfile
@@ -27,6 +27,14 @@ OPENSSL = b'OpenSSL 3.5.9 license fixture\n'
 
 
 class CandidateTests(unittest.TestCase):
+    def test_installer_can_be_loaded_directly_from_a_clean_root(self):
+        script = Path(CANDIDATE.__file__)
+        module = {'__file__': '/qa/tls_candidate.py', '__name__': 'standalone_candidate'}
+        with patch.dict(sys.modules, {'verify_artifacts': RELEASE}), \
+                patch('pathlib.Path.resolve', return_value=PurePosixPath(module['__file__'])):
+            exec(compile(script.read_bytes(), script.name, 'exec'), module)
+        self.assertTrue(callable(module['install']))
+
     def test_cache_refuses_wider_policy_and_official_release_still_refuses_tls(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory) / 'CMakeCache.txt'

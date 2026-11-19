@@ -18,7 +18,6 @@ import zipfile
 from verify_artifacts import MAX_ARTIFACT_BYTES, verify_images
 
 
-SOURCE = Path(__file__).resolve().parents[2]
 SCHEMA = 'canaryminer-tls-candidate-v1'
 MANIFEST = 'manifest.json'
 IMAGE_NAMES = ('canary-miner', 'canary_preferences_worker', 'canary_pool_tls_stream_worker')
@@ -215,6 +214,7 @@ def write_package(platform, files, stream):
 
 
 def pack(platform, build, revision, deny_file, tool, archive, openssl_license):
+    source_tree = Path(__file__).resolve().parent.parent.parent
     if not valid_revision(revision) or not archive.name.endswith(suffix(platform)):
         raise ValueError('invalid revision or candidate archive extension')
     if archive.exists() or archive.is_symlink():
@@ -222,14 +222,14 @@ def pack(platform, build, revision, deny_file, tool, archive, openssl_license):
     check_cache(build / 'CMakeCache.txt', platform)
     files = {}
     for name, source in RELEASE_FILES.items():
-        files[name] = read_regular(SOURCE / source, MAX_TEXT_BYTES)
+        files[name] = read_regular(source_tree / source, MAX_TEXT_BYTES)
     if platform == 'linux':
         if openssl_license is None:
             raise ValueError('the OpenSSL 3.5.9 license is required')
         files[OPENSSL_LICENSE] = read_regular(openssl_license, MAX_TEXT_BYTES)
     elif openssl_license is not None:
         raise ValueError('Windows uses Schannel')
-    floor, checked = verify_images(platform, build, SOURCE, deny_file, tool, images(platform),
+    floor, checked = verify_images(platform, build, source_tree, deny_file, tool, images(platform),
                                    portable=True, payloads=files)
     if platform == 'linux' and b'OpenSSL 3.5.9 ' not in checked[IMAGE_NAMES[2]]:
         raise ValueError('the static OpenSSL 3.5.9 image is required')
