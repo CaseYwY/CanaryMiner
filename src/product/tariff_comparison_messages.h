@@ -1,11 +1,12 @@
-// Source messages for the idle comparison. Locale requests fall back to English.
+// Source messages for the whole-meter comparison. Locale requests fall back to English.
 #pragma once
 #include "localization.h"
 
 namespace om { namespace i18n {
 enum class TariffComparisonMessageKey {
     Hint, ShortTitle, Resize, Back, Title, NeedDeclaration, Span, Instruction, WithoutWatts, WithWatts,
-    Footer, NeedWatts, Clock, Pending, Failed, ModelStatus, DisplayRange, WithoutCharge, WithCharge, Difference
+    Footer, NeedWatts, Clock, Pending, Failed, ModelStatus, DisplayRange, WithoutCharge, WithCharge, Difference,
+    RetryAfterCancel
 };
 
 inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffComparisonMessageKey key) {
@@ -18,7 +19,8 @@ inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffC
         "Calculating the saved scenario...", "Comparison unavailable.", "Comparison unavailable: {status}",
         "Comparison unavailable: display range exceeded.",
         "Remaining without mining: {amount} {currency}", "Remaining with mining:    {amount} {currency}",
-        "Difference (with - without): {amount} {currency}"
+        "Difference (with - without): {amount} {currency}",
+        "Previous comparison cancelled. Press Enter again to retry."
     };
     const auto index = static_cast<size_t>(key);
     if (index >= sizeof(messages) / sizeof(*messages)) return {};

@@ -49,20 +49,20 @@ Existing declarations retain their explicit dates. Press **M** on the monthly po
 dates, then review any edits before saving. The monthly rule derives dates in the draft and validates the saved
 opening against them. It does not advance with elapsed time or reset a bill, readings or accrued amounts.
 
-## Compare two whole-meter scenarios in idle settings
+## Compare two whole-meter scenarios
 
-Open Combined tariff from the idle `settings` command and press **P**. Enter the constant whole-meter import watts
+Open Combined tariff from the Dashboard Settings or the idle `settings` command and press **P**. Enter the constant whole-meter import watts
 for the **without mining** and **with mining** scenarios. Use **Tab** to change fields and **Enter** to calculate.
 The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
 applies to the full displayed UTC interval from the opening's through-time to the cycle end.
 
 The amounts are the hypothetical remaining charges for both scenarios and their difference, in the plan currency.
 The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
-unavailable result. A background calculation uses the inputs and local time captured at Enter. Escape or stopping
-the command cancels it. The input values and results are local to the panel and are discarded when it closes.
+unavailable result. A background calculation uses the inputs and local time captured at Enter. Escape returns to the
+tariff declaration and cancels the calculation. The new comparison starts with empty inputs. If a cancelled calculation
+is still exiting, press Enter again when prompted. The session stop path revokes the calculation before draining workers.
 
-The running Dashboard still supports reviewing and saving the tariff declaration. Open idle settings to calculate
-the comparison. The comparison supplies no observed usage, billing reset, or economic-mode permission.
+The comparison is an estimate from the saved declaration and entered watts. It has no observed usage or economic-mode permission.
 
 ## Persistence, privacy and rollback
 
@@ -81,6 +81,12 @@ paths, source references, private tariffs and measurements are excluded from pub
 ## Verification and remaining work
 
 Tests cover strict schema/output preservation, TOU/progressive and signed dynamic arithmetic with hand-derived totals, continuation without duplicated fees, all-units horizon restrictions, missing prices, invalid clocks/decimals/openings, limits, stale writers/leases/version binding and failed-load preservation. Native tests cover nested editing/error focus, row add/remove/cancel, dirty leave, contextual stop keys, overflow and no-color 60/80/120-column × 12/24-row frames. POSIX PTY authors a combined example from a blank page, tests independent drafts, same-key rejection, active-session nonactivation and real editor SIGINT.
+
+P-05v passed 1,289 declaration checks and 45 POSIX controlling-terminal checks. Windows passed 11 focused CTest groups
+and an owned ConPTY run with the synthetic supervisor. The running Dashboard showed 2.42 USD without mining,
+11.44 USD with mining and 9.02 USD difference. Escape discarded the result and returned to the tariff page.
+The POSIX stop checks use separate state directories for Q and Ctrl+C. Each retains the saved declaration and starts
+one synthetic worker. These scenarios use a synthetic tariff and synthetic workers.
 
 Executed development evidence (2026-10-29): Windows/MSVC focused CTest **45/45** passes, including prior product/settings/energy/credit recovery/donation/intent/market/electricity/oracle families. Final per-leaf review refinement passes the targeted tariff/settings rerun; both platforms' new native program has **1,071 passing checks**. Linux/WSL/GCC passes **16 new actual-terminal checks**, existing settings/runtime/manual-price/session-energy PTY regressions, and **1,071 own-code ASan/UBSan checks**. Linux Python discovery passes **123 tests with seven explicit fixture-dependent skips**. Windows full Python discovery/GNU-toolchain/encoding limitations remain unqualified.
 
