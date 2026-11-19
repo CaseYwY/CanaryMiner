@@ -77,7 +77,7 @@ struct CliOverrides {
     bool json = false;
     bool noDonation = false;  // --no-donation: switch the developer donation off for this run
     bool noHistory = false;   // local accepted history only, never a reward/account setting
-    bool noMarket = false;    // terminal manual-price display override; never modifies saved values
+    bool noMarket = false;    // suppress manual and public references for this launch
     bool noEnergy = false;    // optional session energy collection override; ordinary safety telemetry is unchanged
     LanguageOverrides presentation; // requested presentation only, never mining/config or implicit persistence
     GpuTuningConfig tuning;
@@ -90,6 +90,7 @@ struct CliParse {
     CliOverrides ov;
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
+    std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
 };
 
 inline std::vector<std::string> splitCommaList(const std::string &s) {
@@ -146,6 +147,10 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         }
         *value = argv[++k];
         return true;
+    };
+    const auto keep = [&](const std::string &text, int argvIndex) {
+        r.rest.push_back(text);
+        r.restArgIndices.push_back(argvIndex);
     };
     for (; i < argc; ++i) {
         const std::string a = argv[i];
@@ -217,8 +222,8 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         } else if (a == "--password" || a == "-p") {
             // The legacy loop in miner.cu owns --pass; the value travels there unchanged.
             if (!need(i, a.c_str(), &v)) return false;
-            r.rest.push_back("--pass");
-            r.rest.push_back(v);
+            keep("--pass", i - 1);
+            keep(v, i);
         } else if (a == "--devices" || a == "--device" || a == "--gpu-id") {
             if (!need(i, a.c_str(), &v)) return false;
             for (const auto &d : splitCommaList(v)) r.ov.devices.push_back(d);
@@ -329,7 +334,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             r.commandExplicit = true;
         } else {
             if (a == "--help" || a == "-h") r.help = true;
-            r.rest.push_back(a);  // --help too: the legacy loop in miner.cu still answers it until it calls productHelpText()
+            keep(a, i);  // --help too: the legacy loop in miner.cu calls productHelpText()
         }
     }
     *out = r;
@@ -431,7 +436,8 @@ inline std::string productHelpText() {
         "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       --no-history                  disable local accepted-share history for this run\n"
-        "       --no-market                   suppress offline manual references this run; saved values stay\n"
+        "       --no-market                   suppress manual and public references for this run\n"
+        "       --allow-public-tickers        allow a saved public ticker request for this run in an opt-in build\n"
         "       --no-energy                   disable optional session energy recording; safety telemetry stays\n"
         "       --language ID                 requested message language; never infers format/currency/timezone\n"
         "       --format-locale ID            independent requested number/date style; no implicit Save\n"

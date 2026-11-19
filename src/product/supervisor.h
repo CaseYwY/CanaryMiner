@@ -786,7 +786,11 @@ class Supervisor {
                         if(admitted)marketReferenceStarted_=true;
                         else{if(marketReference_)marketReference_->requestStop();addEvent("Public market references unavailable; no manual fallback, income or mining change.");}
                     }catch(...){if(marketReference_)marketReference_->requestStop();addEvent("Public market reference admission failed; no source fallback or mining change.");}
-                }else if(publicReferencesRequested())addEvent("Public ticker request saved; polling unavailable in this build.");
+                }else if(publicReferencesRequested()){
+                    addEvent(opt_.runtimeContext.publicTickerRuntimeAvailable
+                        ? "Public tickers require an ordinary Dashboard launch with --allow-public-tickers."
+                        : "Public ticker request saved; polling unavailable in this build.");
+                }
                 else if(manualLoaded_&&opt_.manualMarketFactory){manualProjection_=opt_.manualMarketFactory(manualEffective_,startupUtc_,t0);if(!current())return false;}
             }
             if(!current())return false;

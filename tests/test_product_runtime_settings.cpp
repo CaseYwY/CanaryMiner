@@ -206,6 +206,10 @@ static void publicTickerTests() {
     const auto english=i18n::marketTickerSettingsMessage("en",i18n::MarketTickerSettingsKey::Entry);
     const auto fallback=i18n::marketTickerSettingsMessage("zh-Hans",i18n::MarketTickerSettingsKey::Entry);
     CHECK(english.review==i18n::ReviewStatus::Source && !english.fallback && fallback.fallback && english.text==fallback.text);
+    context.publicTickerRuntimeAvailable=true;
+    root.runtime.open(original,context,RuntimeSettingsSection::PublicTickers);
+    CHECK(root.runtime.render(80,16,ColorLevel::None).find("Launch with --allow-public-tickers")!=std::string::npos);
+    CHECK(root.runtime.render(20,12,ColorLevel::None).find("Launch opt-in")!=std::string::npos);
 }
 
 static void independentTargets(const std::filesystem::path &directory) {

@@ -1,14 +1,24 @@
-"""Default-empty provider runtime seam, not source/terms, live data or production qualification."""
+"""Default-off installed provider path, separate from financial and worker authority."""
 from pathlib import Path
 import unittest
 
 
 class MarketReferenceArtifacts(unittest.TestCase):
-    def test_ordinary_entry_does_not_select_a_public_source(self):
+    def test_parent_binds_only_the_explicit_installed_path(self):
         root = Path(__file__).resolve().parents[1]
         native = (root / 'src/core/miner.cu').read_text(encoding='utf-8')
-        self.assertNotIn('marketReferenceFactory', native)
+        self.assertIn('if constexpr (kPublicTickerRuntimeBuilt)', native)
+        self.assertIn('ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket', native)
+        self.assertIn('publicTickerPermissionArg = cli.restArgIndices[i];', native)
+        self.assertIn('if (i == publicTickerPermissionArg) continue;', native)
+        self.assertEqual(native.count('installedPublicTickerFactory('), 1)
         self.assertNotIn('makeMarketReferenceRuntime', native)
+        self.assertNotIn('publicFeedUrl(', native)
+        factory = (root / 'src/product/market_ticker_runtime.cpp').read_text(encoding='utf-8')
+        self.assertIn('module.parent_path() / "canary_public_json_worker', factory)
+        self.assertIn('policy.scheduleEconomicRequests = false', factory)
+        for marker in ('getenv(', 'publicFeedUrl(', 'PublicJsonClient', '.get('):
+            self.assertNotIn(marker, factory)
         sink = (root / 'src/product/market_reference_sink.h').read_text(encoding='utf-8')
         for marker in ('public_https.h', 'market_owner.h', 'filesystem', 'wallet', 'PublicJsonRequest'):
             self.assertNotIn(marker, sink)

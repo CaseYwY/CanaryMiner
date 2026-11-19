@@ -57,6 +57,7 @@ struct RuntimeContext {
     std::optional<unsigned> cliWorkWait;
     bool cliNoHistory = false;
     bool cliNoMarket = false;
+    bool publicTickerRuntimeAvailable = false;
 };
 
 inline RuntimePreferences effectiveRuntimePreferences(RuntimePreferences configured, const RuntimeContext &context) {

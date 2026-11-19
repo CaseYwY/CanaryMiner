@@ -15,7 +15,7 @@ inline LocalizedMessage marketReadinessMessage(std::string_view locale, MarketRe
         "Latest: documented last-trade price. Trade timestamp unavailable from the ticker.",
         "1 hour: candle response shape and timestamp anchor unresolved.",
         "1 hour: candle timestamp anchor unresolved. The final REST candle is provisional.",
-        "Public polling: off in ordinary builds. Source-use and deployment approval are pending.",
+        "Public polling requires a capable build and explicit launch permission. Release qualification is pending.",
         "Reward data: no qualified source.",
         "[Tab/Arrows] Source [Esc] Back [Q/Ctrl+C] Stop",
         "Economy req [{request}]", "Economic mode request: {before} -> {after}", "Econ req {before} -> {after}",

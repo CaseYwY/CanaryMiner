@@ -1,8 +1,10 @@
 // Synthetic frozen public-reference owner adapter. No network, accounts, mining, source or release qualification.
 #include "product/market_reference_runtime.h"
+#include "product/market_ticker_runtime.h"
 #include "product_test_util.h"
 #include <chrono>
 #include <condition_variable>
+#include <ctime>
 #include <mutex>
 #include <thread>
 using namespace om;
@@ -59,5 +61,81 @@ void helperFault(){
     const auto text=joined(runtime->view(epoch,1000));CHECK(text.find("Latest PRL/USD reference: N/A")!=text.npos&&calls==1);
     runtime->stop();CHECK(!runtime->start(2)&&calls==1);
 }
+
+void launchPolicy(){
+    const auto module=std::filesystem::absolute("synthetic-module");
+    for(unsigned mask=0;mask<32;++mask){
+        const PublicTickerLaunch launch{bool(mask&1),bool(mask&2),bool(mask&4),bool(mask&8),bool(mask&16)};
+        CHECK(static_cast<bool>(installedPublicTickerFactory(module,launch))==(mask==15));
+    }
+    const PublicTickerLaunch enabled{true,true,true,true,false};
+    CHECK(!installedPublicTickerFactory("relative-module",enabled));
+    CHECK(!installedPublicTickerFactory({},enabled));
+    MarketPollingPolicy policy;
+    policy.scheduleEconomicRequests=false;
+    MarketPollingPlan plan;
+    CHECK(plan.start(1,1000,epoch,policy,false));
+    CHECK(!plan.takeEconomicRequest(1000,epoch));
+    CHECK(!plan.takeEconomicRequest(3601000,epoch+3600));
+    for (auto feed : {PublicFeed::GatePearlTicker,PublicFeed::KrakenUsdtTicker}) {
+        const auto ticket=plan.next(3601000,epoch+3600);
+        CHECK(ticket && ticket->request.feed==feed && !ticket->request.fromUtc && !ticket->request.toUtc);
+        if(ticket)CHECK(plan.complete(*ticket,quote(feed,epoch+3600),MarketDataStatus::Ok,3601000,epoch+3600));
+    }
+    CHECK(!plan.next(3601000,epoch+3600));
 }
-int main(){lifecycle();late();staleAndClock();helperFault();return finishTests("frozen native public-reference ownership with memory-only revocation and post-drain settlement");}
+
+int installedPath(const std::filesystem::path &fixture){
+#if defined(__linux__)
+#if !defined(__GLIBC__)
+    return 77;
+#elif !__GLIBC_PREREQ(2,40)
+    return 77;
+#endif
+#endif
+    const auto directory = std::filesystem::u8path(makeScratchDir("public-ticker-install"));
+    const auto factory=installedPublicTickerFactory(directory/"synthetic-module",{true,true,true,true,false});
+#if defined(_WIN32)
+    const auto helper=directory/"canary_public_json_worker.exe";
+#else
+    const auto helper=directory/"canary_public_json_worker";
+#endif
+    CHECK(factory && !std::filesystem::exists(helper));
+    auto now=[]{
+        const auto utc=static_cast<uint64_t>(std::time(nullptr));
+        const auto mono=std::chrono::steady_clock::now().time_since_epoch();
+        return std::make_pair(utc,static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(mono).count()));
+    };
+    auto view=[&now](const MarketReferenceSink &runtime){
+        const auto t=now();
+        return joined(runtime.view(t.first,t.second));
+    };
+    const std::atomic<bool> cancelled{false};
+    auto missingFetch=marketProcessFetch(helper);
+    CHECK(missingFetch({PublicFeed::GatePearlTicker},cancelled,{}).status==PublicHttpsStatus::Unavailable);
+    auto missing=factory();
+    CHECK(missing->start(1));
+    CHECK(view(*missing).find("N/A (missing/stale/skewed conversion)")!=std::string::npos);
+    missing->stop();
+    std::filesystem::copy_file(fixture,helper);
+    auto runtime=factory();
+    CHECK(!runtime->view(0,0).enabled && runtime->start(2));
+    CHECK(waitUntil([&]{return view(*runtime).find("Latest PRL/USD reference: 2.45")!=std::string::npos;}));
+    const auto displayed=view(*runtime);
+    CHECK(displayed.find("observed UTC")!=std::string::npos);
+    CHECK(displayed.find("trade-event time NOT SUPPLIED")!=std::string::npos);
+    CHECK(displayed.find("time convention unqualified/unavailable")!=std::string::npos);
+    runtime->requestStop();
+    CHECK(view(*runtime).find("Latest PRL/USD reference: N/A")!=std::string::npos);
+    runtime->stop();
+    CHECK(!runtime->start(3));
+    std::error_code ignored;
+    std::filesystem::remove_all(directory,ignored); // only the scratch directory created above
+    return finishTests("installed ticker helper path and native process");
+}
+}
+int main(int argc,char **argv){
+    if(argc==2)return installedPath(std::filesystem::u8path(argv[1]));
+    lifecycle();late();staleAndClock();helperFault();launchPolicy();
+    return finishTests("frozen native public-reference ownership with memory-only revocation and post-drain settlement");
+}

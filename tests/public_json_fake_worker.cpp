@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <thread>
 #if defined(_WIN32)
 #include <fcntl.h>
@@ -28,6 +29,14 @@ int main(int argc, char **argv) {
     if (scenario == 5) { std::fputs("CMJSON1 0 200 1 0 2\n{", stdout); return 0; }
     om::PublicJsonResponse response;
     response.status = om::PublicHttpsStatus::Ok; response.httpStatus = 200; response.observedUtc = 1; response.body = "{\"fixture\":true}";
+    if (std::strcmp(argv[2], "0") == 0 && std::strcmp(argv[3], "0") == 0) {
+        response.observedUtc = static_cast<uint64_t>(std::time(nullptr));
+        if (std::strcmp(argv[1], "0") == 0)
+            response.body = "[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]";
+        else if (std::strcmp(argv[1], "2") == 0)
+            response.body = "{\"error\":[],\"result\":{\"USDTZUSD\":{\"c\":[\"0.98\",\"1\"]}}}";
+        else return 5;
+    }
     std::string wire;
     if (!om::encodePublicJsonResponse(response, &wire)) return 5;
     std::fwrite(wire.data(), 1, wire.size(), stdout);

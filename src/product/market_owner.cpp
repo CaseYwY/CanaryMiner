@@ -118,7 +118,7 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
     h.nextDueMs = later(ms, delay); return true;
 }
 bool MarketPollingPlan::takeEconomicRequest(uint64_t ms, uint64_t utc) {
-    if (!clock(ms, utc) || ms < economicDue_) return false;
+    if (!clock(ms, utc) || !policy_.scheduleEconomicRequests || ms < economicDue_) return false;
     economicDue_ = later(ms, policy_.economicIntervalMs); return true;  // coalesce missed intervals; no catch-up loop
 }
 
