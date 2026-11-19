@@ -30,6 +30,7 @@ struct UiPreferences {
     bool showEvents = true;
     bool hideWorker = false;
     bool color = true;  // false disables color; true still respects NO_COLOR and terminal capability
+    bool showDonationLink = false;
     bool detailsEnabled = true, logEnabled = true;
     bool detailsIdentity = true, detailsPool = true, detailsRestarts = true, detailsErrors = true;
     unsigned logSeverity = 0;  // 0 all, 1 warnings/errors, 2 errors; never infer severity from raw text
@@ -39,6 +40,7 @@ struct UiPreferences {
 
     bool operator==(const UiPreferences &other) const {
         return refreshMs == other.refreshMs && showEvents == other.showEvents && hideWorker == other.hideWorker && color == other.color &&
+               showDonationLink == other.showDonationLink &&
                detailsEnabled == other.detailsEnabled && logEnabled == other.logEnabled && detailsIdentity == other.detailsIdentity &&
                detailsPool == other.detailsPool && detailsRestarts == other.detailsRestarts && detailsErrors == other.detailsErrors &&
                logSeverity == other.logSeverity && logUnclassified == other.logUnclassified && logRows == other.logRows &&
@@ -61,7 +63,8 @@ inline std::string uiPreferencesJson(const UiPreferences &p) {
            ",\n  \"details_restarts\": " + (p.detailsRestarts ? "true" : "false") + ",\n  \"details_errors\": " + (p.detailsErrors ? "true" : "false") +
            ",\n  \"log_severity\": " + std::to_string(p.logSeverity) + ",\n  \"log_unclassified\": " + (p.logUnclassified ? "true" : "false") +
            ",\n  \"log_rows\": " + std::to_string(p.logRows) + ",\n  \"log_timestamps\": " + (p.logTimestamps ? "true" : "false") +
-           ",\n  \"log_iso_time\": " + (p.logIsoTime ? "true" : "false") + ",\n  \"log_follow\": " + (p.logFollow ? "true" : "false") + "\n}\n";
+           ",\n  \"log_iso_time\": " + (p.logIsoTime ? "true" : "false") + ",\n  \"log_follow\": " + (p.logFollow ? "true" : "false") +
+           (p.showDonationLink ? ",\n  \"show_donation_link\": true" : "") + "\n}\n";
 }
 
 inline bool parseUiPreferences(const std::string &text, UiPreferences *out, std::string *error) {
@@ -76,7 +79,8 @@ inline bool parseUiPreferences(const std::string &text, UiPreferences *out, std:
         const bool oldKey = m.first == "schema_version" || m.first == "refresh_ms" || m.first == "show_events" || m.first == "hide_worker" || m.first == "color";
         const bool newKey = m.first == "details_enabled" || m.first == "log_enabled" || m.first == "details_identity" || m.first == "details_pool" ||
                             m.first == "details_restarts" || m.first == "details_errors" || m.first == "log_severity" || m.first == "log_unclassified" ||
-                            m.first == "log_rows" || m.first == "log_timestamps" || m.first == "log_iso_time" || m.first == "log_follow";
+                            m.first == "log_rows" || m.first == "log_timestamps" || m.first == "log_iso_time" || m.first == "log_follow" ||
+                            m.first == "show_donation_link";
         if (!oldKey && !(version == 2 && newKey)) return fail("unknown UI preference; no changes applied");
     }
     UiPreferences result;
@@ -89,7 +93,7 @@ inline bool parseUiPreferences(const std::string &text, UiPreferences *out, std:
         {"color", &result.color}, {"details_enabled", &result.detailsEnabled}, {"log_enabled", &result.logEnabled},
         {"details_identity", &result.detailsIdentity}, {"details_pool", &result.detailsPool}, {"details_restarts", &result.detailsRestarts},
         {"details_errors", &result.detailsErrors}, {"log_unclassified", &result.logUnclassified}, {"log_timestamps", &result.logTimestamps},
-        {"log_iso_time", &result.logIsoTime}, {"log_follow", &result.logFollow}};
+        {"log_iso_time", &result.logIsoTime}, {"log_follow", &result.logFollow}, {"show_donation_link", &result.showDonationLink}};
     for (const auto &item : booleans) {
         if (const auto *value = root.find(item.first)) {
             if (!value->isBool()) return fail("UI switch must be true or false");

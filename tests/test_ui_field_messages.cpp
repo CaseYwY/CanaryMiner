@@ -9,13 +9,13 @@ std::string unisolate(std::string text){for(const auto *mark:{u8"\u2066",u8"\u20
 std::string unpaint(const std::string &text){std::string result;for(std::size_t i=0;i<text.size();){if(text[i]!='\x1b'){result+=text[i++];continue;}
     CHECK(i+1<text.size()&&text[i+1]=='[');i+=2;while(i<text.size()&&((text[i]>='0'&&text[i]<='9')||text[i]==';'))++i;CHECK(i<text.size()&&text[i]=='m');if(i<text.size())++i;}return result;}
 void catalog(){
-    CHECK(i18n::uiFieldMessageKeyCount==25&&i18n::uiFieldLocalePacks().size()==16);std::set<std::string> keys;
-    for(std::size_t key=0;key<25;++key)CHECK(keys.insert(std::string(i18n::uiFieldMessageKeyName(static_cast<i18n::UiFieldMessageKey>(key)))).second);
+    CHECK(i18n::uiFieldMessageKeyCount==26&&i18n::uiFieldLocalePacks().size()==16);std::set<std::string> keys;
+    for(std::size_t key=0;key<i18n::uiFieldMessageKeyCount;++key)CHECK(keys.insert(std::string(i18n::uiFieldMessageKeyName(static_cast<i18n::UiFieldMessageKey>(key)))).second);
     const auto &source=i18n::uiFieldLocalePacks()[0];
-    for(std::size_t key=0;key<25;++key)if(source.messages[key].find("{state}")!=std::string_view::npos)for(const auto *state:{"x"," "}){auto expected=std::string(source.messages[key]);expected.replace(expected.find("{state}"),7,state);
+    for(std::size_t key=0;key<i18n::uiFieldMessageKeyCount;++key)if(source.messages[key].find("{state}")!=std::string_view::npos)for(const auto *state:{"x"," "}){auto expected=std::string(source.messages[key]);expected.replace(expected.find("{state}"),7,state);
         CHECK(i18n::uiFieldEnglish(static_cast<i18n::UiFieldMessageKey>(key),state)==expected);}
     for(std::size_t p=0;p<16;++p){const auto &pack=i18n::uiFieldLocalePacks()[p];CHECK(pack.id==i18n::localePacks()[p].id&&pack.review==i18n::localePacks()[p].review&&pack.rtl==i18n::localePacks()[p].rtl);
-        for(std::size_t key=0;key<25;++key){const auto message=i18n::uiFieldMessage(pack.id,static_cast<i18n::UiFieldMessageKey>(key));
+        for(std::size_t key=0;key<i18n::uiFieldMessageKeyCount;++key){const auto message=i18n::uiFieldMessage(pack.id,static_cast<i18n::UiFieldMessageKey>(key));
             CHECK(!message.fallback&&message.locale==pack.id&&message.review==pack.review&&i18n::validTemplateTranslation(source.messages[key],message.text));
             if(key==static_cast<std::size_t>(i18n::UiFieldMessageKey::IntensityNotice))CHECK(message.text.find("NO_COLOR")!=message.text.npos);}}
     using Key=i18n::UiFieldMessageKey;
@@ -40,7 +40,7 @@ TerminalUiFieldMessageRequest requestFor(const i18n::UiFieldLocalePack &pack,i18
     return request;
 }
 void matrix(){
-    for(const auto &pack:i18n::uiFieldLocalePacks())for(std::size_t key=0;key<25;++key){const auto request=requestFor(pack,static_cast<i18n::UiFieldMessageKey>(key));
+    for(const auto &pack:i18n::uiFieldLocalePacks())for(std::size_t key=0;key<i18n::uiFieldMessageKeyCount;++key){const auto request=requestFor(pack,static_cast<i18n::UiFieldMessageKey>(key));
         for(auto order:{TerminalTextOrder::Ascii,TerminalTextOrder::Logical,TerminalTextOrder::Visual})for(auto direction:{TerminalTextDirection::Auto,TerminalTextDirection::LeftToRight,TerminalTextDirection::RightToLeft})for(std::size_t width:{0u,3u,19u,79u,1024u}){
             TerminalTextPolicy policy;policy.order=order;policy.direction=direction;policy.columns=width;TerminalMessageLine line;
             CHECK(layoutTerminalUiFieldMessage(request,policy,&line));const bool recover=order==TerminalTextOrder::Ascii||!terminalTextBackend().unicode;

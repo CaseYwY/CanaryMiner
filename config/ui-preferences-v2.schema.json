@@ -9,6 +9,7 @@
     "schema_version": {"const": 2},
     "refresh_ms": {"enum": [100, 250, 500, 1000], "default": 500},
     "show_events": {"type": "boolean", "default": true},
+    "show_donation_link": {"type": "boolean", "default": false},
     "hide_worker": {"type": "boolean", "default": false},
     "color": {"type": "boolean", "default": true},
     "details_enabled": {"type": "boolean", "default": true},

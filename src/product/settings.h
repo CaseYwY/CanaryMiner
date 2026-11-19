@@ -86,7 +86,7 @@ class SettingsPanel {
             return result;}();
         return names;
     }
-    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 3 : (group == 1 || group == 3 || group == 5 || group == 6 || group == 7) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 4 : (group == 1 || group == 3 || group == 5 || group == 6 || group == 7) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
     void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
@@ -172,6 +172,8 @@ class SettingsPanel {
         if (active.color != draft.color) result.push_back(i18n::settingsChangeEnglish(ChangeKey::Color,on(active.color),on(draft.color)));
         if (active.showEvents != draft.showEvents) result.push_back(i18n::settingsChangeEnglish(ChangeKey::Events,on(active.showEvents),on(draft.showEvents)));
         if (active.hideWorker != draft.hideWorker) result.push_back(i18n::settingsChangeEnglish(ChangeKey::HideWorker,on(active.hideWorker),on(draft.hideWorker)));
+        if (active.showDonationLink != draft.showDonationLink)
+            result.push_back(i18n::settingsChangeEnglish(ChangeKey::DonationLink,on(active.showDonationLink),on(draft.showDonationLink)));
         const std::pair<ChangeKey, std::pair<bool, bool>> switches[] = {
             {ChangeKey::DetailsPage, {active.detailsEnabled, draft.detailsEnabled}}, {ChangeKey::LogPage, {active.logEnabled, draft.logEnabled}},
             {ChangeKey::DetailsIdentity, {active.detailsIdentity, draft.detailsIdentity}}, {ChangeKey::DetailsPool, {active.detailsPool, draft.detailsPool}},
@@ -216,7 +218,8 @@ class SettingsPanel {
             body.push_back(one(i18n::settingsEnglishField(ShellKey::ReviewHeading,std::to_string(diff.size())), Tone::Canary));
             if (diff.empty()) body.push_back(one(i18n::settingsEnglish(ShellKey::NoChanges)));
             const size_t start = diff.empty() ? 0 : std::min(static_cast<size_t>(reviewOffset), diff.size() - 1);
-            for (size_t i = start; i < diff.size(); ++i) body.push_back(one(diff[i]));
+            for (size_t i = start; i < diff.size(); ++i)
+                for (const auto &line : wrapText(diff[i], width)) body.push_back(one(line));
             body.push_back(one(i18n::settingsEnglish(ShellKey::Untouched)));
         } else if (page == SettingsPage::Leave) {
             body.push_back(one(i18n::settingsEnglish(ShellKey::Unsaved), Tone::Canary));
@@ -261,7 +264,8 @@ class SettingsPanel {
                 const unsigned choices[] = {100, 250, 500, 1000};
                 for (size_t i = 0; i < 4; ++i) if (draft.refreshMs == choices[i]) { draft.refreshMs = choices[(i + 1) % 4]; break; }
             } else if (field == 1) draft.color = !draft.color;
-            else draft.showEvents = !draft.showEvents;
+            else if (field == 2) draft.showEvents = !draft.showEvents;
+            else if (field == 3) draft.showDonationLink = !draft.showDonationLink;
         } else if (group == 9) {
             bool *values[] = {&draft.detailsEnabled, &draft.detailsIdentity, &draft.detailsPool, &draft.detailsRestarts, &draft.detailsErrors};
             *values[field] = !*values[field];
@@ -292,6 +296,7 @@ class SettingsPanel {
             row(0, i18n::uiFieldEnglish(FieldKey::Refresh,std::to_string(draft.refreshMs)+" ms"));
             toggle(1,FieldKey::Color,draft.color);
             toggle(2,FieldKey::Events,draft.showEvents);
+            toggle(3,FieldKey::DonationLink,draft.showDonationLink);
             result.push_back({"", Tone::Plain});
             result.push_back({i18n::uiFieldEnglish(FieldKey::SamplingNotice), Tone::Plain});
             result.push_back({i18n::uiFieldEnglish(FieldKey::IntensityNotice), Tone::Plain});

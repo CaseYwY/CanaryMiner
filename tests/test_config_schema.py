@@ -133,6 +133,18 @@ class ConfigSchemaTests(unittest.TestCase):
         self.assertEqual(set(re.findall(r'"([a-z_]+)"', m.group(1))), set(pool_obj['properties']))
 
 
+class UiPreferencesSchemaTests(unittest.TestCase):
+    def test_donation_link_is_an_optional_boolean(self):
+        schema = load('config/ui-preferences-v2.schema.json')
+        legacy = {'schema_version': 2}
+        self.assertIs(schema['properties']['show_donation_link']['default'], False)
+        self.assertEqual(validate(legacy, schema, schema), [])
+        for value in (True, False):
+            self.assertEqual(validate({**legacy, 'show_donation_link': value}, schema, schema), [])
+        for value in (1, 'true', None):
+            self.assertTrue(validate({**legacy, 'show_donation_link': value}, schema, schema))
+
+
 class RuntimePreferencesSchemaTests(unittest.TestCase):
     def test_defaults_boundaries_and_writer_keys(self):
         schema = load('config/runtime-preferences-v1.schema.json')

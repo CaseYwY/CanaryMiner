@@ -104,19 +104,42 @@ static void panelTests() {
     CHECK(dashboard.find(model.worker) == std::string::npos);
     CHECK(dashboard.find("synthetic event") == std::string::npos);
     CHECK(dashboard.find("[S] Settings") != std::string::npos);
+    const std::string donationLink = "https://github.com/CaseYwY/CanaryMiner#developer-donation";
+    CHECK(dashboard.find(donationLink) == std::string::npos);
+    p.open(UiPreferences{});
+    p.group = 0;
+    p.groupsFocused = false;
+    p.field = 3;
+    CHECK(p.render(20, 12, ColorLevel::None).find("> Donation link [ ]") != std::string::npos);
+    p.key(' ', ok);
+    CHECK(p.render(20, 12, ColorLevel::None).find("> Donation link [x]") != std::string::npos);
+    CHECK(!p.active.showDonationLink && p.draft.showDonationLink);
+    CHECK(p.changes() == std::vector<std::string>{"Show donation link: off -> on"});
+    p.key('v', ok);
+    CHECK(p.render(20, 12, ColorLevel::None).find("off -> on") != std::string::npos);
+    p.key('\r', ok);
+    model.donationOn = false;
+    view.options = p.active;
+    view.columns = 60;
+    CHECK(renderDashboard(model, view).find(donationLink) != std::string::npos);
+    CHECK(renderDashboard(model, view).find("Donation (off)") != std::string::npos);
+    CHECK(renderPlainSummary(model, 0).find(donationLink) == std::string::npos);
 }
 
 static void storeTests() {
     UiPreferences p;
     std::string error;
     CHECK(parseUiPreferences(uiPreferencesJson(p), &p, &error));
+    CHECK(!p.showDonationLink && uiPreferencesJson(p).find("show_donation_link") == std::string::npos);
     const auto before = p;
     for (const std::string invalid : {"{}", "[]", "{\"schema_version\":3}", "{\"schema_version\":1,\"refresh_ms\":1}",
                                       "{\"schema_version\":1,\"hide_worker\":1}", "{\"schema_version\":1,\"unknown\":true}",
-                                      "{\"schema_version\":1,\"schema_version\":1}"}) {
+                                      "{\"schema_version\":1,\"schema_version\":1}", "{\"schema_version\":1,\"show_donation_link\":true}",
+                                      "{\"schema_version\":2,\"show_donation_link\":1}"}) {
         CHECK(!parseUiPreferences(invalid, &p, &error));
         CHECK(p == before);
     }
+    CHECK(parseUiPreferences("{\"schema_version\":2,\"show_donation_link\":true}", &p, &error) && p.showDonationLink);
     const auto dir = std::filesystem::path(makeScratchDir("ui-preferences"));
     const auto path = dir / "preferences.json";
     UiPreferencesStore store(path);
@@ -145,7 +168,7 @@ static void storeTests() {
     CHECK(std::filesystem::remove(path));
     { std::ofstream file(path); file << "{\"schema_version\":1,\"hide_worker\":true}"; }
     UiPreferencesStore legacy(path);
-    CHECK(legacy.load(&loaded, &error) && loaded.hideWorker && loaded.detailsEnabled && loaded.logEnabled);
+    CHECK(legacy.load(&loaded, &error) && loaded.hideWorker && loaded.detailsEnabled && loaded.logEnabled && !loaded.showDonationLink);
     auto backup = path;
     backup += ".v1.bak";
     { std::ofstream file(backup); file << "invalid synthetic rollback"; }
