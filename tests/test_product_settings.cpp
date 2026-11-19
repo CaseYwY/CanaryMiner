@@ -124,6 +124,25 @@ static void panelTests() {
     CHECK(renderDashboard(model, view).find(donationLink) != std::string::npos);
     CHECK(renderDashboard(model, view).find("Donation (off)") != std::string::npos);
     CHECK(renderPlainSummary(model, 0).find(donationLink) == std::string::npos);
+    p.open(UiPreferences{});
+    p.group = 3;
+    p.field = 0;
+    p.groupsFocused = false;
+    CHECK(p.key('\r', ok) == SettingsResult::OpenManualMarket);
+    p.key(kKeyDown, ok);
+    CHECK(p.key('\r', ok) == SettingsResult::None && p.marketReadiness.visible);
+    const auto gate = p.render(60,12,ColorLevel::None);
+    CHECK(gate.find("Gate Spot REST | PRL/USDT") != std::string::npos &&
+          gate.find("candle response shape") != std::string::npos);
+    CHECK(gate.find("Kraken Spot REST") == std::string::npos);
+    CHECK(p.render(20,8,ColorLevel::None).find("[Esc] Back [Q] Stop") != std::string::npos);
+    p.key('\t', ok);
+    const auto kraken = p.render(60,12,ColorLevel::None);
+    CHECK(kraken.find("Kraken Spot REST | USDT/USD") != std::string::npos &&
+          kraken.find("provisional") != std::string::npos);
+    CHECK(p.key(3, ok) == SettingsResult::Quit);
+    p.key(27, ok);
+    CHECK(!p.marketReadiness.visible && p.field == 1 && !p.dirty());
 }
 
 static void storeTests() {

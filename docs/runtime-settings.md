@@ -6,8 +6,10 @@ Open **S → Automatic mining → Host wait / runtime defaults**, or **Privacy �
 
 - **Host wait:** Enter opens an ASCII numeric editor, accepting every integer from 0 through 1000 milliseconds. Zero is valid, not a duty-cycle percentage. Enter applies only the draft; Esc cancels that edit. Backspace is supported. Q/D/L/S typed inside the editor are input, never global page/quit shortcuts; invalid input stays in the editor with an explanation. Ctrl+C still stops.
 - **History collection:** Space/Enter toggles the local default; disabled collection preserves all existing history. This is not a presentation filter or a delete operation.
+- **Economy req:** defaults to off for new and existing files. An explicit review and save can retain an economic-mode
+  request. Effective coin-price/electricity-cost automation remains inactive while its inputs are unqualified.
 - **V/F2 → review → Enter/F2** explicitly saves runtime defaults. Review names the target, before/after values, scope, CLI precedence and activation. Esc returns; dirty leave offers review/save, discard or continued editing. Q/Ctrl+C does not implicitly save either target.
-- Both settings activate on the **next explicitly started supervisor session**, not at a worker crash/retry, reconnect or game exit. Saving never starts/stops/restarts mining, changes clocks, runs a test or logs in to a provider. To stop collection immediately, deliberately stop the current run; use `--no-history` when explicitly starting again.
+- Host wait and history settings apply on the **next explicitly started supervisor session**. Saving never starts/stops/restarts mining, changes clocks, runs a test or logs in to a provider. To stop collection immediately, deliberately stop the current run; use `--no-history` when explicitly starting again.
 
 The panel displays configured/draft values, the **current session's immutable effective control values**, their CLI-versus-startup-default source, and the next-start projection if the same CLI flags are reused. History-on is a request to collect, not proof of backend availability; Main separately reports loading/unavailable/gap status. Explicit `--work-wait-ms 0` overrides a saved positive wait; `--no-history` overrides saved collection-on. Saving a default is allowed while overridden, but does not erase the override or mislabel it effective now. An idle editor states there is no active session; it cannot know flags for an unrelated future launch.
 
@@ -27,7 +29,9 @@ The file has no wallet, worker, device identity, tariff, API credential or finan
 
 The runtime store bounds reads to 4 KiB, validates strict types/ranges/keys, compares the current file to its loaded snapshot under a cooperative writer lease, flushes a unique same-directory temporary file and atomically replaces the target. A changed file refuses save and retains the draft. OS-owned leases release when a writer closes/exits; the application does not steal/delete another lock. Newly created POSIX files are mode 0600, Windows inherits directory ACLs. A trusted local user-owned state directory is required; these files are not encrypted. Filesystem/hardware power-loss durability and adversarial uncooperative directory writers are not certified by these host tests.
 
-Rollback: an older binary ignores the new runtime-defaults file but does not implement those saved defaults. Use the old binary's supported explicit flags where applicable, or return to this build. No UI migration, mining-config rewrite, history reset or installed-miner modification occurs.
+Before downgrading to a binary that predates the economy request, disable it and save. Saving off omits the optional key,
+so older readers of this runtime preferences schema can still load the other defaults.
+Binaries that predate runtime preferences use their own supported flags.
 
 ## Verification and boundaries
 

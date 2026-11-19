@@ -78,6 +78,7 @@ def main():
 
         with Session() as session:
             session.runtime()
+            session.until(b"Economy req [off]")
             session.write(b"\rq\r")
             session.until(b"Enter an integer", fresh=True)
             assert session.process.poll() is None  # Q is input in the numeric editor
@@ -93,6 +94,28 @@ def main():
             assert not ui_preferences.exists() and not database.exists()
             session.write(b"\x1b")
             session.until(b"CanaryMiner / Settings", fresh=True)
+            session.write(b"q")
+            session.finished()
+
+        with Session() as session:
+            session.runtime()
+            session.until(b"Economy req [off]")
+            session.write(b"\t\t v")
+            session.until(b"Economic mode request: off -> on", fresh=True)
+            session.until(b"Economic mode is inactive")
+            assert "economic_mode_requested" not in json.loads(preferences.read_text())
+            session.write(b"\r")
+            session.until(b"Request saved. Economic mode is inactive.", fresh=True)
+            assert json.loads(preferences.read_text())["economic_mode_requested"] is True
+            session.write(b"q")
+            session.finished()
+
+        with Session() as session:
+            session.runtime()
+            session.until(b"Economy req [on]")
+            session.write(b"\t\t v\r")
+            session.until(b"Request saved. Economic mode is inactive.", fresh=True)
+            assert "economic_mode_requested" not in json.loads(preferences.read_text())
             session.write(b"q")
             session.finished()
 

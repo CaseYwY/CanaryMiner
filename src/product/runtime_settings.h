@@ -7,6 +7,7 @@
 #include "runtime_field_messages.h"
 #include "runtime_panel_messages.h"
 #include "ui_field_messages.h"
+#include "market_readiness_messages.h"
 
 namespace om {
 
@@ -29,6 +30,13 @@ class RuntimeSettingsPanel {
         page = RuntimeSettingsPage::Browse; field = 0; reviewOffset = 0; message.clear();
     }
     bool dirty() const { return active != draft; }
+    void confirmSaved(const RuntimePreferences &value) {
+        const bool economyChanged = active.economicModeRequested != value.economicModeRequested;
+        active = draft = value;
+        page = RuntimeSettingsPage::Browse;
+        message = economyChanged ? i18n::marketReadinessEnglish(i18n::MarketReadinessMessageKey::EconomySaved) :
+            i18n::runtimePanelEnglish(i18n::RuntimePanelMessageKey::Saved);
+    }
     RuntimeSettingsResult key(int key, const Save &save) {
         if (key == 3) return RuntimeSettingsResult::Quit;
         if (page == RuntimeSettingsPage::EditWait) {
@@ -58,17 +66,19 @@ class RuntimeSettingsPanel {
             else if (key == kKeyDown || key == kKeyPageDown) reviewOffset = std::min(30u, reviewOffset + 1);
             else if (key == '\r' || key == '\n' || key == kKeyF2) {
                 std::string error;
-                if (save && save(draft, &error)) { active = draft; page = RuntimeSettingsPage::Browse; message = i18n::runtimePanelEnglish(i18n::RuntimePanelMessageKey::Saved); }
+                if (save && save(draft, &error)) confirmSaved(draft);
                 else message = error.empty() ? i18n::runtimePanelEnglish(i18n::RuntimePanelMessageKey::SaveFailed) : error;
             }
         } else if (key == 27) {
             if (dirty()) page = RuntimeSettingsPage::Leave;
             else { visible = false; return RuntimeSettingsResult::Close; }
         } else if (key == 'v' || key == 'V' || key == kKeyF2) { page = RuntimeSettingsPage::Review; reviewOffset = 0; }
-        else if (key == kKeyUp || key == kKeyDown || key == '\t' || key == kKeyBackTab) field = 1 - field;
+        else if (key == kKeyUp || key == kKeyBackTab) field = (field + 2) % 3;
+        else if (key == kKeyDown || key == '\t') field = (field + 1) % 3;
         else if (key == ' ' || key == '\r' || key == '\n') {
             message.clear();
             if (field == 1) draft.historyEnabled = !draft.historyEnabled;
+            else if (field == 2) draft.economicModeRequested = !draft.economicModeRequested;
             else { input = std::to_string(draft.workWaitMs); replaceInput = true; page = RuntimeSettingsPage::EditWait; }
         }
         return RuntimeSettingsResult::None;
@@ -77,6 +87,8 @@ class RuntimeSettingsPanel {
         using namespace dash_detail;
         using FieldKey=i18n::RuntimeFieldMessageKey;
         using PanelKey=i18n::RuntimePanelMessageKey;
+        using MarketKey=i18n::MarketReadinessMessageKey;
+        using i18n::marketReadinessEnglish;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
         if (rows > 0 && rows < 12) return i18n::runtimePanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::runtimePanelEnglish(PanelKey::ShortResize)+"\n"+i18n::runtimePanelEnglish(PanelKey::ShortKeys)+"\n";
         const bool compact = width < 50 || (rows > 0 && rows < 20);
@@ -89,24 +101,42 @@ class RuntimeSettingsPanel {
         } else if (page == RuntimeSettingsPage::Leave) {
             line(i18n::runtimePanelEnglish(PanelKey::LeaveTitle)); line(i18n::runtimePanelEnglish(PanelKey::LeaveKeys));
         } else if (page == RuntimeSettingsPage::Review) {
+            const bool economyChanged = active.economicModeRequested != draft.economicModeRequested;
+            const bool nextStartChanged = active.workWaitMs != draft.workWaitMs || active.historyEnabled != draft.historyEnabled;
+            const bool showNextStart = !economyChanged || nextStartChanged;
+            if (economyChanged) {
+                line(marketReadinessEnglish(compact ? MarketKey::EconomyChangeCompact : MarketKey::EconomyChange,
+                    {{"before",on(active.economicModeRequested)},{"after",on(draft.economicModeRequested)}}));
+                line(marketReadinessEnglish(compact ? MarketKey::EconomyOffCompact : MarketKey::EconomyOff));
+            }
             line(i18n::runtimePanelEnglish(PanelKey::ReviewHeading));
-            line(i18n::runtimePanelEnglish(PanelKey::NextStartReview));
+            if (showNextStart) line(i18n::runtimePanelEnglish(PanelKey::NextStartReview));
             if (!dirty()) line(i18n::runtimePanelEnglish(PanelKey::NoChanges));
             if (active.workWaitMs != draft.workWaitMs) line(i18n::runtimeFieldEnglish(FieldKey::WaitChange,{{"before",std::to_string(active.workWaitMs)},{"after",std::to_string(draft.workWaitMs)+" ms"}}));
             if (active.historyEnabled != draft.historyEnabled) line(i18n::runtimeFieldEnglish(FieldKey::HistoryChange,{{"before",on(active.historyEnabled)},{"after",on(draft.historyEnabled)}}));
-            line(i18n::runtimeFieldEnglish(FieldKey::Activation,{{"activation",activationName(ChangeActivation::NextStart)}}));
-            line(i18n::runtimePanelEnglish(PanelKey::Scope));
-            if (context.cliWorkWait || context.cliNoHistory) line(i18n::runtimePanelEnglish(PanelKey::FutureCli));
+            if (showNextStart) {
+                line(i18n::runtimeFieldEnglish(FieldKey::Activation,{{"activation",activationName(ChangeActivation::NextStart)}}));
+                line(i18n::runtimePanelEnglish(PanelKey::Scope));
+                if (context.cliWorkWait || context.cliNoHistory) line(i18n::runtimePanelEnglish(PanelKey::FutureCli));
+            }
             line(i18n::runtimePanelEnglish(PanelKey::Untouched));
         } else {
+            const auto economy = std::string(field == 2 ? "> " : "  ") +
+                marketReadinessEnglish(MarketKey::Economy, {{"request",on(draft.economicModeRequested)}});
+            if (compact && field == 2) {
+                line(economy);
+                line(marketReadinessEnglish(MarketKey::EconomyOffCompact));
+            }
             line(std::string(field == 0 ? "> " : "  ") + i18n::runtimeFieldEnglish(compact?FieldKey::WaitCompact:FieldKey::WaitConfigured,{{"wait",std::to_string(draft.workWaitMs)+" ms"}}));
             line(std::string(field == 1 ? "> " : "  ") + i18n::runtimeFieldEnglish(compact?FieldKey::HistoryCompact:FieldKey::HistoryConfigured,{{"history",on(draft.historyEnabled)}}));
+            if (!compact || field != 2) line(economy);
             if (context.running) {
                 line(i18n::runtimeFieldEnglish(FieldKey::CurrentWait,{{"wait",std::to_string(context.effective.workWaitMs)+" ms"},{"source",i18n::runtimeFieldEnglish(context.cliWorkWait?FieldKey::SourceCli:FieldKey::SourceDefaults)}}));
                 line(i18n::runtimeFieldEnglish(context.cliNoHistory?FieldKey::CurrentHistoryCli:FieldKey::CurrentHistoryDefaults,{{"history",on(context.effective.historyEnabled)}}));
                 const auto next = effectiveRuntimePreferences(draft, context);
                 line(i18n::runtimeFieldEnglish(FieldKey::NextSameFlags,{{"wait",std::to_string(next.workWaitMs)+" ms"},{"history",on(next.historyEnabled)}}));
             } else line(i18n::runtimePanelEnglish(PanelKey::NoSession));
+            line(marketReadinessEnglish(MarketKey::EconomyOff));
             line(i18n::runtimePanelEnglish(PanelKey::ActivationNotice));
             line(i18n::runtimePanelEnglish(PanelKey::ZeroWait));
             line(i18n::runtimePanelEnglish(PanelKey::CollectionOff));
