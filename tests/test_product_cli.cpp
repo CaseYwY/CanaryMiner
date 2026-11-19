@@ -181,7 +181,7 @@ int main() {
             std::string err;
             const char *command[] = {"canary-miner", payload.c_str()};
             CHECK(!parseProductCli(2, command, &prior, &err) && prior.command == Command::Status &&
-                  err == "unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted");
+                  err == "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted");
             const std::string flag = "--oc-" + payload;
             const char *tuning[] = {"canary-miner", flag.c_str()};
             CHECK(!parseProductCli(2, tuning, &prior, &err) && prior.command == Command::Status &&

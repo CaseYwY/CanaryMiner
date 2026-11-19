@@ -133,6 +133,11 @@ int main(int argc, char **argv) {
         signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
         return commandDiagnostics(cli.diagnostics,&g_stop); // before any config, preference, platform or device/runtime setup
     }
+    if (cli.command == Command::MeterBill) {
+        signal(SIGINT, onSignal);
+        signal(SIGTERM, onSignal);
+        return commandMeterBill(cli.meterBill, argc, argv, &g_stop);
+    }
     const bool explicitPresentation=cli.ov.presentation.language.has_value()||cli.ov.presentation.formattingLocale.has_value()||cli.ov.presentation.ascii;
     if(explicitPresentation)fprintf(stderr,"Language request: effective UI en / legacy per-field formatting; full native translation/layout integration unavailable. No mining setting changed.\n");
     if (cli.command == Command::Version) {
@@ -419,7 +424,8 @@ int main(int argc, char **argv) {
                 "       canary-miner status [--json]    read the stats endpoint of a running miner\n"
                 "       canary-miner version\n"
                 "       canary-miner settings          edit local display/runtime defaults\n"
-                "       canary-miner diagnostics       build-only preview/export; see diagnostics --help\n\n"
+                "       canary-miner diagnostics       build-only preview/export; see diagnostics --help\n"
+                "       canary-miner meter-bill        review imported meter intervals; see meter-bill --help\n\n"
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"

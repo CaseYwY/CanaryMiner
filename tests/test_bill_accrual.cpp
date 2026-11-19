@@ -18,6 +18,12 @@ void compare(const TariffPlan &plan,const BillOpening &opening,const PowerTrace 
 }
 int main(int argc,char **argv){
     auto p=plan(T,T+2*hour);auto s=opening(T,T+2*hour);
+    const PowerTrace cancellable{s.evidence,{{T,T+hour/2,d("1000")},{T+hour/2,T+hour,d("2000")},
+                                           {T+hour,T+2*hour,d("3000")}}};
+    unsigned stopChecks=0;
+    const auto cancelled=accrueBill(p,s,cancellable,T+2*hour,T+2*hour,[&]{return ++stopChecks==4;});
+    CHECK(stopChecks==4&&cancelled.status==ElectricityStatus::Unavailable);
+    CHECK(!cancelled.ending&&!cancelled.provisionalChange&&!cancelled.provisionalTotal&&!cancelled.settledTotal);
     for(auto mode:{TierMode::None,TierMode::Progressive,TierMode::AllUnits})for(bool floor:{false,true}){
         p=plan(T,T+2*hour);if(mode!=TierMode::None)tier(p,mode);
         p.minimumCycleSubtotal=floor?std::optional<ExactDecimal>(d("180")):std::nullopt;p.subtotalMultiplier=d("1.123456789012345678");

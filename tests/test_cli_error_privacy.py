@@ -9,7 +9,7 @@ import tempfile
 
 def main():
     cli, helper = [Path(value).resolve() for value in sys.argv[1:3]]
-    command_error = b'unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted\n'
+    command_error = b'unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted\n'
     tuning_error = b'unknown GPU tuning flag; rejected original omitted\n'
     pool_error = b'pool is neither a preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted\n'
     option_error = b'unknown option. Run with --help for the list; rejected original omitted.\n'

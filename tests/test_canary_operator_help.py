@@ -30,7 +30,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
                 '-include', 'tests/pearl_cli_stubs/cuda_stub.h', 'src/core/miner.cu',
                 'src/core/registry.cu', 'tests/test_pearl_cli_stubs.cpp', 'src/product/exact_decimal.cpp',
                 'src/product/manual_market.cpp', 'src/product/energy_owner.cpp', 'src/product/civil_time.cpp',
-                'src/product/electricity.cpp', 'src/product/tariff_declaration.cpp',
+                'src/product/electricity.cpp', 'src/product/tariff_declaration.cpp', 'src/product/meter_bill.cpp',
                 'src/product/preferences_protocol.cpp', 'src/product/preferences_document.cpp', 'src/product/preferences_owner.cpp',
                 'src/product/local_task_process.cpp', 'src/product/duplex_task_process.cpp', '-pthread', '-o', str(binary)]
             compiled = subprocess.run(command, cwd=ROOT, capture_output=True, timeout=90)
@@ -110,7 +110,7 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertEqual(self.cli('--version').stdout, version.stdout)
         unknown = self.cli('frobnicate')
         self.assertEqual(unknown.returncode, 2)
-        self.assertEqual(unknown.stdout+unknown.stderr, b'unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted\n')
+        self.assertEqual(unknown.stdout+unknown.stderr, b'unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted\n')
         for args in (['list-devices'], ['--list-devices'], ['selftest']):
             with self.subTest(args=args):
                 result = subprocess.run([str(self.binaries['1']), *args], cwd=self.stage.name, capture_output=True, timeout=5)

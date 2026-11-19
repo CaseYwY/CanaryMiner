@@ -2,6 +2,52 @@
 #pragma once
 #include "runtime_preferences.h"
 namespace om {
+enum class LocalFileRead { Ok, Missing, Unreadable, Invalid };
+inline LocalFileRead readBoundedLocalFile(const std::filesystem::path &path, std::size_t limit, std::string *text) {
+    if (!text || !limit || limit > 1024*1024) return LocalFileRead::Invalid;
+    std::string bytes(limit+1, '\0');
+#if defined(_WIN32)
+    struct File {
+        HANDLE handle;
+        ~File() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+    } file{CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr)};
+    if (file.handle == INVALID_HANDLE_VALUE) {
+        const auto reason = GetLastError();
+        return reason == ERROR_FILE_NOT_FOUND || reason == ERROR_PATH_NOT_FOUND
+            ? LocalFileRead::Missing : LocalFileRead::Unreadable;
+    }
+    BY_HANDLE_FILE_INFORMATION info{};
+    LARGE_INTEGER size{};
+    DWORD got = 0;
+    if (GetFileType(file.handle) != FILE_TYPE_DISK || !GetFileInformationByHandle(file.handle, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) ||
+        !GetFileSizeEx(file.handle, &size) || size.QuadPart < 0 || static_cast<uint64_t>(size.QuadPart) > limit ||
+        !ReadFile(file.handle, bytes.data(), static_cast<DWORD>(bytes.size()), &got, nullptr) || got != size.QuadPart)
+        return LocalFileRead::Invalid;
+#else
+    struct File {
+        int handle;
+        ~File() { if (handle >= 0) ::close(handle); }
+    } file{::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)};
+    if (file.handle < 0) return errno == ENOENT ? LocalFileRead::Missing : LocalFileRead::Unreadable;
+    struct stat before{}, after{};
+    if (fstat(file.handle, &before) != 0 || !S_ISREG(before.st_mode) || before.st_size < 0 ||
+        static_cast<uint64_t>(before.st_size) > limit) return LocalFileRead::Invalid;
+    const auto got = ::read(file.handle, bytes.data(), bytes.size());
+    if (got < 0 || got != before.st_size || fstat(file.handle, &after) != 0 ||
+        after.st_size != before.st_size || after.st_mtime != before.st_mtime || after.st_ctime != before.st_ctime)
+        return LocalFileRead::Invalid;
+#if defined(__linux__)
+    if (after.st_mtim.tv_nsec != before.st_mtim.tv_nsec || after.st_ctim.tv_nsec != before.st_ctim.tv_nsec)
+        return LocalFileRead::Invalid;
+#endif
+#endif
+    bytes.resize(static_cast<std::size_t>(got));
+    *text = std::move(bytes);
+    return LocalFileRead::Ok;
+}
+
 template<class Value,bool (*Parse)(const std::string &,Value *,std::string *),std::string (*Encode)(const Value &),bool (*Valid)(const Value &,std::string *)>
 class LocalPreferencesStore {
    public:
@@ -65,24 +111,13 @@ class LocalPreferencesStore {
     std::filesystem::path path_;std::size_t limit_;std::string original_;bool loaded_=false,existed_=false;
     static bool fail(std::string *error,const char *s){if(error)*error=s;return false;}
     bool read(std::string *text,bool *exists,std::string *error)const{
-        std::string bytes(limit_+1,'\0');bool ok=false;std::size_t count=0;
-#if defined(_WIN32)
-        struct File {HANDLE handle=INVALID_HANDLE_VALUE;~File(){if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);}} file;
-        file.handle=CreateFileW(path_.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
-        if(file.handle==INVALID_HANDLE_VALUE){const auto reason=GetLastError();if(reason==ERROR_FILE_NOT_FOUND||reason==ERROR_PATH_NOT_FOUND){text->clear();*exists=false;return true;}return fail(error,"Cannot read private preferences; preserved.");}
-        BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{};DWORD got=0;
-        ok=GetFileType(file.handle)==FILE_TYPE_DISK&&GetFileInformationByHandle(file.handle,&info)&&!(info.dwFileAttributes&(FILE_ATTRIBUTE_DIRECTORY|FILE_ATTRIBUTE_REPARSE_POINT))&&
-            GetFileSizeEx(file.handle,&size)&&size.QuadPart>=0&&static_cast<uint64_t>(size.QuadPart)<=limit_&&ReadFile(file.handle,bytes.data(),static_cast<DWORD>(bytes.size()),&got,nullptr)&&got==size.QuadPart;
-        count=got;
-#else
-        struct File {int handle=-1;~File(){if(handle>=0)::close(handle);}} file;
-        file.handle=::open(path_.c_str(),O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK);
-        if(file.handle<0){if(errno==ENOENT){text->clear();*exists=false;return true;}return fail(error,"Cannot read private preferences; preserved.");}
-        struct stat info{};
-        if(fstat(file.handle,&info)==0&&S_ISREG(info.st_mode)&&info.st_size>=0&&static_cast<uint64_t>(info.st_size)<=limit_){const auto got=::read(file.handle,bytes.data(),bytes.size());ok=got>=0&&got==info.st_size;if(got>=0)count=static_cast<std::size_t>(got);}
-#endif
-        if(!ok||count>limit_)return fail(error,"Private preferences must be bounded readable regular files; preserved.");
-        bytes.resize(count);*text=std::move(bytes);*exists=true;return true;
+        switch(readBoundedLocalFile(path_,limit_,text)){
+            case LocalFileRead::Ok:*exists=true;return true;
+            case LocalFileRead::Missing:text->clear();*exists=false;return true;
+            case LocalFileRead::Unreadable:return fail(error,"Cannot read private preferences; preserved.");
+            case LocalFileRead::Invalid:return fail(error,"Private preferences must be bounded readable regular files; preserved.");
+        }
+        return false;
     }
 };
 } // namespace om
