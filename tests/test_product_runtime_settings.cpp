@@ -74,16 +74,36 @@ static void panelTests() {
     for(std::size_t i=0;i<phases.size();++i)CHECK(std::string(pointers[i])==descriptions[i]);
     CHECK(std::string(activationName(static_cast<ChangeActivation>(-1)))=="unsupported");
     CHECK(runtimePreferencesJson(panel.active)==original);
+    panel.field = 2;
+    CHECK(panel.render(20,12,ColorLevel::None).find("> Economy req [off]") != std::string::npos);
+    panel.key(' ', save);
+    CHECK(panel.draft.economicModeRequested && !panel.active.economicModeRequested);
+    const auto compactBrowse = panel.render(20,12,ColorLevel::None);
+    CHECK(compactBrowse.find("> Economy req [on]") != std::string::npos &&
+          compactBrowse.find("Economy inactive") != std::string::npos);
+    panel.key('v', save);
+    const auto compactReview = panel.render(20,12,ColorLevel::None);
+    CHECK(compactReview.find("Econ req off -> on") != std::string::npos &&
+          compactReview.find("Economy inactive") != std::string::npos);
+    const auto request = panel.render(100,24,ColorLevel::None);
+    CHECK(request.find("Economic mode request: off -> on") != std::string::npos);
+    CHECK(request.find("Economic mode is inactive") != std::string::npos);
+    CHECK(request.find("next explicit start") == std::string::npos);
+    panel.key('\r', save);
+    CHECK(panel.active.economicModeRequested && !panel.context.effective.economicModeRequested);
+    CHECK(panel.message == "Request saved. Economic mode is inactive.");
 }
 
 static void storeTests(const std::filesystem::path &directory) {
     RuntimePreferences value;
     std::string error;
     CHECK(parseRuntimePreferences(runtimePreferencesJson(value), &value, &error));
-    CHECK(parseRuntimePreferences("{\"schema_version\":1}", &value, &error) && value.workWaitMs == 0 && value.historyEnabled);
+    CHECK(parseRuntimePreferences("{\"schema_version\":1}", &value, &error) && value.workWaitMs == 0 && value.historyEnabled &&
+          !value.economicModeRequested);
     for (const auto &text : {"{}", "[]", "{\"schema_version\":2}", "{\"schema_version\":1,\"work_wait_ms\":1001}",
             "{\"schema_version\":1,\"work_wait_ms\":-1}", "{\"schema_version\":1,\"work_wait_ms\":1.5}",
             "{\"schema_version\":1,\"history_enabled\":1}", "{\"schema_version\":1,\"schema_version\":1}",
+            "{\"schema_version\":1,\"economic_mode_requested\":1}",
             "{\"schema_version\":1,\"unknown\":true}"}) {
         const auto prior = value;
         CHECK(!parseRuntimePreferences(text, &value, &error));
@@ -101,16 +121,21 @@ static void storeTests(const std::filesystem::path &directory) {
     RuntimePreferencesStore store(path);
     CHECK(!store.save(value, &error));
     CHECK(store.load(&value, &error) && !std::filesystem::exists(path));
+    CHECK(!value.economicModeRequested);
     value.workWaitMs = 345;
     value.historyEnabled = false;
+    value.economicModeRequested = true;
     CHECK(store.save(value, &error));
     RuntimePreferencesStore second(path);
     RuntimePreferences loaded;
     CHECK(second.load(&loaded, &error) && loaded == value);
+    CHECK(loaded.economicModeRequested);
     value.workWaitMs = 50;
+    value.economicModeRequested = false;
     CHECK(store.save(value, &error));
     CHECK(!second.save(loaded, &error) && error.find("externally") != std::string::npos);
     CHECK(second.load(&loaded, &error) && loaded == value);
+    CHECK(runtimePreferencesJson(loaded).find("economic_mode_requested") == std::string::npos);
     auto lockPath = path; lockPath += ".lock";
     {
         RuntimePreferencesLease lease;

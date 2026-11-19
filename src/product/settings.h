@@ -19,6 +19,7 @@
 #include "settings_action_messages.h"
 #include "settings_diagnostic_messages.h"
 #include "manual_market_settings.h"
+#include "market_readiness_settings.h"
 #include "electricity_settings.h"
 #include "tariff_settings.h"
 #include "credit_review.h"
@@ -47,6 +48,7 @@ class SettingsPanel {
     PoolSecuritySettingsPanel poolSecurity;
     LanguageSettingsPanel language;
     ManualMarketSettingsPanel manual;
+    MarketReadinessSettings marketReadiness;
     ElectricitySettingsPanel electricity;
     TariffSettingsPanel tariff;
     CreditReviewPanel credit;
@@ -70,6 +72,7 @@ class SettingsPanel {
         poolSecurity.visible=false;
         language.visible=false;
         manual.visible = false;
+        marketReadiness.visible = false;
         electricity.visible = false;
         tariff.visible = false;
         credit.visible = false;
@@ -86,7 +89,8 @@ class SettingsPanel {
             return result;}();
         return names;
     }
-    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 4 : (group == 1 || group == 3 || group == 5 || group == 6 || group == 7) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
+    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 4 : group == 3 ? 2 :
+        (group == 1 || group == 5 || group == 6 || group == 7) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
     void updateEnergyAuthorization(){if(energyAuthorization.visible&&energyAuthorizationAccess.snapshot)energyAuthorization.update(energyAuthorizationAccess.snapshot());}
@@ -109,6 +113,11 @@ class SettingsPanel {
         if(credit.visible){updateCreditReview();return credit.key(key,creditAccess)==CreditReviewResult::Quit?SettingsResult::Quit:SettingsResult::None;}
         if (electricity.visible) return electricity.key(key,electricitySave,nowUtc) == ElectricitySettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (manual.visible) return manual.key(key, manualSave, nowUtc) == ManualMarketSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
+        if (marketReadiness.visible) {
+            if (key == 3 || key == 'q' || key == 'Q') return SettingsResult::Quit;
+            marketReadiness.key(key);
+            return SettingsResult::None;
+        }
         if (runtime.visible) return runtime.key(key, runtimeSave) == RuntimeSettingsResult::Quit ? SettingsResult::Quit : SettingsResult::None;
         if (key == 3 || key == 'q' || key == 'Q') return SettingsResult::Quit;
         if (page == SettingsPage::Leave) {
@@ -151,7 +160,8 @@ class SettingsPanel {
         } else if (key == '\r' || key == '\n' || key == ' ') {
             if (groupsFocused) groupsFocused = false;
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
-            else if (group == 3) return SettingsResult::OpenManualMarket;
+            else if (group == 3 && field == 0) return SettingsResult::OpenManualMarket;
+            else if (group == 3 && field == 1) marketReadiness.open();
             else if (group == 5) return SettingsResult::OpenGame;
             else if (group == 6) return SettingsResult::OpenPoolSecurity;
             else if (group == 7) return SettingsResult::OpenLanguage;
@@ -198,6 +208,7 @@ class SettingsPanel {
         if(credit.visible)return credit.render(columns,rows,color);
         if (electricity.visible) return electricity.render(columns,rows,color);
         if (manual.visible) return manual.render(columns, rows, color);
+        if (marketReadiness.visible) return marketReadiness.render(columns, rows, color);
         if (runtime.visible) return runtime.render(columns, rows, color);
         using namespace dash_detail;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
@@ -315,6 +326,7 @@ class SettingsPanel {
             result.push_back({i18n::settingsActionEnglish(ActionKey::NextStart), Tone::Plain});
         } else if (group == 3) {
             row(0, i18n::settingsActionEnglish(ActionKey::ManualReferences));
+            row(1, i18n::marketReadinessEnglish(i18n::MarketReadinessMessageKey::Entry));
             result.push_back({i18n::settingsActionEnglish(ActionKey::DeclaredMarket), Tone::Plain});
             result.push_back({i18n::settingsActionEnglish(ActionKey::NoMarket), Tone::Plain});
         } else if (group == 5) {

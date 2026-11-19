@@ -79,6 +79,21 @@ def main():
                     child.wait(timeout=5)
                 os.close(master)
 
+        def readiness(send, until, _):
+            nonlocal checks
+            until(b"CanaryMiner / Settings")
+            send(b"\x1b[C" * 3 + b"\t\x1b[B\r")
+            gate = until(b"Public polling: off", True)
+            assert b"Gate Spot REST | PRL/USDT" in gate and b"candle response shape" in gate
+            send(b"\t")
+            kraken = until(b"The final REST candle is provisional", True)
+            assert b"Kraken Spot REST | USDT/USD" in kraken and b"Trade timestamp unavailable" in kraken
+            assert not any(path.exists() for path in (file, ui_file, runtime_file, count))
+            checks += 3
+            send(b"q")
+
+        session([cli, "settings", "--no-market", "--config", str(config)], readiness)
+
         def setup(send, until, _):
             nonlocal checks
             until(b"CanaryMiner / Settings")

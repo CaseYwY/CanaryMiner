@@ -42,7 +42,11 @@ inline const char *activationName(ChangeActivation value) {
 struct RuntimePreferences {
     unsigned workWaitMs = 0;
     bool historyEnabled = true;
-    bool operator==(const RuntimePreferences &other) const { return workWaitMs == other.workWaitMs && historyEnabled == other.historyEnabled; }
+    bool economicModeRequested = false;
+    bool operator==(const RuntimePreferences &other) const {
+        return workWaitMs == other.workWaitMs && historyEnabled == other.historyEnabled &&
+               economicModeRequested == other.economicModeRequested;
+    }
     bool operator!=(const RuntimePreferences &other) const { return !(*this == other); }
 };
 
@@ -61,7 +65,8 @@ inline RuntimePreferences effectiveRuntimePreferences(RuntimePreferences configu
 
 inline std::string runtimePreferencesJson(const RuntimePreferences &value) {
     return "{\n  \"schema_version\": 1,\n  \"work_wait_ms\": " + std::to_string(value.workWaitMs) +
-        ",\n  \"history_enabled\": " + (value.historyEnabled ? "true" : "false") + "\n}\n";
+        ",\n  \"history_enabled\": " + (value.historyEnabled ? "true" : "false") +
+        (value.economicModeRequested ? ",\n  \"economic_mode_requested\": true" : "") + "\n}\n";
 }
 
 inline bool parseRuntimePreferences(const std::string &text, RuntimePreferences *out, std::string *error) {
@@ -72,7 +77,8 @@ inline bool parseRuntimePreferences(const std::string &text, RuntimePreferences 
     const auto *schema = root.find("schema_version");
     if (!root.isObject() || !schema || !schema->asUint64(&version) || version != 1) return fail("unsupported runtime preferences schema");
     for (const auto &item : root.members)
-        if (item.first != "schema_version" && item.first != "work_wait_ms" && item.first != "history_enabled") return fail("unknown runtime preference");
+        if (item.first != "schema_version" && item.first != "work_wait_ms" && item.first != "history_enabled" &&
+            item.first != "economic_mode_requested") return fail("unknown runtime preference");
     RuntimePreferences value;
     if (const auto *wait = root.find("work_wait_ms")) {
         uint64_t number = 0;
@@ -82,6 +88,10 @@ inline bool parseRuntimePreferences(const std::string &text, RuntimePreferences 
     if (const auto *history = root.find("history_enabled")) {
         if (!history->isBool()) return fail("history_enabled must be true or false");
         value.historyEnabled = history->boolean;
+    }
+    if (const auto *economy = root.find("economic_mode_requested")) {
+        if (!economy->isBool()) return fail("economic_mode_requested must be true or false");
+        value.economicModeRequested = economy->boolean;
     }
     *out = value;
     return true;

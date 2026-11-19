@@ -41,6 +41,16 @@ not the future complete source-selection/configuration UI. With no public factor
 
 ## Source qualification is still closed
 
+**Settings → Market and timing → Public feed readiness** shows the two expected public series, their latest-price and
+one-hour evidence separately, and the use/deployment status. The review is read-only and works with `--no-market`.
+The manual reference editor keeps its own entry and save target.
+
+The [Gate Spot REST contract](https://www.gate.com/docs/developers/apiv4/en/spot/#market-candlesticks) still lacks an
+unambiguous returned time anchor and consistent candle row definition. [Kraken Spot REST](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
+identifies the last row as provisional and leaves the other rows' timestamps unspecified as start or end.
+[Kraken WebSocket v2](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ohlc) defines its own
+`interval_begin` field. The WebSocket contract applies to that transport. No public-feed factory is admitted here.
+
 The [2026-11-06 primary-source recheck](research/market-source-qualification-2026-11.md) does not settle Gate's REST candle
 shape or either REST minute time anchor. Public-feed use rights, regional/deployment/trust approval and any required
 trade-event-age basis remain separate. `ProviderResponse` candles still return `UnsupportedConvention`; only explicit
