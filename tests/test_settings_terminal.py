@@ -36,10 +36,10 @@ def main():
         assert not preferences.exists()
         checks = 3
 
-        def session(edit, expected, supervisor=None, history_count=2):
+        def session(edit, expected, supervisor=None, history_count=2, rows=24):
             nonlocal checks
             master, slave = pty.openpty()
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 100, 0, 0))
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, 100, 0, 0))
             command = [executable, "settings", "--config", str(config)] if supervisor is None else [supervisor, "--dashboard-session-test", str(root / "state")]
             process = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
                                        start_new_session=True)
@@ -89,8 +89,15 @@ def main():
         def save(process, terminal, until):
             del process
             assert not preferences.exists()
+            until(b"Donation link [ ]")
             os.write(terminal, b"\t \x1bOQ\r")
             until(b"Saved.")
+            os.write(terminal, b"\x1b[B" * 3 + b" v")
+            until(b"Show donation link: off -> on", fresh=True)
+            assert "show_donation_link" not in json.loads(preferences.read_text())
+            os.write(terminal, b"\r")
+            until(b"Saved.", fresh=True)
+            assert json.loads(preferences.read_text())["show_donation_link"] is True
             os.write(terminal, b"q")
 
         session(save, 1000)
@@ -98,6 +105,7 @@ def main():
         def cancel(process, terminal, until):
             del process
             until(b"1000 ms")
+            until(b"Donation link [x]")
             os.write(terminal, b"\t \x1b")
             until(b"Unsaved changes")
             os.write(terminal, b"d")
@@ -110,9 +118,21 @@ def main():
             process.send_signal(signal.SIGINT)
 
         session(stop, 1000)
+
+        def idle_disable(process, terminal, until):
+            del process
+            until(b"Donation link [x]")
+            os.write(terminal, b"\t" + b"\x1b[B" * 3 + b" \x1bOQ\r")
+            until(b"Saved.", fresh=True)
+            assert "show_donation_link" not in json.loads(preferences.read_text())
+            os.write(terminal, b"q")
+
+        session(idle_disable, 1000)
         if len(sys.argv) > 2:
+            donation_link = b"https://github.com/CaseYwY/CanaryMiner#developer-donation"
             def dashboard_edit(process, terminal, until):
                 del process
+                assert donation_link not in until(b"Donation link [ ]")
                 os.write(terminal, b"\t v\r")
                 until(b"Saved.")
                 os.write(terminal, b"\x1b")
@@ -127,14 +147,31 @@ def main():
                 os.write(terminal, b"dl")
                 main = until(b"[S]", fresh=True)
                 assert b"WORKER OUTPUT" not in main and b"DETAILS" not in main
+                os.write(terminal, b"s")
+                until(b"CanaryMiner / Settings", fresh=True)
+                # The previous visit confirmed the Log page. Display is the next group.
+                os.write(terminal, b"\x1b[C\t" + b"\x1b[B" * 3 + b" v")
+                until(b"Show donation link: off -> on")
+                assert donation_link not in until(b"Show donation link: off -> on")
+                os.write(terminal, b"\r")
+                until(b"Saved.", fresh=True)
+                assert json.loads(preferences.read_text())["show_donation_link"] is True
+                os.write(terminal, b"\x1b")
+                until(donation_link, fresh=True)
                 os.write(terminal, b"q")
 
-            session(dashboard_edit, 100, str(Path(sys.argv[2]).resolve()))
+            session(dashboard_edit, 100, str(Path(sys.argv[2]).resolve()), rows=56)
             def dashboard_restart(process, terminal, until):
-                del process, until
+                del process
+                until(b"Donation link [x]")
+                os.write(terminal, b"\t" + b"\x1b[B" * 3 + b" v\r")
+                until(b"Saved.", fresh=True)
+                os.write(terminal, b"\x1b")
+                assert donation_link not in until(b"[S]", fresh=True)
+                assert "show_donation_link" not in json.loads(preferences.read_text())
                 os.write(terminal, b"q")
 
-            session(dashboard_restart, 100, str(Path(sys.argv[2]).resolve()), history_count=4)
+            session(dashboard_restart, 100, str(Path(sys.argv[2]).resolve()), history_count=4, rows=56)
             with sqlite3.connect(root / "state" / "accepted-history.sqlite3") as database:
                 assert database.execute("SELECT total FROM meta WHERE id=1").fetchone()[0] == 4
                 assert database.execute("SELECT COUNT(*) FROM sessions WHERE ended IS NULL").fetchone()[0] == 0

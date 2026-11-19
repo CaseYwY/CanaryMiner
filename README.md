@@ -361,6 +361,9 @@ increase the pool-rejection count.
 
 ## Developer donation
 
+**Settings → Display → Donation link** adds a link to this section beside the Dashboard's donation statistics. It
+is off by default. Review and save the display change to apply it. The mining-time donation has its own setting below.
+
 CanaryMiner can donate **1% of your productive mining time** to the developer. It is voluntary and **on by default**; you can
 turn it off at any time and the miner is exactly as supported without it.
 

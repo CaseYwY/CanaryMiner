@@ -258,7 +258,7 @@ inline Line titleLine(const DashModel &m) {
 }
 
 /** Main page: header, HARDWARE, SESSION SHARES, RECENT EVENTS. Widths: 80 drops Submitted and Retired; 100 and wider is full. */
-inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents = true) {
+inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents = true, bool showDonationLink = false) {
     const bool wide = w >= 100, full = w >= 79;
     std::vector<Line> out;
     double rate = 0, avg = 0, power = 0;
@@ -406,6 +406,10 @@ inline std::vector<Line> mainPage(const DashModel &m, size_t w, bool showEvents 
     for (const std::string &line : wrapText(
              "Local stale was not sent. Rejected = pool rejections only. Donation = the developer donation, separate from your shares.", w))
         out.push_back(one(line, Tone::Dark));
+    if (showDonationLink) {
+        out.push_back(one("Developer donation", Tone::Donation));
+        out.push_back(one("https://github.com/CaseYwY/CanaryMiner#developer-donation"));
+    }
     out.push_back(one(""));
 
     if (showEvents) {
@@ -515,7 +519,7 @@ inline std::string renderDashboard(const DashModel &input, DashView &view) {
     const size_t W = static_cast<size_t>(view.columns < 60 ? 60 : view.columns);
     const std::vector<Line> body = view.page == DashPage::Details ? detailsPage(m, W, view.options)
                                    : view.page == DashPage::Log    ? logPage(view.logFrozen ? view.frozenLog : m.logEntries, W, view.options)
-                                                                    : mainPage(m, W, view.showEvents);
+                                                                    : mainPage(m, W, view.showEvents, view.options.showDonationLink);
 
     double age = -1;
     for (const DashGpu &g : m.gpus) age = std::max(age, g.sampleAgeS);

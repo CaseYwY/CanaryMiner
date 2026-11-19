@@ -10,9 +10,9 @@ std::string unisolate(std::string text){for(const auto *mark:{u8"\u2066",u8"\u20
 std::string unpaint(const std::string &text){std::string result;for(std::size_t i=0;i<text.size();){if(text[i]!='\x1b'){result+=text[i++];continue;}
     CHECK(i+1<text.size()&&text[i+1]=='[');i+=2;while(i<text.size()&&((text[i]>='0'&&text[i]<='9')||text[i]==';'))++i;CHECK(i<text.size()&&text[i]=='m');if(i<text.size())++i;}return result;}
 void catalogs(){
-    CHECK(i18n::settingsChangeMessageKeyCount==16&&i18n::settingsChangeLocalePacks().size()==16);std::set<std::string> keys;
-    const std::array<std::string,16> names={{"Display refresh","Terminal color","Recent events","Hide worker label","Details page","Log page","Details identity","Details pool","Details restarts","Details errors","Unclassified logs","Log timestamps","ISO UTC time","Log follow","Log level","Log records"}};
-    for(std::size_t key=0;key<16;++key){const auto k=static_cast<Key>(key);const auto identity=i18n::settingsChangeMessageKeyName(k);
+    CHECK(i18n::settingsChangeMessageKeyCount==17&&i18n::settingsChangeLocalePacks().size()==16);std::set<std::string> keys;
+    const std::array<std::string,i18n::settingsChangeMessageKeyCount> names={{"Display refresh","Terminal color","Recent events","Hide worker label","Details page","Log page","Details identity","Details pool","Details restarts","Details errors","Unclassified logs","Log timestamps","ISO UTC time","Log follow","Log level","Log records","Show donation link"}};
+    for(std::size_t key=0;key<i18n::settingsChangeMessageKeyCount;++key){const auto k=static_cast<Key>(key);const auto identity=i18n::settingsChangeMessageKeyName(k);
         CHECK(identity.find("settings.change.")==0&&keys.insert(std::string(identity)).second);
         CHECK(i18n::settingsChangeEnglish(k,"on","off")==names[key]+": on -> off");
         CHECK(i18n::settingsChangeEnglish(k,"off","on")==names[key]+": off -> on");
@@ -20,7 +20,7 @@ void catalogs(){
     const auto &source=i18n::settingsChangeLocalePacks()[0];
     for(std::size_t p=0;p<16;++p){const auto &pack=i18n::settingsChangeLocalePacks()[p];const auto &common=i18n::localePacks()[p];
         CHECK(pack.id==common.id&&pack.review==common.review&&pack.rtl==common.rtl);
-        for(std::size_t key=0;key<16;++key){const auto message=i18n::settingsChangeMessage(pack.id,static_cast<Key>(key));std::vector<std::string_view> parameters;
+        for(std::size_t key=0;key<i18n::settingsChangeMessageKeyCount;++key){const auto message=i18n::settingsChangeMessage(pack.id,static_cast<Key>(key));std::vector<std::string_view> parameters;
             CHECK(!message.text.empty()&&!message.fallback&&message.locale==pack.id&&message.review==pack.review&&message.rtl==pack.rtl);
             CHECK(i18n::validTemplateTranslation(source.messages[key],message.text)&&i18n::templateParameters(message.text,&parameters)&&parameters==std::vector<std::string_view>({"after","before"}));}}
     CHECK(i18n::settingsChangeEnglish(Key::Refresh,"500","1000 ms")=="Display refresh: 500 -> 1000 ms");
@@ -59,7 +59,7 @@ void checkRuns(const TerminalSettingsChangeMessageRequest &request,const Termina
         const auto &actual=argument.name=="before"?before:after;CHECK((!complete&&actual.empty())||actual==expected);}}
 }
 void matrix(){
-    for(const auto &pack:i18n::settingsChangeLocalePacks())for(std::size_t key=0;key<16;++key){const auto request=requestFor(pack,static_cast<Key>(key));
+    for(const auto &pack:i18n::settingsChangeLocalePacks())for(std::size_t key=0;key<i18n::settingsChangeMessageKeyCount;++key){const auto request=requestFor(pack,static_cast<Key>(key));
         for(auto order:{TerminalTextOrder::Ascii,TerminalTextOrder::Logical,TerminalTextOrder::Visual})for(auto direction:{TerminalTextDirection::Auto,TerminalTextDirection::LeftToRight,TerminalTextDirection::RightToLeft})for(std::size_t width:{0u,3u,19u,79u,1024u}){
             TerminalTextPolicy policy;policy.order=order;policy.direction=direction;policy.columns=width;TerminalMessageLine line;
             CHECK(layoutTerminalSettingsChangeMessage(request,policy,&line));const bool recover=order==TerminalTextOrder::Ascii||!terminalTextBackend().unicode;
