@@ -89,6 +89,7 @@ static void panelTests() {
     CHECK(request.find("Economic mode request: off -> on") != std::string::npos);
     CHECK(request.find("Economic mode is inactive") != std::string::npos);
     CHECK(request.find("next explicit start") == std::string::npos);
+    CHECK(request.find("selected GPUs") == std::string::npos);
     panel.key('\r', save);
     CHECK(panel.active.economicModeRequested && !panel.context.effective.economicModeRequested);
     CHECK(panel.message == "Request saved. Economic mode is inactive.");

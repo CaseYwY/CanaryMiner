@@ -103,21 +103,22 @@ class RuntimeSettingsPanel {
         } else if (page == RuntimeSettingsPage::Review) {
             const bool economyChanged = active.economicModeRequested != draft.economicModeRequested;
             const bool nextStartChanged = active.workWaitMs != draft.workWaitMs || active.historyEnabled != draft.historyEnabled;
+            const bool showNextStart = !economyChanged || nextStartChanged;
             if (economyChanged) {
                 line(marketReadinessEnglish(compact ? MarketKey::EconomyChangeCompact : MarketKey::EconomyChange,
                     {{"before",on(active.economicModeRequested)},{"after",on(draft.economicModeRequested)}}));
                 line(marketReadinessEnglish(compact ? MarketKey::EconomyOffCompact : MarketKey::EconomyOff));
             }
             line(i18n::runtimePanelEnglish(PanelKey::ReviewHeading));
-            if (!economyChanged || nextStartChanged) line(i18n::runtimePanelEnglish(PanelKey::NextStartReview));
+            if (showNextStart) line(i18n::runtimePanelEnglish(PanelKey::NextStartReview));
             if (!dirty()) line(i18n::runtimePanelEnglish(PanelKey::NoChanges));
             if (active.workWaitMs != draft.workWaitMs) line(i18n::runtimeFieldEnglish(FieldKey::WaitChange,{{"before",std::to_string(active.workWaitMs)},{"after",std::to_string(draft.workWaitMs)+" ms"}}));
             if (active.historyEnabled != draft.historyEnabled) line(i18n::runtimeFieldEnglish(FieldKey::HistoryChange,{{"before",on(active.historyEnabled)},{"after",on(draft.historyEnabled)}}));
-            if (!economyChanged || nextStartChanged)
+            if (showNextStart) {
                 line(i18n::runtimeFieldEnglish(FieldKey::Activation,{{"activation",activationName(ChangeActivation::NextStart)}}));
-            line(i18n::runtimePanelEnglish(PanelKey::Scope));
-            if ((!economyChanged || nextStartChanged) && (context.cliWorkWait || context.cliNoHistory))
-                line(i18n::runtimePanelEnglish(PanelKey::FutureCli));
+                line(i18n::runtimePanelEnglish(PanelKey::Scope));
+                if (context.cliWorkWait || context.cliNoHistory) line(i18n::runtimePanelEnglish(PanelKey::FutureCli));
+            }
             line(i18n::runtimePanelEnglish(PanelKey::Untouched));
         } else {
             const auto economy = std::string(field == 2 ? "> " : "  ") +
