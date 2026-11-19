@@ -67,11 +67,15 @@ CivilDate monthlyDate(CivilDate month,unsigned day){
     while(!validCivilDate(month))--month.day;
     return month;
 }
-TariffCycleBounds monthlyCycle(const JsonValue &policy,int64_t through){
+TariffMonthlyReset decodeMonthlyReset(const JsonValue &policy){
     keys(policy,"reset_policy",{"monthly_day","clock"});
     const auto day=static_cast<unsigned>(integer(*policy.find("monthly_day"),"reset_policy.monthly_day",31));
     if(!day)bad("reset_policy.monthly_day","Enter a monthly reset day from 1 to 31.",TariffProblemKind::Unknown);
-    const auto clock=decodeClock(*policy.find("clock"),"reset_policy.clock");
+    return {day,decodeClock(*policy.find("clock"),"reset_policy.clock")};
+}
+TariffCycleBounds monthlyCycle(const TariffMonthlyReset &policy,int64_t through){
+    const auto &[day,clock]=policy;
+    if(!day||day>31)bad("reset_policy.monthly_day","Enter a monthly reset day from 1 to 31.",TariffProblemKind::Unknown);
     const auto stamp=civilAt(clock,through);
     if(stamp.status!=CivilStatus::Ok)
         bad("opening.through_utc_ms","Through-time is outside the reset clock range.",TariffProblemKind::Unknown);
@@ -82,6 +86,28 @@ TariffCycleBounds monthlyCycle(const JsonValue &policy,int64_t through){
     if(!begin.utcMs||!end.utcMs)
         bad("opening.through_utc_ms","Monthly cycle requires two boundaries in the supported UTC range.",TariffProblemKind::Unknown);
     return {*begin.utcMs,*end.utcMs};
+}
+std::vector<TariffCycleBounds> comparisonCycles(const TariffDeclaration &d,unsigned cycles){
+    if(cycles<1||cycles>maxTariffComparisonCycles||(cycles>1&&!d.monthlyReset))return {};
+    std::vector<TariffCycleBounds> windows{{d.opening.cycleBeginUtcMs,d.opening.cycleEndUtcMs}};
+    try{
+        while(windows.size()<cycles){
+            const auto boundary=windows.back().endUtcMs;
+            const auto next=monthlyCycle(*d.monthlyReset,boundary);
+            if(next.beginUtcMs!=boundary||next.endUtcMs<=boundary)return {};
+            windows.push_back(next);
+        }
+    }catch(const Invalid &){return {};}
+    return windows;
+}
+
+bool splitsChargedDay(const TariffPlan &plan,int64_t boundary){
+    const auto day=civilDayAt(plan.clock,boundary);
+    // A monthly reset inside a charged tariff day needs an explicit allocation rule.
+    return day.status==CivilStatus::Ok && day.beginUtcMs<boundary &&
+        std::any_of(plan.revisions.begin(),plan.revisions.end(),[&](const TariffRevision &r){
+            return !r.chargePerCivilDay.zero() && r.beginUtcMs<day.endUtcMs && r.endUtcMs>day.beginUtcMs;
+        });
 }
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
     if(tariffJson(a)==tariffJson(b))return;
@@ -126,10 +152,52 @@ JsonValue tariffDeclarationTemplate(){
 }
 bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
     try{
-        bounds=monthlyCycle(policy,static_cast<int64_t>(integer(through,"opening.through_utc_ms")));
+        const auto at=static_cast<int64_t>(integer(through,"opening.through_utc_ms"));
+        bounds=monthlyCycle(decodeMonthlyReset(policy),at);
         if(problem)*problem={};
         return true;
     }catch(const Invalid &e){if(problem)*problem=e.problem;return false;}
+}
+
+std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d,unsigned cycles){
+    const auto windows=comparisonCycles(d,cycles);
+    if(windows.empty())return std::nullopt;
+    return windows.back().endUtcMs;
+}
+
+TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::array<ExactDecimal,2> &watts,
+    unsigned cycles,int64_t decision,const std::atomic<bool> *cancel){
+    if(cancel&&cancel->load(std::memory_order_relaxed))return {};
+    const auto windows=comparisonCycles(d,cycles);
+    if(windows.empty())return {ElectricityStatus::Invalid,0,false,{},{},{}};
+    auto opening=d.opening;
+    TariffCycleComparison result;
+    for(size_t i=0;i<windows.size();++i){
+        if(cancel&&cancel->load(std::memory_order_relaxed))return {};
+        const auto cycle=static_cast<unsigned>(i+1);
+        const auto &window=windows[i];
+        if(i){
+            if(splitsChargedDay(d.plan,window.beginUtcMs))
+                return {ElectricityStatus::Unsupported,cycle,true,{},{},{}};
+            opening.cycleBeginUtcMs=opening.throughUtcMs=window.beginUtcMs;
+            opening.cycleEndUtcMs=window.endUtcMs;
+            opening.importedKwh={};
+            opening.accruedSubtotal={};
+        }
+        const PowerTrace base{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[0]}}};
+        const PowerTrace with{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[1]}}};
+        const auto step=counterfactualBill(d.plan,opening,base,with,window.endUtcMs,decision,cancel);
+        if(step.status!=ElectricityStatus::Ok)return {step.status,cycle,false,{},{},{}};
+        auto &baseTotal=result.withoutMining.numerator;
+        auto &withTotal=result.withMining.numerator;
+        if(!baseTotal.add(step.withoutMining.charge->numerator,&baseTotal)||
+           !withTotal.add(step.withMining.charge->numerator,&withTotal))
+            return {ElectricityStatus::Capacity,cycle,false,{},{},{}};
+    }
+    if(!result.withMining.numerator.subtract(result.withoutMining.numerator,&result.difference.numerator))
+        return {ElectricityStatus::Capacity,0,false,{},{},{}};
+    result.status=ElectricityStatus::Ok;
+    return result;
 }
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem){
     try{
@@ -197,7 +265,8 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         d.openingKey=label(*opening.find("key"),"opening.key");s.timeDatabaseVersion=choice(*opening.find("time_database_version"),"opening.time_database_version",{"explicit-fixed-clock"});
         s.cycleBeginUtcMs=integer(*opening.find("cycle_begin_utc_ms"),"opening.cycle_begin_utc_ms");s.cycleEndUtcMs=integer(*opening.find("cycle_end_utc_ms"),"opening.cycle_end_utc_ms");s.throughUtcMs=integer(*opening.find("through_utc_ms"),"opening.through_utc_ms");
         if(version==2){
-            const auto bounds=monthlyCycle(policy,s.throughUtcMs);
+            d.monthlyReset=decodeMonthlyReset(policy);
+            const auto bounds=monthlyCycle(*d.monthlyReset,s.throughUtcMs);
             if(s.cycleBeginUtcMs!=bounds.beginUtcMs||s.cycleEndUtcMs!=bounds.endUtcMs)
                 bad("opening","Derive both cycle boundaries from the monthly rule and through-time.",TariffProblemKind::Unknown);
         }

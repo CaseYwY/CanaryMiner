@@ -54,7 +54,18 @@ opening against them. It does not advance with elapsed time or reset a bill, rea
 Open Combined tariff from the Dashboard Settings or the idle `settings` command and press **P**. Enter the constant whole-meter import watts
 for the **without mining** and **with mining** scenarios. Use **Tab** to change fields and **Enter** to calculate.
 The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
-applies to the full displayed UTC interval from the opening's through-time to the cycle end.
+applies to the full displayed UTC interval from the opening's through-time to the selected end.
+
+For a saved monthly reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
+the saved cycle. Each additional cycle runs from one declared reset to the next. The same entered watts apply
+through the displayed end. Later cycles start with zero use and zero accrued subtotal, and each cycle applies its
+own fees, tier allowance and minimum. Charges are added exactly before display rounding. A declaration with
+explicit cycle dates still has one horizon.
+
+Every selected cycle needs complete rates known at the original comparison time. A missing rate in any selected
+cycle withholds all three amounts. The first cycle uses the saved opening's existing daily-fee rules. If an
+additional cycle starts within a tariff day with a daily fee, the comparison reports which cycle needs an
+allocation rule. Selecting a horizon applies only to the estimate.
 
 The amounts are the hypothetical remaining charges for both scenarios and their difference, in the plan currency.
 The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
@@ -87,6 +98,11 @@ and an owned ConPTY run with the synthetic supervisor. The running Dashboard sho
 11.44 USD with mining and 9.02 USD difference. Escape discarded the result and returned to the tariff page.
 The POSIX stop checks use separate state directories for Q and Ctrl+C. Each retains the saved declaration and starts
 one synthetic worker. These scenarios use a synthetic tariff and synthetic workers.
+
+P-05w passed 1,353 declaration checks on Windows and Linux, including the Linux AddressSanitizer and
+UndefinedBehaviorSanitizer build. The 52 Linux terminal checks and a Windows ConPTY run exercised the
+running Dashboard. The added scenarios cover the day-31 reset, independent fixed-offset clocks, per-cycle
+tiers and minimums, future rate gaps and preservation of the saved opening.
 
 Executed development evidence (2026-10-29): Windows/MSVC focused CTest **45/45** passes, including prior product/settings/energy/credit recovery/donation/intent/market/electricity/oracle families. Final per-leaf review refinement passes the targeted tariff/settings rerun; both platforms' new native program has **1,071 passing checks**. Linux/WSL/GCC passes **16 new actual-terminal checks**, existing settings/runtime/manual-price/session-energy PTY regressions, and **1,071 own-code ASan/UBSan checks**. Linux Python discovery passes **123 tests with seven explicit fixture-dependent skips**. Windows full Python discovery/GNU-toolchain/encoding limitations remain unqualified.
 

@@ -2,15 +2,21 @@
 #pragma once
 #include "electricity.h"
 #include "json_dom.h"
+#include <array>
 #include <cstddef>
 #include <optional>
 namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
+struct TariffMonthlyReset {
+    unsigned day=0;
+    CivilClock clock;
+};
 struct TariffDeclaration {
     std::string country, sourceReference, openingKey;
     uint64_t confirmedUtc=0;
     TariffPlan plan;
     BillOpening opening;
+    std::optional<TariffMonthlyReset> monthlyReset;
 };
 // Display-neutral rejection sites, not persisted identifiers, source qualification or permission.
 enum class TariffProblemKind { Unknown, MissingFields, SchemaFields, DuplicateField, Label, Integer, Decimal, Choice, Collection, NoOutput, Oversized, SchemaVersion, Acknowledgement, Confirmation, Currency, FixedOffset, Date, OpeningQuantity, ArithmeticCapacity, ModelStatus, FuturePublication, InvalidJson };
@@ -23,6 +29,17 @@ struct TariffProblem {
 struct TariffCycleBounds {
     int64_t beginUtcMs=0,endUtcMs=0;
 };
+constexpr unsigned maxTariffComparisonCycles = 12;
+struct TariffCycleComparison {
+    ElectricityStatus status = ElectricityStatus::Unavailable;
+    unsigned failedCycle = 0;
+    bool splitsChargedDay = false;
+    ElectricityAmount withoutMining, withMining, difference;
+};
+// The first cycle uses the saved opening. Subsequent complete cycles start at the declared monthly reset.
+std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d, unsigned cycles);
+TariffCycleComparison compareTariffCycles(const TariffDeclaration &d, const std::array<ExactDecimal, 2> &watts,
+    unsigned cycles, int64_t decisionUtcMs, const std::atomic<bool> *cancel = nullptr);
 // Display-neutral private source records. Row counts are not JSON strings; value tokens retain exact source serialization.
 struct TariffDeclarationChange {
     enum class Kind { Value, RowCount };
