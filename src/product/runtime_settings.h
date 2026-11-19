@@ -8,11 +8,13 @@
 #include "runtime_panel_messages.h"
 #include "ui_field_messages.h"
 #include "market_readiness_messages.h"
+#include "market_ticker_settings_messages.h"
 
 namespace om {
 
 enum class RuntimeSettingsResult { None, Close, Quit };
 enum class RuntimeSettingsPage { Browse, EditWait, Review, Leave };
+enum class RuntimeSettingsSection { Controls, History, PublicTickers };
 
 class RuntimeSettingsPanel {
    public:
@@ -25,16 +27,19 @@ class RuntimeSettingsPanel {
     RuntimeContext context;
     std::string input, message;
     bool replaceInput = true;
-    void open(RuntimePreferences value, RuntimeContext current) {
+    void open(RuntimePreferences value, RuntimeContext current, RuntimeSettingsSection section=RuntimeSettingsSection::Controls) {
         active = draft = value; context = current; visible = true;
-        page = RuntimeSettingsPage::Browse; field = 0; reviewOffset = 0; message.clear();
+        publicTickers_ = section == RuntimeSettingsSection::PublicTickers;
+        page = RuntimeSettingsPage::Browse; field = section == RuntimeSettingsSection::History ? 1 : 0;
+        reviewOffset = 0; message.clear();
     }
     bool dirty() const { return active != draft; }
     void confirmSaved(const RuntimePreferences &value) {
         const bool economyChanged = active.economicModeRequested != value.economicModeRequested;
         active = draft = value;
         page = RuntimeSettingsPage::Browse;
-        message = economyChanged ? i18n::marketReadinessEnglish(i18n::MarketReadinessMessageKey::EconomySaved) :
+        message = publicTickers_ ? i18n::marketTickerSettingsEnglish(i18n::MarketTickerSettingsKey::SaveNotice) :
+            economyChanged ? i18n::marketReadinessEnglish(i18n::MarketReadinessMessageKey::EconomySaved) :
             i18n::runtimePanelEnglish(i18n::RuntimePanelMessageKey::Saved);
     }
     RuntimeSettingsResult key(int key, const Save &save) {
@@ -73,6 +78,12 @@ class RuntimeSettingsPanel {
             if (dirty()) page = RuntimeSettingsPage::Leave;
             else { visible = false; return RuntimeSettingsResult::Close; }
         } else if (key == 'v' || key == 'V' || key == kKeyF2) { page = RuntimeSettingsPage::Review; reviewOffset = 0; }
+        else if (publicTickers_) {
+            if (key == ' ' || key == '\r' || key == '\n') {
+                draft.publicTickersRequested = !draft.publicTickersRequested;
+                message.clear();
+            }
+        }
         else if (key == kKeyUp || key == kKeyBackTab) field = (field + 2) % 3;
         else if (key == kKeyDown || key == '\t') field = (field + 1) % 3;
         else if (key == ' ' || key == '\r' || key == '\n') {
@@ -88,11 +99,17 @@ class RuntimeSettingsPanel {
         using FieldKey=i18n::RuntimeFieldMessageKey;
         using PanelKey=i18n::RuntimePanelMessageKey;
         using MarketKey=i18n::MarketReadinessMessageKey;
+        using TickerKey=i18n::MarketTickerSettingsKey;
         using i18n::marketReadinessEnglish;
+        using i18n::marketTickerSettingsEnglish;
         const size_t width = static_cast<size_t>(std::max(20, columns) - 1);
         if (rows > 0 && rows < 12) return i18n::runtimePanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::runtimePanelEnglish(PanelKey::ShortResize)+"\n"+i18n::runtimePanelEnglish(PanelKey::ShortKeys)+"\n";
         const bool compact = width < 50 || (rows > 0 && rows < 20);
-        std::vector<std::string> body = {i18n::runtimePanelEnglish(compact?PanelKey::TitleCompact:PanelKey::TitleFull) + (dirty()?i18n::runtimePanelEnglish(PanelKey::UnsavedSuffix):std::string{})};
+        const bool narrowTickers=publicTickers_&&width<50;
+        const auto tickerTitle=narrowTickers?(page==RuntimeSettingsPage::Review?TickerKey::CompactReview:TickerKey::CompactTitle):TickerKey::Title;
+        const auto title=publicTickers_?marketTickerSettingsEnglish(tickerTitle):
+            i18n::runtimePanelEnglish(compact?PanelKey::TitleCompact:PanelKey::TitleFull);
+        std::vector<std::string> body = {title + (dirty()?i18n::runtimePanelEnglish(PanelKey::UnsavedSuffix):std::string{})};
         auto line = [&](const std::string &text) { body.push_back(text); };
         if (page == RuntimeSettingsPage::EditWait) {
             line(i18n::runtimePanelEnglish(PanelKey::EditPrompt)); line(i18n::runtimePanelEnglishInput(input));
@@ -100,6 +117,26 @@ class RuntimeSettingsPanel {
             line(i18n::runtimePanelEnglish(PanelKey::EditKeys));
         } else if (page == RuntimeSettingsPage::Leave) {
             line(i18n::runtimePanelEnglish(PanelKey::LeaveTitle)); line(i18n::runtimePanelEnglish(PanelKey::LeaveKeys));
+        } else if (publicTickers_) {
+            if (page == RuntimeSettingsPage::Review) {
+                if(!narrowTickers)line(i18n::runtimePanelEnglish(PanelKey::ReviewHeading));
+                if (dirty()) line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactChange:TickerKey::Change,
+                    {{"before",on(active.publicTickersRequested)},{"after",on(draft.publicTickersRequested)}}));
+                else line(i18n::runtimePanelEnglish(PanelKey::NoChanges));
+            } else {
+                line("> "+marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactRequest:TickerKey::Request,{{"request",on(draft.publicTickersRequested)}}));
+                if (context.running) line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactCurrent:TickerKey::Current,
+                    {{"request",on(context.effective.publicTickersRequested)}}));
+            }
+            if (context.cliNoMarket) line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactCliBlocked:TickerKey::CliBlocked));
+            line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactUnavailable:TickerKey::Unavailable));
+            line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactNextStart:TickerKey::NextStart));
+            line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactScope:TickerKey::Scope));
+            if(narrowTickers&&page==RuntimeSettingsPage::Review){
+                line(marketTickerSettingsEnglish(TickerKey::CompactGate));
+                line(marketTickerSettingsEnglish(TickerKey::CompactKraken));
+            }
+            line(marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactConflict:TickerKey::Conflict));
         } else if (page == RuntimeSettingsPage::Review) {
             const bool economyChanged = active.economicModeRequested != draft.economicModeRequested;
             const bool nextStartChanged = active.workWaitMs != draft.workWaitMs || active.historyEnabled != draft.historyEnabled;
@@ -142,7 +179,11 @@ class RuntimeSettingsPanel {
             line(i18n::runtimePanelEnglish(PanelKey::CollectionOff));
             line(i18n::runtimePanelEnglish(PanelKey::CollectionOn));
         }
-        const std::string footer=i18n::runtimePanelEnglish(page==RuntimeSettingsPage::EditWait?PanelKey::FooterEdit:page==RuntimeSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse);
+        std::string footer=i18n::runtimePanelEnglish(page==RuntimeSettingsPage::EditWait?PanelKey::FooterEdit:page==RuntimeSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse);
+        if(publicTickers_&&page==RuntimeSettingsPage::Browse)
+            footer=marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactFooter:TickerKey::Footer);
+        if(publicTickers_&&page==RuntimeSettingsPage::Review)
+            footer=marketTickerSettingsEnglish(narrowTickers?TickerKey::CompactReviewFooter:TickerKey::ReviewFooter);
         const auto footerRows = wrapText(footer, width);
         const size_t budget = rows > 0 ? static_cast<size_t>(std::max(1, rows - static_cast<int>(footerRows.size()) - 2)) : 1000;
         std::vector<std::string> wrapped;
@@ -159,6 +200,7 @@ class RuntimeSettingsPanel {
         return text;
     }
    private:
+    bool publicTickers_=false;
     static std::string on(bool value) { return i18n::uiFieldEnglish(value?i18n::UiFieldMessageKey::On:i18n::UiFieldMessageKey::Off); }
 };
 

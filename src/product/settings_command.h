@@ -58,6 +58,7 @@ inline int runSettingsCommand(const std::string &stateDir, volatile sig_atomic_t
     preferences.context.language=std::move(languageContext);
     preferences.context.pool=std::move(poolContext);
     preferences.context.manual.cliDisabled=noMarket;
+    preferences.context.runtime.cliNoMarket=noMarket;
     preferences.context.manualProjectionAvailable=true; // idle declarations need no running display projector
     preferences.context.electricity.cliNoEnergy=noEnergy;
     std::unique_ptr<EnergyRuntime> runtime;

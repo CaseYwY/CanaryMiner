@@ -89,7 +89,7 @@ class SettingsPanel {
             return result;}();
         return names;
     }
-    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 4 : group == 3 ? 2 :
+    int fields() const { return group == 8 ? 6 : group == 2 ? 5 : group == 0 ? 4 : group == 3 ? 3 :
         (group == 1 || group == 5 || group == 6 || group == 7) ? 1 : group == 9 ? 5 : group == 10 ? 7 : 0; }
     void updateCreditReview(){if(credit.visible&&creditAccess.snapshot)credit.update(creditAccess.snapshot());}
     void updateEnergyReview(){if(energyReview.visible&&energyAccess.snapshot)energyReview.update(energyAccess.snapshot());}
@@ -162,6 +162,7 @@ class SettingsPanel {
             else if (group == 1 || (group == 8 && field == 1)) return SettingsResult::OpenRuntime;
             else if (group == 3 && field == 0) return SettingsResult::OpenManualMarket;
             else if (group == 3 && field == 1) marketReadiness.open();
+            else if (group == 3 && field == 2) return SettingsResult::OpenRuntime;
             else if (group == 5) return SettingsResult::OpenGame;
             else if (group == 6) return SettingsResult::OpenPoolSecurity;
             else if (group == 7) return SettingsResult::OpenLanguage;
@@ -327,6 +328,7 @@ class SettingsPanel {
         } else if (group == 3) {
             row(0, i18n::settingsActionEnglish(ActionKey::ManualReferences));
             row(1, i18n::marketReadinessEnglish(i18n::MarketReadinessMessageKey::Entry));
+            row(2, i18n::marketTickerSettingsEnglish(i18n::MarketTickerSettingsKey::Entry));
             result.push_back({i18n::settingsActionEnglish(ActionKey::DeclaredMarket), Tone::Plain});
             result.push_back({i18n::settingsActionEnglish(ActionKey::NoMarket), Tone::Plain});
         } else if (group == 5) {

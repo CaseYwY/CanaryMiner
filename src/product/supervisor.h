@@ -696,13 +696,17 @@ class Supervisor {
         }
         return context;
     }
+    bool publicReferencesRequested()const{
+        return !opt_.noMarket&&(opt_.runtimeContext.effective.publicTickersRequested||opt_.marketReferenceFactory);
+    }
     PreferencesSettingsContext preferencesContext()const{
         PreferencesSettingsContext context;context.runtime=opt_.runtimeContext;context.game=opt_.gameContext;context.game.running=true;
+        context.runtime.cliNoMarket=opt_.noMarket;
         context.pool=poolSecurityContext();context.language=opt_.languageContext;context.language.running=true;
         context.manual.running=true;context.manual.cliDisabled=opt_.noMarket;context.manual.effective=manualEffective_;
         context.electricity.running=true;context.electricity.cliNoEnergy=opt_.noEnergy;context.electricity.effective=electricityEffective_;
         context.electricity.effective.collectEnergy=energy_&&energy_->snapshot()->state==SessionEnergyState::Running;
-        context.manualProjectionAvailable=static_cast<bool>(opt_.manualMarketFactory);context.publicReferencesRequested=opt_.marketReferenceFactory&&!opt_.noMarket;
+        context.manualProjectionAvailable=static_cast<bool>(opt_.manualMarketFactory);context.publicReferencesRequested=publicReferencesRequested();
         context.manualFactory=opt_.manualMarketFactory;return context;
     }
     void startPreferences(){
@@ -772,7 +776,7 @@ class Supervisor {
             }
             if(opt_.dashboard&&!opt_.noMarket){
                 if(!manualKnown_)addEvent("Manual source state unavailable; manual and requested public references both withheld for this session.");
-                else if(opt_.marketReferenceFactory&&manualEffective_.enabled)addEvent("Public and manual market sources both requested; references withheld. Choose one source for a new explicit session.");
+                else if(publicReferencesRequested()&&manualEffective_.enabled)addEvent("Public and manual market sources both requested; references withheld. Choose one source for a new explicit session.");
                 else if(opt_.marketReferenceFactory){
                     try{
                         marketReference_=opt_.marketReferenceFactory();
@@ -782,7 +786,8 @@ class Supervisor {
                         if(admitted)marketReferenceStarted_=true;
                         else{if(marketReference_)marketReference_->requestStop();addEvent("Public market references unavailable; no manual fallback, income or mining change.");}
                     }catch(...){if(marketReference_)marketReference_->requestStop();addEvent("Public market reference admission failed; no source fallback or mining change.");}
-                }else if(manualLoaded_&&opt_.manualMarketFactory){manualProjection_=opt_.manualMarketFactory(manualEffective_,startupUtc_,t0);if(!current())return false;}
+                }else if(publicReferencesRequested())addEvent("Public ticker request saved; polling unavailable in this build.");
+                else if(manualLoaded_&&opt_.manualMarketFactory){manualProjection_=opt_.manualMarketFactory(manualEffective_,startupUtc_,t0);if(!current())return false;}
             }
             if(!current())return false;
             if(!opt_.historyPath.empty())history_.reset(new AcceptedHistory(std::filesystem::u8path(opt_.historyPath)));
