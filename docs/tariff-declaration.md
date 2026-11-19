@@ -2,7 +2,7 @@
 
 **S → Electricity → Combined tariff / declared whole-meter opening** edits and saves the supported [pure electricity model](electricity-core.md). The idle `settings` command exposes the same page. It is an **offline declaration**, not an enabled electricity collector, measured bill/reset ledger, supplier-verified adapter or optimizer. The [session GPU-board flat-energy model](session-energy.md) keeps its own controls/save target.
 
-Requirements R-UI-007/008, R-TAR-001–006 and R-PRIV-002 remain partial. This adds native configuration for existing composable arithmetic and a persisted **user-declared opening scenario**; measured state transitions and independent reset clocks remain unfinished.
+Requirements R-UI-007/008, R-TAR-001–006 and R-PRIV-002 remain partial. Settings saves a **user-declared opening scenario** for the composable tariff. Measured state transitions and separate allowance resets remain unfinished.
 
 ## Native editing and review
 
@@ -18,18 +18,36 @@ The supported terminal remains 60+ columns and 12+ rows. Focus precedes a long n
 
 ## Represented contract
 
-The strict [v1 schema](../config/tariff-declaration.schema.json) and [invented example](../config/tariff-declaration.example.json) contain:
+The strict [declaration schema](../config/tariff-declaration.schema.json) and [invented v1 example](../config/tariff-declaration.example.json) contain:
 
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Fixed `explicit_cycle_only` reset policy, `final_display_only` rounding, basis/origin/time-version contracts and acknowledgement. Unsupported values/keys reject. There is no independent allowance reset, rollover or automatic next-cycle creation. Rate changes do not reset shared quantity.
+4. Version 1 uses the `explicit_cycle_only` policy. Version 2 defines the optional monthly whole-meter cycle below. Both use `final_display_only` rounding, the same basis/origin/time-version contracts and acknowledgement. Unsupported values and keys reject. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
 Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent resets/annual true-up, proration, threshold revisions, provider intermediate rounding and ordered/selective taxes. Synthetic examples are not official supplier certification.
+
+## Derive a monthly whole-meter cycle
+
+Select `reset_policy` and press **M** to choose the monthly policy. Open the policy with **Enter** and enter a day
+from 1 to 31. The draft starts with the rate clock as a suggested value. Review the reset clock and edit it if your
+billing cycle uses a different UTC or fixed standard offset. The saved reset clock is independent of the rate clock.
+Each month starts the cycle at 00:00 on the chosen day. Short months use their last day and the original day applies
+again the following month.
+
+Enter the opening's through-time in UTC milliseconds, then press **G** to derive the dates of the cycle containing
+that instant. At an exact boundary, the new cycle starts. If the start changes, clear both opening amounts with
+**Backspace** in their editors, derive the dates, then explicitly enter the amounts for the new period. At the start
+of a cycle, both amounts are zero. The tariff revisions must cover the full derived cycle. Use **V** to review the
+policy, dates and values, then **Enter** to save. Changing the reset policy requires new plan and opening keys.
+
+Existing declarations retain their explicit dates. Press **M** on the monthly policy to return to manually entered
+dates, then review any edits before saving. The monthly rule derives dates in the draft and validates the saved
+opening against them. It does not advance with elapsed time or reset a bill, readings or accrued amounts.
 
 ## Compare two whole-meter scenarios in idle settings
 
@@ -56,7 +74,9 @@ Identity/rules/clock/source changes require a new `plan.key`; opening or plan-bi
 
 Opening the page loads only this file. Save is synchronous and size-bounded, **not bounded against genuine disk/kernel stalls**. Physical power-loss/fault injection, hostile-directory races, multi-host filesystems and hard-stop deadlines during blocked storage remain unqualified. Render callbacks perform no I/O or bill evaluation. Save changes no runtime tariff, collector, device controls or session intent.
 
-Rollback: older builds ignore this additional file. Preserve it and any histories; no destructive migration/reset is supplied. Runtime files, paths, source references, private tariffs and measurements are excluded from public contribution evidence.
+For rollback to a build that accepts only v1 declarations, keep a copy of the v2 file and use the current editor
+to return to explicit dates before downgrading. The older v1 editor rejects and preserves a v2 file. Runtime files,
+paths, source references, private tariffs and measurements are excluded from public contribution evidence.
 
 ## Verification and remaining work
 

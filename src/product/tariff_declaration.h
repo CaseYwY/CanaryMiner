@@ -20,6 +20,9 @@ struct TariffProblem {
     std::vector<std::string> choices{};
     std::optional<ElectricityStatus> modelStatus{};
 };
+struct TariffCycleBounds {
+    int64_t beginUtcMs=0,endUtcMs=0;
+};
 // Display-neutral private source records. Row counts are not JSON strings; value tokens retain exact source serialization.
 struct TariffDeclarationChange {
     enum class Kind { Value, RowCount };
@@ -33,6 +36,8 @@ JsonValue tariffRowTemplate(const std::string &collection);
 std::string tariffJson(const JsonValue &value);
 // Transactional output; validates every key/type/rule and binds an explicit fixed clock.
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem=nullptr);
+// Checks the rule and through-time independently of unfinished rates and opening amounts.
+bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem=nullptr);
 bool parseTariffDeclaration(const std::string &text,JsonValue *root,TariffProblem *problem=nullptr);
 // Path/value lines for explicit local review. Never log these: they contain private declarations.
 std::vector<std::string> tariffDeclarationChanges(const JsonValue &before,const JsonValue &after);

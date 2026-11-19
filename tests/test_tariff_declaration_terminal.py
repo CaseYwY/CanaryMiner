@@ -225,7 +225,108 @@ def main():
         session([cli, 'settings', '--config', str(config)], stop_editor)
         assert file.read_bytes() == before and not list(state.glob('*credit*'))
         checks += 1
-    print(f'tariff declaration PTY: {checks} checks; author/review/save/comparison/conflict/active-session/stop passed')
+
+        def monthly(send, until, tariff):
+            nonlocal checks
+            down = b'\x1b[B'
+            until(b'CanaryMiner / Settings')
+            tariff()
+            send(down * 5)
+            until(b'[M] Cycle policy', True)
+            send(b'm\r\r31\r')
+            send(down + b'\r\rfixed_standard\r' + down + b'\r19800\r')
+            send(b'\x1b')
+            until(b'> clock:', True)
+            send(b'\x1b')
+            until(b'> reset_policy:', True)
+            send(down * 2 + b'\r' + down * 7 + b'\r1709164800000\rg')
+            until(b'Clear both opening amounts', True)
+            assert file.read_bytes() == before
+            send(b'\r\x7f\r' + down + b'\r\x7f\rg')
+            until(b'Draft cycle dates derived', True)
+            send(down * 3 + b'\r3\r' + down + b'\r0.6\r')
+            send(b'\x1b')
+            until(b'> opening:', True)
+            send(b'\x1b[A\r\rsynthetic-monthly-plan\r' + down * 11 + b'\r\r')
+            until(b'Path: plan.revisions[0]', True)
+            send(down + b'\r1709145000000\r' + down + b'\r1711823400000\r')
+            send(b'\x1b')
+            until(b'> row 0:', True)
+            send(b'\x1b')
+            until(b'> revisions:', True)
+            send(b'\x1b')
+            until(b'> plan:', True)
+            send(down + b'\r\rsynthetic-monthly-opening\rv')
+            until(b'Monthly reset at 00:00', True)
+            assert file.read_bytes() == before
+            send(b'\r')
+            until(b'Saved offline declaration + opening ONLY', True)
+            saved = json.loads(file.read_text())
+            assert saved['schema_version'] == 2
+            assert saved['reset_policy'] == {'monthly_day': 31, 'clock': {'kind': 'fixed_standard', 'fixed_offset_seconds': 19800}}
+            assert saved['plan']['clock'] == example['plan']['clock']
+            opening = saved['opening']
+            assert [opening[name] for name in ('cycle_begin_utc_ms', 'cycle_end_utc_ms', 'through_utc_ms',
+                                               'imported_kwh', 'accrued_subtotal')] == [1709145000000, 1711823400000, 1709164800000, '3', '0.6']
+            checks += 6
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(config)], monthly)
+        monthly_bytes = file.read_bytes()
+
+        def reopen_monthly(send, until, tariff):
+            nonlocal checks
+            until(b'CanaryMiner / Settings')
+            tariff()
+            send(b'g')
+            until(b'Draft cycle dates derived', True)
+            send(b'\x1b')
+            until(b'> opening:', True)
+            send(b'\x1b[A' * 2 + b'm')
+            until(b'"explicit_cycle_only" [fixed]', True)
+            send(b'\x1b')
+            until(b'Discard', True)
+            send(b'd')
+            until(b'CanaryMiner / Settings', True)
+            assert file.read_bytes() == monthly_bytes
+            checks += 1
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(config)], reopen_monthly)
+
+        def revert_monthly(send, until, tariff):
+            nonlocal checks
+            down = b'\x1b[B'
+            until(b'CanaryMiner / Settings')
+            tariff()
+            send(down * 5 + b'm')
+            until(b'"explicit_cycle_only" [fixed]', True)
+            send(down + b'\r\rsynthetic-explicit-plan\r\x1b')
+            until(b'> plan:', True)
+            send(down + b'\r\rsynthetic-explicit-opening\rv')
+            until(b'Review tariff-declaration.json ONLY', True)
+            assert file.read_bytes() == monthly_bytes
+            send(b'\r')
+            until(b'Saved offline declaration + opening ONLY', True)
+            saved = json.loads(file.read_text())
+            assert saved['schema_version'] == 1 and saved['reset_policy'] == 'explicit_cycle_only'
+            assert saved['opening'] == {**json.loads(monthly_bytes)['opening'], 'key': 'synthetic-explicit-opening'}
+            checks += 3
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(config)], revert_monthly)
+
+        def reopen_explicit(send, until, tariff):
+            until(b'CanaryMiner / Settings')
+            tariff()
+            send(b'\x1b[B' * 5)
+            restored = until(b'[M] Cycle policy', True)
+            assert b'> reset_policy: "explicit_cycle_only" [fixed]' in restored
+            assert b'[G] Derive cycle' not in restored
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(config)], reopen_explicit)
+    print(f'tariff declaration PTY: {checks} checks; author/review/save/comparison/conflict/active-session/stop/monthly policy passed')
 
 
 if __name__ == '__main__':

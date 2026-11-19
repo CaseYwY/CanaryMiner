@@ -10,6 +10,7 @@
 #include "tariff_diagnostic_source.h"
 #include "tariff_error_messages.h"
 #include "tariff_comparison_settings.h"
+#include "tariff_monthly_messages.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -71,10 +72,7 @@ class TariffSettingsPanel {
                 auto candidate=draft;for(auto &m:candidate.members)if(m.first=="confirmed_utc"){m.second.type=JsonValue::Type::Number;m.second.text=std::to_string(now);}
                 TariffDeclaration checked;TariffProblem error;
                 if(!decodeTariffDeclaration(candidate,&checked,&error)){
-                    using ErrorKey=i18n::TariffErrorMessageKey;
-                    i18n::MessageArguments arguments={{"reason",tariffDiagnosticReasonEnglish(error)}};
-                    if(!error.path.empty())arguments.emplace_back("path",error.path);
-                    message=i18n::tariffErrorEnglish(error.path.empty()?ErrorKey::OriginalRoot:ErrorKey::OriginalPath,arguments);focus(error.path);page=TariffSettingsPage::Browse;
+                    showProblem(error);page=TariffSettingsPage::Browse;
                 }
                 else if(save&&save(candidate,&message)){active=draft=std::move(candidate);page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::SavedOffline);}
                 else if(message.empty())message=i18n::tariffNoticeEnglish(NoticeKey::SaveUnavailable);
@@ -86,6 +84,8 @@ class TariffSettingsPanel {
             else{visible=false;return TariffSettingsResult::Close;}
         }else if(key=='v'||key=='V'||key==kKeyF2)beginReview();
         else if((key=='p'||key=='P')&&!running_)comparison_.open(active);
+        else if((key=='m'||key=='M')&&onCyclePolicy())toggleCyclePolicy();
+        else if((key=='g'||key=='G')&&monthly())deriveCycle();
         else if(key==kKeyDown||key=='\t'){const auto n=count();if(n)field=(field+1)%n;}
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
         else if((key=='a'||key=='A')&&node()->isArray()){
@@ -108,9 +108,14 @@ class TariffSettingsPanel {
         using PanelKey=i18n::TariffPanelMessageKey;
         using ContextKey=i18n::TariffContextMessageKey;
         if(rows>0&&rows<12)return i18n::tariffPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortKeys)+"\n";
-        const auto compareHint=page==TariffSettingsPage::Browse&&!running_?
-            i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ":"";
-        const auto footer=wrapText(compareHint+i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
+        std::string shortcuts;
+        if(page==TariffSettingsPage::Browse){
+            using Key=i18n::TariffMonthlyMessageKey;
+            if(onCyclePolicy())shortcuts+=i18n::tariffMonthlyEnglish(Key::Toggle)+" ";
+            if(monthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
+            if(!running_)shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
+        }
+        const auto footer=wrapText(shortcuts+i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
         auto notice=wrapText(message.empty()?i18n::tariffPanelEnglish(PanelKey::OfflineDefault):message,width);
         // Reserve focus/editor space even for multi-line validation messages on a 60x12 terminal.
         if(notice.size()>3)notice.resize(3);
@@ -153,9 +158,71 @@ class TariffSettingsPanel {
     JsonValue *selected(){if(field>=count())return nullptr;auto *v=node();return v->isObject()?&v->members[field].second:&v->items[field];}
     std::string selectedName()const{if(field>=count())return "";const auto *v=node();return v->isObject()?v->members[field].first:i18n::tariffContextEnglish(i18n::TariffContextMessageKey::RowName,{{"position",std::to_string(field)}});}
     std::string collectionName()const{const auto s=path();const auto at=s.rfind('.');return at==std::string::npos?s:s.substr(at+1);}
-    static bool readOnly(const std::string &s){return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";}
+    bool monthly()const{const auto *policy=draft.find("reset_policy");return policy&&policy->isObject();}
+    bool onCyclePolicy()const{return route.empty()&&selectedName()=="reset_policy";}
+    bool readOnly(const std::string &s)const{
+        if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return monthly();
+        return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";
+    }
+    static JsonValue *member(JsonValue &object,const std::string &name){
+        for(auto &m:object.members)if(m.first==name)return &m.second;
+        return nullptr;
+    }
+    void toggleCyclePolicy(){
+        using Key=i18n::TariffMonthlyMessageKey;
+        auto *schema=member(draft,"schema_version");
+        auto *policy=selected();
+        const auto *plan=draft.find("plan");
+        const auto *clock=plan?plan->find("clock"):nullptr;
+        if(!schema||!policy||!clock)return;
+        if(monthly()){
+            *policy=JsonValue{};
+            policy->type=JsonValue::Type::String;
+            policy->text="explicit_cycle_only";
+            schema->text="1";
+            message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
+            return;
+        }
+        JsonValue day;
+        day.type=JsonValue::Type::Number;
+        day.text="0";
+        policy->type=JsonValue::Type::Object;
+        policy->text.clear();
+        policy->members={{"monthly_day",std::move(day)},{"clock",*clock}};
+        schema->text="2";
+        message=i18n::tariffMonthlyEnglish(Key::Enabled);
+    }
+    void deriveCycle(){
+        using Key=i18n::TariffMonthlyMessageKey;
+        auto *opening=member(draft,"opening");
+        if(!opening)return;
+        auto *begin=member(*opening,"cycle_begin_utc_ms");
+        auto *end=member(*opening,"cycle_end_utc_ms");
+        const auto *through=opening->find("through_utc_ms");
+        const auto *quantity=opening->find("imported_kwh");
+        const auto *subtotal=opening->find("accrued_subtotal");
+        if(!begin||!end||!through||!quantity||!subtotal)return;
+        TariffCycleBounds bounds;
+        TariffProblem error;
+        if(!deriveTariffMonthlyCycle(*draft.find("reset_policy"),*through,bounds,&error)){
+            showProblem(error);
+            return;
+        }
+        auto beginText=std::to_string(bounds.beginUtcMs);
+        if(begin->text!=beginText&&(!quantity->text.empty()||!subtotal->text.empty())){
+            focus(quantity->text.empty()?"opening.accrued_subtotal":"opening.imported_kwh");
+            message=i18n::tariffMonthlyEnglish(Key::RetainAmounts);
+            return;
+        }
+        auto endText=std::to_string(bounds.endUtcMs);
+        begin->text=std::move(beginText);
+        end->text=std::move(endText);
+        focus("opening.cycle_begin_utc_ms");
+        message=i18n::tariffMonthlyEnglish(Key::Derived);
+    }
     static std::string hint(const std::string &s){
         using HintKey=i18n::TariffHintMessageKey;
+        if(s=="monthly_day")return i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::Day);
         if(s=="tiers")return i18n::tariffHintEnglish(HintKey::Tiers);
         if(s=="time_mode")return i18n::tariffHintEnglish(HintKey::TimeMode);
         if(s=="kind")return i18n::tariffHintEnglish(HintKey::ClockKind);
@@ -177,6 +244,13 @@ class TariffSettingsPanel {
         return false;
     }
     void focus(const std::string &wanted){std::vector<size_t> found;size_t f=0;if(findPath(draft,"",wanted,found,f)){route=std::move(found);field=f;}}
+    void showProblem(const TariffProblem &error){
+        using Key=i18n::TariffErrorMessageKey;
+        i18n::MessageArguments arguments={{"reason",tariffDiagnosticReasonEnglish(error)}};
+        if(!error.path.empty())arguments.emplace_back("path",error.path);
+        message=i18n::tariffErrorEnglish(error.path.empty()?Key::OriginalRoot:Key::OriginalPath,arguments);
+        focus(error.path);
+    }
     static std::vector<std::string> reviewLines(const JsonValue &before,const JsonValue &after){
         using Key=i18n::TariffReviewMessageKey;std::vector<std::string> lines;
         for(const auto &record:tariffDeclarationChangeRecords(before,after)){const bool rows=record.kind==TariffDeclarationChange::Kind::RowCount;i18n::MessageArguments arguments;
@@ -189,7 +263,7 @@ class TariffSettingsPanel {
     void beginReview(){
         using PanelKey=i18n::TariffPanelMessageKey;
         review={i18n::tariffPanelEnglish(PanelKey::ReviewHeading),i18n::tariffPanelEnglish(PanelKey::NoActivation),
-            i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),i18n::tariffPanelEnglish(PanelKey::ResetLimit),
+            i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),monthly()?i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::Review):i18n::tariffPanelEnglish(PanelKey::ResetLimit),
             i18n::tariffPanelEnglish(PanelKey::Excludes),i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
         const auto diff=reviewLines(active,draft);review.insert(review.end(),diff.begin(),diff.end());
