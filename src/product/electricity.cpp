@@ -277,20 +277,21 @@ BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const Powe
 }
 CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &base, const PowerTrace &with, int64_t end, int64_t decision,
                                      const std::atomic<bool> *cancel) {
-    CounterfactualBill result;
-    if (cancel && cancel->load(std::memory_order_relaxed)) return result;
+    if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     const auto &a = base.evidence, &b = with.evidence;
-    if (!evidenceValid(a) || !evidenceValid(b) || a.basis != PowerBasis::WholeMeterImport || b.basis != a.basis || a.origin != b.origin || a.scope != b.scope || a.adapter != b.adapter) { result.status = ElectricityStatus::Invalid; return result; }
+    if (!evidenceValid(a) || !evidenceValid(b) || a.basis != PowerBasis::WholeMeterImport || b.basis != a.basis || a.origin != b.origin || a.scope != b.scope || a.adapter != b.adapter)
+        return {ElectricityStatus::Invalid, {}, {}, {}};
     // Reject truncated shared-meter scenarios even if this plan happens to have no discontinuous components.
-    if (end != opening.cycleEndUtcMs) { result.status = ElectricityStatus::Unsupported; return result; }
-    result.withoutMining = evaluateBillImpl(p,opening,base,end,decision,false,cancel);
+    if (end != opening.cycleEndUtcMs) return {ElectricityStatus::Unsupported, {}, {}, {}};
+    auto withoutMining = evaluateBillImpl(p,opening,base,end,decision,false,cancel);
     if (cancel && cancel->load(std::memory_order_relaxed)) return {};
-    if (result.withoutMining.status != ElectricityStatus::Ok) { result.status = result.withoutMining.status; return result; }
-    result.withMining = evaluateBillImpl(p,opening,with,end,decision,false,cancel);
+    if (withoutMining.status != ElectricityStatus::Ok) return {withoutMining.status, std::move(withoutMining), {}, {}};
+    auto withMining = evaluateBillImpl(p,opening,with,end,decision,false,cancel);
     if (cancel && cancel->load(std::memory_order_relaxed)) return {};
-    if (result.withMining.status != ElectricityStatus::Ok) { result.status = result.withMining.status; return result; }
+    if (withMining.status != ElectricityStatus::Ok) return {withMining.status, std::move(withoutMining), std::move(withMining), {}};
     ElectricityAmount delta;
-    if (!result.withMining.charge->numerator.subtract(result.withoutMining.charge->numerator,&delta.numerator)) { result.status = ElectricityStatus::Capacity; return result; }
-    result.incrementalCharge = delta; result.status = ElectricityStatus::Ok; return result;
+    if (!withMining.charge->numerator.subtract(withoutMining.charge->numerator,&delta.numerator))
+        return {ElectricityStatus::Capacity, std::move(withoutMining), std::move(withMining), {}};
+    return {ElectricityStatus::Ok, std::move(withoutMining), std::move(withMining), std::move(delta)};
 }
 }  // namespace om
