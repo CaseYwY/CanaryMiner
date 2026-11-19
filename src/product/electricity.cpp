@@ -187,7 +187,8 @@ EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerO
 ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
-static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision,bool accrual) {
+static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision,bool accrual,
+                                     const std::atomic<bool> *cancel=nullptr) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
     result.planKey = p.key; result.territory = p.territory; result.supplier = p.supplier; result.product = p.product; result.origin = p.origin; result.clock = p.clock; result.decisionUtcMs = decision;
     result.status = validatePlan(p,opening,end,decision,accrual);
@@ -218,6 +219,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     for (const auto &i : trace.intervals) {
         int64_t now = i.beginUtcMs;
         while (now < i.endUtcMs) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) { result.status = ElectricityStatus::Unavailable; return result; }
             if (++count > maxCuts) { result.status = ElectricityStatus::Capacity; return result; }
             while (revision < p.revisions.size() && p.revisions[revision].endUtcMs <= now) ++revision;
             if (revision == p.revisions.size()) { result.status = ElectricityStatus::Unavailable; return result; }
@@ -273,15 +275,19 @@ BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const Powe
     else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value();
     return result;
 }
-CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &base, const PowerTrace &with, int64_t end, int64_t decision) {
+CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &base, const PowerTrace &with, int64_t end, int64_t decision,
+                                     const std::atomic<bool> *cancel) {
     CounterfactualBill result;
+    if (cancel && cancel->load(std::memory_order_relaxed)) return result;
     const auto &a = base.evidence, &b = with.evidence;
     if (!evidenceValid(a) || !evidenceValid(b) || a.basis != PowerBasis::WholeMeterImport || b.basis != a.basis || a.origin != b.origin || a.scope != b.scope || a.adapter != b.adapter) { result.status = ElectricityStatus::Invalid; return result; }
     // Reject truncated shared-meter scenarios even if this plan happens to have no discontinuous components.
     if (end != opening.cycleEndUtcMs) { result.status = ElectricityStatus::Unsupported; return result; }
-    result.withoutMining = evaluateBill(p,opening,base,end,decision);
+    result.withoutMining = evaluateBillImpl(p,opening,base,end,decision,false,cancel);
+    if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     if (result.withoutMining.status != ElectricityStatus::Ok) { result.status = result.withoutMining.status; return result; }
-    result.withMining = evaluateBill(p,opening,with,end,decision);
+    result.withMining = evaluateBillImpl(p,opening,with,end,decision,false,cancel);
+    if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     if (result.withMining.status != ElectricityStatus::Ok) { result.status = result.withMining.status; return result; }
     ElectricityAmount delta;
     if (!result.withMining.charge->numerator.subtract(result.withoutMining.charge->numerator,&delta.numerator)) { result.status = ElectricityStatus::Capacity; return result; }

@@ -9,6 +9,7 @@
 #include "tariff_review_messages.h"
 #include "tariff_diagnostic_source.h"
 #include "tariff_error_messages.h"
+#include "tariff_comparison_settings.h"
 #include <functional>
 namespace om {
 enum class TariffSettingsResult { None, Close, Quit };
@@ -21,7 +22,8 @@ class TariffSettingsPanel {
     TariffSettingsPage page=TariffSettingsPage::Browse;
     std::vector<size_t> route;size_t field=0,reviewOffset=0;
     std::string input,message;std::vector<std::string> review;
-    void open(JsonValue value){active=draft=std::move(value);route.clear();field=reviewOffset=0;visible=true;page=TariffSettingsPage::Browse;message.clear();review.clear();}
+    void open(JsonValue value,bool sessionRunning=false){active=draft=std::move(value);route.clear();field=reviewOffset=0;visible=true;page=TariffSettingsPage::Browse;message.clear();review.clear();running_=sessionRunning;comparison_.close();}
+    void stopComparison(){comparison_.requestStop();}
     bool dirty()const{return tariffJson(active)!=tariffJson(draft);}
     std::string path()const{
         const auto *v=&draft;std::string s;
@@ -31,6 +33,11 @@ class TariffSettingsPanel {
     TariffSettingsResult key(int key,const Save &save,uint64_t now){
         using NoticeKey=i18n::TariffNoticeMessageKey;
         if(key==3)return TariffSettingsResult::Quit;
+        if(comparison_.visible) {
+            if(key=='q'||key=='Q')return TariffSettingsResult::Quit;
+            comparison_.key(key,now);
+            return TariffSettingsResult::None;
+        }
         if(page==TariffSettingsPage::Edit){
             if(key==27){page=TariffSettingsPage::Browse;message.clear();}
             else if(key=='\r'||key=='\n'){
@@ -78,6 +85,7 @@ class TariffSettingsPanel {
             else if(dirty())page=TariffSettingsPage::Leave;
             else{visible=false;return TariffSettingsResult::Close;}
         }else if(key=='v'||key=='V'||key==kKeyF2)beginReview();
+        else if((key=='p'||key=='P')&&!running_)comparison_.open(active);
         else if(key==kKeyDown||key=='\t'){const auto n=count();if(n)field=(field+1)%n;}
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
         else if((key=='a'||key=='A')&&node()->isArray()){
@@ -95,11 +103,14 @@ class TariffSettingsPanel {
         return TariffSettingsResult::None;
     }
     std::string render(int columns,int rows,ColorLevel color)const{
+        if(comparison_.visible)return comparison_.render(columns,rows,color);
         using namespace dash_detail;const size_t width=static_cast<size_t>(std::max(20,columns)-1);
         using PanelKey=i18n::TariffPanelMessageKey;
         using ContextKey=i18n::TariffContextMessageKey;
         if(rows>0&&rows<12)return i18n::tariffPanelEnglish(PanelKey::ShortTitle)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortResize)+"\n"+i18n::tariffPanelEnglish(PanelKey::ShortKeys)+"\n";
-        const auto footer=wrapText(i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
+        const auto compareHint=page==TariffSettingsPage::Browse&&!running_?
+            i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ":"";
+        const auto footer=wrapText(compareHint+i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
         auto notice=wrapText(message.empty()?i18n::tariffPanelEnglish(PanelKey::OfflineDefault):message,width);
         // Reserve focus/editor space even for multi-line validation messages on a 60x12 terminal.
         if(notice.size()>3)notice.resize(3);
@@ -134,6 +145,8 @@ class TariffSettingsPanel {
         return text;
     }
    private:
+    bool running_=false;
+    TariffComparisonSettings comparison_;
     JsonValue *node(){auto *v=&draft;for(size_t i:route)v=v->isObject()?&v->members[i].second:&v->items[i];return v;}
     const JsonValue *node()const{return const_cast<TariffSettingsPanel *>(this)->node();}
     size_t count()const{const auto *v=node();return v->isObject()?v->members.size():v->items.size();}

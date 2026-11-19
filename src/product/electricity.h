@@ -2,6 +2,7 @@
 #pragma once
 #include "civil_time.h"
 #include "exact_decimal.h"
+#include <atomic>
 #include <optional>
 #include <vector>
 
@@ -125,5 +126,6 @@ struct CounterfactualBill {
 // Both complete WholeMeterImport trajectories must share scope, adapter and origin; caller supplies the whole remainder.
 CounterfactualBill counterfactualBill(const TariffPlan &plan, const BillOpening &opening,
                                     const PowerTrace &withoutMining, const PowerTrace &withMining,
-                                    int64_t endUtcMs, int64_t decisionUtcMs);
+                                    int64_t endUtcMs, int64_t decisionUtcMs,
+                                    const std::atomic<bool> *cancel = nullptr);
 }  // namespace om

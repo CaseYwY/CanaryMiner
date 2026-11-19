@@ -1,6 +1,7 @@
 #include "product/tariff_settings.h"
 #include "product/settings.h"
 #include "product_test_util.h"
+#include <chrono>
 #include <fstream>
 #include <sstream>
 using namespace om;
@@ -17,6 +18,15 @@ void enter(TariffSettingsPanel &p,const char *name){
 }
 void type(TariffSettingsPanel &p,const std::string &text){for(unsigned char c:text)p.key(c,{},T/1000);p.key('\r',{},T/1000);}
 void frame(const TariffSettingsPanel &p,int columns,int rows){const auto out=p.render(columns,rows,ColorLevel::None);CHECK(out.find('\x1b')==std::string::npos);std::istringstream lines(out);std::string line;int n=0;while(std::getline(lines,line)){CHECK(line.size()<static_cast<size_t>(columns));++n;}CHECK(n<=rows);}
+std::string awaitComparison(const TariffSettingsPanel &panel) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    for (;;) {
+        auto rendered = panel.render(60,12,ColorLevel::None);
+        if (rendered.find("Calculating the saved scenario...") == std::string::npos) return rendered;
+        if (std::chrono::steady_clock::now() >= deadline) { CHECK(false); return rendered; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
 }
 int main(){
     auto original=fixture();TariffDeclaration d;TariffProblem error;CHECK(decodeTariffDeclaration(original,&d,&error));
@@ -94,6 +104,75 @@ int main(){
     enter(panel,"country");panel.key(0xc3,{},T/1000);panel.key('\r',{},T/1000);CHECK(panel.inputRejected&&!panel.dirty());panel.key(27,{},T/1000);
     panel.open(original);enter(panel,"plan");enter(panel,"revisions");panel.key('a',{},T/1000);CHECK(panel.draft.find("plan")->find("revisions")->items.size()==2);panel.key('x',{},T/1000);panel.key(27,{},T/1000);CHECK(panel.draft.find("plan")->find("revisions")->items.size()==2);panel.key('x',{},T/1000);panel.key('\r',{},T/1000);CHECK(!panel.dirty());
     panel.open(tariffDeclarationTemplate());panel.key('v',{},T/1000);panel.key('\r',save,T/1000);CHECK(panel.page==TariffSettingsPage::Browse&&panel.message.find("acknowledged")!=std::string::npos&&panel.field==3);
+    // The idle comparison uses the saved plan, even when a new draft has different fees.
+    panel.open(original);
+    set(member(panel.draft,"plan"),"cycle_charge","\"9\"");
+    const auto savedDraft=tariffJson(panel.draft);
+    panel.key('p',save,T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("HYPOTHETICAL")!=std::string::npos);
+    panel.key('\r',save,T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("Enter both watt values")!=std::string::npos);
+    for(char c:std::string("0\t1000\r"))panel.key(c,save,T/1000);
+    auto comparison=awaitComparison(panel);
+    CHECK(comparison.find("2.420000 USD")!=std::string::npos&&comparison.find("11.440000 USD")!=std::string::npos&&comparison.find("9.020000 USD")!=std::string::npos);
+    frame(panel,60,12);
+    panel.key('x',save,T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("9.020000 USD")==std::string::npos);
+    panel.key('\r',save,T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("Enter both watt values")!=std::string::npos);
+    panel.key(127,save,T/1000);
+    panel.key('\r',save,T/1000-1);
+    CHECK(panel.render(60,12,ColorLevel::None).find("current local time")!=std::string::npos);
+    CHECK(panel.key(3,save,T/1000)==TariffSettingsResult::Quit);
+    panel.key(27,save,T/1000);
+    CHECK(tariffJson(panel.draft)==savedDraft&&saves==2);
+    panel.open(gap);
+    panel.key('p',{},T/1000);
+    for(char c:std::string("0\t1000\r"))panel.key(c,{},T/1000);
+    comparison=awaitComparison(panel);
+    CHECK(comparison.find("Comparison unavailable: ")!=std::string::npos&&comparison.find("Remaining without mining: ")==std::string::npos);
+    auto allUnits = original;
+    set(member(allUnits,"plan"),"tiers","\"all_units\"");
+    auto &opening = member(allUnits,"opening");
+    set(opening,"through_utc_ms",std::to_string(T+43200000));
+    set(opening,"imported_kwh","\"9\"");
+    set(opening,"accrued_subtotal","\"3\"");
+    panel.open(allUnits);
+    panel.key('p',{},T/1000);
+    for(char c:std::string("0\t1000\r"))panel.key(c,{},T/1000);
+    comparison=awaitComparison(panel);
+    CHECK(comparison.find("0.110000 USD")!=std::string::npos&&comparison.find("6.160000 USD")!=std::string::npos&&comparison.find("6.050000 USD")!=std::string::npos);
+    panel.key('\r',{},T/1000);
+    panel.stopComparison();
+    CHECK(awaitComparison(panel).find("6.050000 USD")==std::string::npos);
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("HYPOTHETICAL")==std::string::npos);
+    auto large=original;
+    auto &plan=member(large,"plan");
+    set(plan,"tiers","\"none\"");
+    set(plan,"cycle_charge","\"0\"");
+    set(plan,"subtotal_multiplier","\"1\"");
+    auto &revision=member(plan,"revisions").items[0];
+    set(revision,"time_mode","\"constant\"");
+    set(revision,"calendar","[]");
+    set(revision,"bands","[]");
+    set(revision,"base_rate_per_kwh","\"100000000000\"");
+    set(revision,"charge_per_civil_day","\"0\"");
+    panel.open(large);
+    panel.key('p',{},T/1000);
+    for(char c:std::string("100000000000000000\t200000000000000000\r"))panel.key(c,{},T/1000);
+    comparison=awaitComparison(panel);
+    CHECK(std::count(comparison.begin(),comparison.end(),'\n')==11&&comparison.back()!='\n');
+    CHECK(comparison.find("HYPOTHETICAL")<comparison.find("[Tab] Field"));
+    frame(panel,60,12);
+    const std::atomic<bool> cancelled{true};
+    CHECK(counterfactualBill(d.plan,d.opening,trace,trace,T+86400000,T,&cancelled).status==ElectricityStatus::Unavailable);
+    panel.open(tariffDeclarationTemplate());
+    panel.key('p',{},T/1000);
+    CHECK(panel.render(60,12,ColorLevel::None).find("Save a valid combined tariff")!=std::string::npos);
+    panel.open(original,true);
+    panel.key('p',{},T/1000);
+    CHECK(panel.render(100,24,ColorLevel::None).find("Whole-meter comparison")==std::string::npos);
     // Focus remains visible at the supported compact terminal sizes, including deep table routes.
     panel.open(original);enter(panel,"plan");enter(panel,"revisions");panel.key('\r',{},T/1000);enter(panel,"calendar");panel.key('\r',{},T/1000);
     for(int columns:{60,80,120})for(int rows:{12,24})for(size_t i=0;i<9;++i){panel.field=i;frame(panel,columns,rows);CHECK(panel.render(columns,rows,ColorLevel::None).find("> ")!=std::string::npos);}
