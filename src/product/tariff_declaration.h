@@ -40,6 +40,8 @@ struct TariffCycleComparison {
 std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d, unsigned cycles);
 TariffCycleComparison compareTariffCycles(const TariffDeclaration &d, const std::array<ExactDecimal, 2> &watts,
     unsigned cycles, int64_t decisionUtcMs, const std::atomic<bool> *cancel = nullptr);
+// Start the adjacent declared cycle from an opening whose prior cycle is complete.
+ElectricityStatus advanceTariffOpening(const TariffDeclaration &d, BillOpening &settled, bool &chargedDaySplit);
 // Display-neutral private source records. Row counts are not JSON strings; value tokens retain exact source serialization.
 struct TariffDeclarationChange {
     enum class Kind { Value, RowCount };

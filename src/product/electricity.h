@@ -3,6 +3,7 @@
 #include "civil_time.h"
 #include "exact_decimal.h"
 #include <atomic>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -117,7 +118,7 @@ struct BillAccrual {
     bool settlementDependent=false; // future cycle quantity can change already accrued all-units/floor amounts
 };
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
-                      int64_t endUtcMs,int64_t observedUtcMs);
+                      int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={});
 struct CounterfactualBill {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     BillEstimate withoutMining, withMining;

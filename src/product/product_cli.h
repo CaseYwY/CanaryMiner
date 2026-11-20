@@ -37,10 +37,11 @@
 #include "config.h"
 #include "diagnostic_cli.h"
 #include "language_preferences.h"
+#include "meter_bill.h"
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill };
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -89,6 +90,7 @@ struct CliParse {
     bool help = false;  // -h / --help was given (it is also left in `rest` for the legacy loop)
     CliOverrides ov;
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
+    MeterBillOptions meterBill;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
 };
@@ -129,8 +131,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "version") r.command = Command::Version;
         else if (c == "settings") r.command = Command::Settings;
         else if (c == "diagnostics") r.command = Command::Diagnostics;
+        else if (c == "meter-bill") r.command = Command::MeterBill;
         else {
-            if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics; or start with an option, e.g. --pool); rejected original omitted";
+            if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted";
             return false;
         }
         r.commandExplicit = true;
@@ -139,6 +142,15 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
     if(r.command==Command::Diagnostics){
         if(!parseDiagnosticCli(argc,argv,i,&r.diagnostics,error))return false;
         r.help=r.diagnostics.help;*out=std::move(r);return true;
+    }
+    if (r.command == Command::MeterBill) {
+        if (!parseMeterBillCli(argc, argv, i, &r.meterBill)) {
+            if (error) *error = "meter-bill: invalid options; use meter-bill --help";
+            return false;
+        }
+        r.help = r.meterBill.help;
+        *out = std::move(r);
+        return true;
     }
     auto need = [&](int &k, const char *opt, std::string *value) {
         if (k + 1 >= argc) {
@@ -435,6 +447,7 @@ inline std::string productHelpText() {
         "       canary-miner version\n"
         "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
+        "       canary-miner meter-bill        review a tariff and imported meter intervals; see meter-bill --help\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress manual and public references for this run\n"
         "       --allow-public-tickers        allow a saved public ticker request for this run in an opt-in build\n"

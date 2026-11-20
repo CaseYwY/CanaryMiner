@@ -4,12 +4,16 @@ add_library(canary_economics STATIC
   "${CMAKE_SOURCE_DIR}/src/product/civil_time.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/electricity.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/tariff_declaration.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/meter_bill.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_owner.cpp")
 target_compile_features(canary_economics PUBLIC cxx_std_17)
 target_include_directories(canary_economics PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(canary_economics PUBLIC canary_market)
 find_package(Threads REQUIRED)
 target_link_libraries(canary_economics PRIVATE Threads::Threads)
+if(WIN32)
+  target_link_libraries(canary_economics PRIVATE shell32)
+endif()
 if(MSVC)
   target_compile_definitions(canary_economics PRIVATE NOMINMAX)
   target_compile_options(canary_economics PRIVATE /W3 /utf-8)
@@ -48,6 +52,6 @@ if(CANARY_ENABLE_NAMED_TZDB)
   target_compile_definitions(canary_economics PRIVATE CANARY_NAMED_TZDB=1 HAS_REMOTE_API=0 AUTO_DOWNLOAD=0)
   target_link_libraries(canary_economics PRIVATE date::date-tz)
   if(WIN32)
-    target_link_libraries(canary_economics PRIVATE shell32 ole32)
+    target_link_libraries(canary_economics PRIVATE ole32)
   endif()
 endif()

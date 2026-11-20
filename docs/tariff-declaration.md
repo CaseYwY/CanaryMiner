@@ -75,6 +75,42 @@ is still exiting, press Enter again when prompted. The session stop path revokes
 
 The comparison is an estimate from the saved declaration and entered watts. It has no observed usage or economic-mode permission.
 
+## Review a local meter file
+
+Run `canary-miner meter-bill --tariff tariff-declaration.json --intervals meter-intervals.json` with an explicitly chosen
+saved tariff and source file. The command reads those files and prints the review to stdout. Its estimates remain local
+to the command and include any declared opening used for the first cycle.
+
+The interval file has schema version 1. Use the same scope as the tariff opening and supply ordered, adjoining
+whole-meter import intervals. Each interval uses UTC milliseconds and a canonical nonnegative decimal string in watts.
+
+```json
+{
+  "schema_version": 1,
+  "scope": "synthetic-whole-meter-scenario",
+  "intervals": [
+    {
+      "begin_utc_ms": 1711886400000,
+      "end_utc_ms": 1711887300000,
+      "average_watts": "1000"
+    }
+  ]
+}
+```
+
+The first reading starts at the saved opening's through-time. The calculation applies the recorded average watts
+uniformly within each interval. This convention matters when an interval spans a tariff change or monthly reset.
+The output lists reviewed UTC coverage, imported kWh, the charge change from those intervals, and the estimate for
+each touched cycle. A cycle that ends before the next reset has a provisional estimate. Subsequent monthly cycles start
+with fresh allowances and fees from the saved rule. An interval that ends exactly on a reset closes the preceding cycle.
+
+The reader accepts up to 1 MiB, 8,192 intervals and twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
+unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
+additional cycle that starts within a charged tariff day requires an allocation rule. Use regular files in a trusted
+local directory. Windows accepts native Unicode paths on local drives and rejects redirected directories. The command
+prints no file paths or scope labels. Ctrl+C cancels the calculation. A stalled filesystem read can delay exit.
+Estimation from submitted data and qualified live collection remain separate acceptance steps.
+
 ## Persistence, privacy and rollback
 
 The file is limited to **64 KiB**, 16 revisions, 32 calendar rules/bands per revision, 256 dynamic rows per revision and 512 total rows: narrower than the pure API. All nested keys/types/bounds are strict. Invalid/newer/unknown/nonregular files are preserved; failed loads disable Save. Missing files return a blank draft without creating data.
@@ -103,6 +139,11 @@ P-05w passed 1,353 declaration checks on Windows and Linux, including the Linux 
 UndefinedBehaviorSanitizer build. The 52 Linux terminal checks and a Windows ConPTY run exercised the
 running Dashboard. The added scenarios cover the day-31 reset, independent fixed-offset clocks, per-cycle
 tiers and minimums, future rate gaps and preservation of the saved opening.
+
+P-05x passed 37 command cases on Windows and 40 on Linux. They cover native Unicode names,
+whole-report refusal on missing coverage, nonlinear charges around a monthly boundary, and unchanged input files.
+Linux adds symlink, FIFO and process-signal cases. Both platforms pass the deterministic cancellation check
+after two completed calculation segments.
 
 Executed development evidence (2026-10-29): Windows/MSVC focused CTest **45/45** passes, including prior product/settings/energy/credit recovery/donation/intent/market/electricity/oracle families. Final per-leaf review refinement passes the targeted tariff/settings rerun; both platforms' new native program has **1,071 passing checks**. Linux/WSL/GCC passes **16 new actual-terminal checks**, existing settings/runtime/manual-price/session-energy PTY regressions, and **1,071 own-code ASan/UBSan checks**. Linux Python discovery passes **123 tests with seven explicit fixture-dependent skips**. Windows full Python discovery/GNU-toolchain/encoding limitations remain unqualified.
 

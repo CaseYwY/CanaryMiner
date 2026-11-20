@@ -109,6 +109,13 @@ bool splitsChargedDay(const TariffPlan &plan,int64_t boundary){
             return !r.chargePerCivilDay.zero() && r.beginUtcMs<day.endUtcMs && r.endUtcMs>day.beginUtcMs;
         });
 }
+
+void resetOpening(BillOpening &opening,const TariffCycleBounds &window){
+    opening.cycleBeginUtcMs=opening.throughUtcMs=window.beginUtcMs;
+    opening.cycleEndUtcMs=window.endUtcMs;
+    opening.importedKwh={};
+    opening.accruedSubtotal={};
+}
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
     if(tariffJson(a)==tariffJson(b))return;
     if(path=="reset_policy"&&!null(a)&&!null(b)&&a.isObject()!=b.isObject()){
@@ -165,6 +172,23 @@ std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d,unsigned c
     return windows.back().endUtcMs;
 }
 
+ElectricityStatus advanceTariffOpening(const TariffDeclaration &d,BillOpening &settled,bool &chargedDaySplit){
+    chargedDaySplit=false;
+    if(settled.throughUtcMs!=settled.cycleEndUtcMs)return ElectricityStatus::Invalid;
+    if(!d.monthlyReset)return ElectricityStatus::Unsupported;
+    try{
+        const auto boundary=settled.cycleEndUtcMs;
+        const auto window=monthlyCycle(*d.monthlyReset,boundary);
+        if(window.beginUtcMs!=boundary||window.endUtcMs<=boundary)return ElectricityStatus::Invalid;
+        chargedDaySplit=splitsChargedDay(d.plan,boundary);
+        if(chargedDaySplit)return ElectricityStatus::Unsupported;
+        resetOpening(settled,window);
+        return ElectricityStatus::Ok;
+    }catch(const Invalid &){
+        return ElectricityStatus::Unavailable;
+    }
+}
+
 TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::array<ExactDecimal,2> &watts,
     unsigned cycles,int64_t decision,const std::atomic<bool> *cancel){
     if(cancel&&cancel->load(std::memory_order_relaxed))return {};
@@ -179,10 +203,7 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::
         if(i){
             if(splitsChargedDay(d.plan,window.beginUtcMs))
                 return {ElectricityStatus::Unsupported,cycle,true,{},{},{}};
-            opening.cycleBeginUtcMs=opening.throughUtcMs=window.beginUtcMs;
-            opening.cycleEndUtcMs=window.endUtcMs;
-            opening.importedKwh={};
-            opening.accruedSubtotal={};
+            resetOpening(opening,window);
         }
         const PowerTrace base{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[0]}}};
         const PowerTrace with{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[1]}}};

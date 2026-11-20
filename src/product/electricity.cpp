@@ -188,7 +188,7 @@ ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
 static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision,bool accrual,
-                                     const std::atomic<bool> *cancel=nullptr) {
+                                     const std::atomic<bool> *cancel=nullptr, const std::function<bool()> &stop={}) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
     result.planKey = p.key; result.territory = p.territory; result.supplier = p.supplier; result.product = p.product; result.origin = p.origin; result.clock = p.clock; result.decisionUtcMs = decision;
     result.status = validatePlan(p,opening,end,decision,accrual);
@@ -219,7 +219,10 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     for (const auto &i : trace.intervals) {
         int64_t now = i.beginUtcMs;
         while (now < i.endUtcMs) {
-            if (cancel && cancel->load(std::memory_order_relaxed)) { result.status = ElectricityStatus::Unavailable; return result; }
+            if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop())) {
+                result.status = ElectricityStatus::Unavailable;
+                return result;
+            }
             if (++count > maxCuts) { result.status = ElectricityStatus::Capacity; return result; }
             while (revision < p.revisions.size() && p.revisions[revision].endUtcMs <= now) ++revision;
             if (revision == p.revisions.size()) { result.status = ElectricityStatus::Unavailable; return result; }
@@ -263,10 +266,12 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
 BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision) {
     return evaluateBillImpl(p,opening,trace,end,decision,false);
 }
-BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed) {
+BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed,
+                      const std::function<bool()> &stop) {
     BillAccrual result;
+    if(stop&&stop())return result;
     if(end>observed){result.status=ElectricityStatus::NotYetKnown;return result;}
-    const auto step=evaluateBillImpl(p,opening,trace,end,observed,true);result.status=step.status;
+    const auto step=evaluateBillImpl(p,opening,trace,end,observed,true,nullptr,stop);result.status=step.status;
     if(step.status!=ElectricityStatus::Ok)return result;
     ElectricityAmount total;
     if(!step.ending->accruedSubtotal.numerator.multiply(*p.subtotalMultiplier,&total.numerator)){result.status=ElectricityStatus::Capacity;return result;}
