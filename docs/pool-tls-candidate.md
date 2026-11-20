@@ -6,7 +6,7 @@ The candidate tool packages an enabled production SM120 build for installation a
 
 Build the `production-sm120` profile in Release mode with CUDA 13.1.115 and `CANARY_ENABLE_POOL_TLS_RUNTIME=ON`. Use a neutral build and toolkit path. Keep the original source revision, CMake cache, toolchain and output hashes in the build record. Pass that exact build directory and source revision to the packer. The release candidate archive records this declared revision and each file hash. Verify the revision against the external build record when accepting a candidate.
 
-The Linux candidate uses the inventoried static OpenSSL 3.5.9 build. Supply the unmodified `LICENSE.txt` from the verified 3.5.9 source. The tool checks the exact licence hash and TLS helper version marker, and rejects unexpected shared-library dependencies and runtime search paths. For Windows, use the configured MSVC linker's sibling `dumpbin.exe`. The Windows candidate uses Schannel and depends on the supported x64 Visual C++ runtime.
+The Linux candidate uses the inventoried static OpenSSL 3.5.9 build. Supply the unmodified `LICENSE.txt` from the verified 3.5.9 source. The tool checks the exact licence hash and TLS helper version marker. It requires the system x86-64 ELF loader and rejects unexpected shared-library dependencies and runtime search paths. For Windows, use the configured MSVC linker's sibling `dumpbin.exe`. The Windows candidate uses Schannel and depends on the supported x64 Visual C++ runtime.
 
 ```sh
 python3 -B packaging/release/tls_candidate.py pack --platform linux \
@@ -34,6 +34,8 @@ python3 -B packaging/release/tls_candidate.py install --platform linux \
 Installation writes to a new directory after the complete verification step. The verifier checks the exact archive inventory, duplicates, links, sizes and modes. Installation re-reads every output and checks Linux executable permissions. Use a POSIX filesystem for the Linux package and a filesystem supporting hard links when creating either package. A failed interrupted install can leave its new directory for inspection. Choose a fresh directory for another attempt.
 
 Use the extracted miner's `version` and interactive `settings` commands for CPU-only acceptance. The examples request strict TLS for the first user pool and turn donation off. Qualified native GPU, real pool login and proof submission, donation TLS and redistribution acceptance are separate release checks.
+
+Settings keeps economic mode off for fresh installations and old preferences that have no economic mode field. An explicitly saved request remains selected on reopening Settings. This candidate disables the public HTTPS transport at build time.
 
 ## Candidate evidence
 

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import struct
 import subprocess
 import sys
 
@@ -17,6 +18,8 @@ WINDOWS_SYSTEM = frozenset(('kernel32.dll', 'user32.dll', 'advapi32.dll', 'shell
                             'vcruntime140_1.dll', 'ucrtbase.dll'))
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 HOME_PATH = re.compile(r'(?i)[a-z]:[\\/]+Users[\\/]+|/(?:home|Users)/|/mnt/[a-z]/')
+ELF64_PROGRAM_HEADER = struct.Struct('<IIQQQQQQ')
+LINUX_SYSTEM_INTERPRETER = b'/lib64/ld-linux-x86-64.so.2\0'
 
 
 def read_artifact(path, platform):
@@ -102,6 +105,28 @@ def dependency_check(platform, name, metadata, symbols=''):
     return ()
 
 
+def check_linux_interpreter(name, data):
+    # read_artifact has already checked the ELF class, byte order and machine.
+    table, = struct.unpack_from('<Q', data, 32)
+    entry_size, entry_count = struct.unpack_from('<HH', data, 54)
+    invalid = name + ': candidate must use the system ELF interpreter'
+    if (entry_size != ELF64_PROGRAM_HEADER.size or not 0 < entry_count < 0xffff or
+            table < 64 or table + entry_size * entry_count > len(data)):
+        raise ValueError(invalid)
+
+    found = False
+    for offset in range(table, table + entry_size * entry_count, entry_size):
+        segment_type, _, start, _, _, size, _, _ = ELF64_PROGRAM_HEADER.unpack_from(data, offset)
+        if segment_type != 3:  # PT_INTERP
+            continue
+        if (found or size != len(LINUX_SYSTEM_INTERPRETER) or start + size > len(data) or
+                data[start:start + size] != LINUX_SYSTEM_INTERPRETER):
+            raise ValueError(invalid)
+        found = True
+    if not found:
+        raise ValueError(invalid)
+
+
 def verify(platform, stage, source, cache, deny_file, tool):
     check_cache(cache)
     names = ('canary-miner', 'canary_preferences_worker')
@@ -137,8 +162,10 @@ def verify_images(platform, stage, source, deny_file, tool, names, *, portable=F
         privacy_check(data, path.name, *policy)
         if platform == 'linux':
             metadata, symbols = inspect(tool, ['-p', str(path)]), inspect(tool, ['-T', str(path)])
-            if portable and re.search(r'^\s*(?:RPATH|RUNPATH)\s', metadata, re.M):
-                raise ValueError(path.name + ': candidate must use system library paths')
+            if portable:
+                check_linux_interpreter(path.name, data)
+                if re.search(r'^\s*(?:RPATH|RUNPATH)\s', metadata, re.M):
+                    raise ValueError(path.name + ': candidate must use system library paths')
         else:
             metadata, symbols = inspect(tool, ['/DEPENDENTS', str(path)]), ''
         floor = max(floor, dependency_check(platform, path.name, metadata, symbols))

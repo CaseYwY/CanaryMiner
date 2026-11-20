@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import stat
+import struct
 import sys
 import tempfile
 import unittest
@@ -51,6 +52,7 @@ class CandidateTests(unittest.TestCase):
                 ['CANARY_ENABLE_UNKNOWN:STRING=OFF'],
                 ['CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON'],
                 ['CANARY_ENABLE_POOL_TLS_PRIVATE_TRUST:BOOL=ON'],
+                ['CANARY_ENABLE_PUBLIC_HTTPS:BOOL=ON'],
                 ['CANARY_FEE_TEST_POLICY:STRING=OFF'],
             )
             for extra in invalid:
@@ -59,7 +61,7 @@ class CandidateTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         CANDIDATE.check_cache(cache, 'windows')
             for key in ('CANARY_PROFILE', 'CANARY_ENABLE_POOL_TLS_RUNTIME', 'CANARY_FEE_TEST_POLICY',
-                        '_OPENSSL_VERSION'):
+                        'CANARY_ENABLE_PUBLIC_HTTPS', '_OPENSSL_VERSION'):
                 cache.write_text('\n'.join(line for line in base if not line.startswith(key)), encoding='utf8')
                 with self.assertRaises(ValueError):
                     CANDIDATE.check_cache(cache, 'linux')
@@ -75,6 +77,44 @@ class CandidateTests(unittest.TestCase):
                 RELEASE.dependency_check('linux', linux, ' NEEDED libcuda.so.1\n', symbols)
             with self.assertRaises(ValueError):
                 RELEASE.dependency_check('windows', windows, pe_imports)
+
+    def test_pack_checks_the_linux_system_interpreter(self):
+        system_loader = b'/lib64/ld-linux-x86-64.so.2\0'
+
+        def elf(*interpreters):
+            header = bytearray(64)
+            header[:6] = b'\x7fELF\x02\x01'
+            struct.pack_into('<H', header, 18, 62)
+            struct.pack_into('<Q', header, 32, len(header))
+            struct.pack_into('<HH', header, 54, 56, len(interpreters) + 1)
+            entries = bytearray(56)
+            data = b''.join(interpreters)
+            offset = len(header) + 56 * (len(interpreters) + 1)
+            for interpreter in interpreters:
+                entries.extend(struct.pack('<IIQQQQQQ', 3, 4, offset, 0, 0,
+                                           len(interpreter), len(interpreter), 1))
+                offset += len(interpreter)
+            return bytes(header + entries) + data
+
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            name = 'canary_pool_tls_stream_worker'
+            image = stage / name
+            source_and_policy = (stage, stage, stage, (name,))
+            with patch.object(RELEASE, 'privacy_policy'), patch.object(RELEASE, 'privacy_check'), \
+                    patch.object(RELEASE, 'inspect', side_effect=lambda _, args:
+                                 ' NEEDED libc.so.6\n' if args[0] == '-p' else
+                                 ' *UND* (GLIBC_2.39) pidfd_spawn\n'):
+                image.write_bytes(elf(system_loader))
+                _, data = RELEASE.verify_images('linux', stage, *source_and_policy, portable=True)
+                self.assertEqual(data[name], image.read_bytes())
+                rejected = (elf(b'/opt/loader/ld-linux-x86-64.so.2\0'), elf(), elf(system_loader)[:-1],
+                            elf(system_loader, system_loader), elf(system_loader + b'\0'))
+                for payload in rejected:
+                    with self.subTest(payload=payload[-58:]):
+                        image.write_bytes(payload)
+                        with self.assertRaisesRegex(ValueError, 'system ELF interpreter'):
+                            RELEASE.verify_images('linux', stage, *source_and_policy, portable=True)
 
     def files(self, platform):
         files = {name: f'data for {name}'.encode() for name in CANDIDATE.file_limits(platform)
