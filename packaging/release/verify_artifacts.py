@@ -16,6 +16,7 @@ WINDOWS_SYSTEM = frozenset(('kernel32.dll', 'user32.dll', 'advapi32.dll', 'shell
                             'ws2_32.dll', 'bcrypt.dll', 'crypt32.dll', 'secur32.dll', 'ntdll.dll',
                             'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll', 'vcruntime140.dll',
                             'vcruntime140_1.dll', 'ucrtbase.dll'))
+PUBLIC_JSON_WORKER = 'canary_public_json_worker'
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 HOME_PATH = re.compile(r'(?i)[a-z]:[\\/]+Users[\\/]+|/(?:home|Users)/|/mnt/[a-z]/')
 ELF64_PROGRAM_HEADER = struct.Struct('<IIQQQQQQ')
@@ -98,8 +99,12 @@ def dependency_check(platform, name, metadata, symbols=''):
                 started = True
             elif started:
                 inside = False
+    allowed_system = WINDOWS_SYSTEM
+    if name == PUBLIC_JSON_WORKER + '.exe':
+        # The statically linked c-ares resolver reads native interface/DNS information.
+        allowed_system = WINDOWS_SYSTEM | {'iphlpapi.dll'}
     def allowed(value):
-        return value in WINDOWS_SYSTEM or bool(re.fullmatch(r'api-ms-win-(?:crt|core)-[a-z0-9-]+\.dll', value)) or (miner and value == 'nvcuda.dll')
+        return value in allowed_system or bool(re.fullmatch(r'api-ms-win-(?:crt|core)-[a-z0-9-]+\.dll', value)) or (miner and value == 'nvcuda.dll')
     if not needed or any(not allowed(item) for item in needed):
         raise ValueError(name + ': unsupported or unreadable native dependencies')
     return ()
