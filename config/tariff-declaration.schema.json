@@ -5,7 +5,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -14,11 +14,10 @@
     "plan": {"$ref": "#/$defs/plan"},
     "opening": {"$ref": "#/$defs/opening"}
   },
-  "if": {"properties": {"schema_version": {"enum": [4, 5]}}},
+  "if": {"properties": {"schema_version": {"enum": [4, 5, 6]}}},
   "then": {
-    "if": {"properties": {"schema_version": {"const": 5}}},
-    "then": {"properties": {"reset_policy": {"$ref": "#/$defs/annualReset"}}},
-    "else": {
+    "if": {"properties": {"schema_version": {"const": 4}}},
+    "then": {
       "properties": {"reset_policy": {"oneOf": [
         {"const": "explicit_cycle_only"}, {"$ref": "#/$defs/monthlyReset"}, {"$ref": "#/$defs/proratedMonthlyReset"}
       ]}},
@@ -27,6 +26,20 @@
         {"properties": {"reset_policy": {"type": "object", "required": ["clock"],
           "properties": {"clock": {"$ref": "#/$defs/namedClock"}}}}}
       ]
+    },
+    "else": {
+      "if": {"properties": {"schema_version": {"const": 5}}},
+      "then": {"properties": {"reset_policy": {"$ref": "#/$defs/annualReset"}}},
+      "else": {"properties": {
+        "reset_policy": {"$ref": "#/$defs/bimonthlyReset"},
+        "plan": {"properties": {
+          "tiers": {"const": "all_units"}, "rounding": {"const": "final_display_only"},
+          "revisions": {"maxItems": 1, "items": {"properties": {
+            "time_mode": {"const": "constant"}, "charge_per_civil_day": {"const": "0"},
+            "calendar": {"maxItems": 0}, "dynamic": {"maxItems": 0}, "bands": {"minItems": 1}
+          }}}
+        }}
+      }}
     }
   },
   "else": {
@@ -88,6 +101,14 @@
         "monthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
         "clock": {"$ref": "#/$defs/clockChoice"},
         "daily_fee_allocation": {"const": "prorate_by_cycle_minutes"}
+      }
+    },
+    "bimonthlyReset": {
+      "type": "object", "additionalProperties": false, "required": ["bimonthly_start_month", "bimonthly_day", "clock"],
+      "properties": {
+        "bimonthly_start_month": {"type": "integer", "enum": [1, 2]},
+        "bimonthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
+        "clock": {"$ref": "#/$defs/clockChoice"}
       }
     },
     "annualReset": {

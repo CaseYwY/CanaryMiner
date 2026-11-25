@@ -9,11 +9,13 @@ namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
 inline constexpr char finalDisplayRounding[] = "final_display_only";
 inline constexpr char meterHalfHourRounding[] = "meter_import_half_hour_kwh_half_even_2";
+enum class TariffResetCadence { Monthly, Annual, Bimonthly };
 struct TariffResetSchedule {
     unsigned day=0;
     CivilClock clock;
     DailyFeeAllocation dailyFeeAllocation = DailyFeeAllocation::WholeDay;
-    unsigned annualMonth = 0;  // Zero repeats monthly. Otherwise reset once per year in this month.
+    unsigned annualMonth = 0;  // Nonzero schedules one reset per year.
+    unsigned bimonthlyStartMonth = 0;  // 1 for odd months, 2 for even months.
 };
 struct TariffDeclaration {
     std::string country, sourceReference, openingKey;

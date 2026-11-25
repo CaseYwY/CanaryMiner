@@ -5,7 +5,8 @@
 namespace om { namespace i18n {
 enum class TariffMonthlyMessageKey { Toggle, Derive, Enabled, Day, RetainAmounts, Derived, Review,
     FeeToggle, FeeReview, FeeLabel, FeeOpeningRequired, ProratedExclusions,
-    AnnualToggle, AnnualEnabled, AnnualChanged, AnnualMonth, AnnualReview, Count };
+    AnnualToggle, AnnualEnabled, AnnualChanged, AnnualMonth, AnnualReview,
+    BimonthlyToggle, BimonthlyEnabled, BimonthlyChanged, BimonthlyMonth, BimonthlyReview, MonthlyAmount, Count };
 
 inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonthlyMessageKey key) {
     static constexpr std::array<std::string_view,static_cast<size_t>(TariffMonthlyMessageKey::Count)> messages = {{
@@ -24,7 +25,13 @@ inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonth
         "Enter the annual month and day. Derive dates with G and re-enter both opening amounts.",
         "Annual policy removed. Review the cycle dates and re-enter both opening amounts.",
         "Month 1-12 in the declared reset clock.",
-        "Annual reset at the selected date in the declared reset clock. Usage carries across months."
+        "Annual reset at the selected date in the declared reset clock. Usage carries across months.",
+        "[B] Two-month reset",
+        "Enter the start month and reset day. Use G to derive dates and re-enter both opening amounts.",
+        "Two-month policy removed. Review the dates, tariff amounts and opening.",
+        "Enter 1 for odd start months or 2 for even start months.",
+        "Two-month bill uses twice the monthly charge at the cycle's monthly-average usage.",
+        "Enter the monthly value for this two-month rule."
     }};
     const auto index=static_cast<size_t>(key);
     if(index>=messages.size())return {};

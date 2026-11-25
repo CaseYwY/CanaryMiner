@@ -185,6 +185,16 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     report += "  Reviewed interval range [" + std::to_string(opening.throughUtcMs) + ", " +
               std::to_string(accrual.ending->throughUtcMs) + ") UTC ms\n";
     report += "  Imported usage " + usageText + " kWh\n";
+    if (declaration.resetSchedule && declaration.resetSchedule->bimonthlyStartMonth) {
+        report += "  Rate basis is monthly average across the two-month cycle.\n";
+        if (accrual.settledTotal) {
+            ElectricityAmount average;
+            std::string averageText;
+            if (!accrual.ending->importedKwh.numerator.divideExact(2, &average.numerator) ||
+                !average.format(6, &averageText)) return false;
+            report += "  Monthly-average usage at closing " + averageText + " kWh\n";
+        }
+    }
     if (accrual.billedKwh) {
         std::string billed;
         if (!accrual.billedKwh->format(6, &billed)) return false;
@@ -288,7 +298,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || (schemaVersion == 5 &&
+        (schemaVersion == 4 || ((schemaVersion == 5 || schemaVersion == 6) &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <set>
+#include <tuple>
 
 namespace om {
 namespace {
@@ -65,10 +66,10 @@ CivilClock decodeClock(const JsonValue &clock,const std::string &path,bool allow
     result.fixedOffsetSeconds=static_cast<int32_t>(magnitude)*(negative?-1:1);
     return result;
 }
-CivilDate adjacentMonth(CivilDate date,int direction){
-    const int month=static_cast<int>(date.month)+direction;
-    if(month==0)return {date.year-1,12,1};
-    if(month==13)return {date.year+1,1,1};
+CivilDate offsetMonth(CivilDate date,int offset){
+    const int month=static_cast<int>(date.month)+offset;
+    if(month<1)return {date.year-1,static_cast<unsigned>(month+12),1};
+    if(month>12)return {date.year+1,static_cast<unsigned>(month-12),1};
     return {date.year,static_cast<unsigned>(month),1};
 }
 CivilDate monthlyDate(CivilDate month,unsigned day){
@@ -78,9 +79,13 @@ CivilDate monthlyDate(CivilDate month,unsigned day){
     while(!validCivilDate(month))--month.day;
     return month;
 }
-TariffResetSchedule decodeResetSchedule(const JsonValue &policy, bool allowNamed, bool annual) {
+TariffResetSchedule decodeResetSchedule(const JsonValue &policy, bool allowNamed, TariffResetCadence cadence) {
+    const bool annual = cadence == TariffResetCadence::Annual;
+    const bool bimonthly = cadence == TariffResetCadence::Bimonthly;
     const auto *allocation = policy.find("daily_fee_allocation");
-    if (annual) {
+    if (bimonthly) {
+        keys(policy, "reset_policy", {"bimonthly_start_month", "bimonthly_day", "clock"});
+    } else if (annual) {
         if (allocation) keys(policy, "reset_policy", {"annual_month", "annual_day", "clock", "daily_fee_allocation"});
         else keys(policy, "reset_policy", {"annual_month", "annual_day", "clock"});
     } else {
@@ -88,7 +93,7 @@ TariffResetSchedule decodeResetSchedule(const JsonValue &policy, bool allowNamed
         else keys(policy, "reset_policy", {"monthly_day", "clock"});
     }
     if (allocation) choice(*allocation, "reset_policy.daily_fee_allocation", {"prorate_by_cycle_minutes"});
-    const char *dayField = annual ? "annual_day" : "monthly_day";
+    const char *dayField = annual ? "annual_day" : bimonthly ? "bimonthly_day" : "monthly_day";
     const auto dayPath = child("reset_policy", dayField);
     const auto day = static_cast<unsigned>(integer(*policy.find(dayField), dayPath, 31));
     if (!day) bad(dayPath, "Enter a reset day from 1 to 31.", TariffProblemKind::Unknown);
@@ -97,24 +102,56 @@ TariffResetSchedule decodeResetSchedule(const JsonValue &policy, bool allowNamed
         month = static_cast<unsigned>(integer(*policy.find("annual_month"), "reset_policy.annual_month", 12));
         if (!month) bad("reset_policy.annual_month", "Enter a month from 1 to 12.", TariffProblemKind::Unknown);
     }
+    unsigned startMonth = 0;
+    if (bimonthly) {
+        constexpr char path[] = "reset_policy.bimonthly_start_month";
+        startMonth = static_cast<unsigned>(integer(*policy.find("bimonthly_start_month"), path, 2));
+        if (!startMonth) bad(path, "Choose 1 for odd months or 2 for even months.", TariffProblemKind::Unknown);
+    }
     return {day, decodeClock(*policy.find("clock"), "reset_policy.clock", allowNamed),
-            allocation ? DailyFeeAllocation::ProrateByCycleMinutes : DailyFeeAllocation::WholeDay, month};
+            allocation ? DailyFeeAllocation::ProrateByCycleMinutes : DailyFeeAllocation::WholeDay, month, startMonth};
+}
+
+void normalizeBimonthlyTariff(TariffPlan &plan) {
+    if (plan.tiers != TierMode::AllUnits || plan.rounding != TariffRounding::FinalDisplayOnly ||
+        plan.revisions.size() != 1 || plan.revisions.front().timeMode != TimeRateMode::Constant ||
+        !plan.revisions.front().chargePerCivilDay.zero())
+        bad("plan", "A two-month average requires all-units rates, one constant revision, no daily fee and display-only rounding.",
+            TariffProblemKind::ModelStatus, {}, ElectricityStatus::Unsupported);
+
+    // Comparing total kWh to twice each monthly boundary is equivalent to comparing the exact monthly average.
+    // Multiply flat monthly amounts by two to compute 2 * monthly_bill(total kWh / 2). Unit rates stay unchanged.
+    const auto doubleAmount = [](ExactDecimal &value, const std::string &path) {
+        if (!value.add(value, &value))
+            bad(path, "Arithmetic capacity exceeded.", TariffProblemKind::ArithmeticCapacity);
+    };
+    doubleAmount(plan.cycleCharge, "plan.cycle_charge");
+    if (plan.minimumCycleSubtotal) doubleAmount(*plan.minimumCycleSubtotal, "plan.minimum_cycle_subtotal");
+    auto &bands = plan.revisions.front().bands;
+    for (size_t i = 0; i < bands.size(); ++i)
+        if (bands[i].throughKwh)
+            doubleAmount(*bands[i].throughKwh, "plan.revisions[0].bands[" + std::to_string(i) + "].through_kwh");
 }
 
 TariffCycleBounds recurringCycle(const TariffResetSchedule &policy, int64_t through) {
     const auto day = policy.day;
     const auto &clock = policy.clock;
-    if (!day || day > 31 || policy.annualMonth > 12)
+    if (!day || day > 31 || policy.annualMonth > 12 || policy.bimonthlyStartMonth > 2 ||
+        (policy.annualMonth && policy.bimonthlyStartMonth))
         bad("reset_policy", "The recurring reset requires a valid day and month.", TariffProblemKind::Unknown);
     const auto stamp = civilAt(clock, through);
     if (stamp.status != CivilStatus::Ok)
         bad("opening.through_utc_ms", "Through-time is outside the reset clock range.", TariffProblemKind::Unknown);
     const auto neighbor = [&](CivilDate date, int direction) {
         return monthlyDate(policy.annualMonth ? CivilDate{date.year + direction, policy.annualMonth, 1}
-                                             : adjacentMonth(date, direction), day);
+            : offsetMonth(date, policy.bimonthlyStartMonth ? 2 * direction : direction), day);
     };
-    auto first = monthlyDate(policy.annualMonth ? CivilDate{stamp.date.year, policy.annualMonth, 1} : stamp.date, day);
-    if (stamp.date.month < first.month || (stamp.date.month == first.month && stamp.date.day < first.day))
+    auto month = stamp.date;
+    if (policy.annualMonth) month.month = policy.annualMonth;
+    if (policy.bimonthlyStartMonth && (month.month - 1) % 2 + 1 != policy.bimonthlyStartMonth)
+        month = offsetMonth(month, -1);
+    auto first = monthlyDate(month, day);
+    if (std::tie(stamp.date.year, stamp.date.month, stamp.date.day) < std::tie(first.year, first.month, first.day))
         first = neighbor(first, -1);
     const auto next = neighbor(first, 1);
     const auto boundary = [&](CivilDate date) -> std::optional<int64_t> {
@@ -207,20 +244,22 @@ JsonValue tariffDeclarationTemplate(){
     for(auto &m:v.members)if(m.first=="plan")for(auto &p:m.second.members)if(p.first=="revisions")p.second.items.push_back(tariffRowTemplate("revisions"));
     return v;
 }
-static bool deriveCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem,bool annual){
+static bool deriveCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem,TariffResetCadence cadence){
     try{
         const auto at=static_cast<int64_t>(integer(through,"opening.through_utc_ms"));
-        bounds=recurringCycle(decodeResetSchedule(policy,true,annual),at);
+        bounds=recurringCycle(decodeResetSchedule(policy,true,cadence),at);
         if(problem)*problem={};
         return true;
     }catch(const Invalid &e){if(problem)*problem=e.problem;return false;}
 }
 
 bool deriveTariffRecurringCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
-    return deriveCycle(policy,through,bounds,problem,policy.find("annual_month")!=nullptr);
+    const auto cadence = policy.find("annual_month") ? TariffResetCadence::Annual
+        : policy.find("bimonthly_start_month") ? TariffResetCadence::Bimonthly : TariffResetCadence::Monthly;
+    return deriveCycle(policy,through,bounds,problem,cadence);
 }
 bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
-    return deriveCycle(policy,through,bounds,problem,false);
+    return deriveCycle(policy,through,bounds,problem,TariffResetCadence::Monthly);
 }
 
 std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d,unsigned cycles){
@@ -284,7 +323,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(!out)bad("","No declaration output.",TariffProblemKind::NoOutput);
         if(tariffJson(root).size()>tariffDeclarationMaxBytes)bad("","Declaration exceeds 64 KiB.",TariffProblemKind::Oversized);
         keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"});
-        const auto version=integer(*root.find("schema_version"),"schema_version",5);
+        const auto version=integer(*root.find("schema_version"),"schema_version",6);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         const auto &policy=*root.find("reset_policy");
         const bool explicitCycle=version==1||(version==4&&policy.isString());
@@ -350,7 +389,9 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             {namedRate?tariffTzdbVersion:"explicit-fixed-clock"});
         s.cycleBeginUtcMs=integer(*opening.find("cycle_begin_utc_ms"),"opening.cycle_begin_utc_ms");s.cycleEndUtcMs=integer(*opening.find("cycle_end_utc_ms"),"opening.cycle_end_utc_ms");s.throughUtcMs=integer(*opening.find("through_utc_ms"),"opening.through_utc_ms");
         if(!explicitCycle){
-            d.resetSchedule=decodeResetSchedule(policy,version>=4,version==5);
+            const auto cadence = version == 6 ? TariffResetCadence::Bimonthly
+                : version == 5 ? TariffResetCadence::Annual : TariffResetCadence::Monthly;
+            d.resetSchedule=decodeResetSchedule(policy,version>=4,cadence);
             if(version<4&&(version==3)!=(d.dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes))
                 bad("reset_policy.daily_fee_allocation","The chosen daily fee rule must match the schema version.",TariffProblemKind::Unknown);
             const auto bounds=recurringCycle(*d.resetSchedule,s.throughUtcMs);
@@ -363,6 +404,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         auto quantity=electricityKwh(decimal(*opening.find("imported_kwh"),"opening.imported_kwh"));if(!quantity)bad("opening.imported_kwh","Nonnegative whole-meter quantity required.",TariffProblemKind::OpeningQuantity);s.importedKwh=*quantity;
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+        if(version==6)normalizeBimonthlyTariff(p);
         const auto status=validateTariffOpening(p,s);if(status!=ElectricityStatus::Ok)bad("plan/opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
         // This store is an offline declaration, so publication is a local claim bounded by confirmation, not certification.
         for(const auto &r:p.revisions){

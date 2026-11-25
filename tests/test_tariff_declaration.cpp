@@ -218,6 +218,78 @@ void annualCycles(const JsonValue &original) {
     CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
 }
 
+void bimonthlyCycles(JsonValue draft) {
+    constexpr int64_t jan2024=1704067200000, mar2024=1709251200000, may2024=1714521600000;
+    constexpr int64_t dec2023=1703980800000, leap2024=1709164800000, april2024=1714435200000;
+    const auto even=json(R"({"bimonthly_start_month":2,"bimonthly_day":31,"clock":{"kind":"utc","fixed_offset_seconds":0}})");
+    TariffCycleBounds bounds;
+    TariffProblem error;
+    CHECK(deriveTariffRecurringCycle(even,json(std::to_string(leap2024-1)),bounds,&error));
+    CHECK(bounds.beginUtcMs==dec2023&&bounds.endUtcMs==leap2024);
+    CHECK(deriveTariffRecurringCycle(even,json(std::to_string(leap2024)),bounds,&error));
+    CHECK(bounds.beginUtcMs==leap2024&&bounds.endUtcMs==april2024);
+    CHECK(!deriveTariffMonthlyCycle(even,json(std::to_string(leap2024)),bounds,&error));
+    CHECK(bounds.beginUtcMs==leap2024&&bounds.endUtcMs==april2024);
+
+    auto &plan=member(draft,"plan");
+    auto &rate=member(plan,"revisions").items.front();
+    set(plan,"tiers",R"("all_units")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"minimum_cycle_subtotal","null");
+    set(plan,"subtotal_multiplier",R"("1")");
+    set(rate,"begin_utc_ms",std::to_string(jan2024));
+    set(rate,"published_utc_ms",std::to_string(jan2024));
+    set(rate,"end_utc_ms",std::to_string(may2024));
+    set(rate,"time_mode",R"("constant")");
+    set(rate,"calendar","[]");
+    set(rate,"base_rate_per_kwh",R"("0")");
+    set(rate,"charge_per_civil_day",R"("0")");
+    set(rate,"bands",R"([{"through_kwh":"100","rate_per_kwh":"1"},{"through_kwh":null,"rate_per_kwh":"2"}])");
+    set(member(draft,"opening"),"through_utc_ms",std::to_string(jan2024));
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"reset_policy");
+    CHECK(panel.render(90,20,ColorLevel::None).find("[B] Two-month reset")!=std::string::npos);
+    panel.key('b',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="6");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    panel.key('f',{},T/1000);
+    CHECK(!panel.draft.find("reset_policy")->find("daily_fee_allocation"));
+    enter(panel,"reset_policy");
+    enter(panel,"bimonthly_start_month");
+    type(panel,"1");
+    enter(panel,"bimonthly_day");
+    type(panel,"1");
+    panel.key('g',{},T/1000);
+    CHECK(panel.draft.find("opening")->find("cycle_begin_utc_ms")->text==std::to_string(jan2024));
+    CHECK(panel.draft.find("opening")->find("cycle_end_utc_ms")->text==std::to_string(mar2024));
+    enter(panel,"imported_kwh");type(panel,"0");
+    enter(panel,"accrued_subtotal");type(panel,"0");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(110,30,ColorLevel::None).find("monthly-average usage")!=std::string::npos);
+    JsonValue saved;
+    panel.key('\r',[&](const JsonValue &candidate,std::string *){
+        saved=candidate;
+        return true;
+    },T/1000);
+    CHECK(saved.find("schema_version")&&saved.find("schema_version")->text=="6");
+    CHECK(saved.find("plan")->find("revisions")->items.front().find("bands")->items.front().find("through_kwh")->text=="100");
+    TariffDeclaration decoded;
+    CHECK(decodeTariffDeclaration(saved,&decoded,&error));
+    CHECK(decoded.plan.revisions.front().bands.front().throughKwh->text()=="200");
+    CHECK(tariffComparisonEnd(decoded,2)==may2024);
+    checkComparison(compareTariffCycles(decoded,{dec("100"),dec("200")},1,T),"144.000000","576.000000","432.000000");
+
+    panel.open(saved);
+    enter(panel,"reset_policy");
+    panel.key(27,{},T/1000);
+    panel.key('m',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="2");
+    CHECK(panel.draft.find("reset_policy")->find("monthly_day")->text=="1");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+}
+
 void monthlyCycles(const JsonValue &original) {
     using Message=i18n::TariffMonthlyMessageKey;
     for(size_t i=0;i<static_cast<size_t>(Message::Count);++i) {
@@ -395,6 +467,7 @@ int main(int argc,char **argv){
     auto original=fixture();TariffDeclaration d;TariffProblem error;CHECK(decodeTariffDeclaration(original,&d,&error));
     monthlyCycles(original);
     annualCycles(original);
+    bimonthlyCycles(original);
     CHECK(d.plan.tiers==TierMode::Progressive&&d.plan.revisions[0].timeMode==TimeRateMode::Calendar&&d.opening.evidence.origin==PowerOrigin::DeclaredForecast);
     CHECK(d.opening.planKey==d.plan.key&&d.sourceReference.find("SYNTHETIC")!=std::string::npos);
     PowerTrace trace{d.opening.evidence,{{static_cast<int64_t>(T),static_cast<int64_t>(T+86400000),dec("1000")}}};
