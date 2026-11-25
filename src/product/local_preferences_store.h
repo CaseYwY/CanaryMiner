@@ -4,7 +4,7 @@
 namespace om {
 enum class LocalFileRead { Ok, Missing, Unreadable, Invalid };
 inline LocalFileRead readBoundedLocalFile(const std::filesystem::path &path, std::size_t limit, std::string *text) {
-    if (!text || !limit || limit > 1024*1024) return LocalFileRead::Invalid;
+    if (!text || !limit || limit > 2*1024*1024) return LocalFileRead::Invalid;
     std::string bytes(limit+1, '\0');
 #if defined(_WIN32)
     struct File {

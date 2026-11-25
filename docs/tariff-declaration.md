@@ -118,6 +118,20 @@ local directory. Windows accepts native Unicode paths on local drives and reject
 prints no file paths or scope labels. Ctrl+C cancels the calculation. A stalled filesystem read can delay exit.
 Estimation from submitted data and qualified live collection remain separate acceptance steps.
 
+### Save and reopen a local meter review
+
+Add `--save-review NAME.cmr` to a successful `meter-bill` review to save a new archive in the current directory. Use an ASCII basename ending in `.cmr`. Run the command from a private, trusted local directory. The archive contains the original tariff declaration and all supplied meter readings, so it carries the same privacy considerations as those files.
+
+```text
+canary-miner meter-bill --tariff tariff.json --intervals readings.json --as-of-utc-ms 1711936800000 --save-review april.cmr
+canary-miner meter-bill --open-review april.cmr
+```
+
+The archive keeps both input files byte for byte, the effective review cutoff, and the exact per-cycle usage and amount records. With no explicit cutoff, the command records the local UTC time sampled at the start of the review. Opening uses that saved cutoff and those exact inputs, verifies the archive checksum and recalculates the amounts before displaying the estimate. The original input files can move or change. A checksum detects damage and supports replay checking. It carries no supplier or meter authentication.
+
+Saving uses an exclusive, synced sibling file and publishes a complete archive without replacing an existing file. A save cancelled before publication or an interrupted verification returns exit status 130. A process interruption can leave a `.cmr.tmp` sibling. Its presence blocks a new save under that name. Reopen the archive to verify its outcome and choose a new name for another save. On Linux the local filesystem must support hard links. File sync can fail or stall, and this path has no physical power-loss certification. Opening is read-only. The archive preserves an estimate from imported readings and a declared tariff. Runtime billing, observed-source admission and economic-mode activation have separate requirements.
+
+
 ## Persistence, privacy and rollback
 
 The file is limited to **64 KiB**, 16 revisions, 32 calendar rules/bands per revision, 256 dynamic rows per revision and 512 total rows: narrower than the pure API. All nested keys/types/bounds are strict. Invalid/newer/unknown/nonregular files are preserved; failed loads disable Save. Missing files return a blank draft without creating data.
