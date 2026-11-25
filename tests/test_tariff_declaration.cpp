@@ -282,6 +282,25 @@ void bimonthlyCycles(JsonValue draft) {
     checkComparison(compareTariffCycles(decoded,{dec("100"),dec("200")},1,T),"144.000000","576.000000","432.000000");
 
     panel.open(saved);
+    enter(panel,"plan");
+    enter(panel,"minimum_cycle_subtotal");
+    const auto minimumHint=panel.render(120,24,ColorLevel::None);
+    CHECK(minimumHint.find("monthly value")!=std::string::npos);
+    CHECK(minimumHint.find("clear for null")!=std::string::npos);
+    frame(panel,60,12);
+    panel.key(27,{},T/1000);
+    enter(panel,"revisions");
+    panel.key('\r',{},T/1000);
+    enter(panel,"bands");
+    panel.key(kKeyDown,{},T/1000);
+    panel.key('\r',{},T/1000);
+    enter(panel,"through_kwh");
+    const auto bandHint=panel.render(120,24,ColorLevel::None);
+    CHECK(bandHint.find("monthly value")!=std::string::npos);
+    CHECK(bandHint.find("Final band MUST be unbounded/null")!=std::string::npos);
+    frame(panel,60,12);
+
+    panel.open(saved);
     enter(panel,"reset_policy");
     panel.key(27,{},T/1000);
     panel.key('m',{},T/1000);

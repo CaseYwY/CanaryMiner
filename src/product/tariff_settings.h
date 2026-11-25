@@ -369,14 +369,16 @@ class TariffSettingsPanel {
         if(s=="monthly_day"||s=="annual_day"||s=="bimonthly_day")return i18n::tariffMonthlyEnglish(Key::Day);
         if(s=="annual_month")return i18n::tariffMonthlyEnglish(Key::AnnualMonth);
         if(s=="bimonthly_start_month")return i18n::tariffMonthlyEnglish(Key::BimonthlyMonth);
-        if(bimonthly()&&(s=="cycle_charge"||s=="minimum_cycle_subtotal"||s=="through_kwh"))
-            return i18n::tariffMonthlyEnglish(Key::MonthlyAmount);
+        if(s=="minimum_cycle_subtotal"||s=="through_kwh"){
+            const auto optional=i18n::tariffHintEnglish(HintKey::OptionalDecimal);
+            return bimonthly()?i18n::tariffMonthlyEnglish(Key::MonthlyAmount)+" "+optional:optional;
+        }
+        if(bimonthly()&&s=="cycle_charge")return i18n::tariffMonthlyEnglish(Key::MonthlyAmount);
         if(s=="tiers")return i18n::tariffHintEnglish(HintKey::Tiers);
         if(s=="time_mode")return i18n::tariffHintEnglish(HintKey::TimeMode);
         if(s=="kind")return i18n::tariffHintEnglish(HintKey::ClockKind);
         if(s=="zone")return "Enter an IANA zone from the reviewed time database, for example America/New_York.";
         if(s=="date")return i18n::tariffHintEnglish(HintKey::Date);
-        if(s=="minimum_cycle_subtotal"||s=="through_kwh")return i18n::tariffHintEnglish(HintKey::OptionalDecimal);
         if(s.find("utc_ms")!=std::string::npos)return i18n::tariffHintEnglish(HintKey::UtcMs);
         if(s=="imported_kwh"||s=="accrued_subtotal")return i18n::tariffHintEnglish(HintKey::Opening);
         if(s.find("mask")!=std::string::npos)return i18n::tariffHintEnglish(HintKey::Mask);
