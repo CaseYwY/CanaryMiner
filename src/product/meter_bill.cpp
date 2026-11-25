@@ -1,5 +1,5 @@
 #include "meter_bill.h"
-#include "local_preferences_store.h"
+#include "local_review_input.h"
 #include "tariff_declaration.h"
 
 #include <algorithm>
@@ -45,28 +45,6 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
 #else
     return MeterBillPaths{argv[options.tariffArg], argv[options.intervalsArg]};
 #endif
-}
-
-bool readInput(const std::filesystem::path &filename, size_t limit, std::string &out) {
-    std::error_code ec;
-    const auto path = std::filesystem::absolute(filename, ec);
-    if (ec) return false;
-#if defined(_WIN32)
-    const auto root = path.root_name().native();
-    if (root.size() != 2 || root[1] != L':' || path.native().find(L':', 2) != std::wstring::npos)
-        return false;
-    const auto drive = GetDriveTypeW(path.root_path().c_str());
-    if (drive != DRIVE_FIXED && drive != DRIVE_REMOVABLE && drive != DRIVE_RAMDISK) return false;
-    auto parent = path.root_path();
-    const auto directories = path.parent_path().relative_path();
-    for (const auto &component : directories) {
-        parent /= component;
-        const auto attributes = GetFileAttributesW(parent.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY) ||
-            (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
-    }
-#endif
-    return readBoundedLocalFile(path, limit, &out) == LocalFileRead::Ok;
 }
 
 bool instant(const JsonValue *value, int64_t &result) {
@@ -161,7 +139,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         JsonValue root;
         TariffDeclaration declaration;
         if (stop && *stop) return 0;
-        if (!readInput(paths->tariff, tariffDeclarationMaxBytes, tariffText) ||
+        if (!readLocalReviewInput(paths->tariff, tariffDeclarationMaxBytes, tariffText) ||
             !parseJsonStrict(tariffText, &root, nullptr) || !decodeTariffDeclaration(root, &declaration))
             return fail("saved tariff declaration unavailable or invalid");
         if (now < 1 || now > meterBillMaxUtcMs || static_cast<int64_t>(declaration.confirmedUtc * 1000) > now)
@@ -171,7 +149,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         const char *lateReadingError = options.reviewCutoffUtcMs ? "interval ends after the review cutoff" :
                                                                  "interval ends in the future";
         if (stop && *stop) return 0;
-        if (!readInput(paths->intervals, maxMeterFileBytes, meterText))
+        if (!readLocalReviewInput(paths->intervals, maxMeterFileBytes, meterText))
             return fail("interval file unavailable, oversized or not a regular file");
         std::vector<PowerInterval> readings;
         if (const char *problem = decodeIntervals(meterText, declaration.opening, cutoff, lateReadingError, readings))

@@ -44,7 +44,7 @@ class NativeBuildRecipeTests(unittest.TestCase):
         self.assertEqual(len(cuda), 4)
         self.assertEqual({Path(argv[argv.index('-o') - 1]).name for argv in host}, {
             'exact_decimal.cpp', 'manual_market.cpp', 'energy_owner.cpp', 'civil_time.cpp',
-            'electricity.cpp', 'tariff_declaration.cpp', 'meter_bill.cpp', 'preferences_protocol.cpp',
+            'electricity.cpp', 'tariff_declaration.cpp', 'meter_bill.cpp', 'market_hour.cpp', 'preferences_protocol.cpp',
             'preferences_document.cpp', 'preferences_owner.cpp', 'local_task_process.cpp',
             'duplex_task_process.cpp', 'preferences_service.cpp', 'preferences_worker.cpp'})
         for argv in cuda:
@@ -55,14 +55,14 @@ class NativeBuildRecipeTests(unittest.TestCase):
             self.assertIn('-std=c++17', argv)
         self.assertEqual({Path(value).stem for value in link if value.endswith('.o')}, {
             'miner', 'registry', 'pearl_algo', 'run', 'exact_decimal', 'manual_market', 'energy_owner',
-            'civil_time', 'electricity', 'tariff_declaration', 'meter_bill', 'preferences_protocol',
+            'civil_time', 'electricity', 'tariff_declaration', 'meter_bill', 'market_hour', 'preferences_protocol',
             'preferences_document', 'preferences_owner', 'local_task_process', 'duplex_task_process'})
         self.assertIn('-Xcompiler=-pthread', link)
         self.assertEqual(helper[0], '/usr/bin/g++')
         self.assertIn('-pthread', helper)
         self.assertIn('preferences_service', {Path(value).stem for value in helper if value.endswith('.o')})
         self.assertNotIn('preferences_service', {Path(value).stem for value in link if value.endswith('.o')})
-        self.assertFalse(any(Path(value).stem in {'miner', 'pearl_algo', 'run', 'registry', 'meter_bill'}
+        self.assertFalse(any(Path(value).stem in {'miner', 'pearl_algo', 'run', 'registry', 'meter_bill', 'market_hour'}
                              for value in helper if value.endswith('.o')))
 
     def test_kernel_only_gate_stays_compile_only(self):
