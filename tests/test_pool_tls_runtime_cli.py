@@ -121,6 +121,9 @@ def main():
         case('prefer cannot omit consented TCP endpoint', config=tcp, prefs={**prefs, 'user_pools': [{**prefer, 'plaintext_url': ''}]})
         case('prefer requires donation off', config={**tcp, 'donation': True}, prefs=prefer_prefs)
         case('donation policy never inherits user permission', prefs={**prefs, 'donation': strict})
+        case('worker donation policy cannot be supplied to a parent', args=['--worker-donation-tls', strict['tls_url']])
+        case('worker donation policy cannot enable an unqualified peer', config={**base, 'donation': True},
+             args=['--worker-child', '--worker-id', '0', '--worker-donation-tls', strict['tls_url']])
         case('inactive donation TLS candidate stays inactive', prefs={**prefs, 'donation': {**empty, 'tls_url': strict['tls_url']}}, admitted=True)
         case('inactive donation TCP candidate stays inactive', prefs={**prefs, 'donation': {**empty, 'plaintext_url': prefer['plaintext_url']}}, admitted=True)
         case('inactive donation candidates do not block legacy TCP', config=tcp,

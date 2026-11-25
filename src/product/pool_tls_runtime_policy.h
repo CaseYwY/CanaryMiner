@@ -1,6 +1,7 @@
 // Ordinary first-user-pool TLS admission and frozen fallback consent. No network or trust import.
 #pragma once
 #include "config.h"
+#include "donation_tls_route.h"
 #include "pool_security_preferences.h"
 
 namespace om {
@@ -13,6 +14,7 @@ inline constexpr bool poolTlsRuntimeAvailable(){
 }
 struct PoolTlsRuntimePolicy {
     bool tls=false;
+    std::optional<DonationTlsRoute> donationTls;
     std::string host;
     unsigned port=0;
     std::string frozenUrl;
@@ -20,11 +22,25 @@ struct PoolTlsRuntimePolicy {
 };
 
 inline bool resolvePoolTlsRuntimePolicy(const ProductConfig &config,const PoolSecurityPreferences &saved,
-                                       bool ordinary,bool available,PoolTlsRuntimePolicy *out,std::string *error){
+                                       bool ordinary,bool available,PoolTlsRuntimePolicy *out,std::string *error,
+                                       std::string_view frozenDonationUrl={},DonationTlsCapability approvedDonation=qualifiedDonationTlsPeer){
     const auto fail=[&](const char *text){if(error)*error=text;return false;};
     if(!out||!validPoolSecurityPreferences(saved))return fail("pool TLS settings are invalid; no connection or mining was started");
-    if(saved.donation.mode!=PoolSecurityMode::Unchanged)
-        return fail("donation TLS is not supported by this runtime; user-pool permission cannot authorize a donation peer; no mining was started");
+    PoolTlsRuntimePolicy policy;
+    if(saved.donation.mode!=PoolSecurityMode::Unchanged || !frozenDonationUrl.empty()){
+        const char *unavailable="donation TLS is not supported by this runtime; user-pool permission cannot authorize a donation peer; no mining was started";
+        if(!config.donation || !ordinary || !available)return fail(unavailable);
+        const auto approved=DonationTlsRoute::forQualifiedPeer(approvedDonation);
+        if(!approved)return fail(unavailable);
+        const auto &declaration=saved.donation;
+        PoolSecurityEndpoint requested;
+        if(declaration.mode!=PoolSecurityMode::StrictTls || declaration.plaintextConsent ||
+           (!frozenDonationUrl.empty() && frozenDonationUrl!=declaration.tlsUrl) ||
+           !parsePoolSecurityUrl(declaration.tlsUrl,&requested) || !requested.tls ||
+           !approved->matches(requested.host,static_cast<int>(requested.port)))
+            return fail("donation TLS requires its own strict declaration for the qualified fixed peer; no mining was started");
+        policy.donationTls=approved;
+    }
     for(size_t i=0;i<saved.users.size();++i){
         if(i&&saved.users[i].mode!=PoolSecurityMode::Unchanged)
             return fail("pool TLS runtime supports only the first user pool; unused secure slots cannot be activated; no mining was started");
@@ -34,11 +50,10 @@ inline bool resolvePoolTlsRuntimePolicy(const ProductConfig &config,const PoolSe
     const auto &rule=saved.users.front();
     const bool explicitTls=!config.pools.empty()&&config.pools.front().tls;
     const bool requested=explicitTls||rule.mode!=PoolSecurityMode::Unchanged;
-    PoolTlsRuntimePolicy policy;
     if(!requested){*out=std::move(policy);return true;}
     if(!ordinary)return fail("pool TLS is supported only for ordinary user-pool mining; research and evidence modes are refused before device setup");
     if(!available)return fail("pool TLS runtime is unavailable in this build; no TCP fallback or mining was started");
-    if(config.donation)return fail("user-pool TLS requires --no-donation or donation:false; donation transport is not enabled; no mining was started");
+    if(config.donation&&!policy.donationTls)return fail("user-pool TLS requires --no-donation or donation:false; donation transport is not enabled; no mining was started");
     if(config.pools.empty())return fail("TLS requires a configured first user pool; no peer or port is guessed; no mining was started");
     policy.host=config.pools.front().host;
     if(!normalizePoolTlsDns(&policy.host))return fail("pool TLS requires an ASCII DNS identity; no peer substitution or mining was started");
@@ -64,8 +79,9 @@ inline bool resolvePoolTlsRuntimePolicy(const ProductConfig &config,const PoolSe
 }
 
 // A restarted worker may re-read its original config, but cannot switch the parent's secure peer or donation choice.
-inline bool applyFrozenPoolTlsEndpoint(const std::string &url,ProductConfig *config,const std::string &fallbackUrl={}){
-    if(!config||config->donation||config->pools.empty())return false;
+inline bool applyFrozenPoolTlsEndpoint(const std::string &url,ProductConfig *config,const std::string &fallbackUrl={},
+                                       bool frozenDonation=false){
+    if(!config||(config->donation!=frozenDonation)||config->pools.empty())return false;
     PoolSecurityEndpoint endpoint;
     if(!parsePoolSecurityUrl(url,&endpoint)||!endpoint.tls||poolSecurityUrl(endpoint)!=url)return false;
     std::string host=config->pools.front().host;

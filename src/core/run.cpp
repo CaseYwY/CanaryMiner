@@ -172,13 +172,20 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
         fprintf(stderr, "pool fallback requires its frozen TLS-first user policy\n");
         return 1;
     }
+    const bool donationLane = opt.workLane == WorkLane::Donation;
+    if ((opt.donationTlsRoute && (!donationLane || !opt.poolTls)) ||
+        (donationLane && opt.poolTls && (!opt.donationTlsRoute || !opt.poolPlaintextFallbackUrl.empty() ||
+         !opt.donationTlsRoute->matches(opt.poolHost, opt.poolPort)))) {
+        fprintf(stderr, "strict donation TLS requires its independent fixed peer and forbids plaintext fallback\n");
+        return 1;
+    }
     if (opt.poolTls) {
 #if !defined(CANARY_ENABLE_POOL_TLS_RUNTIME) || !CANARY_ENABLE_POOL_TLS_RUNTIME
         fprintf(stderr, "strict pool TLS is unavailable in this build\n");
         return 1;
 #else
-        if (opt.workLane == WorkLane::Donation || opt.bench || opt.poolHost.empty()) {
-            fprintf(stderr, "strict pool TLS requires an ordinary user pool session\n");
+        if (opt.bench || opt.poolHost.empty()) {
+            fprintf(stderr, "strict pool TLS requires an ordinary pool session\n");
             return 1;
         }
 #endif

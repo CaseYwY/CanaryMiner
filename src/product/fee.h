@@ -29,6 +29,7 @@
 #include <unistd.h>
 #endif
 
+#include "donation_tls_route.h"
 #include "hash.h"
 #include "json_dom.h"
 
@@ -39,9 +40,6 @@ namespace om {
 #endif
 
 // Donation traffic has its own pool identity and never inherits the user's pool configuration.
-#ifndef CANARY_FEE_POOL_HOST
-#define CANARY_FEE_POOL_HOST "pearl.f2pool.com"
-#endif
 #ifndef CANARY_FEE_POOL_PORT
 #define CANARY_FEE_POOL_PORT 5500
 #endif
