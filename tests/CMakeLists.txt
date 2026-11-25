@@ -64,6 +64,7 @@ add_test(NAME cli_error_privacy COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test
 add_test(NAME meter_bill_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_bill_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
 set_tests_properties(meter_bill_cli PROPERTIES TIMEOUT 45)
 add_test(NAME meter_bill_archive_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_bill_archive_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
+add_test(NAME meter_invoice_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_invoice_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
 set_tests_properties(meter_bill_archive_cli PROPERTIES TIMEOUT 60)
 if(CANARY_BUNDLED_TZDB_DIR)
   add_test(NAME meter_bill_named_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_bill_named_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host> ${CMAKE_BINARY_DIR}/canary-tzdb-2026e)

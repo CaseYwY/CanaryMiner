@@ -224,7 +224,7 @@ standing charge. It applies the prices including VAT, including negative energy 
 row, missing page or midday fee change withholds the review. The file limit is 2 MiB and 8,192 listed unit
 prices. Capture only elapsed periods and use a review cutoff at or after the observation timestamp printed in the
 report. A later capture cannot supply prices to an earlier historical cutoff. The report estimates costs from the
-supplied files. It carries no invoice reconciliation or proof of the supplier's original publication time.
+supplied files. Supplier publication time requires separate evidence.
 
 When saving, the archive also keeps the captured pages byte for byte and replays them together with the declaration
 and readings. Archives made with captured rates require a version of CanaryMiner with import support for that product.
@@ -273,6 +273,44 @@ even hundredth at a tie. A gap, duplicate or grouped record withholds the review
 the corresponding public price bundle described above. A private archive keeps the prepared consumption bundle
 and the calculated amounts for offline replay. Source account identity, observations before assembly, and
 agreement with a supplier invoice require separate evidence.
+
+### Compare reviewed cycles with supply charges
+
+Add `--invoice FILE` to compare the calculation with electricity supply charges taken from an invoice. The
+comparison covers each complete reviewed cycle from a zero opening to its closing time. Use the same meter alias,
+currency and exact UTC cycle bounds as the tariff declaration. List one charge per reviewed cycle in chronological
+order. Enter the supply charges represented by the tariff, including any standing charges and taxes that the
+declared plan includes. Keep prior balances, payments, export credits and unrelated charges outside the amounts.
+
+```json
+{
+  "schema_version": 1,
+  "scope": "synthetic-whole-meter-scenario",
+  "currency": "GBP",
+  "decimal_places": 2,
+  "rounding": "half_even",
+  "cycles": [
+    {"begin_utc_ms": 1677628800000, "end_utc_ms": 1680303600000, "supply_charge": "18.55"}
+  ]
+}
+```
+
+Select the invoice precision explicitly. The comparison accepts 0 to 6 decimal places and either `half_even`
+or `half_away_from_zero` for ties. Charges can be signed. The command rounds the exact calculated total once
+at that precision and subtracts the reported charge. A mismatch is a completed comparison, shown per cycle
+with a signed difference. Invalid fields, a different meter or currency, and partial cycles produce no report.
+The file limit is 16 KiB. Use a local alias and put only the fields shown above in the file.
+
+```text
+canary-miner meter-bill --tariff go-tariff.json --intervals march-usage.json --octopus-rates go-rates.json --invoice march-charges.json --save-review compared.cmr
+canary-miner meter-bill --open-review compared.cmr
+canary-miner meter-bill --open-review go.cmr --invoice march-charges.json
+```
+
+A version 3 archive keeps the exact invoice input and comparison along with the meter review. Reopening it
+recalculates both at the original meter cutoff. To compare an older archive that contains only a meter review,
+supply the invoice separately. This comparison is read-only and uses the archive's original meter cutoff. The
+supplied charges remain a local declaration, independent of the historical cutoff for meter and price data.
 
 ### Save and reopen a local meter review
 

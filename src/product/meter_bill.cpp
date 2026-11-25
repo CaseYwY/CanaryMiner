@@ -1,5 +1,6 @@
 #include "meter_bill.h"
 #include "meter_bill_archive.h"
+#include "meter_invoice.h"
 #include "octopus_meter_consumption.h"
 
 #include <algorithm>
@@ -19,7 +20,7 @@ using namespace meter_bill_detail;
 constexpr size_t maxMeterIntervals = 8192;
 
 using MeterReadings = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
-struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates; };
+struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
     const auto validIndex = [argc](int index) { return index >= 3 && index < argc; };
@@ -28,7 +29,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         return std::nullopt;
     if ((options.reviewCutoffArg && !validIndex(options.reviewCutoffArg)) ||
         (options.saveArg && !validIndex(options.saveArg)) ||
-        (options.ratesArg && !validIndex(options.ratesArg)))
+        (options.ratesArg && !validIndex(options.ratesArg)) ||
+        (options.invoiceArg && !validIndex(options.invoiceArg)))
         return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -44,9 +46,12 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     const auto matches = [&](int index, std::wstring_view flag) {
         return std::wstring_view(args.values[index-1]) == flag;
     };
+    if (options.invoiceArg && !matches(options.invoiceArg, L"--invoice")) return std::nullopt;
+    std::filesystem::path invoice;
+    if (options.invoiceArg) invoice = args.values[options.invoiceArg];
     if (options.archiveArg) {
         if (!matches(options.archiveArg, L"--open-review")) return std::nullopt;
-        return MeterBillPaths{{}, {}, args.values[options.archiveArg], {}};
+        return MeterBillPaths{{}, {}, args.values[options.archiveArg], {}, std::move(invoice)};
     }
     if (!matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals"))
         return std::nullopt;
@@ -61,11 +66,13 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     if (options.ratesArg && !matches(options.ratesArg, L"--octopus-rates"))
         return std::nullopt;
     return MeterBillPaths{args.values[options.tariffArg], args.values[options.intervalsArg], {},
-                          options.ratesArg ? std::filesystem::path(args.values[options.ratesArg]) : std::filesystem::path{}};
+                          options.ratesArg ? std::filesystem::path(args.values[options.ratesArg]) : std::filesystem::path{},
+                          std::move(invoice)};
 #else
-    if (options.archiveArg) return MeterBillPaths{{}, {}, argv[options.archiveArg], {}};
+    const std::filesystem::path invoice = options.invoiceArg ? argv[options.invoiceArg] : "";
+    if (options.archiveArg) return MeterBillPaths{{}, {}, argv[options.archiveArg], {}, invoice};
     return MeterBillPaths{argv[options.tariffArg], argv[options.intervalsArg], {},
-                          options.ratesArg ? std::filesystem::path(argv[options.ratesArg]) : std::filesystem::path{}};
+                          options.ratesArg ? std::filesystem::path(argv[options.ratesArg]) : std::filesystem::path{}, invoice};
 #endif
 }
 
@@ -206,13 +213,15 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
 
 template<class Interval>
 const char *reviewReadings(const std::vector<Interval> &readings, const TariffDeclaration &declaration, int64_t cutoff,
-                           const std::function<bool()> &stopped, std::string &report, std::string *exactResults) {
+                           const std::function<bool()> &stopped, std::string &report, std::string *exactResults,
+                           const MeterInvoice *invoice, std::string *exactInvoice) {
     constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
     using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
     auto opening = declaration.opening;
     size_t next = 0;
     auto cursor = opening.throughUtcMs;
-    for (unsigned cycle = 1; next < readings.size(); ++cycle) {
+    unsigned cycle = 1;
+    for (; next < readings.size(); ++cycle) {
         if (stopped()) return "review cancelled";
         if (cycle > maxTariffComparisonCycles) return "intervals span more than 12 cycles";
         Trace slice{opening.evidence, {}};
@@ -238,6 +247,11 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
         if (accrual.status != ElectricityStatus::Ok) return electricityStatusName(accrual.status);
         if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults))
             return "amount exceeds the display range";
+        if (invoice) {
+            if (const auto *problem = appendInvoiceComparison(*invoice, cycle - 1, opening, accrual,
+                                                              declaration.plan.currency, report, exactInvoice))
+                return problem;
+        }
         if (next < readings.size()) {
             opening = *accrual.ending;
             bool chargedDaySplit = false;
@@ -246,6 +260,8 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
                                          "next cycle unavailable under the saved reset rule";
         }
     }
+    if (invoice && cycle - 1 != invoice->cycles.size())
+        return "invoice must list one charge for each reviewed cycle";
     return nullptr;
 }
 
@@ -258,8 +274,9 @@ int refuse(const char *reason) {
 
 int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
     if (options.help) {
-        std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS] [--save-review NAME.cmr]\n"
-                  "canary-miner meter-bill --open-review FILE\n"
+        std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
+                  "    [--invoice FILE] [--save-review NAME.cmr]\n"
+                  "canary-miner meter-bill --open-review FILE [--invoice FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
                   "Also accepts local Octopus electricity import bundles in schema version 3.\n"
@@ -267,15 +284,17 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Half-hour rounding requires a reading for every UTC half hour.\n"
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
+                  "Use --invoice to compare declared supply charges for complete billing cycles.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.");
         return 0;
     }
     const std::function<bool()> stopped = [stop] { return stop && *stop; };
     const auto stopResult = [&]() {
-        if (!options.saveArg && !options.archiveArg) return 0;
+        if (!options.saveArg && !options.archiveArg && !options.invoiceArg) return 0;
         std::fputs(options.saveArg ? "meter-bill: archive save stopped before publication\n" :
-                                     "meter-bill: saved review verification stopped\n", stderr);
+                   options.archiveArg ? "meter-bill: saved review verification stopped\n" :
+                                        "meter-bill: invoice comparison stopped\n", stderr);
         return 130;
     };
     const auto fail = [&](const char *reason) { return stopped() ? stopResult() : refuse(reason); };
@@ -359,10 +378,26 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                       (imported.go ? " published price intervals including VAT.\n" : " half-hour prices including VAT.\n");
         }
 
+        const bool retainedInvoice = !original.invoice.empty();
+        if (options.invoiceArg) {
+            if (retainedInvoice) return fail("saved review already contains an invoice comparison");
+            if (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty())
+                return fail("invoice file unavailable, empty, oversized or not a regular file");
+        }
+        std::optional<MeterInvoice> invoice;
+        if (!original.invoice.empty()) {
+            if (const auto *problem = decodeMeterInvoice(original.invoice, declaration, invoice.emplace()))
+                return fail(problem);
+            report += "Invoice comparison uses " + std::to_string(invoice->places) + " decimal places with ties ";
+            report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
+        }
+
         std::string exact;
         auto *exactResults = archiving || reopening ? &exact : nullptr;
+        auto *exactInvoice = archiving || retainedInvoice ? exactResults : nullptr;
         if (const auto *problem = std::visit([&](const auto &series) {
-            return reviewReadings(series, declaration, cutoff, stopped, report, exactResults);
+            return reviewReadings(series, declaration, cutoff, stopped, report, exactResults,
+                                  invoice ? &*invoice : nullptr, exactInvoice);
         }, readings)) return fail(problem);
         if (stopped()) return stopResult();
         if (reopening && original.results != exact) return fail("saved review amounts differ from the recalculated amounts");

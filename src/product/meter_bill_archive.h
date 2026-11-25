@@ -10,27 +10,31 @@ namespace om::meter_bill_detail {
 constexpr size_t maxMeterFileBytes = 1024 * 1024;
 constexpr size_t maxExactResultsBytes = 32 * 1024;
 constexpr size_t maxOriginalArchiveBytes = tariffDeclarationMaxBytes + maxMeterFileBytes + maxExactResultsBytes + 256;
-constexpr size_t maxArchiveBytes = maxOriginalArchiveBytes + maxOctopusRateFileBytes + 16;
+constexpr size_t maxRatesArchiveBytes = maxOriginalArchiveBytes + maxOctopusRateFileBytes + 16;
+constexpr size_t maxArchiveBytes = maxRatesArchiveBytes + maxInvoiceBytes + 16;
 static_assert(maxArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-METER-REVIEW-1\n";
 
 constexpr std::string_view archiveRatesHeader = "CANARY-METER-REVIEW-2\n";
+constexpr std::string_view archiveInvoiceHeader = "CANARY-METER-REVIEW-3\n";
 
 struct ReviewOriginal {
-    std::string tariff, intervals, results, supplierRates;
+    std::string tariff, intervals, results, supplierRates, invoice;
     int64_t cutoff = 0;
 };
 
 inline std::string encodeReviewOriginal(const ReviewOriginal &review) {
-    std::string body(review.supplierRates.empty() ? archiveHeader : archiveRatesHeader);
+    std::string body(!review.invoice.empty() ? archiveInvoiceHeader :
+        review.supplierRates.empty() ? archiveHeader : archiveRatesHeader);
     body += std::to_string(review.cutoff) + '\n';
     for (const auto *part : {&review.tariff, &review.intervals, &review.results}) {
         body += std::to_string(part->size()) + '\n';
         body += *part;
     }
-    if (!review.supplierRates.empty()) {
-        body += std::to_string(review.supplierRates.size()) + '\n';
-        body += review.supplierRates;
+    for (const auto *part : {&review.invoice, &review.supplierRates}) {
+        if (part->empty()) continue;
+        body += std::to_string(part->size()) + '\n';
+        body += *part;
     }
     return body + sha256Hex(body) + '\n';
 }
@@ -38,8 +42,9 @@ inline std::string encodeReviewOriginal(const ReviewOriginal &review) {
 inline bool decodeReviewOriginal(const std::string &bytes, ReviewOriginal &out) {
     const auto header = std::string_view(bytes).substr(0, archiveHeader.size());
     const bool hasRates = header == archiveRatesHeader;
-    if (bytes.size() > (hasRates ? maxArchiveBytes : maxOriginalArchiveBytes) ||
-        (!hasRates && header != archiveHeader))
+    const bool hasInvoice = header == archiveInvoiceHeader;
+    if (bytes.size() > (hasInvoice ? maxArchiveBytes : hasRates ? maxRatesArchiveBytes : maxOriginalArchiveBytes) ||
+        (!hasRates && !hasInvoice && header != archiveHeader))
         return false;
 
     using local_review_archive::readArchiveNumber;
@@ -50,7 +55,9 @@ inline bool decodeReviewOriginal(const std::string &bytes, ReviewOriginal &out) 
         !readArchivePart(bytes, offset, tariffDeclarationMaxBytes, candidate.tariff) ||
         !readArchivePart(bytes, offset, maxMeterFileBytes, candidate.intervals) ||
         !readArchivePart(bytes, offset, maxExactResultsBytes, candidate.results) ||
-        (hasRates && !readArchivePart(bytes, offset, maxOctopusRateFileBytes, candidate.supplierRates)) ||
+        (hasInvoice && !readArchivePart(bytes, offset, maxInvoiceBytes, candidate.invoice)) ||
+        ((hasRates || (hasInvoice && bytes.size() - offset > 65)) &&
+            !readArchivePart(bytes, offset, maxOctopusRateFileBytes, candidate.supplierRates)) ||
         bytes.size() - offset != 65 || bytes.back() != '\n' ||
         bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
         return false;
