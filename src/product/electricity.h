@@ -9,7 +9,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for kWh and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -26,6 +26,9 @@ struct PowerEvidence {
 };
 struct PowerInterval { int64_t beginUtcMs = 0, endUtcMs = 0; ExactDecimal watts; };
 struct PowerTrace { PowerEvidence evidence; std::vector<PowerInterval> intervals; };
+// A measured quantity over the full interval carries no implied power profile within it.
+struct MeterImportInterval { int64_t beginUtcMs = 0, endUtcMs = 0; ElectricityAmount importedKwh; };
+struct MeterImportTrace { PowerEvidence evidence; std::vector<MeterImportInterval> intervals; };
 struct PowerObservation {
     int64_t utcMs = 0, monotonicMs = 0;
     std::optional<ExactDecimal> watts;  // absent sensor value is a gap, never zero
@@ -122,6 +125,10 @@ struct BillAccrual {
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
                       int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},
                       DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay);
+// Apply measured whole-meter import once under a single energy rate schedule per interval.
+BillAccrual accrueMeterImport(const TariffPlan &plan,const BillOpening &opening,const MeterImportTrace &trace,
+                             int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},
+                             DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay);
 struct CounterfactualBill {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     BillEstimate withoutMining, withMining;

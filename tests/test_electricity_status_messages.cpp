@@ -28,6 +28,9 @@ void native(){
         for(const auto &raw:std::vector<std::string>{"",std::string(5000,'x'),std::string("a\x1b\0b",4),"changed original {state}"}){problem.message=raw;CHECK(electricityStatusReasonEnglish(status,raw)==raw&&tariffDiagnosticReasonEnglish(problem)==raw);}
         problem.kind=TariffProblemKind::Unknown;CHECK(tariffDiagnosticReasonEnglish(problem)==problem.message);
     }
+    const auto meter=ElectricityStatus::MeterBoundary;
+    CHECK(!electricityStatusSourceKey(meter)&&electricityStatusReasonEnglish(meter,electricityStatusName(meter))==
+        "meter register needs a reading at an energy-rate boundary");
     const auto unknown=static_cast<ElectricityStatus>(99);CHECK(!electricityStatusSourceKey(unknown)&&english[10]==electricityStatusName(unknown)&&electricityStatusReasonEnglish(unknown,"raw original")=="raw original");
     TariffProblem missing;missing.kind=TariffProblemKind::ModelStatus;missing.message="missing status payload";CHECK(tariffDiagnosticReasonEnglish(missing)==missing.message);
     std::ifstream stream("config/tariff-declaration.example.json");const std::string text{std::istreambuf_iterator<char>(stream),{}};JsonValue original;TariffProblem problem;CHECK(parseTariffDeclaration(text,&original,&problem));

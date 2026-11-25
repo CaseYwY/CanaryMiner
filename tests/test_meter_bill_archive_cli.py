@@ -164,6 +164,31 @@ def main(cli):
         reject(save('rejected.cmr'), 'meter scope differs')
         assert not (root / 'rejected.cmr').exists() and not (root / 'rejected.cmr.tmp').exists()
 
+        register = {'schema_version': 2, 'scope': SCOPE, 'register_readings': [
+            {'utc_ms': END-HOUR, 'imported_kwh': '345.5'},
+            {'utc_ms': END, 'imported_kwh': '345.75'},
+            {'utc_ms': END+7, 'imported_kwh': '345.9'},
+        ]}
+        registers = json.dumps(register, indent=2).encode('utf-8') + b'\r\n'
+        meter_path.write_bytes(registers)
+        register_report = save('register.cmr')
+        assert register_report.returncode == 0 and not register_report.stderr, register_report
+        assert 'cumulative import readings' in register_report.stdout
+        register_archive = root / 'register.cmr'
+        register_bytes = register_archive.read_bytes()
+        register_cutoff, register_parts = frames(register_bytes)
+        assert (register_cutoff, register_parts[0], register_parts[1]) == (cutoff, tariff, registers)
+        register_exact = [json.loads(row) for row in register_parts[2].splitlines()]
+        assert [row[5] for row in register_exact] == ['900000000', '540000000']
+        meter_path.unlink()
+        tariff_path.unlink()
+        reopened = run('--open-review', register_archive.name)
+        assert (reopened.returncode, reopened.stderr, reopened.stdout) == (0, '', register_report.stdout)
+        altered = register_parts[1].replace(b'345.9', b'345.90000000001')
+        bad.write_bytes(pack(cutoff, [register_parts[0], altered, register_parts[2]]))
+        reject(run('--open-review', bad.name), 'differ from the recalculated amounts')
+        assert register_archive.read_bytes() == register_bytes
+
         # Exercise the archive size above the old 1 MiB generic file-read ceiling.
         tariff_path.write_bytes(tariff)
         meter_path.write_bytes(intervals.ljust(1024*1024, b' '))

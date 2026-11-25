@@ -1,6 +1,7 @@
 #include "electricity.h"
 #include <algorithm>
 #include <set>
+#include <type_traits>
 
 namespace om {
 namespace {
@@ -17,12 +18,18 @@ bool evidenceValid(const PowerEvidence &e) {
     return (e.basis == PowerBasis::GpuBoard || e.basis == PowerBasis::WholeSystemWall || e.basis == PowerBasis::DirectIncrementalWall || e.basis == PowerBasis::WholeMeterImport) &&
            (e.origin == PowerOrigin::SyntheticFixture || e.origin == PowerOrigin::ObservedTelemetry || e.origin == PowerOrigin::DeclaredForecast) && textKey(e.scope) && textKey(e.adapter);
 }
-ElectricityStatus validateTrace(const PowerTrace &trace, int64_t begin, int64_t end) {
+const ExactDecimal &intervalQuantity(const PowerInterval &interval) { return interval.watts; }
+const ExactDecimal &intervalQuantity(const MeterImportInterval &interval) { return interval.importedKwh.numerator; }
+template<class Trace>
+ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) {
     if (!evidenceValid(trace.evidence)) return ElectricityStatus::Invalid;
+    if constexpr (std::is_same_v<Trace, MeterImportTrace>) {
+        if (trace.evidence.basis != PowerBasis::WholeMeterImport) return ElectricityStatus::Invalid;
+    }
     if (trace.intervals.size() > maxTrace) return ElectricityStatus::Capacity;
     int64_t cursor = begin;
     for (const auto &i : trace.intervals) {
-        if (!instant(i.beginUtcMs) || !instant(i.endUtcMs) || i.beginUtcMs < cursor || i.endUtcMs <= i.beginUtcMs || i.endUtcMs > end || i.watts.negative()) return ElectricityStatus::Invalid;
+        if (!instant(i.beginUtcMs) || !instant(i.endUtcMs) || i.beginUtcMs < cursor || i.endUtcMs <= i.beginUtcMs || i.endUtcMs > end || intervalQuantity(i).negative()) return ElectricityStatus::Invalid;
         if (i.beginUtcMs != cursor) return ElectricityStatus::Unavailable;
         cursor = i.endUtcMs;
     }
@@ -98,6 +105,14 @@ bool tierCost(const std::vector<TariffBand> &bands, TierMode mode, const ExactDe
         lower = upper;
     }
     *cost = sum; return true;
+}
+bool sameMeterRates(const ExactDecimal &firstRate, const TariffRevision &first,
+                    const ExactDecimal &rate, const TariffRevision &current, TierMode mode) {
+    if (firstRate.compare(rate) != 0) return false;
+    if (mode != TierMode::Progressive || &first == &current) return true;
+    // Plan validation has already required identical thresholds.
+    return std::equal(first.bands.begin(),first.bands.end(),current.bands.begin(),
+        [](const TariffBand &a,const TariffBand &b){return a.ratePerKwh.compare(b.ratePerKwh) == 0;});
 }
 void cut(int64_t candidate, int64_t now, int64_t &next) { if (candidate > now && candidate < next) next = candidate; }
 ElectricityStatus timeRate(const TariffPlan &p, const TariffRevision &r, int64_t now, int64_t decision, ExactDecimal &rate, int64_t &next, CivilStamp &stamp) {
@@ -179,6 +194,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::NotYetKnown: return "rate published after decision instant";
         case ElectricityStatus::ClockFault: return "regressed or inconsistent sample clocks";
         case ElectricityStatus::Capacity: return "bounded arithmetic/input/evaluation capacity exceeded";
+        case ElectricityStatus::MeterBoundary: return "meter register needs a reading at an energy-rate boundary";
     }
     return "unknown electricity status";
 }
@@ -214,7 +230,8 @@ EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerO
 ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
-static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision,bool accrual,
+template<class Trace>
+static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const Trace &trace,int64_t end,int64_t decision,bool accrual,
                                      const std::atomic<bool> *cancel=nullptr, const std::function<bool()> &stop={},
                                      DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
@@ -253,6 +270,8 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     }
     for (const auto &i : trace.intervals) {
         int64_t now = i.beginUtcMs;
+        [[maybe_unused]] const TariffRevision *firstRevision = nullptr;
+        [[maybe_unused]] ExactDecimal firstRate;
         while (now < i.endUtcMs) {
             if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop())) {
                 result.status = ElectricityStatus::Unavailable;
@@ -274,7 +293,22 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
                 previousDate = stamp.date;
             }
             ExactDecimal energy, newQuantity;
-            if (!i.watts.multiply(number(next-now),&energy) || !quantity.add(energy,&newQuantity) || !productAdd(cost,energy,rate)) { result.status = ElectricityStatus::Capacity; return result; }
+            if constexpr (std::is_same_v<Trace, MeterImportTrace>) {
+                energy = i.importedKwh.numerator;
+                if (!firstRevision) {
+                    firstRevision = &r;
+                    firstRate = rate;
+                } else if (!energy.zero() && !sameMeterRates(firstRate,*firstRevision,rate,r,p.tiers)) {
+                    result.status = ElectricityStatus::MeterBoundary;
+                    return result;
+                }
+                // Walk every time segment for fees and rate validation, then apply the known energy once.
+                if (next < i.endUtcMs) { now = next; continue; }
+            } else if (!i.watts.multiply(number(next-now),&energy)) {
+                result.status = ElectricityStatus::Capacity;
+                return result;
+            }
+            if (!quantity.add(energy,&newQuantity) || !productAdd(cost,energy,rate)) { result.status = ElectricityStatus::Capacity; return result; }
             if (p.tiers == TierMode::Progressive) {
                 ExactDecimal before, after, delta;
                 if (!tierCost(r.bands,p.tiers,quantity,&before) || !tierCost(r.bands,p.tiers,newQuantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta)) { result.status = ElectricityStatus::Capacity; return result; }
@@ -302,8 +336,9 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
 BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision) {
     return evaluateBillImpl(p,opening,trace,end,decision,false);
 }
-BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed,
-                      const std::function<bool()> &stop, DailyFeeAllocation dailyFeeAllocation) {
+template<class Trace>
+static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening,const Trace &trace,int64_t end,int64_t observed,
+                                 const std::function<bool()> &stop,DailyFeeAllocation dailyFeeAllocation) {
     BillAccrual result;
     if(stop&&stop())return result;
     if(end>observed){result.status=ElectricityStatus::NotYetKnown;return result;}
@@ -315,6 +350,14 @@ BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const Powe
     if(step.cycleSettled)result.settledTotal=total;
     else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value();
     return result;
+}
+BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed,
+                      const std::function<bool()> &stop,DailyFeeAllocation dailyFeeAllocation) {
+    return accrueBillImpl(p,opening,trace,end,observed,stop,dailyFeeAllocation);
+}
+BillAccrual accrueMeterImport(const TariffPlan &p,const BillOpening &opening,const MeterImportTrace &trace,int64_t end,int64_t observed,
+                             const std::function<bool()> &stop,DailyFeeAllocation dailyFeeAllocation) {
+    return accrueBillImpl(p,opening,trace,end,observed,stop,dailyFeeAllocation);
 }
 CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &base, const PowerTrace &with, int64_t end, int64_t decision,
                                      const std::atomic<bool> *cancel, DailyFeeAllocation dailyFeeAllocation) {
