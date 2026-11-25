@@ -195,6 +195,40 @@ The review takes the difference between adjacent cumulative readings and rounds 
 
 Changing the rule during a cycle clears the accrued subtotal and requires a new reviewed value. It preserves the physical import. The option applies to cumulative whole-meter register files with no tiers. Average-watt files, Dashboard scenarios, and the durable fixture billing ledger require display-only rounding. Existing declarations keep their saved rule. Select display-only rounding and review the opening before using the declaration in a release that predates this option.
 
+### Review publicly listed Octopus Agile prices
+
+Use a package with the reviewed IANA data and a schema 4 declaration. The
+[March 2023 example](../config/tariff-declaration.octopus.example.json) covers a complete London civil month.
+Choose the dated Agile import product, its one-letter tariff region in the declaration's territory field, and
+the payment method. Use GBP, the Europe/London clock, half-hour register rounding and one dynamic revision with
+empty prices and a zero daily fee. Use a subtotal multiplier of 1, with no tiers, cycle charge or minimum.
+The revision starts and ends at London local midnight and covers the reviewed billing cycles. For a complete
+cycle, set the opening to the cycle start with zero accrued usage and charges, then supply adjacent UTC half-hour
+register readings through the close. Use the same scope in both files.
+
+Capture the public rate pages once from the repository with Python 3.8 or later. Give the capture a new filename
+in a trusted local directory and use the UTC instants for the local window boundaries (inclusive start, exclusive end).
+
+```text
+python tools/capture_octopus_rates.py --product AGILE-FLEX-22-11-25 --region C --payment-method DIRECT_DEBIT --begin 2023-03-01T00:00:00Z --end 2023-03-31T23:00:00Z --output march-rates.json
+canary-miner meter-bill --tariff config/tariff-declaration.octopus.example.json --intervals register-march.json --octopus-rates march-rates.json --save-review march.cmr
+canary-miner meter-bill --open-review march.cmr
+```
+
+The capture uses the unauthenticated standard-unit-rate and standing-charge endpoints and saves the original page
+contents along with the tariff identity, payment choice and local observation time. Meter readings stay local.
+[Octopus API price endpoints](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#price-endpoints)
+
+The offline review checks that every half hour has one applicable price and every London day has one applicable
+standing charge. It applies the prices including VAT, including negative energy prices. An ambiguous payment
+row, missing page or midday fee change withholds the review. The file limit is 2 MiB and 8,192 listed unit
+prices. Capture only elapsed periods and use a review cutoff at or after the observation timestamp printed in the
+report. A later capture cannot supply prices to an earlier historical cutoff. The report estimates costs from the
+supplied files. It carries no invoice reconciliation or proof of the supplier's original publication time.
+
+When saving, the archive also keeps the captured pages byte for byte and replays them together with the declaration
+and readings. Archives made with captured rates require a version of CanaryMiner with Agile import support.
+
 ### Save and reopen a local meter review
 
 Add `--save-review NAME.cmr` to a successful `meter-bill` review to save a new archive in the current directory. Use an ASCII basename ending in `.cmr`. Run the command from a private, trusted local directory. The archive contains the original tariff declaration and all supplied meter readings, so it carries the same privacy considerations as those files.

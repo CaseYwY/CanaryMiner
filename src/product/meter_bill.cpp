@@ -18,7 +18,7 @@ using namespace meter_bill_detail;
 constexpr size_t maxMeterIntervals = 8192;
 
 using MeterReadings = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
-struct MeterBillPaths { std::filesystem::path tariff, intervals, archive; };
+struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
     const auto validIndex = [argc](int index) { return index >= 3 && index < argc; };
@@ -26,7 +26,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
                            : !validIndex(options.tariffArg) || !validIndex(options.intervalsArg))
         return std::nullopt;
     if ((options.reviewCutoffArg && !validIndex(options.reviewCutoffArg)) ||
-        (options.saveArg && !validIndex(options.saveArg)))
+        (options.saveArg && !validIndex(options.saveArg)) ||
+        (options.ratesArg && !validIndex(options.ratesArg)))
         return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -44,7 +45,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     };
     if (options.archiveArg) {
         if (!matches(options.archiveArg, L"--open-review")) return std::nullopt;
-        return MeterBillPaths{{}, {}, args.values[options.archiveArg]};
+        return MeterBillPaths{{}, {}, args.values[options.archiveArg], {}};
     }
     if (!matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals"))
         return std::nullopt;
@@ -56,10 +57,14 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         (!matches(options.saveArg, L"--save-review") ||
          std::wstring_view(args.values[options.saveArg]) != std::wstring(options.archiveName.begin(), options.archiveName.end())))
         return std::nullopt;
-    return MeterBillPaths{args.values[options.tariffArg], args.values[options.intervalsArg], {}};
+    if (options.ratesArg && !matches(options.ratesArg, L"--octopus-rates"))
+        return std::nullopt;
+    return MeterBillPaths{args.values[options.tariffArg], args.values[options.intervalsArg], {},
+                          options.ratesArg ? std::filesystem::path(args.values[options.ratesArg]) : std::filesystem::path{}};
 #else
-    if (options.archiveArg) return MeterBillPaths{{}, {}, argv[options.archiveArg]};
-    return MeterBillPaths{argv[options.tariffArg], argv[options.intervalsArg], {}};
+    if (options.archiveArg) return MeterBillPaths{{}, {}, argv[options.archiveArg], {}};
+    return MeterBillPaths{argv[options.tariffArg], argv[options.intervalsArg], {},
+                          options.ratesArg ? std::filesystem::path(argv[options.ratesArg]) : std::filesystem::path{}};
 #endif
 }
 
@@ -238,12 +243,13 @@ int refuse(const char *reason) {
 
 int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
     if (options.help) {
-        std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--as-of-utc-ms MS] [--save-review NAME.cmr]\n"
+        std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS] [--save-review NAME.cmr]\n"
                   "canary-miner meter-bill --open-review FILE\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
                   "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
                   "Half-hour rounding requires cumulative register readings at every UTC half hour.\n"
+                  "Use --octopus-rates to apply captured public Agile prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.");
@@ -315,6 +321,19 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                 return fail("half-hour rounding requires cumulative whole-meter register readings");
             report += "Billing rounds each complete UTC half hour to 0.01 kWh, ties to even, before applying the rate.\n";
         }
+        if (options.ratesArg &&
+            (!readLocalReviewInput(paths->rates, maxOctopusRateFileBytes, original.supplierRates) ||
+             original.supplierRates.empty()))
+            return fail("Octopus Agile rate file unavailable, empty, oversized or not a regular file");
+        if (!original.supplierRates.empty()) {
+            OctopusRateImport imported;
+            if (const auto *problem = importOctopusRates(original.supplierRates, cutoff, declaration, imported, stopped))
+                return fail(problem);
+            report += "Octopus Agile public rate snapshot (" + imported.paymentMethod + ")\n";
+            report += "  Observed " + std::to_string(imported.observedUtcMs) + " UTC ms, " +
+                      std::to_string(imported.intervals) + " half-hour prices including VAT.\n";
+        }
+
         std::string exact;
         auto *exactResults = archiving || reopening ? &exact : nullptr;
         if (const auto *problem = std::visit([&](const auto &series) {

@@ -2,32 +2,44 @@
 #include "hash.h"
 #include "local_review_archive.h"
 #include "meter_bill.h"
+#include "octopus_meter_rates.h"
 #include "tariff_declaration.h"
 
 namespace om::meter_bill_detail {
 
 constexpr size_t maxMeterFileBytes = 1024 * 1024;
 constexpr size_t maxExactResultsBytes = 32 * 1024;
-constexpr size_t maxArchiveBytes = tariffDeclarationMaxBytes + maxMeterFileBytes + maxExactResultsBytes + 256;
+constexpr size_t maxOriginalArchiveBytes = tariffDeclarationMaxBytes + maxMeterFileBytes + maxExactResultsBytes + 256;
+constexpr size_t maxArchiveBytes = maxOriginalArchiveBytes + maxOctopusRateFileBytes + 16;
+static_assert(maxArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-METER-REVIEW-1\n";
 
+constexpr std::string_view archiveRatesHeader = "CANARY-METER-REVIEW-2\n";
+
 struct ReviewOriginal {
-    std::string tariff, intervals, results;
+    std::string tariff, intervals, results, supplierRates;
     int64_t cutoff = 0;
 };
 
 inline std::string encodeReviewOriginal(const ReviewOriginal &review) {
-    std::string body(archiveHeader);
+    std::string body(review.supplierRates.empty() ? archiveHeader : archiveRatesHeader);
     body += std::to_string(review.cutoff) + '\n';
     for (const auto *part : {&review.tariff, &review.intervals, &review.results}) {
         body += std::to_string(part->size()) + '\n';
         body += *part;
     }
+    if (!review.supplierRates.empty()) {
+        body += std::to_string(review.supplierRates.size()) + '\n';
+        body += review.supplierRates;
+    }
     return body + sha256Hex(body) + '\n';
 }
 
 inline bool decodeReviewOriginal(const std::string &bytes, ReviewOriginal &out) {
-    if (bytes.size() > maxArchiveBytes || std::string_view(bytes).substr(0, archiveHeader.size()) != archiveHeader)
+    const auto header = std::string_view(bytes).substr(0, archiveHeader.size());
+    const bool hasRates = header == archiveRatesHeader;
+    if (bytes.size() > (hasRates ? maxArchiveBytes : maxOriginalArchiveBytes) ||
+        (!hasRates && header != archiveHeader))
         return false;
 
     using local_review_archive::readArchiveNumber;
@@ -38,6 +50,7 @@ inline bool decodeReviewOriginal(const std::string &bytes, ReviewOriginal &out) 
         !readArchivePart(bytes, offset, tariffDeclarationMaxBytes, candidate.tariff) ||
         !readArchivePart(bytes, offset, maxMeterFileBytes, candidate.intervals) ||
         !readArchivePart(bytes, offset, maxExactResultsBytes, candidate.results) ||
+        (hasRates && !readArchivePart(bytes, offset, maxOctopusRateFileBytes, candidate.supplierRates)) ||
         bytes.size() - offset != 65 || bytes.back() != '\n' ||
         bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
         return false;

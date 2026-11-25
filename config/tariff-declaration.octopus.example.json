@@ -1,0 +1,52 @@
+{
+  "schema_version": 4,
+  "country": "GB",
+  "source_reference": "Example for public Octopus Agile March 2023 prices and synthetic meter readings",
+  "acknowledged": true,
+  "confirmed_utc": 1677628800,
+  "reset_policy": "explicit_cycle_only",
+  "plan": {
+    "key": "example-octopus-agile-march-2023",
+    "territory": "C",
+    "supplier": "Octopus Energy",
+    "product": "AGILE-FLEX-22-11-25",
+    "currency": "GBP",
+    "clock": {
+      "kind": "named_iana",
+      "zone": "Europe/London",
+      "time_database_version": "2026e"
+    },
+    "tiers": "none",
+    "rounding": "meter_import_half_hour_kwh_half_even_2",
+    "cycle_charge": "0",
+    "minimum_cycle_subtotal": null,
+    "subtotal_multiplier": "1",
+    "revisions": [
+      {
+        "key": "example-public-rate-window",
+        "begin_utc_ms": 1677628800000,
+        "end_utc_ms": 1680303600000,
+        "published_utc_ms": 1677628800000,
+        "time_mode": "dynamic",
+        "base_rate_per_kwh": "0",
+        "charge_per_civil_day": "0",
+        "calendar": [],
+        "dynamic": [],
+        "bands": []
+      }
+    ]
+  },
+  "opening": {
+    "key": "example-octopus-opening",
+    "scope": "synthetic-whole-meter-scenario",
+    "adapter": "user-declared-offline",
+    "basis": "whole_meter_import",
+    "origin": "declared_forecast",
+    "cycle_begin_utc_ms": 1677628800000,
+    "cycle_end_utc_ms": 1680303600000,
+    "through_utc_ms": 1677628800000,
+    "imported_kwh": "0",
+    "accrued_subtotal": "0",
+    "time_database_version": "2026e"
+  }
+}
