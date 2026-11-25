@@ -6,6 +6,7 @@ namespace om {
 enum class EnergyRecoveryMode { Volatile, Inspect, Submit, Retry };
 enum class EnergyRecoveryState { Disabled, Empty, Prepared, Confirmed, Rejected, Diverged, Unavailable };
 constexpr size_t energyHistoryRequestLimit=64*1024;
+constexpr size_t maxEnergyPeriods=12;
 struct EnergyHistoryQuery {
     int64_t beginUtcMs=0,endUtcMs=0;
     std::string registerId,periodId; // optional exact-window assertion; mismatch rejects instead of choosing another period
@@ -51,6 +52,11 @@ bool decodeEnergyHistoryRequest(const std::string &wire,EnergyHistoryRequest *re
 bool encodeEnergyHistoryReply(const EnergyHistoryRequest &request,const EnergyHistoryReply &reply,std::string *wire);
 bool decodeEnergyHistoryReply(const EnergyHistoryRequest &request,const std::string &wire,EnergyHistoryReply *reply);
 EnergyHistoryReply executeEnergyHistoryRequest(const EnergyHistoryRequest &request); // helper-side synchronous I/O only
+// A distinct parent-bound protocol, using Existing + Inspect and plain time ranges only.
+EnergyHistoryProcessResult queryEnergyPeriods(const std::filesystem::path &helper, const EnergyHistoryRequest &request,
+                                            const std::atomic<bool> &cancel, unsigned timeoutMs);
+int serveEnergyPeriods(const std::string &wire);
+inline constexpr char energyPeriodsRequestHeader[] = "CMERQ1\n";
 class EnergyHistoryProcessClient {
    public:
     explicit EnergyHistoryProcessClient(std::filesystem::path helper,std::optional<EnergyCollectorFence> fence={}):process_(std::move(helper)),fence_(std::move(fence)){}

@@ -136,10 +136,12 @@ bool decodeEnergyCollectorGuardRequest(const std::string &wire,EnergyCollectorGu
 int serveEnergyCollectorLease(const EnergyCollectorLeaseRequest &r){
     std::string checked;if(!encodeEnergyCollectorLeaseRequest(r,&checked)||!bindLocalTaskParent(r.parentPid))return 2;
     const auto &path=r.provision.file;LocalStoreLease lifetime;
-    if(!lifetime.acquire(suffixed(path,".collector.lock")))return 3; // no waiting or stealing a live collector
+    LocalStoreLease historyActivity;
+    if(!historyActivity.acquire(energyHistoryActivityPath(path))||
+       !lifetime.acquire(energyCollectorLeasePath(path)))return 3; // no waiting or stealing a live collector
     EnergyCollectorLeaseReply reply;
     {
-        LocalStoreLease operation;if(!operation.acquire(suffixed(path,".collector-operation.lock")))return 4;
+        LocalStoreLease operation;if(!operation.acquire(energyCollectorOperationPath(path)))return 4;
         const auto recordPath=suffixed(path,".collector.json");std::error_code ec;const auto prior=std::filesystem::symlink_status(recordPath,ec);
         const bool absent=ec==std::errc::no_such_file_or_directory||(!ec&&prior.type()==std::filesystem::file_type::not_found);
         EnergyAuthorizationDocument previous;std::string previousEpoch;
@@ -180,8 +182,8 @@ EnergyHistoryReply executeEnergyCollectorGuard(const EnergyCollectorGuardRequest
         for(unsigned n=0;n<3000&&!std::filesystem::exists(suffixed(r.fence.authorizationFile,".fixture-release"));++n)std::this_thread::sleep_for(std::chrono::milliseconds(20));}
 #endif
     LocalStoreLease operation;
-    if(!operation.acquire(suffixed(r.fence.authorizationFile,".collector-operation.lock"))){reply.opened=EnergyHistoryStatus::Storage;reply.recovery->status=reply.opened;return reply;}
-    const auto held=localStoreLeaseHeld(suffixed(r.fence.authorizationFile,".collector.lock"));
+    if(!operation.acquire(energyCollectorOperationPath(r.fence.authorizationFile))){reply.opened=EnergyHistoryStatus::Storage;reply.recovery->status=reply.opened;return reply;}
+    const auto held=localStoreLeaseHeld(energyCollectorLeasePath(r.fence.authorizationFile));
     if(!held||!*held)return reply;
     EnergyAuthorizationDocument d;std::string epoch;
     if(!load(suffixed(r.fence.authorizationFile,".collector.json"),epoch,d)||epoch!=r.fence.epoch||r.history.file!=energyAuthorizationStorePath(r.fence.authorizationFile,d)||

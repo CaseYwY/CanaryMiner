@@ -2,10 +2,15 @@
 #include "energy_history_model.h"
 #include "energy_recovery.h"
 #include "energy_collector_process.h"
+#include "energy_runtime.h"
+#include "local_store_lease.h"
 #include "hash.h"
 #include "json_dom.h"
 #include "public_https.h" // shared bounded JSON lexical guard only
 #include <algorithm>
+#include <charconv>
+#include <chrono>
+#include <string_view>
 #include <cstdlib>
 
 namespace om {
@@ -23,9 +28,11 @@ bool str(const JsonValue &v,std::string &s,size_t max=4096){if(!v.isString()||v.
 bool null(const JsonValue &v){return v.type==JsonValue::Type::Null;}
 bool status(const JsonValue &v,EnergyHistoryStatus &s){uint64_t n=0;if(!u(v,n,static_cast<unsigned>(EnergyHistoryStatus::DetailExpired)))return false;s=static_cast<EnergyHistoryStatus>(n);return true;}
 bool decimal(const JsonValue &v,ExactDecimal &d){return v.isString()&&v.text.size()<=150&&ExactDecimal::parse(v.text,&d)&&d.text()==v.text&&!d.negative();}
-bool valid(const EnergyHistoryRequest &r){
+bool valid(const EnergyHistoryRequest &r, bool periods = false){
+    if (periods && (r.mode != EnergyHistoryOpen::Existing || r.recovery != EnergyRecoveryMode::Inspect || r.batch))
+        return false;
     if(!r.generation||!r.ticket||!localTaskPath(r.file)||!validEnergyHistoryBinding(r.binding)||!validEnergyHistoryLimits(r.limits)||!instant(r.nowUtcMs)||r.binding.historyBeginUtcMs>r.nowUtcMs||
-        (r.mode!=EnergyHistoryOpen::Existing&&r.mode!=EnergyHistoryOpen::CreateNew)||r.queries.size()>4)return false;
+        (r.mode!=EnergyHistoryOpen::Existing&&r.mode!=EnergyHistoryOpen::CreateNew)||r.queries.size()>(periods ? maxEnergyPeriods : 4))return false;
     switch(r.recovery){
         case EnergyRecoveryMode::Volatile:break;
         case EnergyRecoveryMode::Inspect:if(r.batch)return false;break;
@@ -34,7 +41,7 @@ bool valid(const EnergyHistoryRequest &r){
         default:return false;
     }
     for(const auto &q:r.queries)if(!instant(q.beginUtcMs)||!instant(q.endUtcMs)||q.beginUtcMs>=q.endUtcMs||q.endUtcMs>r.nowUtcMs||
-        (q.registerId.empty()? !q.periodId.empty():!identifier(q.registerId)||!identifier(q.periodId)))return false;
+        (q.registerId.empty()? !q.periodId.empty():periods||!identifier(q.registerId)||!identifier(q.periodId)))return false;
     return !r.batch||boundedEnergyHistoryBatch(r.binding,*r.batch,r.nowUtcMs);
 }
 std::string headText(const EnergyHistoryCheckpoint &c,bool persistent,bool compact){
@@ -104,9 +111,8 @@ bool recovery(const JsonValue &v,const EnergyHistoryRequest &r,const EnergyHisto
     if(reply.applied&&accepted(*reply.applied))return s.state==R::Confirmed&&s.batch&&r.batch&&batchText(*s.batch)==batchText(*r.batch);
     return true;
 }
-}
-bool encodeEnergyHistoryRequest(const EnergyHistoryRequest &r,std::string *wire){
-    if(!wire||!valid(r))return false;
+bool encodeRequest(const EnergyHistoryRequest &r,std::string *wire,bool periods){
+    if(!wire||!valid(r,periods))return false;
     try{
         std::string text=std::string(r.limits.compaction?"[\"CMEQ3\",":r.recovery==EnergyRecoveryMode::Volatile?"[\"CMEQ1\",":"[\"CMEQ2\",")+std::to_string(r.generation)+","+std::to_string(r.ticket)+","+jsonQuote(r.file.u8string())+","+bindingText(r.binding)+",["+
             std::to_string(r.limits.maxBatches)+","+std::to_string(r.limits.maxReadings)+","+std::to_string(r.limits.maxSessions)+","+std::to_string(r.limits.maxWindows)+","+
@@ -118,14 +124,14 @@ bool encodeEnergyHistoryRequest(const EnergyHistoryRequest &r,std::string *wire)
         text+="]";if(text.size()>requestLimit||!boundedPublicJson(text))return false;*wire=std::move(text);return true;
     }catch(...){return false;}
 }
-bool decodeEnergyHistoryRequest(const std::string &wire,EnergyHistoryRequest *out){
+bool decodeRequest(const std::string &wire,EnergyHistoryRequest *out,bool periods){
     if(!out||wire.size()>requestLimit||!boundedPublicJson(wire))return false;
     JsonValue v;if(!parseJsonStrict(wire,&v,nullptr)||!v.isArray()||v.items.empty()||!v.items[0].isString())return false;
     const bool compact=v.items[0].text=="CMEQ3",persistent=v.items[0].text=="CMEQ2";
     if(!array(v,compact?12:persistent?11:10)||(!compact&&!persistent&&v.items[0].text!="CMEQ1"))return false;
     const auto &a=v.items;EnergyHistoryRequest r;std::string path;uint64_t mode=0,n[5]={};
     if(!u(a[1],r.generation,UINT64_MAX)||!u(a[2],r.ticket,UINT64_MAX)||!str(a[3],path)||
-        !parseBindingValue(a[4],&r.binding)||!array(a[5],5)||!u(a[6],mode,1)||!time(a[7],r.nowUtcMs)||!a[9].isArray()||a[9].items.size()>4)return false;
+        !parseBindingValue(a[4],&r.binding)||!array(a[5],5)||!u(a[6],mode,1)||!time(a[7],r.nowUtcMs)||!a[9].isArray()||a[9].items.size()>(periods ? maxEnergyPeriods : 4))return false;
     for(size_t i=0;i<5;++i)if(!u(a[5].items[i],n[i],128*1024*1024))return false;
     r.limits={static_cast<size_t>(n[0]),static_cast<size_t>(n[1]),static_cast<size_t>(n[2]),static_cast<size_t>(n[3]),n[4]};r.mode=static_cast<EnergyHistoryOpen>(mode);
     if(persistent||compact){uint64_t recoveryMode=0;if(!u(a[10],recoveryMode,3)||(!compact&&!recoveryMode))return false;r.recovery=static_cast<EnergyRecoveryMode>(recoveryMode);}
@@ -134,21 +140,22 @@ bool decodeEnergyHistoryRequest(const std::string &wire,EnergyHistoryRequest *ou
     try{r.file=std::filesystem::u8path(path);}catch(...){return false;}
     if(!null(a[8])){EnergyHistoryBatch b;if(!parseBatchValue(a[8],r.binding,&b))return false;r.batch=std::move(b);}
     for(const auto &s:a[9].items){EnergyHistoryQuery q;if(!array(s,4)||!time(s.items[0],q.beginUtcMs)||!time(s.items[1],q.endUtcMs)||!str(s.items[2],q.registerId,128)||!str(s.items[3],q.periodId,128))return false;r.queries.push_back(std::move(q));}
-    if(!valid(r))return false;
+    if(!valid(r,periods))return false;
     *out=std::move(r);return true;
 }
-bool encodeEnergyHistoryReply(const EnergyHistoryRequest &r,const EnergyHistoryReply &reply,std::string *wire){
-    if(!wire||!valid(r)||reply.totals.size()>4)return false;
+bool decodeReply(const EnergyHistoryRequest &r,const std::string &wire,EnergyHistoryReply *out,bool periods);
+bool encodeReply(const EnergyHistoryRequest &r,const EnergyHistoryReply &reply,std::string *wire,bool periods){
+    if(!wire||!valid(r,periods)||reply.totals.size()>(periods ? maxEnergyPeriods : 4))return false;
     const bool persistent=r.recovery!=EnergyRecoveryMode::Volatile;if(persistent!=reply.recovery.has_value())return false;
     const bool compact=r.limits.compaction.has_value();
     std::string text=std::string(compact?"[\"CMEA3\",":persistent?"[\"CMEA2\",":"[\"CMEA1\",")+std::to_string(reply.generation)+","+std::to_string(reply.ticket)+","+std::to_string(static_cast<unsigned>(reply.opened))+","+
         (reply.applied?std::to_string(static_cast<unsigned>(*reply.applied)):"null")+","+headText(reply.checkpoint,persistent,compact)+",[";
     for(size_t i=0;i<reply.totals.size();++i){if(i)text+=',';text+=totalText(reply.totals[i]);}
     text+="]";if(persistent)text+=","+recoveryText(*reply.recovery);else if(compact)text+=",null";text+="]";
-    EnergyHistoryReply checked;if(!decodeEnergyHistoryReply(r,text,&checked))return false;*wire=std::move(text);return true;
+    EnergyHistoryReply checked;if(!decodeReply(r,text,&checked,periods))return false;*wire=std::move(text);return true;
 }
-bool decodeEnergyHistoryReply(const EnergyHistoryRequest &r,const std::string &wire,EnergyHistoryReply *out){
-    if(!out||!valid(r)||wire.size()>localTaskResponseLimit||!boundedPublicJson(wire))return false;
+bool decodeReply(const EnergyHistoryRequest &r,const std::string &wire,EnergyHistoryReply *out,bool periods){
+    if(!out||!valid(r,periods)||wire.size()>localTaskResponseLimit||!boundedPublicJson(wire))return false;
     const bool persistent=r.recovery!=EnergyRecoveryMode::Volatile;
     const bool compact=r.limits.compaction.has_value();
     JsonValue v;if(!parseJsonStrict(wire,&v,nullptr)||!array(v,(persistent||compact)?8:7))return false;
@@ -179,6 +186,149 @@ bool decodeEnergyHistoryReply(const EnergyHistoryRequest &r,const std::string &w
         reply.recovery=std::move(s);}
     *out=std::move(reply);return true;
 }
+constexpr char periodsReplyHeader[] = "CMERA1\n";
+constexpr char periodsBusyReply[] = "CMERA1\nbusy";
+
+S inspectStatus(const EnergyRecoverySnapshot &snapshot) {
+    if (snapshot.status != S::Ok) return snapshot.status;
+    switch (snapshot.state) {
+        case R::Empty: case R::Confirmed: case R::Rejected: return S::Ok;
+        default: return S::Conflict;
+    }
+}
+
+int64_t currentUtcMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+EnergyHistoryReply inspectPeriods(EnergyHistoryRequest &request) {
+    EnergyHistoryReply reply;
+    reply.generation = request.generation;
+    reply.ticket = request.ticket;
+    reply.recovery.emplace();
+    const auto fail = [&](S status) {
+        reply.opened = status;
+        reply.checkpoint = {};
+        reply.recovery = EnergyRecoverySnapshot{};
+        reply.recovery->status = status;
+        reply.totals.clear();
+        return std::move(reply);
+    };
+
+    EnergyRecoveryJournal journal;
+    auto source = request;
+    source.queries.clear();
+    const auto journalStatus = journal.open(source, EnergyRecoveryOpen::QueryOnly);
+    if (journalStatus != S::Ok) return fail(journalStatus);
+    EnergyHistoryLedger ledger;
+    const auto sourceStatus = ledger.open(request.file, request.binding, request.nowUtcMs,
+                                          EnergyHistoryOpen::ExistingQuery, request.limits);
+    if (sourceStatus != S::Ok) return fail(sourceStatus);
+    reply.checkpoint = ledger.checkpoint(request.nowUtcMs);
+    if (reply.checkpoint.status != S::Ok) return fail(reply.checkpoint.status);
+    reply.recovery = journal.inspect(ledger, request.nowUtcMs);
+    const auto recovered = inspectStatus(*reply.recovery);
+    if (recovered != S::Ok) return fail(recovered);
+
+    for (const auto &range : request.queries) {
+        auto totals = ledger.query(range.beginUtcMs, range.endUtcMs, request.nowUtcMs);
+        if (totals.status != S::Ok) return fail(totals.status);
+        reply.totals.push_back(std::move(totals));
+    }
+    reply.opened = S::Ok;
+    return reply;
+}
+} // namespace
+
+bool encodeEnergyHistoryRequest(const EnergyHistoryRequest &r,std::string *wire){
+    return encodeRequest(r,wire,false);
+}
+bool decodeEnergyHistoryRequest(const std::string &wire,EnergyHistoryRequest *out){
+    return decodeRequest(wire,out,false);
+}
+bool encodeEnergyHistoryReply(const EnergyHistoryRequest &r,const EnergyHistoryReply &reply,std::string *wire){
+    return encodeReply(r,reply,wire,false);
+}
+bool decodeEnergyHistoryReply(const EnergyHistoryRequest &r,const std::string &wire,EnergyHistoryReply *out){
+    return decodeReply(r,wire,out,false);
+}
+
+int serveEnergyPeriods(const std::string &wire) {
+    constexpr size_t begin = sizeof(energyPeriodsRequestHeader) - 1;
+    if (wire.rfind(energyPeriodsRequestHeader, 0) != 0 || wire.size() > requestLimit) return 3;
+    const auto end = wire.find('\n', begin);
+    if (end == std::string::npos || end == begin || end - begin > 10 || wire[begin] == '0') return 3;
+    uint32_t parent = 0;
+    const auto parsed = std::from_chars(wire.data() + begin, wire.data() + end, parent);
+    EnergyHistoryRequest request;
+    if (parsed.ec != std::errc{} || parsed.ptr != wire.data() + end || !parent ||
+        !decodeRequest(wire.substr(end + 1), &request, true) || !bindLocalTaskParent(parent)) return 3;
+    // Reporting and collection exclude each other without giving a reporter a collector fence.
+    LocalStoreLease activity;
+    const auto authorizationFile = request.file.parent_path() / energyAuthorizationName;
+    if (!activity.acquire(energyHistoryActivityPath(authorizationFile)))
+        return writeLocalTaskOutput(periodsBusyReply) ? 0 : 4;
+    // An operation admitted before the holder stopped may still be finishing.
+    LocalStoreLease operation;
+    if (!operation.acquire(energyCollectorOperationPath(authorizationFile)))
+        return writeLocalTaskOutput(periodsBusyReply) ? 0 : 4;
+    // Check the legacy lifetime only while guards are excluded.
+    const auto legacyLease = energyCollectorLeasePath(authorizationFile);
+    std::error_code pathError;
+    const auto status = std::filesystem::symlink_status(legacyLease, pathError);
+    if ((pathError && pathError != std::errc::no_such_file_or_directory) ||
+        (std::filesystem::exists(status) && localStoreLeaseHeld(legacyLease) != false))
+        return writeLocalTaskOutput(periodsBusyReply) ? 0 : 4;
+
+    const auto auditTime = currentUtcMs();
+    if (auditTime < request.nowUtcMs || !instant(auditTime)) return 4;
+    request.nowUtcMs = auditTime;
+    std::string reply;
+    const auto inspected = inspectPeriods(request);
+    return encodeReply(request, inspected, &reply, true) &&
+           writeLocalTaskOutput(periodsReplyHeader + reply) ? 0 : 4;
+}
+
+EnergyHistoryProcessResult queryEnergyPeriods(const std::filesystem::path &helper, const EnergyHistoryRequest &request,
+                                            const std::atomic<bool> &cancel, unsigned timeoutMs) {
+    EnergyHistoryProcessResult result;
+    if (cancel) {
+        result.transport = LocalTaskStatus::Cancelled;
+        return result;
+    }
+    std::string payload;
+    if (!encodeRequest(request, &payload, true)) {
+        result.transport = LocalTaskStatus::Invalid;
+        return result;
+    }
+    const auto wire = energyPeriodsRequestHeader + std::to_string(localTaskProcessId()) + "\n" + payload;
+    if (wire.size() > requestLimit) {
+        result.transport = LocalTaskStatus::Invalid;
+        return result;
+    }
+    LocalTaskProcess process(helper);
+    const auto task = process.run(wire, cancel, timeoutMs);
+    result.transport = task.status;
+    if (task.status != LocalTaskStatus::Ok) return result;
+    if (task.response == periodsBusyReply) {
+        result.transport = LocalTaskStatus::Busy;
+        return result;
+    }
+    EnergyHistoryReply reply;
+    auto verified = request;
+    verified.nowUtcMs = currentUtcMs();
+    if (verified.nowUtcMs < request.nowUtcMs || task.response.rfind(periodsReplyHeader, 0) != 0 ||
+        !decodeReply(verified, task.response.substr(sizeof(periodsReplyHeader) - 1), &reply, true) ||
+        (reply.opened == S::Ok && (!reply.recovery || inspectStatus(*reply.recovery) != S::Ok ||
+         std::any_of(reply.totals.begin(), reply.totals.end(), [](const auto &total) { return total.status != S::Ok; })))) {
+        result.transport = LocalTaskStatus::Unavailable;
+        return result;
+    }
+    result.reply = std::move(reply);
+    return result;
+}
+
 EnergyHistoryReply executeEnergyHistoryRequest(const EnergyHistoryRequest &r){
     EnergyHistoryReply reply;reply.generation=r.generation;reply.ticket=r.ticket;
     if(!valid(r)){reply.opened=EnergyHistoryStatus::Invalid;return reply;}

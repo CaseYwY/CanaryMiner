@@ -47,7 +47,7 @@ For example, one billing register may have adjacent short periods while an annua
 
 Crossing a reset boundary changes the projection range, **not stored observation facts or lifetime history**. Explicit-window queries integrate the same raw covered intervals independently. A reset is not deletion, a fresh household allowance, measured meter opening, accrued monetary subtotal or utility settlement. Partial coverage stays partial. A billing query must match the persisted window and its requested clipped bounds; a wrong period/start is rejected rather than silently selecting another window. Current interfaces accept known window keys; native discovery/edit/review of these measured-register bindings is future work.
 
-Composite bill state, annual reconciliation, demand/export/prepaid registers, automatic civil/DST period generation, plan-specific rounding/proration and tariff-currency FX are still separate capabilities. This batch does not turn a GPU-board register into the whole-meter `BillOpening` required by the tariff core.
+The [monthly energy report](energy-periods.md) derives civil and DST windows for an existing enrolled history without appending reset records. Composite bill state, annual reconciliation, demand/export/prepaid registers, recurring persisted reset records, plan-specific rounding/proration and tariff-currency FX remain separate capabilities. This batch does not turn a GPU-board register into the whole-meter `BillOpening` required by the tariff core.
 
 ## Atomic persistence, audit and recovery
 

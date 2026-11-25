@@ -2234,6 +2234,17 @@ canary_enable_energy_runtime(test_pearl_energy_runtime_cli_host)
 install(TARGETS test_pearl_energy_runtime_cli_host canary_energy_authorization_worker canary_energy_collector_worker canary_preferences_worker RUNTIME DESTINATION bin COMPONENT energy-runtime-host)
 add_test(NAME energy_runtime_layout COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_energy_runtime_layout.py $<TARGET_FILE:test_energy_runtime> $<TARGET_FILE:test_pearl_energy_runtime_cli_host> $<TARGET_FILE:canary_energy_authorization_worker> $<TARGET_FILE:canary_energy_collector_worker> $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:canary_energy_history> ${CMAKE_BINARY_DIR} ${CMAKE_COMMAND} "$<CONFIG>" $<TARGET_FILE:canary_preferences_worker>)
 set_tests_properties(energy_runtime_layout PROPERTIES TIMEOUT 60)
+add_executable(energy_periods_fixture ${R}/tests/energy_periods_fixture.cpp)
+target_link_libraries(energy_periods_fixture PRIVATE canary_energy_history)
+set(energy_periods_cli_arguments $<TARGET_FILE:test_pearl_energy_runtime_cli_host> $<TARGET_FILE:test_pearl_cuda_cli_host>
+  $<TARGET_FILE:canary_energy_authorization_worker> $<TARGET_FILE:canary_energy_collector_worker> $<TARGET_FILE:energy_periods_fixture>)
+add_test(NAME energy_periods_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_energy_periods_cli.py ${energy_periods_cli_arguments})
+set_tests_properties(energy_periods_cli PROPERTIES TIMEOUT 60)
+if(CANARY_BUNDLED_TZDB_DIR)
+  add_test(NAME energy_periods_named_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_energy_periods_cli.py
+    ${energy_periods_cli_arguments} ${CMAKE_BINARY_DIR}/canary-tzdb-2026e)
+  set_tests_properties(energy_periods_named_cli PROPERTIES TIMEOUT 60)
+endif()
 
 add_executable(test_pearl_overlap_capable_cli_host ${R}/src/core/miner.cu ${R}/src/core/registry.cu ${R}/tests/test_pearl_cli_stubs.cpp)
 set_source_files_properties(${R}/src/core/miner.cu ${R}/src/core/registry.cu PROPERTIES LANGUAGE CXX COMPILE_FLAGS "${CANARY_CXX_X}")

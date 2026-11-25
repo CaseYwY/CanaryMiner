@@ -34,7 +34,7 @@ std::optional<EnergyRuntimePaths> energyRuntimePaths(const std::filesystem::path
     EnergyRuntimePaths p;
     p.authorizationHelper=executable.parent_path()/(std::string("canary_energy_authorization_worker")+suffix);
     p.collectorHelper=executable.parent_path()/(std::string("canary_energy_collector_worker")+suffix);
-    p.authorizationFile=stateDir/"energy-persistence.json";
+    p.authorizationFile=stateDir/energyAuthorizationName;
     if(!localTaskPath(p.authorizationHelper)||!localTaskPath(p.collectorHelper)||!localTaskPath(p.authorizationFile))return {};
     return p;
 }
