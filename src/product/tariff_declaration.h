@@ -7,6 +7,8 @@
 #include <optional>
 namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
+inline constexpr char finalDisplayRounding[] = "final_display_only";
+inline constexpr char meterHalfHourRounding[] = "meter_import_half_hour_kwh_half_even_2";
 struct TariffMonthlyReset {
     unsigned day=0;
     CivilClock clock;

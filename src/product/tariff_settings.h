@@ -101,6 +101,7 @@ class TariffSettingsPanel {
         else if(key=='\r'||key=='\n'||key==' '){
             auto *v=selected();if(!v)return TariffSettingsResult::None;
             if(v->isObject()||v->isArray()){route.push_back(field);field=0;message.clear();}
+            else if(path()=="plan"&&selectedName()=="rounding")toggleMeterRounding(*v);
             else if(readOnly(selectedName()))message=i18n::tariffNoticeEnglish(NoticeKey::FixedContract);
             else if(v->isBool())v->boolean=!v->boolean;
             else{input=v->type==JsonValue::Type::Null?"":v->text;replaceInput=true;inputRejected=false;page=TariffSettingsPage::Edit;message.clear();}
@@ -178,8 +179,9 @@ class TariffSettingsPanel {
     }
     bool readOnly(const std::string &s)const{
         if(s=="kind"&&named(node()))return true;
+        if(s=="rounding")return path()!="plan";
         if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return monthly();
-        return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="daily_fee_allocation"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";
+        return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="daily_fee_allocation"||s=="basis"||s=="origin"||s=="time_database_version";
     }
     static JsonValue *member(JsonValue &object,const std::string &name){
         for(auto &m:object.members)if(m.first==name)return &m.second;
@@ -268,6 +270,17 @@ class TariffSettingsPanel {
         if(!begin||!through||!subtotal||begin->text==through->text)return false;
         subtotal->text.clear();
         return true;
+    }
+    void toggleMeterRounding(JsonValue &rounding){
+        rounding.text=rounding.text==meterHalfHourRounding?finalDisplayRounding:meterHalfHourRounding;
+        if(clearMidcycleSubtotal()){
+            focus("opening.accrued_subtotal");
+            message="Rounding changed. Re-enter the opening subtotal.";
+        }else{
+            message=rounding.text==meterHalfHourRounding
+                ?"Half-hour rounding requires complete cumulative meter readings."
+                :"Draft uses display-only rounding.";
+        }
     }
     void reviewChangedDailyFeeRule(){
         if(clearMidcycleSubtotal())message=i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeOpeningRequired);
@@ -359,6 +372,10 @@ class TariffSettingsPanel {
             i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
         if(prorated)review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::FeeReview));
+        const auto *plan=draft.find("plan");
+        const auto *rounding=plan?plan->find("rounding"):nullptr;
+        if(rounding&&rounding->text==meterHalfHourRounding)
+            review.insert(review.begin()+4,"Meter register only. Rate each complete UTC half hour after 0.01 kWh half-even rounding.");
         const auto diff=reviewLines(active,draft);review.insert(review.end(),diff.begin(),diff.end());
         if(diff.empty())review.push_back(i18n::tariffPanelEnglish(PanelKey::NoChanges));
         const auto complete=reviewLines({},draft);review.insert(review.end(),complete.begin(),complete.end());

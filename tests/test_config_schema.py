@@ -31,6 +31,10 @@ def validate(value, schema, root, path='$'):
     if 'if' in schema:
         branch = 'then' if not validate(value, schema['if'], root, path) else 'else'
         problems += validate(value, schema.get(branch, {}), root, path)
+    for child in schema.get('allOf', []):
+        problems += validate(value, child, root, path)
+    if 'anyOf' in schema and not any(not validate(value, child, root, path) for child in schema['anyOf']):
+        problems.append('%s: no anyOf branch matched' % path)
     if 'oneOf' in schema:
         ok = sum(1 for s in schema['oneOf'] if not validate(value, s, root, path))
         if ok != 1:
@@ -60,6 +64,8 @@ def validate(value, schema, root, path='$'):
             problems.append('%s: below minimum' % path)
         if 'maximum' in schema and value > schema['maximum']:
             problems.append('%s: above maximum' % path)
+        if 'multipleOf' in schema and value % schema['multipleOf']:
+            problems.append('%s: is not a multiple of %s' % (path, schema['multipleOf']))
     if isinstance(value, list):
         if 'minItems' in schema and len(value) < schema['minItems']:
             problems.append('%s: too few items' % path)
@@ -326,6 +332,34 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
             self.assertTrue(validate(bad, schema, schema))
         for version in (1, 2):
             self.assertTrue(validate({**example, 'schema_version': version}, schema, schema))
+
+    def test_half_hour_rounding_and_named_clock_versions(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        plan, opening = example['plan'], example['opening']
+        plan.update(rounding='meter_import_half_hour_kwh_half_even_2', tiers='none')
+        plan['revisions'][0]['bands'] = []
+        self.assertEqual(validate(example, schema, schema), [])
+        for field, value in [('rounding', 'anything_else'), ('tiers', 'progressive')]:
+            bad = {**example, 'plan': {**plan, field: value}}
+            self.assertTrue(validate(bad, schema, schema))
+        for field in ('cycle_begin_utc_ms', 'cycle_end_utc_ms', 'through_utc_ms'):
+            bad = {**example, 'opening': {**opening, field: opening[field] + 1}}
+            self.assertTrue(validate(bad, schema, schema))
+
+        named = {'kind': 'named_iana', 'zone': 'Europe/London', 'time_database_version': '2026e'}
+        named_rate = {**example, 'schema_version': 4, 'plan': {**plan, 'clock': named},
+                      'opening': {**opening, 'time_database_version': '2026e'}}
+        self.assertEqual(validate(named_rate, schema, schema), [])
+        self.assertTrue(validate({**named_rate, 'schema_version': 1}, schema, schema))
+        self.assertTrue(validate({**named_rate, 'opening': opening}, schema, schema))
+        self.assertTrue(validate({**example, 'schema_version': 4}, schema, schema))
+        for fee in ({}, {'daily_fee_allocation': 'prorate_by_cycle_minutes'}):
+            named_reset = {**example, 'schema_version': 4,
+                           'reset_policy': {'monthly_day': 1, 'clock': named, **fee}}
+            self.assertEqual(validate(named_reset, schema, schema), [])
+            self.assertTrue(validate({**named_reset, 'schema_version': 3 if fee else 2}, schema, schema))
+            self.assertTrue(validate({**named_reset, 'reset_policy': {'monthly_day': 1}}, schema, schema))
 
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')

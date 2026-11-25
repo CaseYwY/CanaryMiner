@@ -550,5 +550,30 @@ int main(int argc,char **argv){
         std::string total;
         CHECK(settled.status==ElectricityStatus::Ok&&settled.settledTotal&&settled.settledTotal->format(6,&total)&&total=="743.000000");
     }
+    {
+        auto selected=fixture();
+        auto &plan=member(selected,"plan");
+        set(plan,"tiers","\"none\"");
+        member(member(plan,"revisions").items[0],"bands").items.clear();
+        auto &opening=member(selected,"opening");
+        set(opening,"through_utc_ms",std::to_string(T+1800000));
+        set(opening,"imported_kwh","\"0.025\"");
+        set(opening,"accrued_subtotal","\"0.006\"");
+        TariffSettingsPanel roundingPanel;
+        roundingPanel.open(selected);
+        enter(roundingPanel,"plan");
+        enter(roundingPanel,"rounding");
+        CHECK(roundingPanel.path()=="opening"&&roundingPanel.message.find("Re-enter")!=std::string::npos);
+        CHECK(roundingPanel.draft.find("plan")->find("rounding")->text==meterHalfHourRounding);
+        CHECK(roundingPanel.draft.find("opening")->find("imported_kwh")->text=="0.025");
+        TariffDeclaration revised;
+        CHECK(!decodeTariffDeclaration(roundingPanel.draft,&revised));
+        roundingPanel.key('\r',{},T/1000);
+        type(roundingPanel,"0.004");
+        CHECK(decodeTariffDeclaration(roundingPanel.draft,&revised));
+        CHECK(revised.plan.rounding==TariffRounding::MeterHalfHourKwhHalfEven2);
+        CHECK(compareTariffCycles(revised,{dec("0"),dec("1")},1,T+1800000).status==
+              ElectricityStatus::Unsupported);
+    }
     return finishTests("tariff declaration");
 }

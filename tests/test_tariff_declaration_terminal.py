@@ -447,6 +447,50 @@ def main():
             send(b'q')
 
         session([cli, 'settings', '--config', str(config)], reopen_explicit)
+        rounding_state = root / 'interval-rounding'
+        rounding_state.mkdir()
+        rounding_config = root / 'interval-rounding.json'
+        rounding_config.write_text(json.dumps({'schema_version': 1, 'state_dir': str(rounding_state)}))
+        rounding_file = rounding_state / 'tariff-declaration.json'
+        rounded = json.loads(json.dumps(example))
+        rounded['plan']['tiers'] = 'none'
+        rounded['plan']['revisions'][0]['bands'] = []
+        opening = rounded['opening']
+        opening.update(through_utc_ms=opening['cycle_begin_utc_ms'] + 1800000,
+                       imported_kwh='0.025', accrued_subtotal='0.006')
+        rounded['confirmed_utc'] = opening['through_utc_ms'] // 1000
+        original_rounding = json.dumps(rounded).encode()
+        rounding_file.write_bytes(original_rounding)
+
+        def save_meter_rounding(send, until, tariff):
+            nonlocal checks
+            down = b'\x1b[B'
+            until(b'CanaryMiner / Settings')
+            tariff()
+            send(down * 6 + b'\r' + down * 7 + b'\r')
+            until(b'Rounding changed. Re-enter the opening subtotal.', True)
+            send(b'v')
+            until(b'Meter register only.', True)
+            send(b'\r')
+            refused = until(b'Enter a canonical decimal string', True, complete_frame=True)
+            assert b'opening.accrued_subtotal' in refused
+            assert rounding_file.read_bytes() == original_rounding
+            send(b'\r0.004\r\x1b')
+            until(b'> opening:', True, complete_frame=True)
+            send(b'\x1b[A\r\rsynthetic-rounded-plan\r\x1b')
+            until(b'> plan:', True, complete_frame=True)
+            send(down + b'\r\rsynthetic-rounded-opening\rv')
+            until(b'Review tariff-declaration.json ONLY', True)
+            send(b'\r')
+            until(b'Saved offline declaration + opening ONLY', True)
+            saved = json.loads(rounding_file.read_bytes())
+            assert saved['plan']['rounding'] == 'meter_import_half_hour_kwh_half_even_2'
+            assert saved['plan']['key'] == 'synthetic-rounded-plan'
+            assert saved['opening'] == {**opening, 'key': 'synthetic-rounded-opening', 'accrued_subtotal': '0.004'}
+            checks += 3
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(rounding_config)], save_meter_rounding)
         if '--named' in sys.argv[3:]:
             explicit = file.read_bytes()
 
