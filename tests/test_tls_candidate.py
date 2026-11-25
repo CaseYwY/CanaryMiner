@@ -204,9 +204,12 @@ class CandidateTests(unittest.TestCase):
                 hashes = {name: hashlib.sha256(files[path]).hexdigest() for name, path in tzdb.items()}
                 inventory = ''.join(f'{name} {digest}\n' for name, digest in sorted(hashes.items()))
                 fixture_pin = hashlib.sha256(inventory.encode('ascii')).hexdigest()
-                consumers = [f'bin/{name}' for name in CANDIDATE.images(platform)[:2]]
+                miner, preferences, stream_worker = CANDIDATE.images(platform)
+                consumers = (f'bin/{miner}', f'bin/{preferences}')
                 for consumer in consumers:
                     files[consumer] += inventory.encode('ascii')
+                named_only_miner = files[consumers[0]]
+                files[consumers[0]] += stream_worker.encode('ascii') + b'\0'
                 glibc = '2.40' if platform == 'linux' else None
 
                 def rewrite_manifest(payloads, named_tzdb=True):
@@ -224,6 +227,7 @@ class CandidateTests(unittest.TestCase):
                         rewrite_manifest({**files, tzdb['version']: b'a different database'}),
                         rewrite_manifest({key: val for key, val in files.items() if key != tzdb['version']}),
                         rewrite_manifest(files, named_tzdb=False),
+                        rewrite_manifest({**files, consumers[0]: named_only_miner}),
                         *(rewrite_manifest({**files, consumer: b'older TLS-only image'})
                           for consumer in consumers),
                     ):

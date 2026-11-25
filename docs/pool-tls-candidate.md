@@ -30,8 +30,8 @@ It installs the data as regular files under `bin/canary-tzdb-2026e`, next to the
 includes `windowsZones.xml` as required by its backend.
 
 The verifier recognizes both manifest schemas automatically. It checks the named data pins and
-looks for those pins in both native consumers, the miner and the preferences worker. Use the updated
-verifier to install a named-clock package.
+looks for those pins in both native consumers, the miner and the preferences worker. It also checks
+the miner's compiled reference to the TLS stream worker. Use the updated verifier to install a named-clock package.
 Keep the directory beside the miner when moving the installation. You can use the installed
 [`meter-bill` command](tariff-declaration.md) with named tariff and reset clocks and reopen existing local market hour
 archives with [`market-hour --open-review`](market-reference-runtime.md#save-and-replay-a-public-hour).

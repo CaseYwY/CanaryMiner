@@ -174,10 +174,13 @@ def validate(platform, files):
         check_tzdb(platform, files)
         # The miner and its preferences worker must both recognize the bundled clocks.
         pins = [sha256(files[path]).encode('ascii') for path in tzdb_paths(platform).values()]
-        for image in images(platform)[:2]:
+        miner, preferences, stream_worker = images(platform)
+        for image in (miner, preferences):
             data = files[f'bin/{image}']
             if any(pin not in data for pin in pins):
                 raise ValueError('tariff TZDB pins missing from a native consumer')
+        if stream_worker.encode('ascii') + b'\0' not in files[f'bin/{miner}']:
+            raise ValueError('pool TLS worker reference missing from the miner')
     revision, glibc = document.get('source_revision'), document.get('min_glibc')
     valid_glibc = (glibc is None if platform == 'windows' else
                    isinstance(glibc, str) and re.fullmatch(r'[0-9]{1,3}(?:\.[0-9]{1,3}){1,2}', glibc)
