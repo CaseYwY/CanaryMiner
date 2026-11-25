@@ -360,7 +360,7 @@ class MarketHourCli(unittest.TestCase):
     def test_archive_options_exclude_public_sampling_and_unsafe_names(self):
         for args in (("--open-review",), ("--open-review", ""),
                      ("--open-review", "hour.cmh", "--allow-public-candles"),
-                     ("--allow-public-candles", "--save-review", "hour.cmh"),
+                     ("--allow-public-candles", "--save-review", "../hour.cmh"),
                      ("--file", self.file.name, "--save-review", "bad/name.cmh"),
                      ("--file", self.file.name, "--save-review", "CON.cmh"),
                      ("--file", self.file.name, "--save-review", "not-an-hour.cmr")):

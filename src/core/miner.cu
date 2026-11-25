@@ -144,10 +144,10 @@ int main(int argc, char **argv) {
 #if defined(SIGBREAK)
         signal(SIGBREAK, onSignal);
 #endif
-        if (cli.marketHour.action != MarketHourAction::PublicSample)
+        if (!cli.marketHour.samplesPublic())
             return commandMarketHour(cli.marketHour, argc, argv, &g_stop);
         if constexpr (kPublicTickerRuntimeBuilt) {
-            return commandPublicMarketHour(std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
+            return commandPublicMarketHour(cli.marketHour, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
         }
         std::fputs("market-hour: public HTTPS unavailable in this build\n", stderr);
         return kExitConfig;

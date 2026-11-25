@@ -129,6 +129,27 @@ The report names each source, the UTC window, minute coverage, local receipt tim
 
 Exit code 0 indicates both means were available, 3 means a mean or the helper was unavailable, and 130 indicates a cancelled sample with confirmed helper cleanup. If cleanup is uncertain, the command exits with 3, withholds both means and admits no further request. The command leaves Settings, Dashboard polling and economic mode alone. Live provider response qualification and deployment acceptance remain open.
 
+### Save and replay a public hour
+
+Run the save command from a trusted private local directory. Use a new, simple ASCII basename ending in `.cmh`.
+
+```text
+canary-miner market-hour --allow-public-candles --save-review capture.cmh
+canary-miner market-hour --open-review capture.cmh
+```
+
+A save requires all 60 aligned minutes from both providers and both exact means. A failed or incomplete sample
+returns an error and publishes no review. The version 2 archive holds both original response bodies byte for byte,
+the selected window, command start and per-request times, the calculated report, and a SHA-256 checksum.
+The save preserves any existing archive or temporary sibling. If the command reports uncertain publication or cleanup,
+check the archive and its temporary sibling. Reopen any published archive to verify it.
+
+Opening the archived hour works in builds with public HTTPS disabled. It reads only the supplied archive,
+checks the checksum, revalidates both source formats and request-time bounds, and recalculates both means.
+The ages in the report are measured at its recorded capture time. The archive and checksum provide a way to
+check the stored calculation and detect corruption. They carry no provider signature or current freshness claim.
+Existing [user-declared reviews](manual-market.md#save-and-reopen-a-local-hour-review) remain readable.
+
 ### Native ownership across a one-shot sample
 
 Both requests share one native ownership lifetime when an explicit command starts. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.

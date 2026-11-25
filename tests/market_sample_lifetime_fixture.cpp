@@ -47,7 +47,7 @@ int main(int argc, char **argv) {
     return 77;
 #endif
 #endif
-    if (argc != 3) return 2;
+    if (argc < 3) return 2;
     const auto module = std::filesystem::u8path(om::selfExecutablePath());
     if (module.empty()) return 2;
     std::string mode;
@@ -60,7 +60,11 @@ int main(int argc, char **argv) {
 #endif
     const om::NativeProcessScope scope(epoch);
     const auto command = std::string_view(argv[1]);
-    if (command == "market-hour") return om::commandPublicMarketHour(module, argc, argv, nullptr);
+    if (command == "market-hour") {
+        om::MarketHourOptions options;
+        if (!om::parseMarketHourCli(argc, argv, 2, options) || !options.samplesPublic()) return 2;
+        return om::commandPublicMarketHour(options, module, argc, argv, nullptr);
+    }
     if (command == "market-tickers") return om::commandPublicTickers(module, argc, argv, nullptr);
     return 2;
 }

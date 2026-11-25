@@ -1,5 +1,5 @@
 #include "market_hour.h"
-#include "market_hour_payload.h"
+#include "market_hour_capture.h"
 #include "market_public_sample.h"
 #include "market_ticker_runtime.h"
 
@@ -20,12 +20,6 @@ bool clockContinuous(const ClockReading &initial, const ClockReading &previous, 
     return (std::max)(steadySeconds, utcSeconds) - (std::min)(steadySeconds, utcSeconds) <= 5;
 }
 
-struct HourSample {
-    const char *problem = nullptr;
-    uint64_t observedUtc = 0;
-    std::vector<ReviewMinute> minutes;
-};
-
 HourSample decodeHourReply(const PublicJsonResponse &reply, HourFeed feed, uint64_t start, uint64_t end,
                           uint64_t sentUtc, uint64_t receivedUtc) {
     HourSample sample;
@@ -45,19 +39,6 @@ HourSample decodeHourReply(const PublicJsonResponse &reply, HourFeed feed, uint6
     return sample;
 }
 
-void appendPublicCoverage(std::string &report, const char *label, const HourSample &sample, uint64_t nowUtc) {
-    report += label;
-    report += ": ";
-    if (sample.problem) {
-        report += sample.problem;
-    } else {
-        report += std::to_string(sample.minutes.size()) + "/60 elapsed minute buckets; observed UTC " +
-            std::to_string(sample.observedUtc) + " (receipt age " +
-            std::to_string(nowUtc - sample.observedUtc) + " s)";
-    }
-    report += '\n';
-}
-
 int hourError(const char *message, int code = 3) {
     std::fprintf(stderr, "market-hour: %s\n", message);
     return code;
@@ -65,9 +46,13 @@ int hourError(const char *message, int code = 3) {
 
 }  // namespace
 
-int commandPublicMarketHour(const std::filesystem::path &module, int argc, const char *const *argv,
+int commandPublicMarketHour(const MarketHourOptions &options, const std::filesystem::path &module,
+                            int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop) {
-    if (!nativeMarketConsent(argc, argv, "market-hour", "--allow-public-candles"))
+    const bool saving = options.action == MarketHourAction::PublicSave;
+    if (argc != (saving ? 5 : 3) ||
+        !nativeMarketArgumentPair(argc, argv, 1, "market-hour", 2, "--allow-public-candles") ||
+        (saving && !nativeMarketArgumentPair(argc, argv, 3, "--save-review", 4, options.archiveName)))
         return hourError("exact --allow-public-candles required", 2);
     if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
     const auto ownershipUncertain = [] { return hourError("helper ownership uncertain"); };
@@ -78,15 +63,15 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
         if (helper.empty()) return hourError("installed helper path unavailable");
         const auto initial = marketSystemClock();
         const MarketPollingPolicy policy;
-        if (initial.second > marketUtcLimit || initial.second <= marketHourSeconds + 60 + policy.settlementGuardSeconds)
-            return hourError("local UTC clock unavailable");
-        const auto end = (initial.second - policy.settlementGuardSeconds) / 60 * 60;
+        const auto end = publicHourEnd(initial.second);
+        if (!end) return hourError("local UTC clock unavailable");
         const auto start = end - marketHourSeconds;
         const auto fetch = marketProcessFetch(helper);
         auto limits = policy.https;
         limits.bodyBytes = marketHourBodyBytes;
         auto previous = initial;
         HourSample pearl, fx;
+        PublicHourOriginal original{initial.second, end, {}, {}};
         for (const auto feed : {HourFeed::MexcPearl, HourFeed::CoinbaseFx}) {
             if (!lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
@@ -96,7 +81,7 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
             const bool token = feed == HourFeed::MexcPearl;
             const PublicJsonRequest request{token ? PublicFeed::MexcPearlHour : PublicFeed::CoinbaseUsdtHour,
                 static_cast<int64_t>(start), static_cast<int64_t>(end)};
-            const auto reply = awaitPublicMarketReply(fetch, request, limits, lifetime, stop);
+            auto reply = awaitPublicMarketReply(fetch, request, limits, lifetime, stop);
             if (reply.status == PublicHttpsStatus::Unreaped || !lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
             const auto received = marketSystemClock();
@@ -104,27 +89,31 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
                 return hourError("local clock changed during sampling");
             previous = received;
             (token ? pearl : fx) = decodeHourReply(reply, feed, start, end, sent.second, received.second);
+            if (saving)
+                (token ? original.pearl : original.fx) = PublicHourReceipt{sent.second, received.second, std::move(reply)};
         }
 
-        const auto window = calculateMarketHour(start, end, pearl.minutes, fx.minutes);
-        std::string report = "One public candle sample; candle finality is unverified.\n";
-        report += "UTC seconds [" + std::to_string(start) + ", " + std::to_string(end) + "); window ended " +
-            std::to_string(previous.second - end) + " s ago\n";
-        appendPublicCoverage(report, "MEXC Pearl mainnet PRL/USDT", pearl, previous.second);
-        appendPublicCoverage(report, "Coinbase USDT/USD", fx, previous.second);
-        report += "Mean USDT per PRL (exact sum / minutes): ";
-        report += window.tokenUsdt ? exactHourMean(*window.tokenUsdt) :
-            window.status == MarketDataStatus::Arithmetic ? "N/A (exact arithmetic limit exceeded)" :
-            "N/A (requires all 60 PRL minutes)";
-        report += "\nMean USD per PRL (exact sum / minutes): ";
-        report += window.tokenUsd ? exactHourMean(*window.tokenUsd) :
-            window.tokenUsdt && fx.minutes.size() == marketHourMinutes ? "N/A (exact arithmetic limit exceeded)" :
-            "N/A (requires complete aligned PRL and FX coverage)";
-        report += '\n';
+        std::string report;
+        const bool complete = renderPublicHour(end, previous.second, pearl, fx, report);
         if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
+        if (saving) {
+            using local_review_archive::ReviewSave;
+            if (!complete)
+                return hourError("could not save public review: complete aligned minute coverage and exact means required");
+            report += publicHourCaptureTime(previous.second);
+            const auto state = savePublicHourReview(options.archiveName, original, report, [&] {
+                return marketSampleStopped(stop) || !lifetime.permitted();
+            });
+            if (state == ReviewSave::Stopped)
+                return lifetime.permitted() ? hourError("sample cancelled", 130) : ownershipUncertain();
+            if (state == ReviewSave::Uncertain)
+                return hourError("archive publication or cleanup is uncertain; inspect the review and its temporary file");
+            if (state != ReviewSave::Written)
+                return hourError("could not create the new review archive; any existing archive was preserved");
+        }
         if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0) return 1;
-        return window.tokenUsd ? 0 : 3;
+        return complete ? 0 : 3;
     } catch (...) {
         if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
