@@ -405,7 +405,7 @@ void demandRatchet(JsonValue draft,const std::filesystem::path &target) {
     auto &row=member(plan,"revisions").items.front();
     set(row,"begin_utc_ms",std::to_string(jan));
     set(row,"end_utc_ms",std::to_string(mar));
-    set(row,"published_utc_ms",std::to_string(jan));
+    set(row,"published_utc_ms",std::to_string(jan-1000));
     set(row,"time_mode",R"("constant")");
     set(row,"base_rate_per_kwh",R"("0")");
     set(row,"charge_per_civil_day",R"("0")");
@@ -450,8 +450,9 @@ void demandRatchet(JsonValue draft,const std::filesystem::path &target) {
     CHECK(decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharge->ratchet);
     CHECK(decoded.opening.accruedSubtotal.numerator.zero());
     const std::array<ExactDecimal,2> watts{dec("10000"),dec("24000")};
-    checkComparison(compareTariffCycles(decoded,watts,1,T),"80.000000","120.000000","40.000000");
-    checkComparison(compareTariffCycles(decoded,watts,2,T),"130.000000","240.000000","110.000000");
+    CHECK(compareTariffCycles(decoded,watts,1,jan-1).status==ElectricityStatus::DemandHistoryNotYetKnown);
+    checkComparison(compareTariffCycles(decoded,watts,1,jan),"80.000000","120.000000","40.000000");
+    checkComparison(compareTariffCycles(decoded,watts,2,jan),"130.000000","240.000000","110.000000");
 
     auto &history=member(member(saved,"opening"),"demand_history");
     set(history.items.front(),"peak_kw",R"("21")");

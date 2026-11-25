@@ -335,6 +335,9 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return "local clock precedes the review or is unavailable";
     const auto cutoff = original.cutoff;
     if (cutoff > now) return "review cutoff is in the future";
+    if (declaration.plan.demandCharge && declaration.plan.demandCharge->ratchet &&
+        declaration.opening.cycleBeginUtcMs > cutoff)
+        return "completed demand history is after the review cutoff";
     if (stopped()) return "review cancelled";
     if (const auto *problem = decodeMeterReadings(original.intervals, declaration, cutoff, lateReadingError,
                                                    review.readings, stopped))

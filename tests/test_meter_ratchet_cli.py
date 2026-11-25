@@ -97,6 +97,15 @@ def main(cli, bundle=None):
             meter.unlink()
             assert run("--open-review", "all.cmr") == report
 
+            # The rate was known, but the supposed latest measured month had not ended.
+            early = copy.deepcopy(rule)
+            early["demand_charge"]["published_utc_ms"] = jan - 1000
+            early["plan"]["revisions"][0]["published_utc_ms"] = jan - 1000
+            early["confirmed_utc"] = (jan - 1000) // 1000
+            review(early, modeled((jan, feb, "10000")), feb, error="saved tariff declaration")
+            early["confirmed_utc"] = jan // 1000
+            review(early, modeled((jan, feb, "10000")), jan - 1, error="completed demand history is after the review cutoff")
+
             already = copy.deepcopy(rule)
             middle = jan + 15 * MINUTE
             already["opening"].update(through_utc_ms=middle, imported_kwh="2.5",

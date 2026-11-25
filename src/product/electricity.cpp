@@ -320,6 +320,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::MeterRoundingBoundary: return "meter rounding needs readings and cycle boundaries on the UTC half hour";
         case ElectricityStatus::SeasonalDayBoundary: return "seasonal allowance requires complete tariff civil days without skipped or disjoint dates";
         case ElectricityStatus::DemandWindowBoundary: return "demand requires complete aligned windows and nonzero meter deltas within each window";
+        case ElectricityStatus::DemandHistoryNotYetKnown: return "demand history extends beyond the decision instant";
     }
     return "unknown electricity status";
 }

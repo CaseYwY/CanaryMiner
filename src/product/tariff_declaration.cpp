@@ -463,6 +463,8 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::
     const auto windows=comparisonCycles(d,cycles);
     if(windows.empty()||d.opening.evidence.basis!=PowerBasis::WholeMeterImport)
         return {ElectricityStatus::Invalid,0,false,{},{},{}};
+    if(d.plan.demandCharge&&d.plan.demandCharge->ratchet&&d.opening.cycleBeginUtcMs>decision)
+        return {ElectricityStatus::DemandHistoryNotYetKnown,0,false,{},{},{}};
     std::array<BillOpening,2> openings{d.opening,d.opening};
     TariffCycleComparison result;
     for(size_t i=0;i<windows.size();++i){
@@ -635,7 +637,11 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             if(peak.negative())bad(path,"Use a nonnegative established peak in kW.",TariffProblemKind::Unknown);
             if(!peak.multiply(denominator,&s.peakDemandKw.emplace().numerator))
                 bad(path,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
-            if(ratchet)decodeDemandHistory(*opening.find("demand_history"),*p.demandCharge,*d.resetSchedule,denominator,s,total);
+            if(ratchet){
+                if(s.cycleBeginUtcMs>confirmedMs)
+                    bad("opening.demand_history","The latest historical month must be complete at local confirmation.",TariffProblemKind::Unknown);
+                decodeDemandHistory(*opening.find("demand_history"),*p.demandCharge,*d.resetSchedule,denominator,s,total);
+            }
             if(s.throughUtcMs!=s.cycleBeginUtcMs){
                 ElectricityAmount billable,floor,peakCharge;
                 if(!billableDemand(*p.demandCharge,s,billable,floor)||

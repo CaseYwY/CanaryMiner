@@ -205,7 +205,8 @@ greater than zero and up to one. For 80 percent, enter `0.8`.
 In `opening.demand_history`, add one row for every immediately preceding completed
 month, oldest first. Each row contains its exact `cycle_end_utc_ms` under the saved reset
 clock and its `peak_kw` measured on the declared demand grid. Enter actual peaks before
-applying any floor. Missing months or mismatched boundaries block the review. The separate
+applying any floor. The historical periods must be complete by local confirmation
+and the review cutoff. Missing months or mismatched boundaries block the review. The separate
 `peak_demand_kw` field still holds the current cycle's actual peak, or zero at cycle start.
 
 The billable amount is the larger of the current month's actual peak and the lookback
