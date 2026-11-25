@@ -378,6 +378,30 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         self.assertEqual(validate({**annual, 'reset_policy': prorated}, schema, schema), [])
         self.assertTrue(validate({**annual, 'reset_policy': 'explicit_cycle_only'}, schema, schema))
 
+    def test_bimonthly_reset_pairs_with_v6_and_monthly_all_units_rates(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        clock = {'kind': 'utc', 'fixed_offset_seconds': 0}
+        reset = {'bimonthly_start_month': 2, 'bimonthly_day': 31, 'clock': clock}
+        example.update(schema_version=6, reset_policy=reset)
+        plan = example['plan']
+        plan.update(tiers='all_units')
+        revision = plan['revisions'][0]
+        revision.update(time_mode='constant', calendar=[], charge_per_civil_day='0')
+        self.assertEqual(validate(example, schema, schema), [])
+        for version in (1, 2, 3, 4, 5):
+            self.assertTrue(validate({**example, 'schema_version': version}, schema, schema))
+        for change in ({'bimonthly_start_month': 0}, {'bimonthly_start_month': 3},
+                       {'bimonthly_start_month': True}, {'bimonthly_day': 32},
+                       {'daily_fee_allocation': 'prorate_by_cycle_minutes'}):
+            self.assertTrue(validate({**example, 'reset_policy': {**reset, **change}}, schema, schema))
+        for change in ({'tiers': 'progressive'}, {'rounding': 'meter_import_half_hour_kwh_half_even_2'},
+                       {'revisions': [revision, revision]}):
+            self.assertTrue(validate({**example, 'plan': {**plan, **change}}, schema, schema))
+        for change in ({'time_mode': 'calendar'}, {'charge_per_civil_day': '1'}, {'bands': []}):
+            bad = {**plan, 'revisions': [{**revision, **change}]}
+            self.assertTrue(validate({**example, 'plan': bad}, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')

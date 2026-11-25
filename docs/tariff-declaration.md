@@ -23,7 +23,7 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks, and version 5 supports an annual cycle. The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
@@ -39,9 +39,10 @@ or the recurring reset policy and press **Z**. Enter the IANA zone in the Zone f
 Changing the rate clock in a cycle requires re-entering the accrued opening subtotal.
 Changing the reset clock requires deriving the cycle again with **G** and reviewing its opening.
 Press **Z** again to select UTC. The rate clock controls calendar prices and daily fees.
-The reset clock controls monthly or annual boundaries.
+The reset clock controls monthly, annual or two-month boundaries.
 
-With a named clock, an explicit or monthly cycle uses version 4. An annual cycle uses version 5. Both accept this clock object.
+With a named clock, an explicit or monthly cycle uses version 4. An annual cycle uses version 5
+and a two-month cycle uses version 6. All three accept this clock object.
 
 ```json
 {"kind":"named_iana","zone":"America/New_York","time_database_version":"2026e"}
@@ -97,6 +98,41 @@ Version 5 stores this annual policy. For a February 29 reset, the boundary is Fe
 
 Usage accumulates from the annual opening across months and rate revisions. The shared tier register resets at the next annual boundary. The cycle charge and any minimum apply once per annual cycle. For month-by-month review, supply readings through the desired cutoff to obtain a provisional annual estimate. When an interval crosses the year boundary, a cumulative register file needs a reading exactly there. A version 5 review requires a version 5-capable reader. This policy defines one annual billing and tier cycle. Use the [annual invoice comparison](#reconcile-interim-supply-charges-at-annual-close) to reconcile locally declared interim charges. Automatic invoicing and supplier-specific settlement need their own rules.
 
+### Price a two-month cycle from monthly bands
+
+Select `reset_policy` and press **B**. Enter `1` for resets in January, March, May, July, September
+and November, or `2` for the even months. Enter a day from 1 to 31 and review the reset clock.
+Each cycle starts at the first valid local instant of its reset date. Short months use their
+last day. Use **G** to derive the dates, enter the opening amounts, then review and save with
+**V** and **Enter**. Changing to or from the two-month rule clears the draft opening amounts.
+
+Version 6 stores this reset policy.
+
+```json
+{
+  "bimonthly_start_month": 1,
+  "bimonthly_day": 1,
+  "clock": {"kind": "utc", "fixed_offset_seconds": 0}
+}
+```
+
+Enter the all-units band thresholds, cycle charge and optional minimum as **monthly** values.
+The rule charges twice the monthly bill at half the cycle's total consumption. For example, with
+a monthly threshold of 100 kWh and rates of 1 and 2 per kWh, a cycle with 200 kWh costs 200.
+A cycle with 202 kWh averages 101 kWh per month and costs 404. The rule selects the band
+before display rounding and applies the existing subtotal multiplier once.
+
+The plan requires one constant price revision, zero daily fees and `final_display_only` rounding.
+Use readings at each two-month boundary for cumulative register files. `meter-bill` labels the rate
+basis and shows the monthly-average usage at closing. Earlier reports are provisional because
+later usage can change the band for the whole cycle. A mid-cycle declared opening uses the import
+to date for the two-month cycle and its pre-multiplier subtotal under this same rule. Archives keep
+the original monthly declaration and replay the calculation. Reopening an archive with this rule
+requires a reader that supports version 6 declarations.
+
+This offline rule covers the declared two-month formula. Supplier-specific rounding, proration
+and settlement require their own rules.
+
 <a id="prorate-a-daily-fee-across-the-monthly-reset"></a>
 
 ### Prorate a daily fee across a recurring reset
@@ -114,7 +150,7 @@ for the **without mining** and **with mining** scenarios. Use **Tab** to change 
 The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
 applies to the full displayed UTC interval from the opening's through-time to the selected end.
 
-For a saved monthly or annual reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
+For a saved monthly, annual or two-month reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
 the saved cycle. Each additional cycle runs from one declared reset to the next. The same entered watts apply
 through the displayed end. Later cycles start with zero use and zero accrued subtotal, and each cycle applies its
 own fees, tier allowance and minimum. Charges are added exactly before display rounding. A declaration with
