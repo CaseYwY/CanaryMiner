@@ -37,12 +37,23 @@ ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) 
 }
 constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
 ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &opening,int64_t end,int64_t decision) {
-    if (!plan.demandCharge) return opening.peakDemandKw ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
+    if (!plan.demandCharge)
+        return opening.peakDemandKw || !opening.demandHistoryKw.empty()
+            ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
     const auto &rule=*plan.demandCharge;
     if (opening.evidence.basis!=PowerBasis::WholeMeterImport) return ElectricityStatus::Unsupported;
     if (!opening.peakDemandKw || opening.peakDemandKw->numerator.negative() || rule.windowMinutes<5 ||
         rule.windowMinutes>60 || 60%rule.windowMinutes || rule.offsetMinutes>=rule.windowMinutes ||
         rule.ratePerKw.negative() || !instant(rule.publishedUtcMs)) return ElectricityStatus::Invalid;
+    if (rule.ratchet) {
+        const auto &ratchet=*rule.ratchet;
+        if (!ratchet.lookbackMonths || ratchet.lookbackMonths>12 ||
+            ratchet.fraction.negative() || ratchet.fraction.zero() || ratchet.fraction.compare(number(1))>0 ||
+            opening.demandHistoryKw.size()!=ratchet.lookbackMonths)
+            return ElectricityStatus::Invalid;
+        for (const auto &peak:opening.demandHistoryKw)
+            if (peak.numerator.negative()) return ElectricityStatus::Invalid;
+    } else if (!opening.demandHistoryKw.empty()) return ElectricityStatus::Invalid;
     const int64_t span=rule.windowMinutes*minuteMs, offset=rule.offsetMinutes*minuteMs;
     for (const auto t:{opening.cycleBeginUtcMs,opening.throughUtcMs,opening.cycleEndUtcMs,end})
         if ((t-offset)%span) return ElectricityStatus::DemandWindowBoundary;
@@ -309,6 +320,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::MeterRoundingBoundary: return "meter rounding needs readings and cycle boundaries on the UTC half hour";
         case ElectricityStatus::SeasonalDayBoundary: return "seasonal allowance requires complete tariff civil days without skipped or disjoint dates";
         case ElectricityStatus::DemandWindowBoundary: return "demand requires complete aligned windows and nonzero meter deltas within each window";
+        case ElectricityStatus::DemandHistoryNotYetKnown: return "demand history extends beyond the decision instant";
     }
     return "unknown electricity status";
 }
@@ -341,6 +353,24 @@ EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerO
     else result.status = result.coveredMs ? ElectricityStatus::Partial : ElectricityStatus::Unavailable;
     return result;
 }
+bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
+                    ElectricityAmount &peak,ElectricityAmount &ratchetFloor) {
+    if (!opening.peakDemandKw) return false;
+    ratchetFloor={};
+    if (rule.ratchet) {
+        const auto &history=opening.demandHistoryKw;
+        const auto largest=std::max_element(history.begin(),history.end(),[](const auto &a,const auto &b){
+            return a.numerator.compare(b.numerator)<0;
+        });
+        if (largest==history.end() ||
+            !largest->numerator.multiply(rule.ratchet->fraction,&ratchetFloor.numerator))
+            return false;
+    }
+    peak=opening.peakDemandKw->numerator.compare(ratchetFloor.numerator)>=0
+        ? *opening.peakDemandKw : ratchetFloor;
+    return true;
+}
+
 ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
@@ -380,8 +410,13 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     if (p.demandCharge) {
         result.status=measureDemand(*p.demandCharge,trace,opening.throughUtcMs,*state.peakDemandKw,cancel,stop);
         if (result.status!=ElectricityStatus::Ok) return result;
+        ElectricityAmount nextBillable, openingBillable, floor;
         ExactDecimal increase;
-        if (!state.peakDemandKw->numerator.subtract(opening.peakDemandKw->numerator,&increase) ||
+        // A new cycle has no posted demand subtotal yet, even if a ratchet floor already applies.
+        if (!billableDemand(*p.demandCharge,state,nextBillable,floor) ||
+            (opening.throughUtcMs!=opening.cycleBeginUtcMs &&
+             !billableDemand(*p.demandCharge,opening,openingBillable,floor)) ||
+            !nextBillable.numerator.subtract(openingBillable.numerator,&increase) ||
             !productAdd(cost,increase,p.demandCharge->ratePerKw)) {
             result.status=ElectricityStatus::Capacity;
             return result;
@@ -493,8 +528,9 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     result.ending = state; result.charge = charge; result.cycleSettled = end == state.cycleEndUtcMs; result.status = ElectricityStatus::Ok;
     return result;
 }
-BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision) {
-    return evaluateBillImpl(p,opening,trace,end,decision,false);
+BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,
+                          int64_t end,int64_t decision,DailyFeeAllocation allocation,const std::atomic<bool> *cancel) {
+    return evaluateBillImpl(p,opening,trace,end,decision,false,cancel,{},allocation);
 }
 template<class Trace>
 static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening,const Trace &trace,int64_t end,int64_t observed,

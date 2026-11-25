@@ -458,6 +458,22 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['demand_charge']['window_minutes'] = 7
         self.assertTrue(validate(example, schema, schema))
 
+    def test_demand_ratchet_needs_v10_monthly_reset_and_prior_peaks(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example.update(schema_version=10, reset_policy={'monthly_day': 1, 'clock': example['plan']['clock']})
+        example['demand_charge'] = dict(window_minutes=15, offset_minutes=0, published_utc_ms=0, rate_per_kw='5')
+        example['opening']['peak_demand_kw'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+        example['demand_charge']['ratchet'] = {'lookback_months': 1, 'fraction': '0.8'}
+        self.assertTrue(validate(example, schema, schema))
+        example['opening']['demand_history'] = [{'cycle_end_utc_ms': 1, 'peak_kw': '20'}]
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 9}, schema, schema))
+        self.assertTrue(validate({**example, 'reset_policy': 'explicit_cycle_only'}, schema, schema))
+        example['demand_charge']['ratchet']['fraction'] = '1.1'
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -488,7 +504,8 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'revision': {'component_multiplier'},
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
-                    'opening': {'peak_demand_kw'},
+                    'opening': {'peak_demand_kw', 'demand_history'},
+                    'demandCharge': {'ratchet'},
                 }.get(name, set())
                 self.assertEqual(set(definition['required']), set(definition['properties']) - optional)
 

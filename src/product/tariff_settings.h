@@ -54,6 +54,10 @@ class TariffSettingsPanel {
                 const bool changedAllowance=changed&&(seasonRow()||(openingChanged&&seasonal()&&name=="cycle_end_utc_ms"));
                 const bool changedMeterBinding=openingChanged&&components&&(name=="scope"||name=="adapter");
                 const bool changedDemandWindow=changed&&location=="demand_charge"&&(name=="window_minutes"||name=="offset_minutes");
+                const bool changedHistoryBasis=changed&&ratchet()&&
+                    (changedMeterBinding||changedDemandWindow||location=="reset_policy.clock"||
+                     (location=="reset_policy"&&name=="monthly_day")||
+                     (openingChanged&&name=="cycle_begin_utc_ms"));
                 const bool changedPlanSubtotal=location=="plan"&&(name=="tiers"||name=="cycle_charge"||name=="currency");
                 const bool changedComponents=changed&&components&&(revision()||changedPlanSubtotal);
                 const bool changedRateClock=changed&&location=="plan.clock"&&
@@ -78,6 +82,8 @@ class TariffSettingsPanel {
                 else if(changedAllowance)reviewChangedSeasonalAllowance();
                 else if(changedDemandWindow)reviewChangedDemandWindow();
                 else if(changedComponents)reviewChangedComponents();
+                if(changedHistoryBasis&&clearDemandHistory())
+                    message+=" Re-enter the prior monthly peaks for the new basis.";
             }else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;inputRejected=false;}
             else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<128)input+=static_cast<char>(key);else{inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::TooLong);}}
             else if(key>=128&&key<=255){inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::AsciiOnly);}
@@ -130,13 +136,15 @@ class TariffSettingsPanel {
         else if((key=='a'||key=='A')&&onSeasonalToggle())toggleSeasonalAllowance();
         else if((key=='c'||key=='C')&&onComponentToggle())toggleComponentMultiplier();
         else if((key=='d'||key=='D')&&onDemandToggle())toggleDemandCharge();
+        else if((key=='r'||key=='R')&&onRatchetToggle())toggleRatchet();
         else if((key=='f'||key=='F')&&onCyclePolicy()&&recurring()&&!bimonthly())toggleDailyFeeAllocation();
         else if((key=='z'||key=='Z')&&onTariffClock())toggleNamedClock();
         else if((key=='g'||key=='G')&&recurring())deriveCycle();
         else if(key==kKeyDown||key=='\t'){const auto n=count();if(n)field=(field+1)%n;}
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
         else if((key=='a'||key=='A')&&node()->isArray()){
-            const auto collection=collectionName();const size_t bound=collection=="revisions"||collection=="seasons"?16:collection=="dynamic"?256:32;
+            const auto collection=collectionName();
+            const size_t bound=collection=="demand_history"?12:collection=="revisions"||collection=="seasons"?16:collection=="dynamic"?256:32;
             if(count()>=bound||tariffJson(draft).size()>tariffDeclarationMaxBytes-1024)message=i18n::tariffNoticeEnglish(NoticeKey::Capacity);
             else{
                 auto value=tariffRowTemplate(collection,componentRevision());
@@ -176,6 +184,7 @@ class TariffSettingsPanel {
             if(onSeasonalToggle())shortcuts+=i18n::tariffMonthlyEnglish(Key::SeasonalToggle)+" ";
             if(onComponentToggle())shortcuts+="[C] Component multiplier ";
             if(onDemandToggle())shortcuts+="[D] Demand charge ";
+            if(onRatchetToggle())shortcuts+="[R] Historical demand floor ";
             if(recurring())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
             if(onTariffClock()&&civilNamedTimeAvailable())shortcuts+="[Z] Named/UTC clock ";
             shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
@@ -242,6 +251,11 @@ class TariffSettingsPanel {
         });
     }
     bool demand()const{return draft.find("demand_charge")!=nullptr;}
+    bool ratchet()const{
+        const auto *rule=draft.find("demand_charge");
+        return rule&&rule->find("ratchet");
+    }
+    bool onRatchetToggle()const{return route.empty()&&selectedName()=="demand_charge";}
     bool onDemandToggle()const{return onCyclePolicy()||(route.empty()&&selectedName()=="demand_charge");}
     bool requiresPricedOpeningReview()const{
         return demand()||active.find("demand_charge")||hasComponents(active)||hasComponents(draft);
@@ -270,7 +284,7 @@ class TariffSettingsPanel {
     bool readOnly(const std::string &s)const{
         if(s=="kind"&&named(node()))return true;
         if(s=="rounding")return path()!="plan";
-        if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return recurring();
+        if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return path()=="opening"&&recurring();
         return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="daily_fee_allocation"||s=="basis"||s=="origin"||s=="time_database_version";
     }
     static JsonValue *member(JsonValue &object,const std::string &name){
@@ -285,7 +299,7 @@ class TariffSettingsPanel {
         if(!schema||!opening||!plan||!policy)return;
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
-        schema->text=demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        schema->text=ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -305,7 +319,9 @@ class TariffSettingsPanel {
             member(*clock,"time_database_version")->text=tariffTzdbVersion;
         }
         refreshClockContract();
-        if(rate&&clearMidcycleSubtotal()){
+        if(!rate&&clearDemandHistory()){
+            message="Draft reset clock changed. Derive the cycle and re-enter the prior monthly peaks.";
+        }else if(rate&&clearMidcycleSubtotal()){
             message="Rate clock changed. Re-enter the opening subtotal using the new clock.";
         }else{
             message=rate?"Draft rate clock changed. Review the zone and opening.":"Draft reset clock changed. Derive and review the billing cycle.";
@@ -318,6 +334,10 @@ class TariffSettingsPanel {
         const auto *clock=plan?plan->find("clock"):nullptr;
         if(!policy||!clock)return;
         const auto previousCadence=cadence();
+        if(ratchet()){
+            message="Remove the historical demand floor before changing the monthly reset type.";
+            return;
+        }
         const bool useAnnual=selectedCadence==TariffResetCadence::Annual;
         const bool useBimonthly=selectedCadence==TariffResetCadence::Bimonthly;
         if(useBimonthly&&demand()){
@@ -405,7 +425,7 @@ class TariffSettingsPanel {
         auto &opening=*member(draft,"opening");
         if(demand()){
             opening.members.erase(std::remove_if(opening.members.begin(),opening.members.end(),[](const auto &entry){
-                return entry.first=="peak_demand_kw";
+                return entry.first=="peak_demand_kw"||entry.first=="demand_history";
             }),opening.members.end());
             draft.members.erase(std::remove_if(draft.members.begin(),draft.members.end(),[](const auto &entry){
                 return entry.first=="demand_charge";
@@ -422,6 +442,39 @@ class TariffSettingsPanel {
             message="Enter the aligned window, price and established peak. The opening subtotal excludes demand.";
         }
         refreshClockContract();
+    }
+    void toggleRatchet(){
+        if(!recurring()||annual()||bimonthly()){
+            message="Historical demand floor requires a monthly reset policy.";
+            return;
+        }
+        auto &rule=*member(draft,"demand_charge");
+        auto &opening=*member(draft,"opening");
+        if(ratchet()){
+            rule.members.erase(std::remove_if(rule.members.begin(),rule.members.end(),[](const auto &entry){
+                return entry.first=="ratchet";
+            }),rule.members.end());
+            opening.members.erase(std::remove_if(opening.members.begin(),opening.members.end(),[](const auto &entry){
+                return entry.first=="demand_history";
+            }),opening.members.end());
+            message="Historical demand floor removed from the draft.";
+        }else{
+            JsonValue setting,history;
+            parseJsonStrict(R"({"lookback_months":0,"fraction":""})",&setting,nullptr);
+            history.type=JsonValue::Type::Array;
+            rule.members.emplace_back("ratchet",std::move(setting));
+            opening.members.emplace_back("demand_history",std::move(history));
+            focus("demand_charge.ratchet");
+            message="Enter the fraction and lookback length. Enter one actual peak for each prior month.";
+        }
+        refreshClockContract();
+    }
+    bool clearDemandHistory(){
+        auto *opening=member(draft,"opening");
+        auto *history=opening?member(*opening,"demand_history"):nullptr;
+        if(!history||history->items.empty())return false;
+        history->items.clear();
+        return true;
     }
     void reviewChangedDemandWindow(){
         auto &opening=*member(draft,"opening");
@@ -535,6 +588,7 @@ class TariffSettingsPanel {
         }
         auto endText=std::to_string(bounds.endUtcMs);
         const auto *policy=draft.find("reset_policy");
+        const bool clearedHistory=begin->text!=beginText&&clearDemandHistory();
         const bool proratedEndChanged=end->text!=endText&&policy->find("daily_fee_allocation");
         const bool seasonalEndChanged=end->text!=endText&&seasonal();
         begin->text=std::move(beginText);
@@ -550,7 +604,8 @@ class TariffSettingsPanel {
             return;
         }
         focus("opening.cycle_begin_utc_ms");
-        message=i18n::tariffMonthlyEnglish(Key::Derived);
+        message=clearedHistory?"Cycle derived. Re-enter the prior monthly peaks.":
+            i18n::tariffMonthlyEnglish(Key::Derived);
     }
     std::string hint(const std::string &s)const{
         using HintKey=i18n::TariffHintMessageKey;
@@ -568,7 +623,11 @@ class TariffSettingsPanel {
         if(s=="time_mode")return i18n::tariffHintEnglish(HintKey::TimeMode);
         if(s=="window_minutes")return "Choose 5 to 60 minutes. The window must divide one hour.";
         if(s=="offset_minutes")return "Enter the UTC grid offset in minutes, smaller than the window.";
-        if(s=="rate_per_kw")return "Enter the price per kW of the highest average demand for this cycle.";
+        if(s=="rate_per_kw")return "Enter the price per kW of the billable demand for this cycle.";
+        if(s=="lookback_months")return "Enter one to twelve completed monthly cycles.";
+        if(s=="fraction")return "Enter a positive fraction up to one. For 80 percent, use 0.8.";
+        if(s=="peak_kw"&&collectionName().rfind("demand_history[",0)==0)
+            return "Enter the actual measured peak, before applying any historical floor.";
         if(s=="peak_demand_kw")return "Enter the established average-window peak. Use zero at cycle start.";
         if(s=="accrued_subtotal"&&demand())return "Enter accrued energy and fees before demand or the subtotal multiplier.";
         if(s=="base_multiplier")return "Enter the fallback factor as a nonnegative decimal. Use 0 in dynamic mode.";
@@ -626,6 +685,8 @@ class TariffSettingsPanel {
             i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
         if(seasonal())review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::SeasonalReview));
+        if(ratchet())review.insert(review.begin()+4,
+            "Billable demand is the larger of this month's actual peak and the fraction of the prior maximum.");
         if(demand())review.insert(review.begin()+4,
             "Peak demand is charged once per cycle. The opening subtotal excludes it. Review the plan and opening keys.");
         if(hasComponents(draft))review.insert(review.begin()+4,
