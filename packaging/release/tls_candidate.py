@@ -20,6 +20,16 @@ from verify_artifacts import MAX_ARTIFACT_BYTES, verify_images
 
 
 SCHEMA = 'canaryminer-tls-candidate-v1'
+NAMED_TZDB_SCHEMA = 'canaryminer-tls-named-tzdb-candidate-v2'
+TZDB_DIR = 'canary-tzdb-2026e'
+TZDB_FILES = ('africa', 'antarctica', 'asia', 'australasia', 'backward', 'etcetera',
+              'europe', 'northamerica', 'southamerica', 'leapseconds', 'version')
+# SHA-256 of the sorted 'filename SHA-256\n' inventory from tariff_tzdb_files.inc.
+# An aggregate pin lets the standalone installer authenticate these files offline.
+TZDB_INVENTORY_SHA256 = {
+    'linux': 'd5cd786140b5170a4788f55fec6e908c53242b72ee73a2f2295f9ab34af08b3d',
+    'windows': '088b7d0d940bc512b89f328b44ddb78a59c042fdea8e9996b18cf58432609656',
+}
 MANIFEST = 'manifest.json'
 IMAGE_NAMES = ('canary-miner', 'canary_preferences_worker', 'canary_pool_tls_stream_worker')
 RELEASE_FILES = {
@@ -44,8 +54,10 @@ MAX_TEXT_BYTES = 256 * 1024
 MAX_PACKAGE_BYTES = 96 * 1024 * 1024
 REQUIRED_OFF = ('CANARY_ENABLE_ENERGY_RUNTIME', 'CANARY_ENABLE_WORKER_CONTROL_RUNTIME',
                 'CANARY_ENABLE_POOL_TLS_PRIVATE_TRUST', 'CANARY_ENABLE_PUBLIC_HTTPS',
-                'CANARY_ENABLE_NAMED_TZDB', 'CANARY_FEE_TEST_POLICY')
+                'CANARY_FEE_TEST_POLICY')
 TLS_RUNTIME = 'CANARY_ENABLE_POOL_TLS_RUNTIME'
+NAMED_TZDB = 'CANARY_ENABLE_NAMED_TZDB'
+BUNDLED_TZDB = 'CANARY_BUNDLED_TZDB_DIR'
 
 
 def sha256(data):
@@ -77,18 +89,24 @@ def images(platform):
     return tuple(name + ('.exe' if platform == 'windows' else '') for name in IMAGE_NAMES)
 
 
-def file_limits(platform):
+def tzdb_paths(platform):
+    names = (*TZDB_FILES, 'windowsZones.xml') if platform == 'windows' else TZDB_FILES
+    return {name: f'bin/{TZDB_DIR}/{name}' for name in names}
+
+
+def file_limits(platform, named_tzdb=False):
     return {**{f'bin/{name}': MAX_ARTIFACT_BYTES for name in images(platform)},
             **dict.fromkeys(RELEASE_FILES, MAX_TEXT_BYTES),
+            **dict.fromkeys(tzdb_paths(platform).values() if named_tzdb else (), MAX_TEXT_BYTES),
             **({OPENSSL_LICENSE: MAX_TEXT_BYTES} if platform == 'linux' else {}),
             MANIFEST: MAX_TEXT_BYTES}
 
 
 def file_mode(name):
-    return 0o755 if name.startswith('bin/') else 0o644
+    return 0o755 if name.startswith('bin/') and name.count('/') == 1 else 0o644
 
 
-def check_cache(path, platform):
+def check_cache(path, platform, named_tzdb=False):
     keys = {}
     for line in read_regular(path, MAX_TEXT_BYTES).decode('utf8').splitlines():
         if line.startswith(('#', '//')) or '=' not in line or ':' not in line.partition('=')[0]:
@@ -96,25 +114,38 @@ def check_cache(path, platform):
         field, _, value = line.partition('=')
         key, _, kind = field.partition(':')
         if key.startswith('CANARY_ENABLE_') or key in ('CANARY_PROFILE', 'CMAKE_BUILD_TYPE',
-                                                       'CANARY_FEE_TEST_POLICY', '_OPENSSL_VERSION'):
+                                                       'CANARY_FEE_TEST_POLICY', '_OPENSSL_VERSION',
+                                                       BUNDLED_TZDB):
             if key in keys:
                 raise ValueError('candidate cache has duplicate capability or profile')
             keys[key] = (kind, value)
     if (keys.get('CANARY_PROFILE') != ('STRING', 'production-sm120') or
             keys.get('CMAKE_BUILD_TYPE') != ('STRING', 'Release') or
             keys.get(TLS_RUNTIME) != ('BOOL', 'ON') or
+            keys.get(NAMED_TZDB) != ('BOOL', 'ON' if named_tzdb else 'OFF') or
             any(keys.get(key) != ('BOOL', 'OFF') for key in REQUIRED_OFF)):
-        raise ValueError('candidate requires Release SM120, TLS ON and explicit unrelated defaults OFF')
+        raise ValueError('candidate requires Release SM120 and the selected capabilities')
+    enabled = (TLS_RUNTIME, NAMED_TZDB) if named_tzdb else (TLS_RUNTIME,)
     if any(value != ('BOOL', 'OFF') for key, value in keys.items()
-           if key.startswith('CANARY_ENABLE_') and key != TLS_RUNTIME):
+           if key.startswith('CANARY_ENABLE_') and key not in enabled):
         raise ValueError('candidate includes an unsupported development capability')
+    kind, bundled = keys.get(BUNDLED_TZDB, ('PATH', ''))
+    if kind != 'PATH' or (not Path(bundled).is_absolute() if named_tzdb else bool(bundled)):
+        raise ValueError('bundled tariff TZDB must match the selected candidate')
     if platform == 'linux' and keys.get('_OPENSSL_VERSION') != ('INTERNAL', '3.5.9'):
         raise ValueError('Linux candidate requires the inventoried OpenSSL 3.5.9 build')
 
 
-def manifest(platform, revision, glibc, files):
+def check_tzdb(platform, files):
+    paths = tzdb_paths(platform)
+    inventory = ''.join(f'{name} {sha256(files[paths[name]])}\n' for name in sorted(paths))
+    if sha256(inventory.encode('ascii')) != TZDB_INVENTORY_SHA256[platform]:
+        raise ValueError('tariff TZDB does not match the pinned file inventory')
+
+
+def manifest(platform, revision, glibc, files, named_tzdb=False):
     return {
-        'schema': SCHEMA,
+        'schema': NAMED_TZDB_SCHEMA if named_tzdb else SCHEMA,
         'platform': platform,
         'architecture': 'x86_64',
         'source_revision': revision,
@@ -131,18 +162,30 @@ def valid_revision(revision):
 
 
 def validate(platform, files):
-    if set(files) != set(file_limits(platform)):
-        raise ValueError('candidate inventory mismatch')
+    if MANIFEST not in files:
+        raise ValueError('candidate manifest is missing')
     document = json.loads(files[MANIFEST], object_pairs_hook=one)
-    if not isinstance(document, dict):
+    if not isinstance(document, dict) or document.get('schema') not in (SCHEMA, NAMED_TZDB_SCHEMA):
         raise ValueError('invalid candidate manifest')
+    named_tzdb = document['schema'] == NAMED_TZDB_SCHEMA
+    if set(files) != set(file_limits(platform, named_tzdb)):
+        raise ValueError('candidate inventory mismatch')
+    if named_tzdb:
+        check_tzdb(platform, files)
+        # The miner and its preferences worker must both recognize the bundled clocks.
+        pins = [sha256(files[path]).encode('ascii') for path in tzdb_paths(platform).values()]
+        for image in images(platform)[:2]:
+            data = files[f'bin/{image}']
+            if any(pin not in data for pin in pins):
+                raise ValueError('tariff TZDB pins missing from a native consumer')
     revision, glibc = document.get('source_revision'), document.get('min_glibc')
     valid_glibc = (glibc is None if platform == 'windows' else
                    isinstance(glibc, str) and re.fullmatch(r'[0-9]{1,3}(?:\.[0-9]{1,3}){1,2}', glibc)
                    and tuple(map(int, glibc.split('.'))) >= (2, 40))
     if not valid_revision(revision) or not valid_glibc:
         raise ValueError('invalid candidate revision or runtime requirement')
-    actual = manifest(platform, revision, glibc, {k: v for k, v in files.items() if k != MANIFEST})
+    actual = manifest(platform, revision, glibc, {k: v for k, v in files.items() if k != MANIFEST},
+                      named_tzdb)
     if document != actual:
         raise ValueError('candidate manifest or file hash mismatch')
     if platform == 'linux' and sha256(files[OPENSSL_LICENSE]) != OPENSSL_LICENSE_SHA256:
@@ -159,7 +202,7 @@ def load(platform, archive, expected=None):
     digest = sha256(data)
     if expected is not None and digest != expected:
         raise ValueError('candidate archive hash mismatch')
-    files, limits = {}, file_limits(platform)
+    files, limits = {}, file_limits(platform, named_tzdb=True)
     total = 0
 
     def add(name, size, mode, open_entry):
@@ -207,7 +250,7 @@ def write_package(platform, files, stream):
                 entry.compress_type = zipfile.ZIP_DEFLATED
                 package.writestr(entry, data)
     else:
-        with gzip.GzipFile(fileobj=stream, mode='wb', mtime=0) as compressed:
+        with gzip.GzipFile(filename='', fileobj=stream, mode='wb', mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as package:
                 for name, data in sorted(files.items()):
                     entry = tarfile.TarInfo(name)
@@ -215,16 +258,21 @@ def write_package(platform, files, stream):
                     package.addfile(entry, io.BytesIO(data))
 
 
-def pack(platform, build, revision, deny_file, tool, archive, openssl_license):
+def pack(platform, build, revision, deny_file, tool, archive, openssl_license, named_tzdb=False):
     source_tree = Path(__file__).resolve().parent.parent.parent
     if not valid_revision(revision) or not archive.name.endswith(suffix(platform)):
         raise ValueError('invalid revision or candidate archive extension')
     if archive.exists() or archive.is_symlink():
         raise ValueError('candidate archive already exists')
-    check_cache(build / 'CMakeCache.txt', platform)
-    files = {}
-    for name, source in RELEASE_FILES.items():
-        files[name] = read_regular(source_tree / source, MAX_TEXT_BYTES)
+    check_cache(build / 'CMakeCache.txt', platform, named_tzdb)
+    files = {name: read_regular(source_tree / source, MAX_TEXT_BYTES)
+             for name, source in RELEASE_FILES.items()}
+    tzdb = {}
+    if named_tzdb:
+        tzdb = {destination: read_regular(build / TZDB_DIR / name, MAX_TEXT_BYTES)
+                for name, destination in tzdb_paths(platform).items()}
+        # These independently pinned public source bytes can include public URLs with /home/.
+        check_tzdb(platform, tzdb)
     if platform == 'linux':
         if openssl_license is None:
             raise ValueError('the OpenSSL 3.5.9 license is required')
@@ -235,9 +283,10 @@ def pack(platform, build, revision, deny_file, tool, archive, openssl_license):
                                    portable=True, payloads=files)
     if platform == 'linux' and b'OpenSSL 3.5.9 ' not in checked[IMAGE_NAMES[2]]:
         raise ValueError('the static OpenSSL 3.5.9 image is required')
+    files.update(tzdb)
     files.update({f'bin/{name}': data for name, data in checked.items()})
     glibc = '.'.join(map(str, floor)) if floor else None
-    document = manifest(platform, revision, glibc, files)
+    document = manifest(platform, revision, glibc, files, named_tzdb)
     files[MANIFEST] = (json.dumps(document, indent=2, sort_keys=True) + '\n').encode('utf8')
     validate(platform, files)
     if sum(map(len, files.values())) > MAX_PACKAGE_BYTES:
@@ -287,6 +336,8 @@ def main():
             command.add_argument('--deny-file', type=Path, required=True)
             command.add_argument('--tool', type=Path, required=True)
             command.add_argument('--openssl-license', type=Path)
+            command.add_argument('--with-named-tzdb', action='store_true',
+                                 help='include the reviewed IANA 2026e data for named tariff clocks')
         else:
             command.add_argument('--sha256', required=True)
         if action == 'install':
@@ -295,7 +346,7 @@ def main():
     try:
         if args.operation == 'pack':
             print(pack(args.platform, args.build, args.revision, args.deny_file, args.tool,
-                       args.archive, args.openssl_license))
+                       args.archive, args.openssl_license, args.with_named_tzdb))
         else:
             if not re.fullmatch('[0-9a-f]{64}', args.sha256):
                 raise ValueError('expected a trusted SHA-256 digest')

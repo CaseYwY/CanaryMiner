@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import stat
 import struct
 import subprocess
@@ -43,6 +44,7 @@ class CandidateTests(unittest.TestCase):
             cache = Path(directory) / 'CMakeCache.txt'
             base = ['CANARY_PROFILE:STRING=production-sm120', 'CMAKE_BUILD_TYPE:STRING=Release',
                     'CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON', '_OPENSSL_VERSION:INTERNAL=3.5.9',
+                    'CANARY_ENABLE_NAMED_TZDB:BOOL=OFF',
                     *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF)]
             cache.write_text('\n'.join(base), encoding='utf8')
             CANDIDATE.check_cache(cache, 'linux')
@@ -63,10 +65,43 @@ class CandidateTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         CANDIDATE.check_cache(cache, 'windows')
             for key in ('CANARY_PROFILE', 'CANARY_ENABLE_POOL_TLS_RUNTIME', 'CANARY_FEE_TEST_POLICY',
-                        'CANARY_ENABLE_PUBLIC_HTTPS', '_OPENSSL_VERSION'):
+                        'CANARY_ENABLE_PUBLIC_HTTPS', 'CANARY_ENABLE_NAMED_TZDB', '_OPENSSL_VERSION'):
                 cache.write_text('\n'.join(line for line in base if not line.startswith(key)), encoding='utf8')
                 with self.assertRaises(ValueError):
                     CANDIDATE.check_cache(cache, 'linux')
+
+    def test_named_tzdb_requires_explicit_bundled_offline_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / 'CMakeCache.txt'
+            base = ['CANARY_PROFILE:STRING=production-sm120', 'CMAKE_BUILD_TYPE:STRING=Release',
+                    'CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON', 'CANARY_ENABLE_NAMED_TZDB:BOOL=ON',
+                    *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF)]
+            bundle = f'CANARY_BUNDLED_TZDB_DIR:PATH={root.as_posix()}'
+            cache.write_text('\n'.join([*base, bundle]), encoding='utf8')
+            CANDIDATE.check_cache(cache, 'windows', named_tzdb=True)
+            with self.assertRaises(ValueError):
+                CANDIDATE.check_cache(cache, 'windows')
+            for entries in (base, [*base, 'CANARY_BUNDLED_TZDB_DIR:PATH=relative'],
+                            [*base, bundle, 'CANARY_ENABLE_PUBLIC_HTTPS:BOOL=ON'],
+                            [*base, bundle, 'CANARY_BUNDLED_TZDB_DIR:PATH=another']):
+                with self.subTest(entries=len(entries)):
+                    cache.write_text('\n'.join(entries), encoding='utf8')
+                    with self.assertRaises(ValueError):
+                        CANDIDATE.check_cache(cache, 'windows', named_tzdb=True)
+
+    def test_standalone_tzdb_pins_match_native_runtime(self):
+        pins = Path(__file__).resolve().parents[1] / 'src/product/tariff_tzdb_files.inc'
+        rows = re.findall(r'TARIFF_TZDB_(FILE|WINDOWS)\("([A-Za-z.]+)", "([0-9a-f]{64})"\)',
+                          pins.read_text(encoding='utf8'))
+        for platform in ('linux', 'windows'):
+            with self.subTest(platform=platform):
+                expected = sorted((name, digest) for mode, name, digest in rows
+                                  if mode == 'FILE' or platform == 'windows')
+                self.assertEqual(set(CANDIDATE.tzdb_paths(platform)), {name for name, _ in expected})
+                inventory = ''.join(f'{name} {digest}\n' for name, digest in expected)
+                self.assertEqual(CANDIDATE.TZDB_INVENTORY_SHA256[platform],
+                                 hashlib.sha256(inventory.encode('ascii')).hexdigest())
 
     def test_gpu_allowlist_is_for_the_miner_only(self):
         symbols = ' *UND* (GLIBC_2.39) pidfd_spawn\n'
@@ -154,6 +189,54 @@ class CandidateTests(unittest.TestCase):
                                       for p in prefix.rglob('*') if p.is_file()}, files)
                     with self.assertRaises(FileExistsError):
                         CANDIDATE.install(platform, archive, digest, prefix)
+
+    def test_named_tzdb_inventory_and_pins_are_checked_before_install(self):
+        for platform in ('windows', 'linux'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / ('named' + CANDIDATE.suffix(platform))
+                other = root / ('renamed' + CANDIDATE.suffix(platform))
+                prefix = root / 'installed'
+                files = self.files(platform)
+                tzdb = CANDIDATE.tzdb_paths(platform)
+                for name, destination in tzdb.items():
+                    files[destination] = f'{name} fixture contents'.encode()
+                hashes = {name: hashlib.sha256(files[path]).hexdigest() for name, path in tzdb.items()}
+                inventory = ''.join(f'{name} {digest}\n' for name, digest in sorted(hashes.items()))
+                fixture_pin = hashlib.sha256(inventory.encode('ascii')).hexdigest()
+                consumers = [f'bin/{name}' for name in CANDIDATE.images(platform)[:2]]
+                for consumer in consumers:
+                    files[consumer] += inventory.encode('ascii')
+                glibc = '2.40' if platform == 'linux' else None
+
+                def rewrite_manifest(payloads, named_tzdb=True):
+                    original = {name: data for name, data in payloads.items() if name != CANDIDATE.MANIFEST}
+                    document = CANDIDATE.manifest(platform, REVISION, glibc, original, named_tzdb)
+                    return {**original, CANDIDATE.MANIFEST: json.dumps(document).encode()}
+
+                files = rewrite_manifest(files)
+                with patch.dict(CANDIDATE.TZDB_INVENTORY_SHA256, {platform: fixture_pin}), \
+                        patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+                    digest = self.archive(platform, files, archive)
+                    self.assertEqual(digest, self.archive(platform, files, other))
+                    self.assertEqual(CANDIDATE.load(platform, archive, digest)[0], files)
+                    for changed in (
+                        rewrite_manifest({**files, tzdb['version']: b'a different database'}),
+                        rewrite_manifest({key: val for key, val in files.items() if key != tzdb['version']}),
+                        rewrite_manifest(files, named_tzdb=False),
+                        *(rewrite_manifest({**files, consumer: b'older TLS-only image'})
+                          for consumer in consumers),
+                    ):
+                        changed_digest = self.archive(platform, changed, other)
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.install(platform, other, changed_digest, prefix)
+                    self.assertFalse(prefix.exists())
+                    if platform == 'windows' or os.name == 'posix':
+                        document, _ = CANDIDATE.install(platform, archive, digest, prefix)
+                        self.assertEqual(document['schema'], CANDIDATE.NAMED_TZDB_SCHEMA)
+                        self.assertEqual((prefix / tzdb['version']).read_bytes(), files[tzdb['version']])
+                        if platform == 'linux':
+                            self.assertEqual(stat.S_IMODE((prefix / tzdb['version']).stat().st_mode), 0o644)
 
     def test_refuses_wrong_hash_changed_file_extra_and_missing_members(self):
         for platform in ('linux', 'windows'):
