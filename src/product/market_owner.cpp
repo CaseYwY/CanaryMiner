@@ -1,4 +1,5 @@
 #include "market_owner.h"
+#include "market_hour_payload.h"
 #include "public_json_process.h"
 #include "native_process_admission.h"
 #include <algorithm>
@@ -8,11 +9,24 @@
 #include <thread>
 
 namespace om {
+struct PublicHourObservation {
+    uint64_t start = 0, end = 0, observedUtc = 0, receivedMonoMs = 0;
+    std::vector<market_detail::ReviewMinute> minutes;
+};
+
 namespace {
+using namespace market_detail;
+constexpr auto pearlHourFeed = static_cast<unsigned>(PublicFeed::MexcPearlHour);
+constexpr auto fxHourFeed = static_cast<unsigned>(PublicFeed::CoinbaseUsdtHour);
 uint64_t later(uint64_t now, uint64_t delay) { return delay > UINT64_MAX - now ? UINT64_MAX : now + delay; }
 unsigned index(PublicFeed feed) { return static_cast<unsigned>(feed); }
-unsigned provider(unsigned feed) { return feed < 2 ? 0 : 1; }
-bool candles(unsigned feed) { return feed == 1 || feed == 3; }
+unsigned provider(unsigned feed) { return feed < pearlHourFeed ? feed / 2 : feed - 2; }
+bool fixtureCandles(unsigned feed) { return feed == 1 || feed == 3; }
+bool publicHourFeed(unsigned feed) { return feed == pearlHourFeed || feed == fxHourFeed; }
+unsigned hourBit(unsigned feed) { return 1u << (feed - pearlHourFeed); }
+uint64_t eligibleHourEnd(uint64_t utc, unsigned guard) {
+    return utc > marketHourSeconds + 60 + guard ? (utc - guard) / 60 * 60 : 0;
+}
 bool transient(const PublicJsonResponse &r) {
     return r.status == PublicHttpsStatus::Network || r.status == PublicHttpsStatus::Timeout ||
         (r.status == PublicHttpsStatus::HttpStatus && (r.httpStatus == 429 || (r.httpStatus >= 500 && r.httpStatus <= 599)));
@@ -45,9 +59,11 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
     };
 }
 bool MarketPollingPlan::start(uint64_t generation, uint64_t ms, uint64_t utc, const MarketPollingPolicy &policy, bool fixture) {
-    if (active_ || helperFault_ || !generation || generation <= generation_ || !utc || utc > 253402300799ULL || !validMarketPollingPolicy(policy)) return false;
+    if (active_ || helperFault_ || !generation || generation <= generation_ || !utc || utc > marketUtcLimit ||
+        (fixture && policy.publicHour) || !validMarketPollingPolicy(policy)) return false;
     generation_ = generation; policy_ = policy; fixtureCandles_ = fixture; baseMs_ = lastMs_ = ms; baseUtc_ = lastUtc_ = utc;
-    economicDue_ = ms; providerDue_ = {ms, ms}; health_ = {}; current_.reset(); clockFault_ = false; active_ = true;
+    economicDue_ = ms; providerDue_.fill(ms); health_ = {}; current_.reset(); clockFault_ = false; active_ = true;
+    pendingHourFeeds_ = 0; pendingHourEnd_ = 0;
     for (auto &h : health_) h.nextDueMs = ms;
     return true;
 }
@@ -73,13 +89,34 @@ bool MarketPollingPlan::clock(uint64_t ms, uint64_t utc) {
 }
 std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t utc) {
     if (!clock(ms, utc) || current_) return std::nullopt;
+    auto due = [&](unsigned i) {
+        const auto &h = health_[i];
+        return !h.latched && ms >= h.nextDueMs && ms >= providerDue_[provider(i)];
+    };
+    unsigned hourFeeds = pendingHourFeeds_;
+    auto hourEnd = pendingHourEnd_;
+    if (policy_.publicHour && !hourFeeds) {
+        hourEnd = eligibleHourEnd(utc, policy_.settlementGuardSeconds);
+        if (hourEnd) {
+            for (const auto i : {pearlHourFeed, fxHourFeed})
+                if (due(i)) hourFeeds |= hourBit(i);
+            // Healthy lanes share a refresh window. A backed-off or latched lane cannot hold the other up.
+            const auto healthy = [&](unsigned i) { return !health_[i].latched && !health_[i].attempts; };
+            if (healthy(pearlHourFeed) && healthy(fxHourFeed) && hourFeeds != (hourBit(pearlHourFeed) | hourBit(fxHourFeed)))
+                hourFeeds = 0;
+        }
+    }
     unsigned choice = static_cast<unsigned>(health_.size());
     PublicJsonRequest chosen;
     for (unsigned i = 0; i < health_.size(); ++i) {
         auto &h = health_[i];
-        if (h.latched || (candles(i) && !fixtureCandles_) || ms < h.nextDueMs || ms < providerDue_[provider(i)]) continue;
+        if (!due(i) || (fixtureCandles(i) && !fixtureCandles_)) continue;
         PublicJsonRequest request{static_cast<PublicFeed>(i)};
-        if (candles(i)) {
+        if (publicHourFeed(i)) {
+            if (!(hourFeeds & hourBit(i))) continue;
+            request.fromUtc = static_cast<int64_t>(hourEnd - marketHourSeconds);
+            request.toUtc = static_cast<int64_t>(hourEnd);
+        } else if (fixtureCandles(i)) {
             const auto minutes = (std::max)(60u, policy_.economicsMinutes);
             if (utc <= policy_.settlementGuardSeconds) continue;
             const auto end = (utc - policy_.settlementGuardSeconds) / 60 * 60;
@@ -93,6 +130,10 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
     if (h.attempts >= policy_.maxAttempts) h.attempts = 0;  // a new, separately cooled-down periodic cycle
     if (serial_ == UINT64_MAX) { stop(); return std::nullopt; }
     MarketFetchTicket ticket{chosen, generation_, ++serial_, utc, ms};
+    if (publicHourFeed(choice)) {
+        pendingHourFeeds_ = hourFeeds & ~hourBit(choice);
+        pendingHourEnd_ = hourEnd;
+    }
     h.inFlight = true;
     providerDue_[provider(choice)] = later(ms, 1000);  // shared endpoint/IP budget; never evade with concurrency
     current_ = ticket; return ticket;
@@ -102,7 +143,8 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
     if (!clock(ms, utc) || !current_ || !sameTicket(*current_, ticket)) return false;
     auto &h = health_[index(ticket.request.feed)];
     current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
-    const auto refresh = candles(index(ticket.request.feed)) ? policy_.candleRefreshMs : policy_.quoteRefreshMs;
+    const auto feed = index(ticket.request.feed);
+    const auto refresh = fixtureCandles(feed) || publicHourFeed(feed) ? policy_.candleRefreshMs : policy_.quoteRefreshMs;
     if (r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::Ok) {
         h.attempts = 0; h.nextDueMs = later(ms, refresh); return true;
     }
@@ -164,8 +206,11 @@ struct MarketDataOwner::Impl {
                 if (ticket) {
                     publish();
                     {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
+                    const auto feed = index(ticket->request.feed);
+                    auto limits = policy.https;
+                    if (publicHourFeed(feed)) limits.bodyBytes = (std::min)(limits.bodyBytes, marketHourBodyBytes);
                     PublicJsonResponse response;
-                    try { response = fetch(ticket->request, cancel, policy.https); } catch (...) { response.status = PublicHttpsStatus::Unavailable; }
+                    try { response = fetch(ticket->request, cancel, limits); } catch (...) { response.status = PublicHttpsStatus::Unavailable; }
                     if (response.status == PublicHttpsStatus::Unreaped) {
                         // Cleanup uncertainty survives a simultaneous stop; it publishes no quote facts.
                         std::lock_guard<std::mutex> commit(commitMutex);
@@ -179,9 +224,24 @@ struct MarketDataOwner::Impl {
                         fixture ? MarketMinuteConvention::FixtureMinuteStart : MarketMinuteConvention::Unqualified, now.second};
                     MarketDataResult<MarketQuote> quote;
                     MarketDataResult<MarketCandles> minutes;
-                    if (candles(index(ticket->request.feed))) minutes = parseMarketCandles(response, context);
-                    else quote = parseMarketQuote(response, context);
-                    const auto status = candles(index(ticket->request.feed)) ? minutes.status : quote.status;
+                    std::shared_ptr<PublicHourObservation> hour;
+                    MarketDataStatus status;
+                    if (publicHourFeed(feed)) {
+                        hour = std::make_shared<PublicHourObservation>();
+                        hour->start = static_cast<uint64_t>(ticket->request.fromUtc);
+                        hour->end = static_cast<uint64_t>(ticket->request.toUtc);
+                        hour->observedUtc = response.observedUtc;
+                        hour->receivedMonoMs = now.first;
+                        status = decodePublicHourPayload(response, feed == pearlHourFeed ? HourFeed::MexcPearl : HourFeed::CoinbaseFx,
+                            hour->start, hour->end, ticket->startedUtc, now.second, hour->minutes);
+                        if (status != MarketDataStatus::Ok) hour.reset();
+                    } else if (fixtureCandles(feed)) {
+                        minutes = parseMarketCandles(response, context);
+                        status = minutes.status;
+                    } else {
+                        quote = parseMarketQuote(response, context);
+                        status = quote.status;
+                    }
                     now = clock();
                     {
                         // Serialize cancellation with cache commit, not with network/parse work. No late fact commits after stop.
@@ -196,6 +256,7 @@ struct MarketDataOwner::Impl {
                                 if (ticket->request.feed == PublicFeed::GatePearlCandles) current.pearlCandles = std::move(minutes.value);
                                 else current.fxCandles = std::move(minutes.value);
                             }
+                            if (hour) (feed == pearlHourFeed ? current.pearlHour : current.fxHour) = std::move(hour);
                         }
                         publish();
                     }
@@ -216,6 +277,7 @@ MarketDataOwner::~MarketDataOwner() { stop(); }
 bool MarketDataOwner::start(uint64_t generation) {
     std::lock_guard<std::mutex> life(impl_->lifecycle);
     if (impl_->thread.joinable() || !impl_->fetch || (impl_->fixture && impl_->origin != MarketOrigin::SyntheticFixture) ||
+        (impl_->policy.publicHour && impl_->origin != MarketOrigin::ProviderResponse) ||
         (impl_->origin != MarketOrigin::SyntheticFixture && impl_->origin != MarketOrigin::ProviderResponse)) return false;
     try {
         {std::lock_guard<std::mutex> commit(impl_->commitMutex);if(!impl_->nativeLife.begin()){impl_->nativeCurrent();return false;}}
@@ -271,10 +333,66 @@ std::vector<std::string> marketTickerLines(const MarketSnapshot &s, const Market
     return lines;
 }
 
+namespace {
+std::string displayedMean(const std::optional<MarketExactMean> &value) {
+    std::string text;
+    if (!value || !value->sum.formatRatio(value->count, 6, &text)) return "N/A";
+    return text == "0.000000" && !value->sum.zero() ? "<0.000001" : text;
+}
+
+void appendPublicHour(std::vector<std::string> &lines, const MarketSnapshot &s, const MarketPollingPolicy &policy,
+                      uint64_t utc, uint64_t ms) {
+    const auto targetEnd = eligibleHourEnd(utc, policy.settlementGuardSeconds);
+    const auto maxAge = policy.freshness.maxObservationAgeMs;
+    const auto fresh = [&](const std::shared_ptr<const PublicHourObservation> &reading) {
+        return s.running && !s.clockFault && !s.helperFault && s.origin == MarketOrigin::ProviderResponse &&
+            reading && reading->end <= targetEnd && targetEnd - reading->end <= 60 &&
+            utc >= reading->observedUtc && utc - reading->observedUtc <= maxAge / 1000 &&
+            ms >= reading->receivedMonoMs && ms - reading->receivedMonoMs <= maxAge;
+    };
+    const auto *pearl = fresh(s.pearlHour) ? s.pearlHour.get() : nullptr;
+    const auto *fx = fresh(s.fxHour) ? s.fxHour.get() : nullptr;
+    const bool aligned = pearl && fx && pearl->start == fx->start && pearl->end == fx->end;
+    MarketWindow window;
+    if (pearl) {
+        const std::vector<ReviewMinute> missing;
+        window = calculateMarketHour(pearl->start, pearl->end, pearl->minutes, aligned ? fx->minutes : missing);
+    }
+    lines.push_back("1h mean of minute closes: " + displayedMean(window.tokenUsdt) + " USDT/PRL | " +
+        displayedMean(window.tokenUsd) + " USD/PRL");
+    lines.push_back("1h candles: TWAP approximation | candidate data, finality unverified");
+    const auto describe = [&](unsigned feed, const char *label, const PublicHourObservation *reading) {
+        std::string line = label;
+        if (reading) {
+            line += std::to_string(reading->minutes.size()) + "/60 | received " +
+                std::to_string(utc - reading->observedUtc) + "s ago";
+            if (reading->end != targetEnd) line += " | previous minute window";
+        } else {
+            line += "N/A (no fresh window)";
+        }
+        const auto &health = s.health[feed];
+        lines.push_back(line + " | " + publicHttpsStatusName(health.transport) + "/" + marketDataStatusName(health.data));
+    };
+    describe(pearlHourFeed, "MEXC PEARLUSDT: ", pearl);
+    describe(fxHourFeed, "Coinbase USDT-USD: ", fx);
+    const auto interval = [](const PublicHourObservation &reading) {
+        return "[" + std::to_string(reading.start) + ", " + std::to_string(reading.end) + ")";
+    };
+    if (pearl) lines.push_back("1h UTC seconds " + interval(*pearl));
+    if (fx && !aligned) lines.push_back("FX UTC seconds " + interval(*fx));
+    if (pearl && fx && !aligned) lines.push_back("1h USD unavailable: source windows differ");
+}
+}  // namespace
+
 std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const MarketPollingPolicy &policy, uint64_t utc, uint64_t ms) {
     auto lines = marketTickerLines(s, policy.freshness, utc, ms);
     lines.insert(lines.begin(), std::string("Market references: ") + (s.helperFault ? "helper ownership fault" : s.clockFault ? "clock fault" : s.running ? "active" : "stopped") +
         (s.origin == MarketOrigin::SyntheticFixture ? " | SYNTHETIC FIXTURE - NOT LIVE" : " | public provider observations"));
+    if (policy.publicHour) {
+        appendPublicHour(lines, s, policy, utc, ms);
+        lines.push_back("Reference prices are not executable proceeds, credited income or current holdings.");
+        return lines;
+    }
     const unsigned expected = 60;
     MarketWindow window;
     if (s.running && !s.clockFault && s.pearlCandles && utc >= s.pearlCandles->observation.observedUtc && ms >= s.pearlCandles->observation.receivedMonoMs &&
@@ -286,12 +404,7 @@ std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const Mark
             utc >= s.fxCandles->observation.observedUtc && utc - s.fxCandles->observation.observedUtc <= policy.freshness.maxObservationAgeMs / 1000) fx = &*s.fxCandles;
         window = marketWindow(*s.pearlCandles, fx, end - 3600, end);
     }
-    auto average = [](const std::optional<MarketExactMean> &value) {
-        std::string text;
-        if (!value || !value->sum.formatRatio(value->count, 6, &text)) return std::string("N/A");
-        return text == "0.000000" && !value->sum.zero() ? std::string("<0.000001") : text;
-    };
-    lines.push_back("1h equal-time mean of 1m closes (TWAP approximation): " + average(window.tokenUsdt) + " USDT/PRL | " + average(window.tokenUsd) + " USD/PRL");
+    lines.push_back("1h equal-time mean of 1m closes (TWAP approximation): " + displayedMean(window.tokenUsdt) + " USDT/PRL | " + displayedMean(window.tokenUsd) + " USD/PRL");
     lines.push_back("1h coverage: Pearl " + std::to_string(window.pearlCovered) + "/" + std::to_string(expected) + " | FX " + std::to_string(window.fxCovered) +
         "/" + std::to_string(expected) + " | end UTC " + (window.endUtc ? std::to_string(window.endUtc) + " | lag " + std::to_string(utc - window.endUtc) + "s" : "N/A (time convention unqualified/unavailable)"));
     lines.push_back("Reference prices are not executable proceeds, credited income or current holdings.");

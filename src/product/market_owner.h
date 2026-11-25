@@ -16,6 +16,7 @@ struct MarketPollingPolicy {
     MarketFreshnessPolicy freshness;
     PublicHttpsLimits https;
     bool scheduleEconomicRequests = true;
+    bool publicHour = false;
 };
 bool validMarketPollingPolicy(const MarketPollingPolicy &policy);
 struct MarketFetchTicket {
@@ -41,23 +42,27 @@ class MarketPollingPlan {
     bool active() const { return active_; }
     bool clockFault() const { return clockFault_; }
     bool helperFault() const { return helperFault_; }
-    const std::array<MarketFeedHealth, 4> &health() const { return health_; }
+    const std::array<MarketFeedHealth, 6> &health() const { return health_; }
    private:
     bool clock(uint64_t nowMs, uint64_t nowUtc);
     MarketPollingPolicy policy_;
     bool active_ = false, fixtureCandles_ = false, clockFault_ = false, helperFault_ = false;
     uint64_t generation_ = 0, serial_ = 0, baseMs_ = 0, baseUtc_ = 0, lastMs_ = 0, lastUtc_ = 0, economicDue_ = 0;
-    std::array<uint64_t, 2> providerDue_{};
+    std::array<uint64_t, 4> providerDue_{};
+    uint64_t pendingHourEnd_ = 0;
+    unsigned pendingHourFeeds_ = 0;
     std::optional<MarketFetchTicket> current_;
-    std::array<MarketFeedHealth, 4> health_{};
+    std::array<MarketFeedHealth, 6> health_{};
 };
+struct PublicHourObservation;
 struct MarketSnapshot {
     uint64_t generation = 0, revision = 0, economicRequests = 0;
     bool running = false, clockFault = false, helperFault = false;
     MarketOrigin origin = MarketOrigin::ProviderResponse;
-    std::array<MarketFeedHealth, 4> health;
+    std::array<MarketFeedHealth, 6> health;
     std::optional<MarketQuote> pearlQuote, fxQuote;
     std::optional<MarketCandles> pearlCandles, fxCandles;
+    std::shared_ptr<const PublicHourObservation> pearlHour, fxHour;
 };
 using MarketFetch = std::function<PublicJsonResponse(const PublicJsonRequest &, const std::atomic<bool> &, PublicHttpsLimits)>;
 using MarketClock = std::function<std::pair<uint64_t, uint64_t>()>;  // monotonic milliseconds, UTC seconds

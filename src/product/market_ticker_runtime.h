@@ -1,4 +1,4 @@
-// Application wiring for the two installed, read-only ticker feeds.
+// Application wiring for installed read-only public market feeds.
 #pragma once
 #include "market_reference_sink.h"
 #include <csignal>
@@ -7,7 +7,9 @@
 namespace om {
 struct PublicTickerLaunch {
     bool available = false, requested = false, permitted = false, dashboard = false, suppressed = false;
+    bool hourPermitted = false;
 };
+bool validDashboardHourConsent(int argc, const char *const *argv, int tickerIndex, int hourIndex);
 std::filesystem::path installedPublicTickerHelper(const std::filesystem::path &module);
 MarketReferenceFactory installedPublicTickerFactory(const std::filesystem::path &module, PublicTickerLaunch launch);
 int commandPublicTickers(const std::filesystem::path &module, int argc, const char *const *argv,

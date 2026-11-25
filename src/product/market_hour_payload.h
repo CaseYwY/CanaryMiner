@@ -9,6 +9,7 @@ namespace om::market_detail {
 inline constexpr unsigned marketHourMinutes = 60;
 inline constexpr uint64_t marketHourSeconds = 3600;
 inline constexpr uint64_t marketUtcLimit = 253402300799ULL;
+inline constexpr size_t marketHourBodyBytes = 64 * 1024;
 
 enum class HourFeed { MexcPearl, CoinbaseFx };
 
@@ -20,6 +21,18 @@ struct ReviewMinute {
 
 bool readMarketHourPayload(const JsonValue &payload, HourFeed feed, uint64_t start, uint64_t end,
                            uint64_t observedUtc, std::vector<ReviewMinute> &minutes);
+
+inline MarketDataStatus decodePublicHourPayload(const PublicJsonResponse &reply, HourFeed feed,
+                                                uint64_t start, uint64_t end, uint64_t sentUtc, uint64_t receivedUtc,
+                                                std::vector<ReviewMinute> &minutes) {
+    if (reply.status != PublicHttpsStatus::Ok || reply.httpStatus != 200) return MarketDataStatus::Transport;
+    if (!sentUtc || reply.observedUtc < sentUtc || reply.observedUtc > receivedUtc) return MarketDataStatus::Timestamp;
+    JsonValue payload;
+    if (reply.body.size() > marketHourBodyBytes || !parseJsonStrict(reply.body, &payload, nullptr) ||
+        !readMarketHourPayload(payload, feed, start, end, reply.observedUtc, minutes))
+        return MarketDataStatus::Schema;
+    return MarketDataStatus::Ok;
+}
 
 inline MarketWindow calculateMarketHour(uint64_t start, uint64_t end, const std::vector<ReviewMinute> &pearl,
                                         const std::vector<ReviewMinute> &fx) {

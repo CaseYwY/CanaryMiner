@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import struct
 import subprocess
 import sys
@@ -16,11 +17,21 @@ def main():
     import fcntl
     import pty
     import termios
-    fixture = str(Path(sys.argv[1]).resolve())
+    fixture = Path(sys.argv[1]).resolve()
+    helper_fixture = Path(sys.argv[2]).resolve()
+    preference_fixture = Path(sys.argv[3]).resolve()
     checks = 0
 
-    def session(root, work, disabled=False):
+    def session(root, work, disabled=False, hour=False):
         nonlocal checks
+        executable = fixture
+        if hour:
+            installed = root / 'installed'
+            installed.mkdir(parents=True)
+            executable = Path(shutil.copy2(fixture, installed / fixture.name))
+            shutil.copy2(helper_fixture, installed / 'canary_public_json_worker')
+            shutil.copy2(preference_fixture, installed / 'canary_preferences_worker')
+        options = ['--hour-fixture'] if hour else ['--no-market'] if disabled else []
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 60, 120, 0, 0))
 
@@ -28,7 +39,7 @@ def main():
             os.setsid()
             fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
-        child = subprocess.Popen([fixture, str(root), *(['--no-market'] if disabled else [])], stdin=slave, stdout=slave, stderr=slave, preexec_fn=own_terminal)
+        child = subprocess.Popen([executable, str(root), *options], stdin=slave, stdout=slave, stderr=slave, preexec_fn=own_terminal)
         os.close(slave)
         transcript = b''
 
@@ -39,7 +50,7 @@ def main():
             deadline = time.monotonic() + 10
             while needle not in transcript:
                 if time.monotonic() >= deadline:
-                    raise AssertionError('native public-reference terminal readiness deadline')
+                    raise AssertionError(f'native public-reference terminal did not show {needle!r}: {transcript[-3000:]!r}')
                 readable, _, _ = select.select([master], [], [], 0.1)
                 if readable:
                     try:
@@ -61,7 +72,10 @@ def main():
             while not (root / 'worker-starts').exists():
                 assert child.poll() is None and time.monotonic() < deadline, 'owned synthetic worker admission'
                 if select.select([master], [], [], .05)[0]:
-                    transcript += os.read(master, 65536)
+                    try:
+                        transcript += os.read(master, 65536)
+                    except OSError as error:
+                        raise AssertionError('native fixture closed before worker admission') from error
             work(send, until)
             child.wait(timeout=8)
             assert child.returncode == 0
@@ -103,6 +117,28 @@ def main():
         counts = session(active, live)
         assert counts['factories'] == counts['starts'] == counts['joins'] == 1 and counts['fetches'] == 2 and counts['views'] > 0
         checks += 1
+        libc = os.confstr('CS_GNU_LIBC_VERSION') if 'CS_GNU_LIBC_VERSION' in os.confstr_names else None
+        if libc and tuple(map(int, libc.split()[1].split('.')[:2])) >= (2, 40):
+            def public_hour(send, until):
+                nonlocal checks
+                text = until(b'1h mean of minute closes: 3.000000 USDT/PRL | 3.500000 USD/PRL')
+                assert b'Latest PRL/USD reference: 2.45' in text
+                assert b'PRODUCTION AND REFERENCE VALUATION' not in text and b'Estimated net' not in text
+                until(b'TWAP approximation | candidate data, finality unverified')
+                until(b'MEXC PEARLUSDT: 60/60')
+                until(b'Coinbase USDT-USD: 60/60')
+                until(b'1h UTC seconds [')
+                checks += 5
+                send(b'q')
+
+            state = root / 'hour'
+            counts = session(state, public_hour, hour=True)
+            payloads = (state / 'installed' / 'candle-requests').read_text().splitlines()
+            assert len(payloads) == 2 and payloads[0].startswith('4 ') and payloads[1] == '5 ' + payloads[0][2:]
+            assert (state / 'installed' / 'ticker-requests').read_text().splitlines() == ['0', '2']
+            assert counts['factories'] == counts['starts'] == counts['joins'] == 1 and counts['views'] > 0
+            checks += 3
+
         manual = {
             'schema_version': 1, 'asset': 'pearl-mainnet-native-prl', 'token_quote': 'USDT', 'fx_base': 'USDT', 'fx_quote': 'USD',
             'enabled': True, 'fx_enabled': False, 'prl_usdt': '3', 'prl_as_of_utc': int(time.time()), 'usdt_usd': '', 'fx_as_of_utc': 0,

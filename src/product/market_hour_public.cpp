@@ -33,12 +33,11 @@ HourSample decodeHourReply(const PublicJsonResponse &reply, HourFeed feed, uint6
         sample.problem = reply.httpStatus == 429 ? "provider rate limited the request" : publicHttpsStatusName(reply.status);
     } else if (reply.httpStatus != 200) {
         sample.problem = "unexpected HTTP status";
-    } else if (reply.observedUtc < sentUtc || reply.observedUtc > receivedUtc) {
-        sample.problem = "invalid response observation time";
     } else {
-        JsonValue payload;
-        if (!parseJsonStrict(reply.body, &payload, nullptr) ||
-            !readMarketHourPayload(payload, feed, start, end, reply.observedUtc, sample.minutes))
+        const auto status = decodePublicHourPayload(reply, feed, start, end, sentUtc, receivedUtc, sample.minutes);
+        if (status == MarketDataStatus::Timestamp)
+            sample.problem = "invalid response observation time";
+        else if (status != MarketDataStatus::Ok)
             sample.problem = "invalid minute response schema or timestamp";
         else
             sample.observedUtc = reply.observedUtc;
@@ -82,7 +81,7 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
         const auto start = end - marketHourSeconds;
         const auto fetch = marketProcessFetch(helper);
         auto limits = policy.https;
-        limits.bodyBytes = 64 * 1024;
+        limits.bodyBytes = marketHourBodyBytes;
         auto previous = initial;
         HourSample pearl, fx;
         for (const auto feed : {HourFeed::MexcPearl, HourFeed::CoinbaseFx}) {
