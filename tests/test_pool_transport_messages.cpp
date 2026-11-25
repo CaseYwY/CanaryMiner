@@ -54,6 +54,9 @@ void migrationMessages(){
     CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+ssl://prl-hk.kryptex.network:8048"}})=="Proposed TLS: stratum+ssl://prl-hk.kryptex.network:8048");
     CHECK(i18n::poolMigrationEnglish(Key::Source,{{"endpoint","stratum+ssl://prl-hk.kryptex.network:8048"}}).empty());
     CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+tcp://prl-hk.kryptex.network:7048"}}).empty());
+    CHECK(i18n::poolMigrationEnglish(Key::Source,{{"endpoint","stratum+tcp://us2.pearl.herominers.com:1200"}})=="Configured source: stratum+tcp://us2.pearl.herominers.com:1200");
+    CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+ssl://us2.pearl.herominers.com:1200"}})=="Proposed TLS: stratum+ssl://us2.pearl.herominers.com:1200");
+    CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint","stratum+tcp://us2.pearl.herominers.com:1200"}}).empty());
     for(const auto value:{"stratum+ssl://wallet:password@prl-us.kryptex.network:8048","stratum+ssl://other.test:8048","PRIVATE-error","stratum+ssl://prl-us.kryptex.network:8048\n"})
         CHECK(i18n::poolMigrationEnglish(Key::Target,{{"endpoint",value}}).empty());
     CHECK(i18n::poolMigrationEnglish(Key::Count).empty()&&i18n::poolMigrationEnglish(Key::Target).empty());
@@ -67,6 +70,22 @@ void migrationMessages(){
     CHECK(layoutTerminalPoolMigrationMessage(bad,policy,&line)&&line.line.line.text.find("prl-hk.kryptex.network:8048")!=std::string::npos);
     bad.key=Key::Source;
     CHECK(!layoutTerminalPoolMigrationMessage(bad,policy,&line));
+
+    TerminalPoolMigrationMessageRequest hero;
+    hero.key = Key::Target;
+    const std::string heroEndpoint = "stratum+ssl://us2.pearl.herominers.com:1200";
+    hero.arguments = {{"endpoint", {{heroEndpoint, {}, true}, Tone::Plain}}};
+    TerminalMessageRows rows;
+    policy.columns = heroEndpoint.size() - 1;
+    CHECK(!wrapTerminalPoolMigrationMessage(hero, policy, 40, &rows));
+    policy.columns = heroEndpoint.size();
+    CHECK(wrapTerminalPoolMigrationMessage(hero, policy, 40, &rows));
+    int exactEndpointRows = 0;
+    for (const auto &row : rows.rows) {
+        CHECK(row.line.cells <= policy.columns && !row.line.clipped);
+        if (row.line.text == heroEndpoint) ++exactEndpointRows;
+    }
+    CHECK(exactEndpointRows == 1);
 }
 int main(){
     using Key=i18n::PoolTransportMessageKey;

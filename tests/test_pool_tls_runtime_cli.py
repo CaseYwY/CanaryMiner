@@ -99,6 +99,24 @@ def main():
         assert marker in result.stderr
         case('Hong Kong migration cannot redirect a US source', config=migrated_source, prefs=hk_migrated)
         case('US declaration conflicts with Hong Kong preset', config=hk_preset, prefs=migrated)
+        hero_url = 'stratum+ssl://us2.pearl.herominers.com:1200'
+        hero_plain = 'stratum+tcp://us2.pearl.herominers.com:1200'
+        hero_preset = {**base, 'pools': [dict(url='herominers-tls')]}
+        hero_source = {**base, 'pools': ['herominers']}
+        hero_migrated = {**migrated, 'user_pools': [{**migrated_rule, 'tls_url': hero_url}]}
+        hero_prefer = {**migrated, 'user_pools': [dict(mode='prefer_tls', tls_url=hero_url,
+                                                     plaintext_url=hero_plain, plaintext_consent=True)]}
+        case('HeroMiners legacy alias remains TCP', config=hero_source, code=97)
+        result = case('HeroMiners preset stays strict with saved same-port fallback consent',
+                      config=hero_preset, prefs=hero_prefer, admitted=True)
+        assert marker in result.stderr
+        case('HeroMiners preset CLI', args=['--pool', 'herominers-tls'], admitted=True)
+        result = case('HeroMiners preset requires donation off', config={**hero_preset, 'donation': True})
+        assert (b'user-pool TLS requires --no-donation' if available else marker) in result.stderr
+        result = case('HeroMiners legacy alias admits saved same-port migration',
+                      config=hero_source, prefs=hero_migrated, admitted=True)
+        assert marker in result.stderr
+        case('HeroMiners migration cannot redirect a Kryptex source', config=migrated_source, prefs=hero_migrated)
         case('f2pool account only', config={**base, 'wallet': '', 'pools': [dict(url='stratum+ssl://pearl.f2pool.com:5501', account='synthetic_account')]}, admitted=True)
         prefs = dict(schema_version=1, user_pools=[strict], donation=empty)
         tcp = {**base, 'pools': ['pool-fixture.invalid:1']}

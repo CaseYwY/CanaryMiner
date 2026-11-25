@@ -42,9 +42,13 @@ inline bool validPoolMigrationMessageArgument(PoolMigrationMessageKey key,std::s
     if(name!="endpoint")return false;
     using Candidate=PoolTlsMigrationCandidate;
     if(key==PoolMigrationMessageKey::Source)
-        return value==poolTlsMigrationSource(Candidate::KryptexUsTcp7048)||value==poolTlsMigrationSource(Candidate::KryptexHkTcp7048);
+        return value==poolTlsMigrationSource(Candidate::KryptexUsTcp7048)||
+               value==poolTlsMigrationSource(Candidate::KryptexHkTcp7048)||
+               value==poolTlsMigrationSource(Candidate::HeroMinersUsEastTcp1200);
     if(key==PoolMigrationMessageKey::Target)
-        return value==poolTlsMigrationTarget(Candidate::KryptexUsTcp7048)||value==poolTlsMigrationTarget(Candidate::KryptexHkTcp7048);
+        return value==poolTlsMigrationTarget(Candidate::KryptexUsTcp7048)||
+               value==poolTlsMigrationTarget(Candidate::KryptexHkTcp7048)||
+               value==poolTlsMigrationTarget(Candidate::HeroMinersUsEastTcp1200);
     return false;
 }
 inline std::string poolMigrationEnglish(PoolMigrationMessageKey key,const MessageArguments &arguments={}){

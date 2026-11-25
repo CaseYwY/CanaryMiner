@@ -6,14 +6,15 @@ Open **Pools / TLS declarations** in the dashboard settings or run `canary-miner
 | --- | --- |
 | `kryptex` or `prl-us.kryptex.network:7048` | `stratum+ssl://prl-us.kryptex.network:8048` |
 | `prl-hk.kryptex.network:7048` | `stratum+ssl://prl-hk.kryptex.network:8048` |
+| `herominers` or `us2.pearl.herominers.com:1200` | `stratum+ssl://us2.pearl.herominers.com:1200` |
 
-The proposal requires a clean draft and an `Unchanged` first-user declaration with empty URLs and no plaintext consent. Existing declarations can be edited through the ordinary fields. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en)
+The proposal requires a clean draft and an `Unchanged` first-user declaration with empty URLs and no plaintext consent. Existing declarations can be edited through the ordinary fields. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en) · [Official HeroMiners TLS instructions](https://pearl.herominers.com/help/)
 
 The review shows the configured TCP source, proposed TLS endpoint, disabled plaintext fallback, and any startup constraints. Use Up/Down or PgUp/PgDn to read the review on a short terminal. **Enter** saves through the existing preference owner. **Esc** returns to the draft, which can be discarded through the ordinary leave prompt.
 
 Save writes the first user declaration to `pool-security-preferences.json`. The main configuration remains the source for the wallet, protocol parameters and configured first pool. The dashboard still shows the running session's frozen policy and observed connection. The next explicit start reads the saved Strict TLS declaration and applies the ordinary first-pool admission rules, including a matching DNS host, a TLS-enabled build and donation off.
 
-The proposal uses the configured first-pool tuple captured after command-line overrides. Each proposal shares its target with the corresponding strict Kryptex preset and keeps the configured region. [Strict TLS presets](pool-tls-presets.md)
+The proposal uses the configured first-pool tuple captured after command-line overrides. Each proposal shares its target with the corresponding strict TLS preset and keeps the configured region. [Strict TLS presets](pool-tls-presets.md)
 
 If the independent preferences file changes after it was loaded, the save can become UNKNOWN. The original review cannot be replayed by restoring the old file bytes. Explicit inspection can establish a new editable baseline, after which **M** and **Enter** are separate actions again.
 

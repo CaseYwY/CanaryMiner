@@ -216,6 +216,44 @@ int main(){
         CHECK(!resolvePoolTlsRuntimePolicy(legacy,migration,true,true,&resolved,&error));
     }
 
+    {
+        using Candidate = PoolTlsMigrationCandidate;
+        ProductConfig legacy;
+        legacy.donation = false;
+        legacy.pools.resize(1);
+        const std::string sourceUrl = "stratum+tcp://us2.pearl.herominers.com:1200";
+        const std::string targetUrl = "stratum+ssl://us2.pearl.herominers.com:1200";
+        for (const auto &spec : {std::string("herominers"), std::string("us2.pearl.herominers.com:1200"), sourceUrl}) {
+            CHECK(parsePoolSpec(spec, &legacy.pools.front(), &error));
+            CHECK(poolTlsMigrationCandidate(legacy) == Candidate::HeroMinersUsEastTcp1200);
+        }
+        const auto candidate = poolTlsMigrationCandidate(legacy);
+        const auto *source = poolTlsMigrationSource(candidate);
+        const auto *target = poolTlsMigrationTarget(candidate);
+        CHECK(source && sourceUrl == source);
+        CHECK(target && targetUrl == target);
+        for (const auto *other : {"us2.pearl.herominers.com:1201", "us2.pearl.herominers.com.example:1200",
+                                  "us.pearl.herominers.com:1200", "herominers-tls"}) {
+            auto otherFirst = legacy;
+            otherFirst.pools.insert(otherFirst.pools.begin(), PoolEntry{});
+            CHECK(parsePoolSpec(other, &otherFirst.pools.front(), &error));
+            CHECK(poolTlsMigrationCandidate(otherFirst) == Candidate::None);
+        }
+        legacy.pools.front().targetSemantics = "final-adjusted-bound";
+        legacy.pools.front().compression = "off";
+        PoolSecurityPreferences migration;
+        migration.users[0] = {PoolSecurityMode::StrictTls, targetUrl, {}, false};
+        PoolTlsRuntimePolicy resolved;
+        CHECK(resolvePoolTlsRuntimePolicy(legacy, migration, true, true, &resolved, &error));
+        CHECK(resolved.tls && resolved.port == 1200 && resolved.frozenUrl == targetUrl && resolved.fallbackUrl.empty());
+        auto worker = legacy;
+        CHECK(applyFrozenPoolTlsEndpoint(resolved.frozenUrl, &worker));
+        CHECK(worker.pools.front().tls && worker.pools.front().host == legacy.pools.front().host &&
+              worker.pools.front().port == legacy.pools.front().port && worker.pools.front().preset == "herominers" &&
+              worker.pools.front().targetSemantics == "final-adjusted-bound" && worker.pools.front().compression == "off");
+        CHECK(!legacy.pools.front().tls);
+    }
+
     // The early refusal must precede every scheduler clock, storage or run callback, even if miscalled internally.
     unsigned logs=0;FeeLoopDeps deps;deps.log=[&](const std::string &text){++logs;CHECK(text.find("refused")!=text.npos);};
     FeeSession fee(FeePolicy{},nullptr,FeeStateFile("unused-fixture-directory"),"synthetic-destination",deps);
