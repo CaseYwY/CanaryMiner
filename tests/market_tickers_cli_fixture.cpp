@@ -4,7 +4,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstdio>
-#include <ctime>
 #include <fstream>
 #include <string_view>
 #include <thread>
@@ -67,7 +66,9 @@ int main(int argc, char **argv) {
     om::PublicJsonResponse response;
     response.status = om::PublicHttpsStatus::Ok;
     response.httpStatus = 200;
-    response.observedUtc = static_cast<uint64_t>(std::time(nullptr));
+    // Match the real HTTPS worker's clock so coarse time() cannot lag the request's start second.
+    const auto observed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    response.observedUtc = static_cast<uint64_t>(observed);
     if (candles) {
         const bool pearl = feed == "4";
         // Index 60 adds an end-boundary row. The gap fixtures end at index 58.
