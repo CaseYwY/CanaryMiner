@@ -10,6 +10,7 @@ constexpr size_t tariffDeclarationMaxBytes=65536;
 struct TariffMonthlyReset {
     unsigned day=0;
     CivilClock clock;
+    DailyFeeAllocation dailyFeeAllocation = DailyFeeAllocation::WholeDay;
 };
 struct TariffDeclaration {
     std::string country, sourceReference, openingKey;
@@ -17,6 +18,9 @@ struct TariffDeclaration {
     TariffPlan plan;
     BillOpening opening;
     std::optional<TariffMonthlyReset> monthlyReset;
+    DailyFeeAllocation dailyFeeAllocation() const {
+        return monthlyReset ? monthlyReset->dailyFeeAllocation : DailyFeeAllocation::WholeDay;
+    }
 };
 // Display-neutral rejection sites, not persisted identifiers, source qualification or permission.
 enum class TariffProblemKind { Unknown, MissingFields, SchemaFields, DuplicateField, Label, Integer, Decimal, Choice, Collection, NoOutput, Oversized, SchemaVersion, Acknowledgement, Confirmation, Currency, FixedOffset, Date, OpeningQuantity, ArithmeticCapacity, ModelStatus, FuturePublication, InvalidJson };

@@ -372,16 +372,49 @@ def main():
 
         session([cli, 'settings', '--config', str(config)], reopen_monthly)
 
+        def save_prorated(send, until, tariff):
+            nonlocal checks
+            down = b'\x1b[B'
+            until(b'CanaryMiner / Settings')
+            tariff()
+            send(down * 5)
+            until(b'[F] Daily fee rule', True)
+            send(b'f')
+            until(b'Re-enter the accrued subtotal', True)
+            send(down + b'\r\rsynthetic-prorated-plan\r\x1b')
+            until(b'> plan:', True)
+            send(down + b'\r\rsynthetic-prorated-opening\r' + down * 9 + b'\r0.6\rv')
+            until(b'split by minutes in each billing cycle', True)
+            assert file.read_bytes() == monthly_bytes
+            send(b'\r')
+            until(b'Saved offline declaration + opening ONLY', True)
+            saved = json.loads(file.read_text())
+            assert saved['schema_version'] == 3
+            assert saved['reset_policy'] == {
+                **json.loads(monthly_bytes)['reset_policy'],
+                'daily_fee_allocation': 'prorate_by_cycle_minutes',
+            }
+            assert saved['opening'] == {**json.loads(monthly_bytes)['opening'], 'key': 'synthetic-prorated-opening'}
+            checks += 4
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(config)], save_prorated)
+        monthly_bytes = file.read_bytes()
+
         def revert_monthly(send, until, tariff):
             nonlocal checks
             down = b'\x1b[B'
             until(b'CanaryMiner / Settings')
             tariff()
-            send(down * 5 + b'm')
-            until(b'"explicit_cycle_only" [fixed]', True)
+            send(down * 5 + b'\r' + down * 2)
+            until(b'prorate_by_cycle_minutes', True)
+            send(b'\x1b')
+            until(b'> reset_policy:', True)
+            send(b'm')
+            until(b'Re-enter the accrued subtotal', True)
             send(down + b'\r\rsynthetic-explicit-plan\r\x1b')
             until(b'> plan:', True)
-            send(down + b'\r\rsynthetic-explicit-opening\rv')
+            send(down + b'\r\rsynthetic-explicit-opening\r' + down * 9 + b'\r0.6\rv')
             until(b'Review tariff-declaration.json ONLY', True)
             assert file.read_bytes() == monthly_bytes
             send(b'\r')

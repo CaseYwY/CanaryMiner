@@ -169,6 +169,32 @@ def main():
         rejected('daily fee')
 
         boundary = APRIL - offset
+        # A fee revision at the cycle reset does not change the fee already set at tariff midnight.
+        prorated = copy.deepcopy(split_day)
+        prorated['schema_version'] = 3
+        prorated['reset_policy']['daily_fee_allocation'] = 'prorate_by_cycle_minutes'
+        prorated['plan'].update(cycle_charge='0', subtotal_multiplier='1')
+        before_reset = prorated['plan']['revisions'][0]
+        before_reset.update(end_utc_ms=boundary, charge_per_civil_day='1.44')
+        prorated['plan']['revisions'].append({
+            **before_reset, 'key': 'synthetic-reset-revision', 'begin_utc_ms': boundary,
+            'end_utc_ms': MAY, 'charge_per_civil_day': '9.99',
+        })
+        tariff_midnight = APRIL - 2 * NOON
+        prorated['opening'].update(through_utc_ms=tariff_midnight, imported_kwh='0', accrued_subtotal='0')
+        one_day = {**source, 'intervals': [
+            {'begin_utc_ms': tariff_midnight, 'end_utc_ms': boundary+3600000, 'average_watts': '0'},
+        ]}
+        store(prorated, one_day)
+        text = success(as_of=boundary+3600000)
+        assert 'split by minutes in each billing cycle' in text
+        assert 'Cycle estimate at closing 1.110000 USD' in text
+        assert 'Provisional cycle estimate 0.330000 USD' in text
+        # The next civil midnight selects the newly effective daily fee.
+        one_day['intervals'][0]['end_utc_ms'] = APRIL + 1
+        store(prorated, one_day)
+        assert 'Provisional cycle estimate 10.320000 USD' in success(as_of=APRIL+1)
+
         historical_split = copy.deepcopy(split_day)
         announcement = boundary + 3 * 3600000
         fee_start = boundary + 4 * 3600000

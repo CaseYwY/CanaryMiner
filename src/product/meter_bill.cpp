@@ -201,6 +201,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         std::string report = "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
                              "Average import is applied uniformly within each interval.\n";
         if (options.reviewCutoffArg || reopening || archiving) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
+        if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
+            report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";
         std::string exact;
         auto *exactResults = archiving || reopening ? &exact : nullptr;
         auto opening = declaration.opening;
@@ -217,7 +219,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                 cursor = end;
                 if (cursor == reading.endUtcMs) ++next;
             }
-            const auto accrual = accrueBill(declaration.plan, opening, slice, cursor, cutoff, stopped);
+            const auto accrual = accrueBill(declaration.plan, opening, slice, cursor, cutoff, stopped,
+                                            declaration.dailyFeeAllocation());
             if (stopped()) return stopResult();
             if (accrual.status != ElectricityStatus::Ok) return fail(electricityStatusName(accrual.status));
             if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults)) return fail("amount exceeds the display range");
