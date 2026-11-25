@@ -38,32 +38,36 @@ ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) 
 constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
 ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &opening,int64_t end,int64_t decision) {
     if (!plan.demandCharge)
-        return opening.peakDemandKw || !opening.demandHistoryKw.empty()
+        return opening.apparentDemand || opening.peakDemand || !opening.demandHistory.empty()
             ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
     const auto &rule=*plan.demandCharge;
     if (opening.evidence.basis!=PowerBasis::WholeMeterImport) return ElectricityStatus::Unsupported;
-    if (!opening.peakDemandKw || opening.peakDemandKw->numerator.negative() || rule.windowMinutes<5 ||
+    if (opening.apparentDemand!=rule.apparent() || !opening.peakDemand ||
+        opening.peakDemand->numerator.negative() || rule.windowMinutes<5 ||
         rule.windowMinutes>60 || 60%rule.windowMinutes || rule.offsetMinutes>=rule.windowMinutes ||
-        rule.ratePerKw.negative() || !instant(rule.publishedUtcMs)) return ElectricityStatus::Invalid;
+        rule.ratePerUnit.negative() || !instant(rule.publishedUtcMs) ||
+        (rule.powerFactorVaPlaces && (!rule.apparent() || *rule.powerFactorVaPlaces>18))) return ElectricityStatus::Invalid;
     if (rule.ratchet) {
         const auto &ratchet=*rule.ratchet;
         if (!ratchet.lookbackMonths || ratchet.lookbackMonths>12 ||
             ratchet.fraction.negative() || ratchet.fraction.zero() || ratchet.fraction.compare(number(1))>0 ||
-            opening.demandHistoryKw.size()!=ratchet.lookbackMonths)
+            opening.demandHistory.size()!=ratchet.lookbackMonths)
             return ElectricityStatus::Invalid;
-        for (const auto &peak:opening.demandHistoryKw)
+        for (const auto &peak:opening.demandHistory)
             if (peak.numerator.negative()) return ElectricityStatus::Invalid;
-    } else if (!opening.demandHistoryKw.empty()) return ElectricityStatus::Invalid;
+    } else if (!opening.demandHistory.empty()) return ElectricityStatus::Invalid;
     const int64_t span=rule.windowMinutes*minuteMs, offset=rule.offsetMinutes*minuteMs;
     for (const auto t:{opening.cycleBeginUtcMs,opening.throughUtcMs,opening.cycleEndUtcMs,end})
         if ((t-offset)%span) return ElectricityStatus::DemandWindowBoundary;
     // Total window energy bounds the peak from both sides.
     ExactDecimal scaledImport, maximumScaledImport;
-    const auto &peak=opening.peakDemandKw->numerator;
+    const auto &peak=opening.peakDemand->numerator;
     const auto windows=(opening.throughUtcMs-opening.cycleBeginUtcMs)/span;
     if (!opening.importedKwh.numerator.multiply(number(60/rule.windowMinutes),&scaledImport) ||
         !peak.multiply(number(windows),&maximumScaledImport)) return ElectricityStatus::Capacity;
-    if (peak.compare(scaledImport)>0 || scaledImport.compare(maximumScaledImport)>0)
+    // Active imports bound the apparent peak from below. With no elapsed windows its peak is zero.
+    if (scaledImport.compare(maximumScaledImport)>0 ||
+        ((!rule.apparent() || !windows) && peak.compare(scaledImport)>0))
         return ElectricityStatus::Invalid;
     return rule.publishedUtcMs>decision ? ElectricityStatus::NotYetKnown : ElectricityStatus::Ok;
 }
@@ -85,16 +89,29 @@ ElectricityStatus measureDemand(const DemandChargeRule &rule,const Trace &trace,
     for (const auto &interval:trace.intervals) {
         if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
             return ElectricityStatus::Unavailable;
+        const auto &active=intervalQuantity(interval);
+        const auto *quantity=&active;
+        if (rule.apparent()) {
+            const auto *apparent=[&]() -> const ExactDecimal * {
+                if constexpr (std::is_same_v<Trace,MeterImportTrace>)
+                    return interval.apparentKvah ? &interval.apparentKvah->numerator : nullptr;
+                else
+                    return interval.apparentVa ? &*interval.apparentVa : nullptr;
+            }();
+            if (!apparent) return ElectricityStatus::DemandApparentEvidence;
+            if (apparent->compare(active)<0) return ElectricityStatus::Invalid;
+            quantity=apparent;
+        }
         if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
             // A nonzero register delta cannot be assigned to two demand windows.
-            if (interval.endUtcMs>windowEnd&&!interval.importedKwh.numerator.zero())
+            if (interval.endUtcMs>windowEnd&&!quantity->zero())
                 return ElectricityStatus::DemandWindowBoundary;
         }
         const auto energyFor=[&](int64_t duration,ExactDecimal &energy){
             if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
-                energy=interval.importedKwh.numerator;
+                energy=*quantity;
                 return true;
-            } else return interval.watts.multiply(number(duration),&energy);
+            } else return quantity->multiply(number(duration),&energy);
         };
         auto through=(std::min)(interval.endUtcMs,windowEnd);
         ExactDecimal energy;
@@ -321,6 +338,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::SeasonalDayBoundary: return "seasonal allowance requires complete tariff civil days without skipped or disjoint dates";
         case ElectricityStatus::DemandWindowBoundary: return "demand requires complete aligned windows and nonzero meter deltas within each window";
         case ElectricityStatus::DemandHistoryNotYetKnown: return "demand history extends beyond the decision instant";
+        case ElectricityStatus::DemandApparentEvidence: return "apparent demand needs whole-meter VA, an allowed power factor, or paired kWh/kVAh readings";
     }
     return "unknown electricity status";
 }
@@ -353,12 +371,26 @@ EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerO
     else result.status = result.coveredMs ? ElectricityStatus::Partial : ElectricityStatus::Unavailable;
     return result;
 }
+bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
+                                   const ExactDecimal &factor,ExactDecimal &voltAmps) {
+    if (!rule.apparent() || !rule.powerFactorVaPlaces || *rule.powerFactorVaPlaces>18 || watts.negative() ||
+        factor.negative() || factor.zero() || factor.compare(number(1))>0)
+        return false;
+    std::string formatted;
+    ExactDecimal converted;
+    if (!watts.formatRatio(factor,*rule.powerFactorVaPlaces,&formatted) ||
+        !ExactDecimal::parse(formatted,&converted) || converted.compare(watts)<0)
+        return false;
+    voltAmps=std::move(converted);
+    return true;
+}
+
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
                     ElectricityAmount &peak,ElectricityAmount &ratchetFloor) {
-    if (!opening.peakDemandKw) return false;
+    if (opening.apparentDemand!=rule.apparent() || !opening.peakDemand) return false;
     ratchetFloor={};
     if (rule.ratchet) {
-        const auto &history=opening.demandHistoryKw;
+        const auto &history=opening.demandHistory;
         const auto largest=std::max_element(history.begin(),history.end(),[](const auto &a,const auto &b){
             return a.numerator.compare(b.numerator)<0;
         });
@@ -366,8 +398,8 @@ bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
             !largest->numerator.multiply(rule.ratchet->fraction,&ratchetFloor.numerator))
             return false;
     }
-    peak=opening.peakDemandKw->numerator.compare(ratchetFloor.numerator)>=0
-        ? *opening.peakDemandKw : ratchetFloor;
+    peak=opening.peakDemand->numerator.compare(ratchetFloor.numerator)>=0
+        ? *opening.peakDemand : ratchetFloor;
     return true;
 }
 
@@ -408,7 +440,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     auto state = opening; state.timeDatabaseVersion = result.timeDatabaseVersion;
     ExactDecimal cost, billedQuantity, quantity = state.importedKwh.numerator;
     if (p.demandCharge) {
-        result.status=measureDemand(*p.demandCharge,trace,opening.throughUtcMs,*state.peakDemandKw,cancel,stop);
+        result.status=measureDemand(*p.demandCharge,trace,opening.throughUtcMs,*state.peakDemand,cancel,stop);
         if (result.status!=ElectricityStatus::Ok) return result;
         ElectricityAmount nextBillable, openingBillable, floor;
         ExactDecimal increase;
@@ -417,7 +449,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
             (opening.throughUtcMs!=opening.cycleBeginUtcMs &&
              !billableDemand(*p.demandCharge,opening,openingBillable,floor)) ||
             !nextBillable.numerator.subtract(openingBillable.numerator,&increase) ||
-            !productAdd(cost,increase,p.demandCharge->ratePerKw)) {
+            !productAdd(cost,increase,p.demandCharge->ratePerUnit)) {
             result.status=ElectricityStatus::Capacity;
             return result;
         }

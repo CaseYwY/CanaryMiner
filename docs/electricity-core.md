@@ -61,18 +61,19 @@ interval charge = (settled subtotal - opening accrued subtotal) * explicit subto
 - Evaluations split at trace endpoints, revisions, dynamic records, civil midnights, DST transitions and both occurrences of applicable wall boundaries. Minimum/all-units need the full remainder of the cycle, not a short horizon that assumes cheap allowance remains free.
 
 An optional [demand rule](tariff-declaration.md#charge-for-maximum-average-demand) uses the maximum
-of complete aligned average-kW windows over the whole meter. The internal opening subtotal
-includes the charge on the recorded peak. The tariff document supplies that peak and the
-subtotal before demand separately. The calculation uses physical energy even with an energy
-quantity rounding rule. With both rules selected, finer measured differences establish the demand
-peak and are summed for energy rounding. Nonzero differences must fit within both billing
-and demand windows. The actual peak resets at the declared cycle boundary. With a
-[monthly historical floor](tariff-declaration.md#use-a-historical-demand-floor), the most
-recent completed actual peaks roll forward separately. Billable kW includes the floor.
-At cycle start the opening billable kW for charge arithmetic is zero because the new
-cycle's charge has yet to accrue.
+of complete aligned average-power windows over the whole meter. The declared unit is kW
+for active demand or [kVA](tariff-declaration.md#charge-for-apparent-demand-in-kva) for
+apparent demand. Apparent demand needs its own interval or register evidence. Active kWh
+still supplies energy pricing and tiers. The internal opening subtotal includes the charge
+on the recorded peak. The document supplies that peak and the subtotal before demand separately.
+When active energy is rounded, demand still uses the original readings. Nonzero quantities
+must fit their applicable demand and billing windows. The actual peak resets at the declared
+cycle boundary. With a [monthly historical floor](tariff-declaration.md#use-a-historical-demand-floor),
+the most recent completed actual peaks roll forward in the selected unit. Billable demand
+includes the floor. At cycle start the opening demand charge is zero until the new cycle's
+charge accrues.
 
-All flags for unknown rule families reject evaluation. **Not implemented:** contracted capacity, apparent and reactive power, prepaid purchase/inventory/debt, import/export netting or lost export credits, restricted credits, independent annual/purchase/reset ledgers, seasonal allowance outside the offline declaration adapter, provisional/annual true-up, all-units monthly-average normalization in the pure core, tier reallocation/threshold revisions, other supplier-specific intermediate rounding, ordered/selective taxes/multipliers, contracted eligibility or persistent beyond-cycle consequences. These need separate declared adapters/state, not zero-valued placeholders. Choosing a simpler energy-only scenario must be explicit and visibly exclude the omitted rules.
+All flags for unknown rule families reject evaluation. **Not implemented:** contracted capacity, reactive power, apparent demand based on a different trigger such as maximum kW, prepaid purchase/inventory/debt, import/export netting or lost export credits, restricted credits, independent annual/purchase/reset ledgers, seasonal allowance outside the offline declaration adapter, provisional/annual true-up, all-units monthly-average normalization in the pure core, tier reallocation/threshold revisions, other supplier-specific intermediate rounding, ordered/selective taxes/multipliers, contracted eligibility or persistent beyond-cycle consequences. These need separate declared adapters/state, not zero-valued placeholders. Choosing a simpler energy-only scenario must be explicit and visibly exclude the omitted rules.
 
 A declared [half-hour meter rounding rule](tariff-declaration.md#round-cumulative-readings-for-half-hour-billing) rounds each complete UTC half-hour quantity before applying its signed energy rate. `BillOpening.importedKwh` retains the exact physical quantity. Successful meter accrual reports the billed quantity for the current trace separately. Fees and the subtotal retain their documented exact arithmetic. Tiered plans and power traces cannot use this rule.
 
@@ -113,7 +114,7 @@ Executed development evidence (2026-10-28):
 
 Test sources include civil serial-day round trips through 2400, UTC/fixed clocks, missing/wrong-version data, named folds/gaps, 23/25h New York days, half-hour Lord Howe days, Apia's skipped date and the 2026e Winnipeg rule. Electricity cases cover exact irregular sample integration, missing/zero/gaps/clocks, fixed-fee cancellation, progressive/all-units jumps and late settlement, shared tiers, signed rates, dynamic gaps/overlaps/causality, event priority, effective revisions without resets, minimums, whole-subtotal multiplier, same-day resume/purity and unsupported/input/capacity failures. Named tests also bill both repeated hours and no nonexistent spring hour. Scope/source/basis and continued time-database mismatches cannot reuse opening ledgers; future observed telemetry cannot masquerade as a decision-time forecast.
 
-Research specifications T01–T04, T10–T12, T17, T25 and supported portions/variants of T05, T13–T16, T23, T33–T34 are covered by the core. The offline declarations cover T06 ([seasonal allowance](tariff-declaration.md#apply-a-seasonal-baseline-allowance)), T09 ([two-month tariff](tariff-declaration.md#price-a-two-month-cycle-from-monthly-bands)) and T24 ([component multipliers](tariff-declaration.md#apply-a-multiplier-to-part-of-the-unit-rate)). The [maximum-demand rule](tariff-declaration.md#charge-for-maximum-average-demand) covers T18–T20. The monthly historical demand floor covers T21. T07–T08, T22, T26–T32 and broader state/source-specific variants still need coverage. Supplier worked examples require separate qualification.
+Research specifications T01–T04, T10–T12, T17, T25 and supported portions/variants of T05, T13–T16, T23, T33–T34 are covered by the core. The offline declarations cover T06 ([seasonal allowance](tariff-declaration.md#apply-a-seasonal-baseline-allowance)), T09 ([two-month tariff](tariff-declaration.md#price-a-two-month-cycle-from-monthly-bands)) and T24 ([component multipliers](tariff-declaration.md#apply-a-multiplier-to-part-of-the-unit-rate)). The [maximum-demand rule](tariff-declaration.md#charge-for-maximum-average-demand) covers T18–T20. The monthly historical demand floor covers T21. [Apparent maximum demand](tariff-declaration.md#charge-for-apparent-demand-in-kva) covers T22 using aligned whole-meter VA, paired registers, or an explicitly declared power-factor conversion. T07–T08, T26–T32 and broader state/source-specific variants still need coverage. Supplier worked examples require separate qualification.
 
 ### Development dependency provenance (not production approval)
 

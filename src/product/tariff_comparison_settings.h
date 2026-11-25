@@ -49,7 +49,7 @@ class TariffComparisonSettings {
         } else if (key >= 32 && key <= 255) {
             auto &value = input_[focus_];
             // Keep an invalid byte or overflow marker so a malformed answer cannot become a valid prefix.
-            if (value.size() <= inputLimit_) value.push_back(key <= 126 ? static_cast<char>(key) : '?');
+            if (value.size() <= (apparentRule() ? inputLimit_ * 2 + 1 : inputLimit_)) value.push_back(key <= 126 ? static_cast<char>(key) : '?');
             clearResult();
         }
     }
@@ -92,8 +92,14 @@ class TariffComparisonSettings {
         if(declaration_->dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes)
             cycleLabel+=" | "+i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeLabel);
         add(cycleLabel);
-        add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(Key::WithoutWatts, {{"watts", input_[0]}}));
-        add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithWatts, {{"watts", input_[1]}}));
+        if (const auto *rule = apparentRule()) {
+            add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(Key::WithoutApparent, {{"power", input_[0]}}));
+            add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithApparent, {{"power", input_[1]}}));
+            if (!job_ && notice_.empty()) add(tariffComparisonEnglish(rule->powerFactorVaPlaces ? Key::ApparentFactorInput : Key::ApparentInput));
+        } else {
+            add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(Key::WithoutWatts, {{"watts", input_[0]}}));
+            add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithWatts, {{"watts", input_[1]}}));
+        }
         if (pending()) add(tariffComparisonEnglish(Key::Pending));
         else if (job_ && !job_->cancel.load(std::memory_order_relaxed)) {
             if (job_->results.empty()) add(tariffComparisonEnglish(Key::Failed));
@@ -126,6 +132,17 @@ class TariffComparisonSettings {
     std::string notice_;
     std::shared_ptr<Job> job_;
 
+    const DemandChargeRule *apparentRule() const {
+        if (!declaration_ || !declaration_->plan.demandCharge || !declaration_->plan.demandCharge->apparent())
+            return nullptr;
+        return &*declaration_->plan.demandCharge;
+    }
+
+    static bool parsePower(const std::string &text, ExactDecimal &value) {
+        return !text.empty() && text.size() <= inputLimit_ &&
+            text.find_first_not_of("0123456789.") == std::string::npos && ExactDecimal::parse(text, &value);
+    }
+
     bool busy() const { return job_ && !job_->done.load(std::memory_order_acquire); }
     bool pending() const { return busy() && !job_->cancel.load(std::memory_order_relaxed); }
     void clearResult() {
@@ -145,13 +162,28 @@ class TariffComparisonSettings {
             return;
         }
         std::array<ExactDecimal, 2> watts;
+        std::array<std::optional<ExactDecimal>, 2> apparentVa;
+        const auto *rule = apparentRule();
         for (size_t i = 0; i < watts.size(); ++i) {
             const auto &value = input_[i];
-            if (value.empty() || value.size() > inputLimit_ || value.find_first_not_of("0123456789.") != std::string::npos ||
-                !ExactDecimal::parse(value, &watts[i])) {
+            if (!rule) {
+                if (parsePower(value, watts[i])) continue;
                 notice_ = tariffComparisonEnglish(Key::NeedWatts);
                 return;
             }
+            const auto separator = value.find_first_of("/@");
+            ExactDecimal inputPower, va;
+            if (separator == std::string::npos || !parsePower(value.substr(0, separator), watts[i]) ||
+                !parsePower(value.substr(separator + 1), inputPower)) {
+                notice_ = tariffComparisonEnglish(rule->powerFactorVaPlaces ? Key::NeedApparentFactor : Key::NeedApparent);
+                return;
+            }
+            if (value[separator] == '/' && inputPower.compare(watts[i]) >= 0) va = std::move(inputPower);
+            else if (value[separator] != '@' || !apparentDemandFromPowerFactor(*rule, watts[i], inputPower, va)) {
+                notice_ = tariffComparisonEnglish(rule->powerFactorVaPlaces ? Key::NeedApparentFactor : Key::NeedApparent);
+                return;
+            }
+            apparentVa[i] = std::move(va);
         }
         const auto &d = *declaration_;
         if (!nowUtc || nowUtc < d.confirmedUtc || nowUtc > 253402300799ULL) {
@@ -162,9 +194,9 @@ class TariffComparisonSettings {
             auto owned = std::make_shared<Job>();
             auto *job = owned.get();
             // The worker owns an immutable copy of the reviewed inputs and original decision time.
-            job->worker = std::thread([job, d, watts, cycles = cycles_, decision = static_cast<int64_t>(nowUtc * 1000)] {
+            job->worker = std::thread([job, d, watts, apparentVa, cycles = cycles_, decision = static_cast<int64_t>(nowUtc * 1000)] {
                 try {
-                    auto result = evaluate(d, watts, cycles, decision, job->cancel);
+                    auto result = evaluate(d, watts, apparentVa, cycles, decision, job->cancel);
                     if (!job->cancel.load(std::memory_order_relaxed)) job->results = std::move(result);
                 } catch (...) {}  // No partial comparison is published if evaluation fails.
                 job->done.store(true, std::memory_order_release);
@@ -176,9 +208,10 @@ class TariffComparisonSettings {
     }
 
     static std::vector<std::string> evaluate(const TariffDeclaration &d, const std::array<ExactDecimal, 2> &watts,
+                                             const std::array<std::optional<ExactDecimal>, 2> &apparentVa,
                                              unsigned cycles, int64_t decision, const std::atomic<bool> &cancel) {
         using i18n::tariffComparisonEnglish;
-        const auto result = compareTariffCycles(d, watts, cycles, decision, &cancel);
+        const auto result = compareTariffCycles(d, watts, cycles, decision, &cancel, apparentVa);
         if (result.status != ElectricityStatus::Ok) {
             const auto cycle = std::to_string(result.failedCycle);
             if (result.splitsChargedDay) return {tariffComparisonEnglish(Key::ChargedDay, {{"cycle", cycle}})};

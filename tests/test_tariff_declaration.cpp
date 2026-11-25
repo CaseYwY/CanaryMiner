@@ -396,6 +396,84 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
 }
 
+void apparentDemand(JsonValue draft,const std::filesystem::path &target) {
+    const auto close=T+15*60000;
+    auto &plan=member(draft,"plan");
+    set(plan,"tiers",R"("none")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    auto &revision=member(plan,"revisions").items.front();
+    set(revision,"end_utc_ms",std::to_string(close));
+    set(revision,"time_mode",R"("constant")");
+    set(revision,"base_rate_per_kwh",R"("1")");
+    set(revision,"charge_per_civil_day",R"("0")");
+    set(revision,"calendar","[]");
+    set(revision,"bands","[]");
+    set(member(draft,"opening"),"cycle_end_utc_ms",std::to_string(close));
+
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"reset_policy");
+    panel.key('d',{},T/1000);
+    CHECK(panel.render(120,24,ColorLevel::None).find("[K] kW/kVA")!=std::string::npos);
+    panel.key('k',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="11");
+    CHECK(panel.draft.find("opening")->find("peak_demand_kva")->text.empty());
+    CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
+    enter(panel,"demand_charge");
+    enter(panel,"window_minutes");type(panel,"15");
+    enter(panel,"rate_per_kva");type(panel,"5");
+    enter(panel,"power_factor_va_places");type(panel,"6");
+    panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"peak_demand_kva");type(panel,"0");
+    panel.key('v',{},T/1000);
+    TariffDeclarationStore store(target);
+    std::string reason;
+    JsonValue saved;
+    CHECK(store.load(&saved,&reason));
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    const bool persisted=store.load(&saved,&reason)&&saved.find("schema_version")->text=="11";
+    CHECK(persisted);
+    if(!persisted)return;
+    TariffDeclaration decoded;
+    const bool decodedApparent=decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharge&&decoded.plan.demandCharge->apparent();
+    CHECK(decodedApparent);
+    if(!decodedApparent)return;
+    CHECK(decoded.plan.demandCharge->powerFactorVaPlaces==6);
+    const std::array<ExactDecimal,2> watts{dec("0"),dec("8000")};
+    CHECK(compareTariffCycles(decoded,watts,1,T).status==ElectricityStatus::DemandApparentEvidence);
+    checkComparison(compareTariffCycles(decoded,watts,1,T,nullptr,{dec("0"),dec("10000")}),
+                    "0.000000","52.000000","52.000000");
+
+    TariffComparisonSettings comparison;
+    comparison.open(saved);
+    for(char c:std::string("0/0"))comparison.key(c,T/1000);
+    comparison.key('\t',T/1000);
+    for(char c:std::string("8000"))comparison.key(c,T/1000);
+    comparison.key('\r',T/1000);
+    CHECK(comparison.render(60,12,ColorLevel::None).find("both scenarios")!=std::string::npos);
+    for(char c:std::string("@0.8"))comparison.key(c,T/1000);
+    comparison.key('\r',T/1000);
+    std::string text;
+    for(unsigned attempt=0;attempt<200;++attempt){
+        text=comparison.render(60,12,ColorLevel::None);
+        if(text.find("52.000000 USD")!=std::string::npos)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(text.find("Remaining with mining:    52.000000 USD")!=std::string::npos);
+    CHECK(text.find("Difference (with - without): 52.000000 USD")!=std::string::npos);
+
+    panel.open(saved);
+    enter(panel,"demand_charge");
+    panel.key(27,{},T/1000);
+    panel.key('k',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="9");
+    CHECK(panel.draft.find("demand_charge")->find("rate_per_kw")->text.empty());
+    CHECK(panel.draft.find("opening")->find("peak_demand_kw")->text.empty());
+    CHECK(!panel.draft.find("demand_charge")->find("power_factor_va_places"));
+}
+
 void demandRatchet(JsonValue draft,const std::filesystem::path &target) {
     constexpr int64_t jan=1704067200000,feb=1706745600000,mar=1709251200000;
     auto &plan=member(draft,"plan");
@@ -935,6 +1013,7 @@ int main(int argc,char **argv){
     componentMultipliers(original,root/"component-version-test.json");
     demandWindows(original,root/"demand-version-test.json");
     demandRatchet(original,root/"ratchet-version-test.json");
+    apparentDemand(original,root/"apparent-demand-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));

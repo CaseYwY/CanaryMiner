@@ -23,13 +23,13 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families include contracted capacity, apparent power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families include contracted capacity, reactive power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -192,9 +192,9 @@ The same data under a five-minute rule yields a peak of 12 kW. A plan with an es
 window. Two loads considered together can increase the bill even when each alone stays
 within the existing peak.
 
-The peak resets at the declared cycle boundary. This covers fixtures T18–T20. Apparent-power
-charges, separate demand-reset calendars, eligible time bands and supplier qualification
-remain open. The two-month monthly-average rule has no demand allocation.
+The peak resets at the declared cycle boundary. This covers fixtures T18–T20. Separate
+demand-reset calendars, eligible time bands and supplier qualification remain open.
+The two-month monthly-average rule has no demand allocation.
 
 ### Use a historical demand floor
 
@@ -223,7 +223,44 @@ reconstructs the same history and verifies the exact floor and billable demand f
 each reviewed cycle.
 
 This covers T21 for one all-day maximum with consecutive monthly resets. Contracted
-capacity, kVA measurement and independent reset schedules remain open.
+capacity and independent reset schedules remain open.
+
+### Charge for apparent demand in kVA
+
+With `demand_charge` selected in Settings, press **K** to switch the draft to kVA. Enter the
+price per kVA and the established kVA peak again. For a monthly historical floor, enter the
+previous actual peaks in kVA. Version 11 uses `rate_per_kva`, `opening.peak_demand_kva`
+and `peak_kva` in each historical row. The selected demand unit also applies to the floor
+and the billed peak. Use new plan and opening keys when changing a saved demand unit.
+
+Save the standard demand window, UTC alignment and publication time. Leave
+`power_factor_va_places` empty in Settings (`null` in JSON) for measured VA only. To accept
+power factors, enter the number of VA decimal places, from zero to 18. The model divides
+active watts by the factor and rounds to those VA places, with ties to even, before integrating
+the interval. A factor must be positive and no larger than one. Choose sufficient precision
+to preserve the active watts as a lower bound. An interval with 8,000 W and a factor of
+0.8 gives 10,000 VA, or 10 kVA. Energy billing continues to use the original 8,000 W.
+[Electrical units and power factor](https://www.eaton.com/content/dam/eaton/products/design-guides---consultant-audience/eaton-basics-of-power-system-design-dg081001en.pdf)
+
+In a local `meter-bill` input, use one of these document versions with the saved meter scope.
+
+- Version 4 has the same `intervals` rows as the active-watt format. Add exactly one of
+  `average_va` or `power_factor` as a canonical decimal string to each row.
+- Version 5 adds the cumulative `apparent_kvah` decimal string to each `register_readings`
+  row. Both registers use the same timestamps. Apparent-energy increments must be at least
+  the corresponding active-energy increments. A nonzero apparent increment needs a reading
+  at every demand-window boundary it crosses, even when active import is zero.
+
+The program refuses kVA calculations without complete apparent-power evidence. It averages
+apparent power by elapsed time in each aligned window and bills the highest qualifying average.
+The archive records the original evidence and the exact kVA results. Review extension binds
+both starting registers and all covered observations, including the source of each VA estimate.
+
+In the whole-meter comparison, supply watts and VA for each scenario as `8000/10000`. If
+the declaration permits conversion, `8000@0.8` is equivalent under that precision. The
+second line describes the complete meter with mining. Enter its apparent-power evidence
+independently. This covers T22. Tariffs that use kVA at the maximum kW window, reactive
+charges or contracted capacity require their own rule and supplier qualification.
 
 ### Apply a seasonal baseline allowance
 

@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
         demandPlan.revisions[0].baseRatePerKwh=d("0");
         demandPlan.demandCharge=DemandChargeRule{15,0,T,d("5")};
         auto beginning=opening(T,close);
-        beginning.peakDemandKw=ElectricityAmount{};
+        beginning.peakDemand=ElectricityAmount{};
         const auto known=accrueBill(demandPlan,beginning,load("10000",T,middle),middle,middle);
         CHECK(known.ending&&known.provisionalTotal&&display(*known.provisionalTotal)=="50.000000");
         const auto prior=known.ending.value_or(beginning);
@@ -81,13 +81,13 @@ int main(int argc, char **argv) {
         delta(counterfactualBill(demandPlan,prior,baseline,oneMiner,close,T),"0.000000");
         const auto joint=counterfactualBill(demandPlan,prior,baseline,bothMiners,close,T);
         delta(joint,"10.000000");
-        CHECK(joint.withoutMining.ending&&display(*joint.withoutMining.ending->peakDemandKw)=="10.000000");
-        CHECK(joint.withMining.ending&&display(*joint.withMining.ending->peakDemandKw)=="12.000000");
-        CHECK(display(*prior.peakDemandKw)=="10.000000");
+        CHECK(joint.withoutMining.ending&&display(*joint.withoutMining.ending->peakDemand)=="10.000000");
+        CHECK(joint.withMining.ending&&display(*joint.withMining.ending->peakDemand)=="12.000000");
+        CHECK(display(*prior.peakDemand)=="10.000000");
         const auto projected=accrueBill(demandPlan,prior,bothMiners,close,close);
         CHECK(projected.settledTotal&&display(*projected.settledTotal)=="60.000000");
         auto incomplete=opening(T,close);
-        incomplete.peakDemandKw=ElectricityAmount{};
+        incomplete.peakDemand=ElectricityAmount{};
         CHECK(evaluateBill(demandPlan,incomplete,load("8000",T,T+hour/3),T+hour/3,T).status==
               ElectricityStatus::DemandWindowBoundary);
     }

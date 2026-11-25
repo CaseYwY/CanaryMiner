@@ -158,11 +158,15 @@ SeasonalAllowance decodeSeasonalAllowance(const JsonValue &value,int64_t confirm
     return result;
 }
 
-DemandChargeRule decodeDemandCharge(const JsonValue &value,int64_t confirmedUtcMs) {
+DemandChargeRule decodeDemandCharge(const JsonValue &value,int64_t confirmedUtcMs,bool apparent) {
     const auto *ratchet=value.find("ratchet");
     using Fields=std::initializer_list<const char *>;
-    keys(value,"demand_charge",{"window_minutes","offset_minutes","published_utc_ms","rate_per_kw"},
-         ratchet?Fields{"ratchet"}:Fields{});
+    if(apparent)
+        keys(value,"demand_charge",{"window_minutes","offset_minutes","published_utc_ms","rate_per_kva","power_factor_va_places"},
+             ratchet?Fields{"ratchet"}:Fields{});
+    else
+        keys(value,"demand_charge",{"window_minutes","offset_minutes","published_utc_ms","rate_per_kw"},
+             ratchet?Fields{"ratchet"}:Fields{});
     const auto window=static_cast<unsigned>(integer(*value.find("window_minutes"),"demand_charge.window_minutes",60));
     const auto offset=static_cast<unsigned>(integer(*value.find("offset_minutes"),"demand_charge.offset_minutes",59));
     if(window<5||60%window)
@@ -172,9 +176,17 @@ DemandChargeRule decodeDemandCharge(const JsonValue &value,int64_t confirmedUtcM
     const auto published=static_cast<int64_t>(integer(*value.find("published_utc_ms"),"demand_charge.published_utc_ms"));
     if(published>confirmedUtcMs)
         bad("demand_charge.published_utc_ms","Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);
-    auto rate=decimal(*value.find("rate_per_kw"),"demand_charge.rate_per_kw");
-    if(rate.negative())bad("demand_charge.rate_per_kw","Use a nonnegative demand charge per kW.",TariffProblemKind::Unknown);
+    const auto *rateField=apparent?"rate_per_kva":"rate_per_kw";
+    const auto ratePath=child("demand_charge",rateField);
+    auto rate=decimal(*value.find(rateField),ratePath);
+    if(rate.negative())bad(ratePath,"Use a nonnegative demand charge in the declared unit.",TariffProblemKind::Unknown);
     DemandChargeRule result{window,offset,published,std::move(rate)};
+    result.apparentPower=apparent;
+    if(apparent){
+        const auto &places=*value.find("power_factor_va_places");
+        if(places.type!=JsonValue::Type::Null)
+            result.powerFactorVaPlaces=static_cast<unsigned>(integer(places,"demand_charge.power_factor_va_places",18));
+    }
     if(ratchet){
         constexpr char path[]="demand_charge.ratchet";
         keys(*ratchet,path,{"lookback_months","fraction"});
@@ -288,32 +300,34 @@ void decodeDemandHistory(const JsonValue &rows,const DemandChargeRule &rule,cons
     boundedArray(rows,field,12,total);
     if(rows.items.size()!=rule.ratchet->lookbackMonths)
         bad(field,"Supply one actual peak for each complete month in the lookback.",TariffProblemKind::Unknown);
-    opening.demandHistoryKw.resize(rows.items.size());
+    opening.demandHistory.resize(rows.items.size());
     auto boundary=opening.cycleBeginUtcMs;
     const int64_t span=rule.windowMinutes*60000LL,offset=rule.offsetMinutes*60000LL;
+    const auto *peakField=rule.apparent()?"peak_kva":"peak_kw";
     for(size_t i=rows.items.size();i>0;--i){
         const auto &row=rows.items[i-1];
         const auto path=std::string(field)+"["+std::to_string(i-1)+"]";
-        keys(row,path,{"cycle_end_utc_ms","peak_kw"});
+        keys(row,path,{"cycle_end_utc_ms",peakField});
         if(boundary<=0||integer(*row.find("cycle_end_utc_ms"),path+".cycle_end_utc_ms")!=static_cast<uint64_t>(boundary))
             bad(path+".cycle_end_utc_ms","Use consecutive completed reset boundaries, oldest first.",TariffProblemKind::Unknown);
         const auto period=recurringCycle(policy,boundary-1);
         if(period.endUtcMs!=boundary||(period.beginUtcMs-offset)%span||(boundary-offset)%span)
             bad(path+".cycle_end_utc_ms","The preceding monthly cycle must align with the demand grid.",TariffProblemKind::Unknown);
-        const auto peak=decimal(*row.find("peak_kw"),path+".peak_kw");
-        if(peak.negative())bad(path+".peak_kw","Use a nonnegative measured peak in kW.",TariffProblemKind::Unknown);
-        if(!peak.multiply(denominator,&opening.demandHistoryKw[i-1].numerator))
-            bad(path+".peak_kw","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+        const auto peakPath=child(path,peakField);
+        const auto peak=decimal(*row.find(peakField),peakPath);
+        if(peak.negative())bad(peakPath,"Use a nonnegative measured peak in the declared demand unit.",TariffProblemKind::Unknown);
+        if(!peak.multiply(denominator,&opening.demandHistory[i-1].numerator))
+            bad(peakPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         boundary=period.beginUtcMs;
     }
 }
 
 bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const TariffPlan &plan){
     if(plan.demandCharge&&plan.demandCharge->ratchet){
-        auto &history=opening.demandHistoryKw;
-        if(!opening.peakDemandKw||history.empty()||history.size()!=plan.demandCharge->ratchet->lookbackMonths)
+        auto &history=opening.demandHistory;
+        if(!opening.peakDemand||history.empty()||history.size()!=plan.demandCharge->ratchet->lookbackMonths)
             return false;
-        auto peak=*opening.peakDemandKw;
+        auto peak=*opening.peakDemand;
         std::rotate(history.begin(),history.begin()+1,history.end());
         history.back()=std::move(peak);
     }
@@ -321,7 +335,7 @@ bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const Tar
     opening.cycleEndUtcMs=window.endUtcMs;
     opening.importedKwh={};
     opening.accruedSubtotal={};
-    if(opening.peakDemandKw)opening.peakDemandKw=ElectricityAmount{};
+    if(opening.peakDemand)opening.peakDemand=ElectricityAmount{};
     return true;
 }
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
@@ -355,7 +369,7 @@ std::string tariffJson(const JsonValue &v){
     if(v.isObject()){std::string s="{";for(const auto &m:v.members){if(s!="{")s+=",";s+=jsonQuote(m.first)+":"+tariffJson(m.second);}return s+"}";}
     return "null";
 }
-JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier){
+JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier,bool apparentDemand){
     if(name=="revisions")return literal(R"({"key":"","begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"time_mode":"constant","base_rate_per_kwh":"","charge_per_civil_day":"","calendar":[],"dynamic":[],"bands":[]})");
     if(name=="calendar"||name=="dynamic"){
         auto row=literal(name=="calendar"?
@@ -366,7 +380,8 @@ JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier){
     }
     if(name=="bands")return literal(R"({"through_kwh":null,"rate_per_kwh":""})");
     if(name=="seasons")return literal(R"({"start_month":0,"start_day":0,"kwh_per_day":""})");
-    if(name=="demand_history")return literal(R"({"cycle_end_utc_ms":0,"peak_kw":""})");
+    if(name=="demand_history")return literal(apparentDemand?R"({"cycle_end_utc_ms":0,"peak_kva":""})":
+                                           R"({"cycle_end_utc_ms":0,"peak_kw":""})");
     return {};
 }
 JsonValue tariffDeclarationTemplate(){
@@ -458,7 +473,8 @@ ElectricityStatus advanceTariffOpening(const TariffDeclaration &d,BillOpening &s
 }
 
 TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::array<ExactDecimal,2> &watts,
-    unsigned cycles,int64_t decision,const std::atomic<bool> *cancel){
+    unsigned cycles,int64_t decision,const std::atomic<bool> *cancel,
+    const std::array<std::optional<ExactDecimal>,2> &apparentVa){
     if(cancel&&cancel->load(std::memory_order_relaxed))return {};
     const auto windows=comparisonCycles(d,cycles);
     if(windows.empty()||d.opening.evidence.basis!=PowerBasis::WholeMeterImport)
@@ -485,7 +501,7 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::
         std::array<ExactDecimal *,2> totals{&result.withoutMining.numerator,&result.withMining.numerator};
         for(size_t scenario=0;scenario<openings.size();++scenario){
             auto &opening=openings[scenario];
-            const PowerTrace trace{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[scenario]}}};
+            const PowerTrace trace{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[scenario],apparentVa[scenario]}}};
             auto step=evaluateBill(plan,opening,trace,window.endUtcMs,decision,d.dailyFeeAllocation(),cancel);
             if(cancel&&cancel->load(std::memory_order_relaxed))return {};
             if(step.status!=ElectricityStatus::Ok)return {step.status,cycle,false,{},{},{}};
@@ -509,13 +525,15 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"},
              allowance?(demand?Fields{"seasonal_allowance","demand_charge"}:Fields{"seasonal_allowance"}):
                        (demand?Fields{"demand_charge"}:Fields{}));
-        const auto version=integer(*root.find("schema_version"),"schema_version",10);
+        const auto version=integer(*root.find("schema_version"),"schema_version",11);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         if((version>=9)!=static_cast<bool>(demand))
             bad("schema_version","Demand charge requires version 9.",TariffProblemKind::SchemaVersion);
         const auto *ratchet=demand?demand->find("ratchet"):nullptr;
-        if((version==10)!=static_cast<bool>(ratchet))
-            bad("schema_version","Demand ratchet requires version 10.",TariffProblemKind::SchemaVersion);
+        const bool apparent=version==11;
+        if(!apparent&&(version==10)!=static_cast<bool>(ratchet))
+            bad("schema_version","Historical kW demand requires version 10.",TariffProblemKind::SchemaVersion);
+        const char *openingPeak=apparent?"peak_demand_kva":"peak_demand_kw";
         const bool allowsComponents=version>=8;
         if((version==7&&!allowance)||(version<7&&allowance))
             bad("schema_version","Seasonal allowance requires version 7.",TariffProblemKind::SchemaVersion);
@@ -533,7 +551,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         const auto confirmedMs=static_cast<int64_t>(d.confirmedUtc*1000);
         if(allowance)d.seasonalAllowance=decodeSeasonalAllowance(*allowance,confirmedMs);
         auto &p=d.plan;const auto &plan=*root.find("plan");
-        if(demand)p.demandCharge=decodeDemandCharge(*demand,confirmedMs);
+        if(demand)p.demandCharge=decodeDemandCharge(*demand,confirmedMs,apparent);
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"});
         p.declared=true;p.origin=TariffOrigin::UserDeclaredOffline;
         const auto rounding=choice(*plan.find("rounding"),"plan.rounding",{finalDisplayRounding,meterHalfHourRounding});
@@ -604,7 +622,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             bad("schema_version","Version 8 requires a revision with a component multiplier.",TariffProblemKind::SchemaVersion);
         auto &s=d.opening;const auto &opening=*root.find("opening");
         keys(opening,"opening",{"key","scope","adapter","basis","origin","cycle_begin_utc_ms","cycle_end_utc_ms","through_utc_ms","imported_kwh","accrued_subtotal","time_database_version"},
-             ratchet?Fields{"peak_demand_kw","demand_history"}:(demand?Fields{"peak_demand_kw"}:Fields{}));
+             ratchet?Fields{openingPeak,"demand_history"}:(demand?Fields{openingPeak}:Fields{}));
         choice(*opening.find("basis"),"opening.basis",{"whole_meter_import"});choice(*opening.find("origin"),"opening.origin",{"declared_forecast"});
         s.declared=true;s.planKey=p.key;s.evidence={PowerBasis::WholeMeterImport,PowerOrigin::DeclaredForecast,label(*opening.find("scope"),"opening.scope"),label(*opening.find("adapter"),"opening.adapter")};
         d.openingKey=label(*opening.find("key"),"opening.key");
@@ -632,10 +650,11 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         if(p.demandCharge){
-            constexpr char path[]="opening.peak_demand_kw";
-            const auto peak=decimal(*opening.find("peak_demand_kw"),path);
-            if(peak.negative())bad(path,"Use a nonnegative established peak in kW.",TariffProblemKind::Unknown);
-            if(!peak.multiply(denominator,&s.peakDemandKw.emplace().numerator))
+            s.apparentDemand=apparent;
+            const auto path=child("opening",openingPeak);
+            const auto peak=decimal(*opening.find(openingPeak),path);
+            if(peak.negative())bad(path,"Use a nonnegative established peak in the declared demand unit.",TariffProblemKind::Unknown);
+            if(!peak.multiply(denominator,&s.peakDemand.emplace().numerator))
                 bad(path,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
             if(ratchet){
                 if(s.cycleBeginUtcMs>confirmedMs)
