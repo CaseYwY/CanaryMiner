@@ -59,9 +59,10 @@ constexpr size_t kMaxInput = 1u << 20;
 
 struct Reader {
     const std::string &s;
+    const size_t maxObjectMembers;
     size_t p = 0;
     std::string error;
-    explicit Reader(const std::string &text) : s(text) {}
+    Reader(const std::string &text, size_t memberLimit) : s(text), maxObjectMembers(memberLimit) {}
 
     bool fail(const std::string &why) {
         if (error.empty()) error = why + " at byte " + std::to_string(p);
@@ -179,6 +180,8 @@ struct Reader {
             ws();
             if (p < s.size() && s[p] == '}') { ++p; return true; }
             for (;;) {
+                if (maxObjectMembers && v->members.size() >= maxObjectMembers)
+                    return fail("too many object members");
                 ws();
                 std::string key;
                 if (!str(&key)) return false;
@@ -222,13 +225,20 @@ struct Reader {
 
 }  // namespace json_dom_detail
 
+struct JsonParseLimits {
+    size_t bytes = json_dom_detail::kMaxInput;
+    size_t objectMembers = 0;  // Zero keeps the default unrestricted object size.
+};
+
 /** Parse one complete JSON document. On failure returns false and a one-line reason in *error. */
-inline bool parseJsonStrict(const std::string &text, JsonValue *out, std::string *error) {
-    if (text.size() > json_dom_detail::kMaxInput) {
-        if (error) *error = "document larger than 1 MiB";
+inline bool parseJsonStrict(const std::string &text, JsonValue *out, std::string *error,
+                            JsonParseLimits limits = {}) {
+    if (text.size() > limits.bytes) {
+        if (error) *error = limits.bytes == json_dom_detail::kMaxInput ?
+            "document larger than 1 MiB" : "document exceeds the byte limit";
         return false;
     }
-    json_dom_detail::Reader r(text);
+    json_dom_detail::Reader r(text, limits.objectMembers);
     JsonValue v;
     // a UTF-8 byte order mark is tolerated (editors add it); nothing else is
     if (text.size() >= 3 && static_cast<unsigned char>(text[0]) == 0xEF && static_cast<unsigned char>(text[1]) == 0xBB &&

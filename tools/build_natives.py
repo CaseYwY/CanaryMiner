@@ -30,7 +30,8 @@ idx={n:i for i,(n,_) in enumerate(TUS)}
 if a.only: TUS=[t for t in TUS if t[0]=='pearl_algo']
 else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market','src/product/manual_market.cpp'),('energy_owner','src/product/energy_owner.cpp'),
               ('civil_time','src/product/civil_time.cpp'),('electricity','src/product/electricity.cpp'),('tariff_declaration','src/product/tariff_declaration.cpp'),
-              ('meter_bill','src/product/meter_bill.cpp'),('market_hour','src/product/market_hour.cpp'),
+              ('meter_bill','src/product/meter_bill.cpp'),('octopus_meter_rates','src/product/octopus_meter_rates.cpp'),
+              ('market_hour','src/product/market_hour.cpp'),
               ('preferences_protocol','src/product/preferences_protocol.cpp'),('preferences_document','src/product/preferences_document.cpp'),
               ('preferences_owner','src/product/preferences_owner.cpp'),('local_task_process','src/product/local_task_process.cpp'),('duplex_task_process','src/product/duplex_task_process.cpp')]
 HELPER_TUS=[] if a.only else [('preferences_service','src/product/preferences_service.cpp'),('preferences_worker','src/product/preferences_worker.cpp')]
