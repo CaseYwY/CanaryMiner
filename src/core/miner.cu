@@ -240,6 +240,7 @@ int main(int argc, char **argv) {
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
     bool workerPoolFallbackSeen=false;
+    std::string workerDonationTlsUrl;
     std::string workerPoolFallbackUrl;
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
     bool workerControlSeen=false;
@@ -419,6 +420,11 @@ int main(int argc, char **argv) {
             workerPoolTlsSeen=true;workerPoolTlsUrl=next();
             if(workerPoolTlsUrl.empty()){fprintf(stderr,"invalid private worker TLS policy\n");return kExitUsage;}
         }
+        else if (a == "--worker-donation-tls") {
+            if(!workerDonationTlsUrl.empty()){fprintf(stderr,"duplicate private worker donation TLS policy\n");return kExitUsage;}
+            workerDonationTlsUrl=next();
+            if(workerDonationTlsUrl.empty()){fprintf(stderr,"invalid private worker donation TLS policy\n");return kExitUsage;}
+        }
         else if (a == "--worker-pool-fallback") {
             if(workerPoolFallbackSeen){fprintf(stderr,"duplicate private worker fallback policy\n");return kExitUsage;}
             workerPoolFallbackSeen=true;workerPoolFallbackUrl=next();
@@ -537,17 +543,28 @@ int main(int argc, char **argv) {
 #endif
         ;
     const bool poolPreferenceGuard=cli.command==Command::Run&&!workerChild&&!cli.help&&!opt.bench&&!opt.formalBenchmark.enabled;
+    const bool workerDonationTls=!workerDonationTlsUrl.empty();
+    const bool verifyWorkerDonation=workerChild && cli.command==Command::Run && DonationTlsRoute::forQualifiedPeer(qualifiedDonationTlsPeer) &&
+        (cfg.donation || workerDonationTls);
     PoolSecurityPreferences poolDefaults;
     uint64_t preRunNativeEpoch=0;
     std::optional<NativeProcessScope> preRunScope;
-    if((ordinaryRuntime||poolPreferenceGuard)&&!cli.help){
+    if((ordinaryRuntime||poolPreferenceGuard||verifyWorkerDonation)&&!cli.help){
         signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
         PreRunPreferences inspected;
         const auto admission=inspectPreRunPreferences(cfg.stateDir,&g_stop,ordinaryRuntime?PreRunPreferencesMode::Ordinary:PreRunPreferencesMode::PoolOnly,&inspected);
         if(admission!=PreRunPreferencesStatus::Ready)return admission==PreRunPreferencesStatus::Stopped?kExitOk:kExitConfig;
         preRunNativeEpoch=inspected.nativeEpoch;
         preRunScope.emplace(preRunNativeEpoch);
-        runtimeDefaults=std::move(inspected.runtime);gameDefaults=std::move(inspected.game);poolDefaults=std::move(inspected.pool);
+        if(verifyWorkerDonation){
+            if((inspected.pool.donation.mode!=PoolSecurityMode::Unchanged)!=workerDonationTls){
+                fprintf(stderr,"private worker donation policy does not match the saved declaration; no mining was started\n");
+                return kExitConfig;
+            }
+            poolDefaults.donation=std::move(inspected.pool.donation);
+        }else{
+            runtimeDefaults=std::move(inspected.runtime);gameDefaults=std::move(inspected.game);poolDefaults=std::move(inspected.pool);
+        }
         if(ordinaryRuntime)loadLanguageContext(inspected.language,inspected.languageAvailable);
     }
     if (ordinaryRuntime && !cli.help) {
@@ -564,8 +581,11 @@ int main(int argc, char **argv) {
     if(workerPoolFallbackSeen&&(!workerChild||!workerPoolTlsSeen)){
         fprintf(stderr,"private worker fallback requires its parent's frozen TLS peer; no mining was started\n");return kExitConfig;
     }
-    if(workerPoolTlsSeen&&(!workerChild||!applyFrozenPoolTlsEndpoint(workerPoolTlsUrl,&cfg,workerPoolFallbackUrl))){
-        fprintf(stderr,"private worker TLS policy does not match its frozen user peer and disabled donation; no mining was started\n");return kExitConfig;
+    if(workerDonationTls&&!workerChild){
+        fprintf(stderr,"private donation TLS policy requires a worker launch\n");return kExitConfig;
+    }
+    if(workerPoolTlsSeen&&(!workerChild||!applyFrozenPoolTlsEndpoint(workerPoolTlsUrl,&cfg,workerPoolFallbackUrl,workerDonationTls))){
+        fprintf(stderr,"private worker TLS policy does not match its frozen user peer and donation policy; no mining was started\n");return kExitConfig;
     }
     if(workerChild&&!workerPoolTlsSeen&&!cfg.pools.empty()&&cfg.pools[0].tls){
         fprintf(stderr,"strict TLS worker requires its parent's frozen peer policy; no mining was started\n");return kExitConfig;
@@ -582,7 +602,7 @@ int main(int argc, char **argv) {
     PoolTlsRuntimePolicy poolTlsPolicy;
     if(cli.command==Command::Run&&!cli.help){
         std::string error;
-        if(!resolvePoolTlsRuntimePolicy(cfg,poolDefaults,ordinaryTlsMode,poolTlsRuntimeAvailable(),&poolTlsPolicy,&error)){
+        if(!resolvePoolTlsRuntimePolicy(cfg,poolDefaults,ordinaryTlsMode,poolTlsRuntimeAvailable(),&poolTlsPolicy,&error,workerDonationTlsUrl)){
             fprintf(stderr,"%s\n",error.c_str());return kExitConfig;
         }
         if(poolTlsPolicy.tls){
@@ -590,10 +610,12 @@ int main(int argc, char **argv) {
             if(workerPoolFallbackSeen)poolTlsPolicy.fallbackUrl=workerPoolFallbackUrl;
             cfg.pools[0].host=poolTlsPolicy.host;cfg.pools[0].port=static_cast<int>(poolTlsPolicy.port);cfg.pools[0].tls=true;
             if(!workerChild){
-                if(poolTlsPolicy.fallbackUrl.empty())fprintf(stderr,"Strict user-pool TLS: system trust and DNS verification; no plaintext fallback; donation is off.\n");
-                else fprintf(stderr,"Prefer TLS: plaintext fallback is authorized for a qualifying pre-TLS connection failure. Plaintext exposes login/proof data, and a network attacker can trigger fallback. Donation is off.\n");
+                if(poolTlsPolicy.fallbackUrl.empty())fprintf(stderr,"Strict user-pool TLS: system trust and DNS verification; no plaintext fallback.\n");
+                else fprintf(stderr,"Prefer TLS: plaintext fallback is authorized for a qualifying pre-TLS connection failure. Plaintext exposes login/proof data, and a network attacker can trigger fallback.\n");
             }
         }else if(ordinaryRuntime)fprintf(stderr,"Legacy TCP compatibility is unencrypted; no automatic TLS migration or downgrade is performed.\n");
+        if(!workerChild && poolTlsPolicy.donationTls)
+            fprintf(stderr,"Strict donation TLS requires system trust and the fixed donation peer.\n");
     }
     if (!workWaitEnvironmentCompatible(opt.workWaitMs)) {
         fprintf(stderr, "--work-wait-ms cannot be combined with research/pipeline/evidence selectors\n");
@@ -1138,6 +1160,8 @@ int main(int argc, char **argv) {
         so.resolvedWorkWait = opt.workWaitMs;
         so.resolvedPoolTlsUrl = poolTlsPolicy.frozenUrl;
         so.resolvedPoolFallbackUrl = poolTlsPolicy.fallbackUrl;
+        if(poolTlsPolicy.donationTls)
+            so.resolvedDonationTlsUrl=poolSecurityUrl({DonationTlsRoute::host(),poolTlsPolicy.donationTls->port(),true});
         so.stop = &g_stop;
         std::vector<GpuTuningDevice> tuningDevices;
         for (const DeviceIdentity &d : chosenAll) tuningDevices.push_back({d.index, d.uuid});
@@ -1363,14 +1387,16 @@ int main(int argc, char **argv) {
                 snap->fee.debtSeconds = f.debtMs / 1000;
                 snap->fee.poolFailures = f.poolFailures;
                 snap->fee.windowsCompleted = f.windowsCompleted;
-                snap->fee.pool = feePoolEndpoint();
+                snap->fee.pool = poolTlsPolicy.donationTls
+                    ? std::string(DonationTlsRoute::host()) + ":" + std::to_string(poolTlsPolicy.donationTls->port())
+                    : feePoolEndpoint();
                 snap->fee.login = "developer";  // H-031 Amendment 2: the donation account is never presented
                 snap->fee.note = "developer donation: 1% (99:1 per 100 productive minutes)";
             });
         };
         feeRandom.reset(new om::SystemFeeRandom());
         feeSession.reset(new om::FeeSession(om::productFeePolicy(), feeRandom.get(),
-                                            om::FeeStateFile(!cfg.log.dir.empty() ? cfg.log.dir : cfg.stateDir), feeDestination(), feeDeps));
+                                            om::FeeStateFile(!cfg.log.dir.empty() ? cfg.log.dir : cfg.stateDir), feeDestination(), feeDeps, poolTlsPolicy.donationTls));
         feeSession->load();
         feeForShutdown.store(feeSession.get());
         fprintf(stderr, "donation-policy: %s\n", feePolicyBuildLabel());

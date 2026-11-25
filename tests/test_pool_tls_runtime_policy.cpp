@@ -222,5 +222,61 @@ int main(){
     RunOptions options;options.poolTls=true;options.poolPlaintextFallbackUrl=fallback;
     CHECK(fee.runFeeWindow(options)==kRunPauseFault&&logs==1);
     CHECK(fee.windowsCompleted()==0&&fee.poolFailures()==0);
+    // A fixture approval is an internal capability. No production socket or donation account is used here.
+    {
+        constexpr unsigned fixtureApprovedPort=10443;
+        const DonationTlsCapability fixtureApproval{DonationTlsRoute::host(),fixtureApprovedPort};
+        ProductConfig source;
+        PoolEntry user;
+        CHECK(parsePoolSpec("user-donation-tls-fixture.invalid:7048",&user,&error));
+        source.pools={user};
+        PoolSecurityPreferences separate;
+        separate.donation.mode=PoolSecurityMode::StrictTls;
+        separate.donation.tlsUrl=std::string("stratum+ssl://")+DonationTlsRoute::host()+":10443";
+        PoolTlsRuntimePolicy resolved;
+        CHECK(!resolvePoolTlsRuntimePolicy(source,separate,true,true,&resolved,&error));
+        CHECK(!resolved.donationTls);
+        CHECK(!resolvePoolTlsRuntimePolicy(source,separate,true,true,&resolved,&error,{},
+            {"other-donor.invalid",fixtureApprovedPort}));
+        CHECK(resolvePoolTlsRuntimePolicy(source,separate,true,true,&resolved,&error,{},fixtureApproval));
+        CHECK(!resolved.tls&&resolved.donationTls&&resolved.donationTls->matches(DonationTlsRoute::host(),10443));
+        CHECK(!resolvePoolTlsRuntimePolicy(source,separate,false,true,&resolved,&error,{},fixtureApproval));
+        CHECK(!resolvePoolTlsRuntimePolicy(source,separate,true,false,&resolved,&error,{},fixtureApproval));
+        auto disabled=source; disabled.donation=false;
+        CHECK(!resolvePoolTlsRuntimePolicy(disabled,separate,true,true,&resolved,&error,{},fixtureApproval));
+        CHECK(!resolvePoolTlsRuntimePolicy(source,{},true,true,&resolved,&error,separate.donation.tlsUrl));
+        for(const std::string &url:std::vector<std::string>{"stratum+ssl://user-donation-tls-fixture.invalid:10443",
+                                    std::string("stratum+ssl://")+DonationTlsRoute::host()+":10444"}){
+            auto invalid=separate; invalid.donation.tlsUrl=url;
+            CHECK(!resolvePoolTlsRuntimePolicy(source,invalid,true,true,&resolved,&error,{},fixtureApproval));
+        }
+        auto preferDonation=separate;
+        preferDonation.donation.mode=PoolSecurityMode::PreferTls;
+        CHECK(!resolvePoolTlsRuntimePolicy(source,preferDonation,true,true,&resolved,&error,{},fixtureApproval));
+        separate.users[0].mode=PoolSecurityMode::PreferTls;
+        separate.users[0].tlsUrl="stratum+ssl://user-donation-tls-fixture.invalid:8048";
+        separate.users[0].plaintextUrl="stratum+tcp://user-donation-tls-fixture.invalid:7048";
+        separate.users[0].plaintextConsent=true;
+        CHECK(resolvePoolTlsRuntimePolicy(source,separate,true,true,&resolved,&error,{},fixtureApproval));
+        CHECK(resolved.tls&&resolved.port==8048&&resolved.fallbackUrl==separate.users[0].plaintextUrl&&
+            resolved.donationTls&&resolved.donationTls->port()==fixtureApprovedPort);
+        const auto combined=workerArgs({},seed,9000,7,resolved.frozenUrl,resolved.fallbackUrl,separate.donation.tlsUrl);
+        CHECK(std::count(combined.begin(),combined.end(),"--worker-donation-tls")==1);
+        CHECK(std::count(combined.begin(),combined.end(),"--no-donation")==0);
+        const auto ordinary=workerArgs({"--password","--worker-donation-tls"},seed,9000);
+        CHECK(ordinary.size()>2&&ordinary[0]=="--password"&&ordinary[1]=="--worker-donation-tls");
+        CHECK(std::count(ordinary.begin(),ordinary.end(),"--worker-donation-tls")==1);
+        auto worker=source;
+        CHECK(!applyFrozenPoolTlsEndpoint(resolved.frozenUrl,&worker,resolved.fallbackUrl));
+        CHECK(applyFrozenPoolTlsEndpoint(resolved.frozenUrl,&worker,resolved.fallbackUrl,true));
+        PoolSecurityPreferences savedWorker;
+        savedWorker.donation=separate.donation;
+        CHECK(!resolvePoolTlsRuntimePolicy(worker,{},true,true,&resolved,&error,separate.donation.tlsUrl,fixtureApproval));
+        CHECK(resolvePoolTlsRuntimePolicy(worker,savedWorker,true,true,&resolved,&error,separate.donation.tlsUrl,fixtureApproval));
+        CHECK(resolved.donationTls&&resolved.donationTls->port()==fixtureApprovedPort);
+        CHECK(!resolvePoolTlsRuntimePolicy(worker,savedWorker,true,true,&resolved,&error,
+            std::string("stratum+ssl://")+DonationTlsRoute::host()+":10444",fixtureApproval));
+        CHECK(!resolvePoolTlsRuntimePolicy(disabled,savedWorker,true,true,&resolved,&error,separate.donation.tlsUrl,fixtureApproval));
+    }
     return finishTests("pool_tls_runtime_policy");
 }

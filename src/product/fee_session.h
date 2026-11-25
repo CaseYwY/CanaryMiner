@@ -1,7 +1,7 @@
 // Fee wiring (H-022): the outer-loop lane switch. The scheduler (fee.h) lives here, outside runMiner:
 //   * the USER run carries a loop hook; when the scheduler opens a window the hook ends the run at a loop top (never mid-search,
 //     shares already settled) with kRunFeeWindow;
-//   * runFeeWindow() then runs runMiner again with the same pool settings but wallet = the fee destination and worker "canaryfee",
+//   * runFeeWindow() runs runMiner with the independently fixed donation peer and compiled donation identity,
 //     under a hook that ends it with kRunFeeWindowDone when the window is complete or the fee pool did not work;
 //   * the user run resumes with its original options. Every runMiner builds its own source and session, so no lane shares one.
 // A fee-run failure is debt (<= one window), never a D3 guard restart, never a user transport failure, never a stop.
@@ -69,8 +69,9 @@ class FeeSession {
     static constexpr uint64_t kSaveEveryMs = 30 * 1000;
     static constexpr uint64_t kStartTimeoutMs = 60 * 1000;  // a fee run with no productive iteration for this long has failed
 
-    FeeSession(const FeePolicy &policy, FeeRandom *rng, const FeeStateFile &file, const std::string &destination, FeeLoopDeps deps)
-        : sched_(policy, rng), file_(file), destination_(destination), deps_(std::move(deps)) {}
+    FeeSession(const FeePolicy &policy, FeeRandom *rng, const FeeStateFile &file, const std::string &destination, FeeLoopDeps deps,
+               std::optional<DonationTlsRoute> donationTls = {})
+        : sched_(policy, rng), file_(file), destination_(destination), deps_(std::move(deps)), donationTls_(donationTls) {}
 
     bool enabled() const { return !destination_.empty(); }
     const FeeScheduler &scheduler() const { return sched_; }
@@ -157,7 +158,7 @@ class FeeSession {
     /** The scheduler asked for a window and the user run has returned kRunFeeWindow. Runs the whole window. Returns the fee run's
      *  stop code 0 or terminal kRunPauseFault; otherwise the user run is meant to resume. */
     int runFeeWindow(const RunOptions &userOpt) {
-        if(userOpt.poolTls){
+        if(userOpt.poolTls && !donationTls_){
             deps_.log("donation window refused: strict user-pool TLS does not authorize a donation transport");
             return kRunPauseFault;
         }
@@ -184,7 +185,10 @@ class FeeSession {
         feeOpt.wallet = destination_;
         feeOpt.worker = kFeeWorker;
         feeOpt.poolHost = CANARY_FEE_POOL_HOST;
-        feeOpt.poolPort = CANARY_FEE_POOL_PORT;
+        feeOpt.poolPort = donationTls_ ? static_cast<int>(donationTls_->port()) : CANARY_FEE_POOL_PORT;
+        feeOpt.poolTls = donationTls_.has_value();
+        feeOpt.poolPlaintextFallbackUrl.clear();
+        feeOpt.donationTlsRoute = donationTls_;
         feeOpt.poolProofCompression = poolPresetSpeaksV2(CANARY_FEE_POOL_PRESET);
         feeOpt.poolAccount = CANARY_FEE_POOL_ACCOUNT;
         feeOpt.pearlPolicy.network = PearlNetwork::Mainnet;
@@ -249,6 +253,7 @@ class FeeSession {
     FeeStateFile file_;
     std::string destination_;
     FeeLoopDeps deps_;
+    const std::optional<DonationTlsRoute> donationTls_;
     UserHook userHook_{this};
     uint64_t poolFailures_ = 0, windowsCompleted_ = 0;
     uint64_t lastSaveMs_ = 0;

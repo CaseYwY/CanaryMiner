@@ -95,7 +95,7 @@ struct SupervisorTuning {
 /** Arguments for one worker: the user's command line without the options the supervisor sets per worker, plus the internal ones. */
 inline std::vector<std::string> workerArgs(const std::vector<std::string> &user, const WorkerSeed &w, int port,
                                          std::optional<unsigned> resolvedWait = std::nullopt,const std::string &resolvedPoolTlsUrl = {},
-                                         const std::string &resolvedPoolFallbackUrl = {}) {
+                                         const std::string &resolvedPoolFallbackUrl = {},const std::string &resolvedDonationTlsUrl = {}) {
     std::vector<std::string> out;
     for (size_t i = 0; i < user.size(); ++i) {
         const std::string &a = user[i];
@@ -118,7 +118,13 @@ inline std::vector<std::string> workerArgs(const std::vector<std::string> &user,
     out.push_back("--worker-id");
     out.push_back(std::to_string(w.index));
     if (resolvedWait) { out.push_back("--work-wait-ms"); out.push_back(std::to_string(*resolvedWait)); }
-    if (!resolvedPoolTlsUrl.empty()) { out.push_back("--worker-pool-tls"); out.push_back(resolvedPoolTlsUrl); out.push_back("--no-donation"); }
+    if (!resolvedPoolTlsUrl.empty()) {
+        out.push_back("--worker-pool-tls"); out.push_back(resolvedPoolTlsUrl);
+        if (resolvedDonationTlsUrl.empty()) out.push_back("--no-donation");
+    }
+    if (!resolvedDonationTlsUrl.empty()) {
+        out.push_back("--worker-donation-tls"); out.push_back(resolvedDonationTlsUrl);
+    }
     if (!resolvedPoolTlsUrl.empty() && !resolvedPoolFallbackUrl.empty()) { out.push_back("--worker-pool-fallback"); out.push_back(resolvedPoolFallbackUrl); }
     return out;
 }
@@ -158,6 +164,7 @@ struct SupervisorOptions {
     std::optional<unsigned> resolvedWorkWait;  // frozen for this session, including child restarts
     std::string resolvedPoolTlsUrl; // frozen user peer; no saved preference reload in workers
     std::string resolvedPoolFallbackUrl; // frozen consent for this exact TCP endpoint, or empty
+    std::string resolvedDonationTlsUrl; // frozen independent admission to this build's fixed donation peer
     WorkerFleetFactory workerFleetFactory; // default empty; one fixed lifetime, never reconstructed on a worker retry
     WorkerFleetEvidenceSource workerFleetEvidence; // trusted memory-only source; missing evidence holds every controlled worker
     DisplaySampleFactory displaySampleFactory; // empty uses native display reader; constructed/read/destroyed only in the background
@@ -865,7 +872,7 @@ class Supervisor {
         w.historyLastUtc = static_cast<int64_t>(time(nullptr));
         if(fleet_){
             w.controlledExitHandled=false;w.view.haveStats=false;w.view.state="Pausing";w.view.detail="waiting for controlled startup";
-            if(!fleet_->launch(static_cast<unsigned>(i),std::filesystem::u8path(opt_.exe),workerArgs(opt_.userArgs,w.view.seed,w.port,opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl,opt_.resolvedPoolFallbackUrl),
+            if(!fleet_->launch(static_cast<unsigned>(i),std::filesystem::u8path(opt_.exe),workerArgs(opt_.userArgs,w.view.seed,w.port,opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl,opt_.resolvedPoolFallbackUrl,opt_.resolvedDonationTlsUrl),
                 static_cast<unsigned>(opt_.drainMs+5000),supervisorControlTime())){
                 w.controlledExitHandled=true;onExit(i,kExitFaultLatched,now,false,"controlled worker admission refused");
             }else addEvent(workerLabel(w)+": controlled worker requested");
@@ -875,7 +882,7 @@ class Supervisor {
         const size_t slot = i;
         std::string err;
         const bool ok = w.proc->start(
-            opt_.exe, workerArgs(opt_.userArgs, w.view.seed, w.port, opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl,opt_.resolvedPoolFallbackUrl),
+            opt_.exe, workerArgs(opt_.userArgs, w.view.seed, w.port, opt_.resolvedWorkWait,opt_.resolvedPoolTlsUrl,opt_.resolvedPoolFallbackUrl,opt_.resolvedDonationTlsUrl),
             [this, slot](const std::string &line) {
                 std::lock_guard<std::mutex> g(mu_);
                 inbox_.push_back({slot, line});

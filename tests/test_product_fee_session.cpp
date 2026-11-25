@@ -39,6 +39,9 @@ struct RunRecord {
     std::string poolHost;
     int poolPort = 0;
     bool proofCompression = false;
+    bool tls = false;
+    std::string fallback;
+    std::optional<DonationTlsRoute> donationTls;
     PearlSourcePolicy policy;
     bool fee = false;
     uint64_t startMs = 0, endMs = 0;
@@ -71,6 +74,9 @@ struct Sim {
         r.poolHost = o.poolHost;
         r.poolPort = o.poolPort;
         r.proofCompression = o.poolProofCompression;
+        r.tls = o.poolTls;
+        r.fallback = o.poolPlaintextFallbackUrl;
+        r.donationTls = o.donationTlsRoute;
         r.policy = o.pearlPolicy;
         r.fee = o.worker == kFeeWorker;
         CHECK(o.workLane==(r.fee?WorkLane::Donation:WorkLane::User));
@@ -534,6 +540,45 @@ int main() {
         CHECK(!std::filesystem::exists(FeeStateFile(dir).path()) && !std::filesystem::exists(FeeStateFile(dir).backupPath()));
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
+    }
+
+    // Separate strict lane: qualify a synthetic port and exercise the exact scheduler and option handoff.
+    for(const auto behaviour:{FeeBehaviour::Works,FeeBehaviour::ConnectFails}){
+        constexpr unsigned port=10443;
+        const auto route=DonationTlsRoute::forQualifiedPeer({DonationTlsRoute::host(),port});
+        Sim sim;
+        sim.stopAtMs=5*kMin;
+        sim.feeBehaviour=behaviour;
+        auto deps=sim.deps();
+        FixedRandom rng(2*kMin);
+        const auto dir=makeScratchDir("fee-strict-transport-fixture");
+        const auto user=[] {
+            auto o=userOptions();
+            o.poolTls=true;
+            o.poolPlaintextFallbackUrl="stratum+tcp://pool.example:7048";
+            return o;
+        }();
+        {
+            GuardRestartBudget budget;
+            FeeSession session(productFeePolicy(),&rng,FeeStateFile(dir),kDest,deps,route);
+            session.load();
+            CHECK(runOuterLoop(user,&session,deps,&budget,0,8)==0);
+            CHECK(sim.runs.size()==3&&budget.usedInWindow(sim.now)==0);
+            if(sim.runs.size()==3){
+                const auto &first=sim.runs[0],&fee=sim.runs[1],&resumed=sim.runs[2];
+                CHECK(first.tls&&!first.donationTls&&first.fallback==user.poolPlaintextFallbackUrl);
+                CHECK(fee.fee&&fee.tls&&fee.fallback.empty()&&fee.wallet==kDest&&fee.worker==kFeeWorker);
+                CHECK(fee.donationTls&&fee.donationTls->matches(fee.poolHost,fee.poolPort)&&fee.poolPort==10443);
+                CHECK(fee.account==CANARY_FEE_POOL_ACCOUNT&&fee.account!=user.poolAccount);
+                CHECK(resumed.tls&&!resumed.donationTls&&resumed.fallback==user.poolPlaintextFallbackUrl);
+            }
+            CHECK(session.windowsCompleted()==(behaviour==FeeBehaviour::Works?1u:0u));
+            CHECK(session.poolFailures()==(behaviour==FeeBehaviour::ConnectFails?1u:0u));
+            if(behaviour==FeeBehaviour::ConnectFails)
+                CHECK(session.scheduler().state().feeMs==0);
+        }
+        std::error_code ec;
+        std::filesystem::remove_all(dir,ec); // only this test's scratch directory
     }
 
     return finishTests("fee_session");

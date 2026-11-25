@@ -28,6 +28,7 @@
 #include "pearl_job_context.h"
 #include "telemetry.h"
 #include "pool_transport_observation.h"
+#include "../product/donation_tls_route.h"
 
 namespace om {
 
@@ -288,7 +289,8 @@ struct RunOptions {
     // node source.
     std::string poolHost;
     int poolPort = 0;
-    bool poolTls = false;  // first-user-pool transport; never inherited by donation
+    bool poolTls = false;  // transport of this run's lane
+    std::optional<DonationTlsRoute> donationTlsRoute; // separate fixed peer proof, only set for the donation lane
     std::string poolPlaintextFallbackUrl; // frozen user consent; empty keeps TLS strict
     std::string wallet;
     std::string worker = "canary";
