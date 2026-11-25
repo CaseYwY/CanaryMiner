@@ -130,7 +130,7 @@ const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffD
     const auto error = [go](const char *agile, const char *goProduct) { return go ? goProduct : agile; };
     if (!go && !datedProduct(plan.product, "AGILE-") && !datedProduct(plan.product, "AGILE-FLEX-"))
         return "tariff declaration is unsuitable for an Octopus rate import";
-    if (!compatiblePlan(plan))
+    if (declaration.componentMultipliers || !compatiblePlan(plan))
         return error("tariff declaration is unsuitable for an Octopus Agile rate import",
                      "tariff declaration is unsuitable for an Octopus Go rate import");
 

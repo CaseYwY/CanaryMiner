@@ -47,11 +47,16 @@ class TariffSettingsPanel {
                 const auto name=selectedName();
                 const auto location=path();
                 const bool changed=v->text!=input;
-                const bool seasonalOpening=seasonal()&&location=="opening"&&changed;
-                const bool changedOpeningPoint=seasonalOpening&&(name=="through_utc_ms"||name=="cycle_begin_utc_ms");
-                const bool changedAllowance=changed&&(seasonRow()||(seasonalOpening&&name=="cycle_end_utc_ms"));
+                const bool openingChanged=changed&&location=="opening";
+                const bool components=requiresComponentOpeningReview();
+                const bool changedOpeningPoint=openingChanged&&(seasonal()||components)&&
+                    (name=="through_utc_ms"||name=="cycle_begin_utc_ms");
+                const bool changedAllowance=changed&&(seasonRow()||(openingChanged&&seasonal()&&name=="cycle_end_utc_ms"));
+                const bool changedMeterBinding=openingChanged&&components&&(name=="scope"||name=="adapter");
+                const bool changedPlanSubtotal=location=="plan"&&(name=="tiers"||name=="cycle_charge"||name=="currency");
+                const bool changedComponents=changed&&components&&(revision()||changedPlanSubtotal);
                 const bool changedRateClock=changed&&location=="plan.clock"&&
-                    (name=="zone"||(seasonal()&&(name=="kind"||name=="fixed_offset_seconds")));
+                    (name=="zone"||((seasonal()||components)&&(name=="kind"||name=="fixed_offset_seconds")));
                 if(input.empty()&&(name=="minimum_cycle_subtotal"||name=="through_kwh"||name=="date"))*v={};
                 else if(v->isNumber()){
                     JsonValue number;if(!parseJsonStrict(input,&number,nullptr)||!number.isNumber()||input.find_first_not_of("-0123456789")!=std::string::npos){message=i18n::tariffNoticeEnglish(NoticeKey::IntegerOnly);return TariffSettingsResult::None;}
@@ -60,10 +65,15 @@ class TariffSettingsPanel {
                 page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::DraftOnly);
                 if(changedOpeningPoint){
                     clearDraftOpeningAmounts();
-                    message=i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::SeasonalOpeningPoint);
+                    message=seasonal()?i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::SeasonalOpeningPoint):
+                        "Opening time changed. Re-enter the imported quantity and subtotal.";
+                }else if(changedMeterBinding){
+                    clearDraftOpeningAmounts();
+                    message="Meter binding changed. Re-enter the imported quantity and subtotal.";
                 }else if(changedRateClock&&clearMidcycleSubtotal())
                     message="Rate clock changed. Re-enter the opening subtotal using the new clock.";
                 else if(changedAllowance)reviewChangedSeasonalAllowance();
+                else if(changedComponents)reviewChangedComponents();
             }else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;inputRejected=false;}
             else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<128)input+=static_cast<char>(key);else{inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::TooLong);}}
             else if(key>=128&&key<=255){inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::AsciiOnly);}
@@ -74,12 +84,17 @@ class TariffSettingsPanel {
             if(key==27)page=TariffSettingsPage::Browse;
             else if(key=='\r'||key=='\n'){
                 auto *v=node();
+                const bool rateRows=requiresComponentOpeningReview()&&(revision()||path()=="plan.revisions");
                 if(v->isArray()&&field<v->items.size()){
                     v->items.erase(v->items.begin()+field);
                     if(field&&field==v->items.size())--field;
                 }
                 page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::Removed);
                 if(collectionName()=="seasons")reviewChangedSeasonalAllowance();
+                if(rateRows){
+                    refreshClockContract();
+                    reviewChangedComponents();
+                }
             }
         }else if(page==TariffSettingsPage::Leave){
             if(key==27)page=TariffSettingsPage::Browse;
@@ -109,6 +124,7 @@ class TariffSettingsPanel {
         else if((key=='y'||key=='Y')&&onCyclePolicy())toggleCyclePolicy(TariffResetCadence::Annual);
         else if((key=='b'||key=='B')&&onCyclePolicy())toggleCyclePolicy(TariffResetCadence::Bimonthly);
         else if((key=='a'||key=='A')&&onSeasonalToggle())toggleSeasonalAllowance();
+        else if((key=='c'||key=='C')&&onComponentToggle())toggleComponentMultiplier();
         else if((key=='f'||key=='F')&&onCyclePolicy()&&recurring()&&!bimonthly())toggleDailyFeeAllocation();
         else if((key=='z'||key=='Z')&&onTariffClock())toggleNamedClock();
         else if((key=='g'||key=='G')&&recurring())deriveCycle();
@@ -117,7 +133,16 @@ class TariffSettingsPanel {
         else if((key=='a'||key=='A')&&node()->isArray()){
             const auto collection=collectionName();const size_t bound=collection=="revisions"||collection=="seasons"?16:collection=="dynamic"?256:32;
             if(count()>=bound||tariffJson(draft).size()>tariffDeclarationMaxBytes-1024)message=i18n::tariffNoticeEnglish(NoticeKey::Capacity);
-            else{auto value=tariffRowTemplate(collection);if(value.isObject()){node()->items.push_back(std::move(value));field=count()-1;message=i18n::tariffNoticeEnglish(NoticeKey::AddedBlank);if(collection=="seasons")reviewChangedSeasonalAllowance();}}
+            else{
+                auto value=tariffRowTemplate(collection,componentRevision());
+                if(value.isObject()){
+                    node()->items.push_back(std::move(value));
+                    field=count()-1;
+                    message=i18n::tariffNoticeEnglish(NoticeKey::AddedBlank);
+                    if(collection=="seasons")reviewChangedSeasonalAllowance();
+                    if(requiresComponentOpeningReview()&&(revision()||collection=="revisions"))reviewChangedComponents();
+                }
+            }
         }else if((key=='x'||key=='X')&&node()->isArray()&&count())page=TariffSettingsPage::Remove;
         else if(key=='\r'||key=='\n'||key==' '){
             auto *v=selected();if(!v)return TariffSettingsResult::None;
@@ -144,6 +169,7 @@ class TariffSettingsPanel {
                 if(recurring()&&!bimonthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::FeeToggle)+" ";
             }
             if(onSeasonalToggle())shortcuts+=i18n::tariffMonthlyEnglish(Key::SeasonalToggle)+" ";
+            if(onComponentToggle())shortcuts+="[C] Component multiplier ";
             if(recurring())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
             if(onTariffClock()&&civilNamedTimeAvailable())shortcuts+="[Z] Named/UTC clock ";
             shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
@@ -202,6 +228,28 @@ class TariffSettingsPanel {
     bool onCyclePolicy()const{return route.empty()&&selectedName()=="reset_policy";}
     bool seasonal()const{return draft.find("seasonal_allowance")!=nullptr;}
     bool onSeasonalToggle()const{return onCyclePolicy()||(route.empty()&&selectedName()=="seasonal_allowance");}
+    static bool hasComponents(const JsonValue &value){
+        const auto *plan=value.find("plan");
+        const auto *revisions=plan?plan->find("revisions"):nullptr;
+        return revisions&&std::any_of(revisions->items.begin(),revisions->items.end(),[](const JsonValue &row){
+            return row.find("component_multiplier")!=nullptr;
+        });
+    }
+    bool requiresComponentOpeningReview()const{
+        return hasComponents(active)||hasComponents(draft);
+    }
+    const JsonValue *revision()const{
+        if(route.size()<3||draft.members[route[0]].first!="plan")return nullptr;
+        const auto &collection=draft.members[route[0]].second.members[route[1]];
+        return collection.first=="revisions"?&collection.second.items[route[2]]:nullptr;
+    }
+    bool componentRevision()const{
+        const auto *row=revision();
+        return row&&row->find("component_multiplier");
+    }
+    bool onComponentToggle()const{
+        return route.size()==3&&selectedName()=="base_rate_per_kwh"&&revision();
+    }
     bool seasonRow()const{return path().rfind("seasonal_allowance.seasons[",0)==0;}
     bool onTariffClock()const{
         const auto at=path();
@@ -229,7 +277,7 @@ class TariffSettingsPanel {
         if(!schema||!opening||!plan||!policy)return;
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
-        schema->text=seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        schema->text=hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -306,6 +354,36 @@ class TariffSettingsPanel {
         else if(wasBimonthly)reviewChangedPeriod(Key::BimonthlyChanged);
         else if(wasAnnual||useAnnual)reviewChangedPeriod(useAnnual?Key::AnnualEnabled:Key::AnnualChanged);
         else message=i18n::tariffMonthlyEnglish(Key::Enabled);
+    }
+    void toggleComponentMultiplier(){
+        auto &row=*node();
+        const bool remove=componentRevision();
+        const auto removeField=[](JsonValue &object,const std::string &name){
+            object.members.erase(std::remove_if(object.members.begin(),object.members.end(),
+                [&](const auto &entry){return entry.first==name;}),object.members.end());
+        };
+        JsonValue blank;
+        blank.type=JsonValue::Type::String;
+        if(remove)removeField(row,"component_multiplier");
+        else{
+            JsonValue rule;
+            parseJsonStrict(R"({"rate_per_kwh":"","base_multiplier":""})",&rule,nullptr);
+            if(row.find("time_mode")->text=="dynamic")member(rule,"base_multiplier")->text="0";
+            row.members.emplace_back("component_multiplier",std::move(rule));
+        }
+        for(const auto *collection:{"calendar","dynamic"}){
+            for(auto &entry:member(row,collection)->items){
+                if(remove)removeField(entry,"multiplier");
+                else entry.members.emplace_back("multiplier",blank);
+            }
+        }
+        refreshClockContract();
+        message=remove?"Draft component multiplier removed. Review the remaining unit rates.":
+            "Enter the multiplied part and each factor. Review existing unit rates as the unscaled part.";
+        reviewChangedComponents();
+    }
+    void reviewChangedComponents(){
+        if(clearMidcycleSubtotal())message="Tariff changed. Re-enter the opening subtotal using the revised rules.";
     }
     void toggleSeasonalAllowance(){
         using Key=i18n::TariffMonthlyMessageKey;
@@ -439,6 +517,14 @@ class TariffSettingsPanel {
         if(bimonthly()&&s=="cycle_charge")return i18n::tariffMonthlyEnglish(Key::MonthlyAmount);
         if(s=="tiers")return i18n::tariffHintEnglish(HintKey::Tiers);
         if(s=="time_mode")return i18n::tariffHintEnglish(HintKey::TimeMode);
+        if(s=="base_multiplier")return "Enter the fallback factor as a nonnegative decimal. Use 0 in dynamic mode.";
+        if(s=="multiplier")return "Enter the nonnegative factor for the multiplied part of the unit rate.";
+        if(componentRevision()&&(s=="base_rate_per_kwh"||s=="rate_per_kwh")){
+            const auto location=path();
+            if(collectionName()=="component_multiplier")return "Enter the sum per kWh of the charges that use the factor.";
+            if(location.find(".bands[")==std::string::npos)
+                return "Enter the sum per kWh of the charges excluded from the factor.";
+        }
         if(s=="kind")return i18n::tariffHintEnglish(HintKey::ClockKind);
         if(s=="zone")return "Enter an IANA zone from the reviewed time database, for example America/New_York.";
         if(s=="date")return i18n::tariffHintEnglish(HintKey::Date);
@@ -485,6 +571,8 @@ class TariffSettingsPanel {
             i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
         if(seasonal())review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::SeasonalReview));
+        if(hasComponents(draft))review.insert(review.begin()+4,
+            "Unit rate = unscaled part + multiplied part x factor. Use new plan and opening keys after a rate change.");
         if(prorated)review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::FeeReview));
         const auto *plan=draft.find("plan");
         const auto *rounding=plan?plan->find("rounding"):nullptr;

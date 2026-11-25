@@ -305,7 +305,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || ((schemaVersion == 5 || schemaVersion == 6 || schemaVersion == 7) &&
+        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 8 &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
@@ -331,6 +331,8 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
             std::to_string(review.readings.octopusObserved) + " UTC ms.\n";
     }
     if (namedTariff) report += std::string("Reviewed IANA time database ") + tariffTzdbVersion + "\n";
+    if (declaration.componentMultipliers)
+        report += "Component multipliers apply to the declared part of the unit rate.\n";
     if (showCutoff) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
     if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
         report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";

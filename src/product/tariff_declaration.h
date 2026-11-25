@@ -28,6 +28,7 @@ struct SeasonalAllowance {
 struct TariffDeclaration {
     std::string country, sourceReference, openingKey;
     uint64_t confirmedUtc=0;
+    bool componentMultipliers=false;
     TariffPlan plan;
     BillOpening opening;
     std::optional<TariffResetSchedule> resetSchedule;
@@ -77,7 +78,7 @@ struct TariffDeclarationChange {
 };
 // Templates intentionally leave unknown rates, quantities and identities EMPTY, not zero.
 JsonValue tariffDeclarationTemplate();
-JsonValue tariffRowTemplate(const std::string &collection);
+JsonValue tariffRowTemplate(const std::string &collection,bool componentMultiplier=false);
 std::string tariffJson(const JsonValue &value);
 // Transactional output; validates every key/type/rule and binds an explicit fixed clock.
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem=nullptr);
