@@ -396,6 +396,110 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
 }
 
+void exportPayment(JsonValue draft,const std::filesystem::path &target) {
+    const auto close=T+3600000;
+    auto &plan=member(draft,"plan");
+    set(plan,"tiers",R"("none")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    auto &revision=member(plan,"revisions").items.front();
+    set(revision,"end_utc_ms",std::to_string(close));
+    set(revision,"time_mode",R"("constant")");
+    set(revision,"base_rate_per_kwh",R"("3")");
+    set(revision,"charge_per_civil_day",R"("0")");
+    set(revision,"calendar","[]");
+    set(revision,"bands","[]");
+    set(member(draft,"opening"),"cycle_end_utc_ms",std::to_string(close));
+
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"plan");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,25,ColorLevel::None).find("[E] Export payment")!=std::string::npos);
+    panel.key('e',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="12");
+    enter(panel,"export_payment");
+    enter(panel,"rate_per_kwh");type(panel,"1");
+    panel.key(27,{},T/1000);
+    panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"exported_kwh");type(panel,"0");
+
+    TariffDeclarationStore store(target);
+    std::string reason;
+    JsonValue saved;
+    CHECK(store.load(&saved,&reason));
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,25,ColorLevel::None).find("Export is paid separately")!=std::string::npos);
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    const bool persisted=store.load(&saved,&reason)&&saved.find("schema_version")->text=="12";
+    CHECK(persisted);
+    if(!persisted)return;
+
+    TariffDeclaration decoded;
+    const bool declared=decodeTariffDeclaration(saved,&decoded)&&decoded.plan.exportPayment.has_value();
+    CHECK(declared);
+    if(!declared)return;
+    checkComparison(compareTariffCycles(decoded,{dec("-2000"),dec("-1000")},1,T),
+                    "-2.000000","-1.000000","1.000000");
+    checkComparison(compareTariffCycles(decoded,{dec("-1000"),dec("1000")},1,T),
+                    "-1.000000","3.000000","4.000000");
+    const PowerTrace absent{decoded.opening.evidence,{{static_cast<int64_t>(T),static_cast<int64_t>(close),dec("1000")}}};
+    CHECK(evaluateBill(decoded.plan,decoded.opening,absent,close,T).status==ElectricityStatus::ExportEvidenceMissing);
+
+    panel.key('p',{},T/1000);
+    for(char c:std::string("-1000\t+1000\r"))panel.key(c,{},T/1000);
+    const auto rendered=awaitComparison(panel);
+    CHECK(rendered.find("Net without mining: -1.000000 USD")!=std::string::npos);
+    CHECK(rendered.find("Net with mining:    3.000000 USD")!=std::string::npos);
+    CHECK(rendered.find("Difference (with - without): 4.000000 USD")!=std::string::npos);
+    frame(panel,60,12);
+
+    for(const bool recurring:{false,true}){
+        auto large=saved;
+        auto &largePlan=member(large,"plan");
+        auto &largeRate=member(largePlan,"revisions").items.front();
+        const auto *rate=recurring?R"("1000000000000000000")":R"("1000000000000000000000")";
+        set(largeRate,"base_rate_per_kwh",rate);
+        set(member(largePlan,"export_payment"),"rate_per_kwh",rate);
+        if(recurring){
+            constexpr int64_t jan=1704067200000,feb=1706745600000,mar=1709251200000;
+            set(large,"reset_policy",R"({"monthly_day":1,"clock":{"kind":"utc","fixed_offset_seconds":0},"daily_fee_allocation":"prorate_by_cycle_minutes"})");
+            set(largeRate,"begin_utc_ms",std::to_string(jan));
+            set(largeRate,"end_utc_ms",std::to_string(mar));
+            auto &opening=member(large,"opening");
+            set(opening,"cycle_begin_utc_ms",std::to_string(jan));
+            set(opening,"cycle_end_utc_ms",std::to_string(feb));
+            set(opening,"through_utc_ms",std::to_string(jan));
+        }
+        TariffSettingsPanel narrow;
+        narrow.open(large);
+        narrow.key('p',{},T/1000);
+        if(recurring)narrow.key(kKeyRight,{},T/1000);
+        for(char c:std::string("-100000000000000000\t+200000000000000000\r"))narrow.key(c,{},T/1000);
+        const auto output=awaitComparison(narrow);
+        CHECK(output.find("Net without mining:")!=std::string::npos);
+        CHECK(output.find("Net with mining:")!=std::string::npos);
+        CHECK(output.find("[Esc] Back")!=std::string::npos);
+        if(recurring)CHECK(output.find("fees prorated")!=std::string::npos);
+        frame(narrow,60,12);
+    }
+
+    auto changed=saved;
+    set(member(member(changed,"plan"),"export_payment"),"rate_per_kwh",R"("0.5")");
+    CHECK(!store.save(changed,&reason)&&reason.find("NEW plan.key")!=std::string::npos);
+    set(member(changed,"plan"),"key",R"("new-export-plan")");
+    CHECK(!store.save(changed,&reason)&&reason.find("NEW opening.key")!=std::string::npos);
+
+    panel.open(saved);
+    enter(panel,"plan");
+    panel.key(27,{},T/1000);
+    panel.key('e',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="1");
+    CHECK(!panel.draft.find("plan")->find("export_payment"));
+    CHECK(!panel.draft.find("opening")->find("exported_kwh"));
+}
+
 void apparentDemand(JsonValue draft,const std::filesystem::path &target) {
     const auto close=T+15*60000;
     auto &plan=member(draft,"plan");
@@ -1014,6 +1118,7 @@ int main(int argc,char **argv){
     demandWindows(original,root/"demand-version-test.json");
     demandRatchet(original,root/"ratchet-version-test.json");
     apparentDemand(original,root/"apparent-demand-version-test.json");
+    exportPayment(original,root/"export-payment-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));

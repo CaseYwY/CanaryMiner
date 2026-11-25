@@ -35,6 +35,29 @@ ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) 
     }
     return cursor == end ? ElectricityStatus::Ok : ElectricityStatus::Unavailable;
 }
+template<class Trace>
+ElectricityStatus sumExport(const Trace &trace, ElectricityAmount &amount,
+                            const std::atomic<bool> *cancel, const std::function<bool()> &stop) {
+    for (const auto &interval : trace.intervals) {
+        if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+            return ElectricityStatus::Unavailable;
+        ExactDecimal energy;
+        if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+            if (!interval.exportedKwh) return ElectricityStatus::ExportEvidenceMissing;
+            energy=interval.exportedKwh->numerator;
+            if (energy.negative()) return ElectricityStatus::Invalid;
+        } else {
+            if (!interval.exportWatts) return ElectricityStatus::ExportEvidenceMissing;
+            const auto &watts=*interval.exportWatts;
+            if (watts.negative() || (!watts.zero() && !interval.watts.zero()))
+                return ElectricityStatus::Invalid;
+            if (!watts.multiply(number(interval.endUtcMs-interval.beginUtcMs),&energy))
+                return ElectricityStatus::Capacity;
+        }
+        if (!accumulate(amount.numerator,energy)) return ElectricityStatus::Capacity;
+    }
+    return ElectricityStatus::Ok;
+}
 constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
 ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &opening,int64_t end,int64_t decision) {
     if (!plan.demandCharge)
@@ -171,6 +194,17 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
                        s.throughUtcMs % meterHalfHourMs || end % meterHalfHourMs))
         return ElectricityStatus::MeterRoundingBoundary;
     if (s.throughUtcMs == s.cycleBeginUtcMs && (!s.importedKwh.numerator.zero() || !s.accruedSubtotal.numerator.zero())) return ElectricityStatus::Invalid;
+    if (p.exportPayment.has_value()!=s.exportedKwh.has_value()) return ElectricityStatus::Invalid;
+    if (p.exportPayment) {
+        if (s.evidence.basis!=PowerBasis::WholeMeterImport || (p.demandCharge && p.demandCharge->apparent()))
+            return ElectricityStatus::Unsupported;
+        const auto &exportRule=*p.exportPayment;
+        const auto &exported=s.exportedKwh->numerator;
+        if (!instant(exportRule.publishedUtcMs) || exportRule.ratePerKwh.negative() || exported.negative() ||
+            (s.throughUtcMs==s.cycleBeginUtcMs && !exported.zero()))
+            return ElectricityStatus::Invalid;
+        if (exportRule.publishedUtcMs>decision) return ElectricityStatus::NotYetKnown;
+    }
     const auto demandStatus=validateDemand(p,s,end,decision);
     if (demandStatus!=ElectricityStatus::Ok) return demandStatus;
     if (p.revisions.empty()) return ElectricityStatus::Unavailable;
@@ -339,6 +373,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::DemandWindowBoundary: return "demand requires complete aligned windows and nonzero meter deltas within each window";
         case ElectricityStatus::DemandHistoryNotYetKnown: return "demand history extends beyond the decision instant";
         case ElectricityStatus::DemandApparentEvidence: return "apparent demand needs whole-meter VA, an allowed power factor, or paired kWh/kVAh readings";
+        case ElectricityStatus::ExportEvidenceMissing: return "export payment needs signed whole-meter power or both cumulative energy registers";
     }
     return "unknown electricity status";
 }
@@ -438,6 +473,17 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         }
     }
     auto state = opening; state.timeDatabaseVersion = result.timeDatabaseVersion;
+    std::optional<ElectricityAmount> exportPayment;
+    if (p.exportPayment) {
+        ElectricityAmount newExport;
+        result.status=sumExport(trace,newExport,cancel,stop);
+        if (result.status!=ElectricityStatus::Ok) return result;
+        if (!accumulate(state.exportedKwh->numerator,newExport.numerator) ||
+            !p.exportPayment->payment(newExport,exportPayment.emplace())) {
+            result.status=ElectricityStatus::Capacity;
+            return result;
+        }
+    }
     ExactDecimal cost, billedQuantity, quantity = state.importedKwh.numerator;
     if (p.demandCharge) {
         result.status=measureDemand(*p.demandCharge,trace,opening.throughUtcMs,*state.peakDemand,cancel,stop);
@@ -558,6 +604,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     if (roundMeter) result.billedKwh = ElectricityAmount{billedQuantity};
     state.importedKwh.numerator = quantity; state.throughUtcMs = end;
     result.ending = state; result.charge = charge; result.cycleSettled = end == state.cycleEndUtcMs; result.status = ElectricityStatus::Ok;
+    result.exportPayment=std::move(exportPayment);
     return result;
 }
 BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,
@@ -574,6 +621,18 @@ static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening
     if(step.status!=ElectricityStatus::Ok)return result;
     ElectricityAmount total;
     if(!step.ending->accruedSubtotal.numerator.multiply(*p.subtotalMultiplier,&total.numerator)){result.status=ElectricityStatus::Capacity;return result;}
+    if (p.exportPayment) {
+        BillExportAccrual exported;
+        exported.paymentChange=*step.exportPayment;
+        if (!step.ending->exportedKwh->numerator.subtract(opening.exportedKwh->numerator,&exported.newKwh.numerator) ||
+            !p.exportPayment->payment(*step.ending->exportedKwh,exported.paymentTotal) ||
+            !step.netChange(exported.netChange) ||
+            !total.numerator.subtract(exported.paymentTotal.numerator,&exported.netTotal.numerator)) {
+            result.status=ElectricityStatus::Capacity;
+            return result;
+        }
+        result.exportAccrual=std::move(exported);
+    }
     result.ending=step.ending;result.provisionalChange=step.charge;result.provisionalTotal=total;
     result.billedKwh=step.billedKwh;
     if(step.cycleSettled)result.settledTotal=total;
@@ -602,8 +661,9 @@ CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &op
     auto withMining = evaluateBillImpl(p,opening,with,end,decision,false,cancel,{},dailyFeeAllocation);
     if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     if (withMining.status != ElectricityStatus::Ok) return {withMining.status, std::move(withoutMining), std::move(withMining), {}};
-    ElectricityAmount delta;
-    if (!withMining.charge->numerator.subtract(withoutMining.charge->numerator,&delta.numerator))
+    ElectricityAmount delta, withCost, withoutCost;
+    if (!withMining.netChange(withCost) || !withoutMining.netChange(withoutCost) ||
+        !withCost.numerator.subtract(withoutCost.numerator,&delta.numerator))
         return {ElectricityStatus::Capacity, std::move(withoutMining), std::move(withMining), {}};
     return {ElectricityStatus::Ok, std::move(withoutMining), std::move(withMining), std::move(delta)};
 }

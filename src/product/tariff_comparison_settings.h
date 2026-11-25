@@ -86,9 +86,10 @@ class TariffComparisonSettings {
         };
         add(end_ ? tariffComparisonEnglish(Key::Span, {{"begin", std::to_string(o.throughUtcMs)}, {"end", std::to_string(*end_)}})
                  : tariffComparisonEnglish(Key::EndUnavailable));
+        const bool net=declaration_->plan.exportPayment.has_value();
         auto cycleLabel=declaration_->resetSchedule
-            ? tariffComparisonEnglish(Key::Cycles, {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
-            : tariffComparisonEnglish(Key::Instruction);
+            ? tariffComparisonEnglish(net?Key::NetCycles:Key::Cycles, {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
+            : tariffComparisonEnglish(net?Key::NetInstruction:Key::Instruction);
         if(declaration_->dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes)
             cycleLabel+=" | "+i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeLabel);
         add(cycleLabel);
@@ -97,8 +98,8 @@ class TariffComparisonSettings {
             add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithApparent, {{"power", input_[1]}}));
             if (!job_ && notice_.empty()) add(tariffComparisonEnglish(rule->powerFactorVaPlaces ? Key::ApparentFactorInput : Key::ApparentInput));
         } else {
-            add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(Key::WithoutWatts, {{"watts", input_[0]}}));
-            add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithWatts, {{"watts", input_[1]}}));
+            add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(net?Key::WithoutNetWatts:Key::WithoutWatts, {{"watts", input_[0]}}));
+            add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(net?Key::WithNetWatts:Key::WithWatts, {{"watts", input_[1]}}));
         }
         if (pending()) add(tariffComparisonEnglish(Key::Pending));
         else if (job_ && !job_->cancel.load(std::memory_order_relaxed)) {
@@ -138,9 +139,12 @@ class TariffComparisonSettings {
         return &*declaration_->plan.demandCharge;
     }
 
-    static bool parsePower(const std::string &text, ExactDecimal &value) {
-        return !text.empty() && text.size() <= inputLimit_ &&
-            text.find_first_not_of("0123456789.") == std::string::npos && ExactDecimal::parse(text, &value);
+    static bool parsePower(const std::string &text, ExactDecimal &value, bool signedNet=false) {
+        if (text.empty() || text.size()>inputLimit_) return false;
+        const bool plus=signedNet&&text.front()=='+';
+        const size_t first=(plus||(signedNet&&text.front()=='-'))?1:0;
+        if (text.find_first_not_of("0123456789.",first)!=std::string::npos) return false;
+        return ExactDecimal::parse(plus?text.substr(1):text,&value);
     }
 
     bool busy() const { return job_ && !job_->done.load(std::memory_order_acquire); }
@@ -164,11 +168,12 @@ class TariffComparisonSettings {
         std::array<ExactDecimal, 2> watts;
         std::array<std::optional<ExactDecimal>, 2> apparentVa;
         const auto *rule = apparentRule();
+        const bool net=declaration_->plan.exportPayment.has_value();
         for (size_t i = 0; i < watts.size(); ++i) {
             const auto &value = input_[i];
             if (!rule) {
-                if (parsePower(value, watts[i])) continue;
-                notice_ = tariffComparisonEnglish(Key::NeedWatts);
+                if (parsePower(value,watts[i],net)) continue;
+                notice_ = tariffComparisonEnglish(net?Key::NeedNetWatts:Key::NeedWatts);
                 return;
             }
             const auto separator = value.find_first_of("/@");
@@ -228,8 +233,9 @@ class TariffComparisonSettings {
             change.size() > amountTextLimit_) {
             return {tariffComparisonEnglish(Key::DisplayRange)};
         }
-        return {tariffComparisonEnglish(Key::WithoutCharge, {{"amount", baseCharge}, {"currency", d.plan.currency}}),
-                tariffComparisonEnglish(Key::WithCharge, {{"amount", withCharge}, {"currency", d.plan.currency}}),
+        const bool net=d.plan.exportPayment.has_value();
+        return {tariffComparisonEnglish(net?Key::WithoutNetCharge:Key::WithoutCharge, {{"amount", baseCharge}, {"currency", d.plan.currency}}),
+                tariffComparisonEnglish(net?Key::WithNetCharge:Key::WithCharge, {{"amount", withCharge}, {"currency", d.plan.currency}}),
                 tariffComparisonEnglish(Key::Difference, {{"amount", change}, {"currency", d.plan.currency}})};
     }
 };

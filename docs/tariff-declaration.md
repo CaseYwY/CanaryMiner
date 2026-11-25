@@ -23,13 +23,13 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). Version 12 declares a [separate payment for exports](#price-electricity-exports-separately). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families include contracted capacity, reactive power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families include contracted capacity, reactive power, export netting and restricted export credits, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -261,6 +261,43 @@ the declaration permits conversion, `8000@0.8` is equivalent under that precisio
 second line describes the complete meter with mining. Enter its apparent-power evidence
 independently. This covers T22. Tariffs that use kVA at the maximum kW window, reactive
 charges or contracted capacity require their own rule and supplier qualification.
+
+### Price electricity exports separately
+
+Select Plan in Settings and press **E** to add the export rule. Version 12 declares
+`plan.export_payment.rate_per_kwh` and `published_utc_ms`. Enter one nonnegative
+fixed export payment per kWh in the same currency as the supply tariff. In the opening,
+enter `exported_kwh` from the cycle start to the opening time. Enter zero at the cycle
+start. The import quantity and accrued supply subtotal retain their existing meanings.
+Use new plan and opening keys when changing a saved rule.
+
+A local meter review requires explicit export evidence even when export is zero.
+
+- Input version 6 uses `intervals` with `begin_utc_ms`, `end_utc_ms` and
+  `average_net_watts`. A positive decimal string denotes import, a negative one
+  denotes export, and zero denotes neither. Each row models a constant flow in one
+  direction. Where import and export change direction within a metering interval,
+  use the separate registers.
+- Input version 7 uses `register_readings` with `utc_ms`, `imported_kwh` and
+  `exported_kwh`. The last two are independent, cumulative, nonnegative decimal
+  strings. Each can increase during the same interval. Take paired readings at
+  billing-cycle boundaries.
+
+The report gives supply charges, export payment and net electricity cost. Active imports
+alone count toward tiers, demand windows and supply floors. The separate payment does
+not enter supply multipliers or supply-invoice matching. A negative net cost means the
+declared payment exceeds the supply charge. The archive saves the original readings and
+exact results. Extension freezes the starting readings and deltas of both registers.
+
+In the whole-meter comparison, enter the net watts for each constant scenario. Across
+one hour, moving from -2,000 W to -1,000 W loses 1 kWh of export. At 1 USD/kWh that
+costs 1 USD. Moving from -1,000 W to +1,000 W loses the same payment and adds 1 kWh of
+import. At 3 USD/kWh for import, the difference is 4 USD. These examples cover T28 and T29.
+
+This rule models a separate payment using a fixed price. Banked or restricted credits,
+expiry, time-varying export pricing, supplier-specific settlement and the combination
+with apparent-power demand need their own declarations and evidence.
+[Example of provider-specific export credits](https://www.pge.com/en/clean-energy/solar/getting-started-with-solar/solar-billing-plan.html)
 
 ### Apply a seasonal baseline allowance
 

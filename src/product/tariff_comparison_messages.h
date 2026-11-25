@@ -7,7 +7,8 @@ enum class TariffComparisonMessageKey {
     Hint, ShortTitle, Resize, Back, Title, NeedDeclaration, Span, Instruction, WithoutWatts, WithWatts,
     Footer, NeedWatts, Clock, Pending, Failed, ModelStatus, DisplayRange, WithoutCharge, WithCharge, Difference,
     RetryAfterCancel, Cycles, EndUnavailable, CycleStatus, ChargedDay,
-    WithoutApparent, WithApparent, ApparentInput, ApparentFactorInput, NeedApparent, NeedApparentFactor
+    WithoutApparent, WithApparent, ApparentInput, ApparentFactorInput, NeedApparent, NeedApparentFactor,
+    WithoutNetWatts, WithNetWatts, NetInstruction, NetCycles, NeedNetWatts, WithoutNetCharge, WithNetCharge
 };
 
 inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffComparisonMessageKey key) {
@@ -30,7 +31,12 @@ inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffC
         "Enter whole-meter watts/VA for each scenario.",
         "Enter whole-meter watts/VA or watts@power_factor.",
         "Enter watts/VA for both scenarios. VA must be at least the watts.",
-        "Enter watts/VA or watts@power_factor for both scenarios. The factor must be greater than 0 and up to 1."
+        "Enter watts/VA or watts@power_factor for both scenarios. The factor must be greater than 0 and up to 1.",
+        "Without mining (net W): {watts}", "With mining (net W):    {watts}",
+        "Net watts per scenario (+import, -export).",
+        "[Left/Right] {count}/{max} | +import -export",
+        "Enter signed net watts for each scenario (+import, -export).",
+        "Net without mining: {amount} {currency}", "Net with mining:    {amount} {currency}"
     };
     const auto index = static_cast<size_t>(key);
     if (index >= sizeof(messages) / sizeof(*messages)) return {};
