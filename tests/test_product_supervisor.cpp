@@ -87,7 +87,11 @@ int fakeHistoryChild(int argc, char **argv) {
             stats.poolTransport={};
             if(scenario=="malformed")return std::string("not a stats document");
             if(scenario=="verified"||scenario=="stale")stats.poolTransport.observation={PoolTransportSecurity::VerifiedTls,PoolTransportError::None,8048,scenario=="stale"?frozenObservation:now};
-            else if(scenario=="plaintext")stats.poolTransport.observation={PoolTransportSecurity::Plaintext,PoolTransportError::None,7048,now};
+            else if(scenario=="plaintext"){
+                uint16_t plaintextPort=0;
+                if(!(input>>plaintextPort))plaintextPort=7048;
+                stats.poolTransport.observation={PoolTransportSecurity::Plaintext,PoolTransportError::None,plaintextPort,now};
+            }
             else if(scenario=="disconnected")stats.poolTransport.observation={PoolTransportSecurity::Disconnected,PoolTransportError::Verification,0,now};
             else if(scenario=="connecting")stats.poolTransport.observation={PoolTransportSecurity::Connecting,PoolTransportError::None,0,now};
         }

@@ -6,7 +6,9 @@ The `kryptex-tls` preset selects strict TLS for the first user pool. It expands 
 
 Use `kryptex-hk-tls` to select `stratum+ssl://prl-hk.kryptex.network:8048` with the same strict policy and Kryptex protocol identity. The first user pool must use a TLS-enabled build with donation off. Existing Hong Kong TCP configurations can be reviewed in the migration panel. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en) · [Migration instructions](pool-tls-migration.md)
 
-Use it in a [TLS-enabled local build](pool-tls-runtime.md), with donation explicitly off:
+Use `herominers-tls` for the Pearl US East endpoint `stratum+ssl://us2.pearl.herominers.com:1200`. The pool publishes both transports on port 1200. The preset uses the existing HeroMiners protocol rules and requires donation off. To upgrade the legacy `herominers` preset, review and save the same host and port in Settings. [HeroMiners Pearl regions](https://pearl.herominers.com/) · [Official TCP/TLS instructions](https://pearl.herominers.com/help/) · [Migration instructions](pool-tls-migration.md)
+
+Use a strict preset in a [TLS-enabled local build](pool-tls-runtime.md), with donation explicitly off:
 
 ```sh
 canary-miner --pool kryptex-tls --no-donation --wallet YOUR_PRL_ADDRESS.rig1
@@ -18,7 +20,7 @@ The alias always means strict TLS, including in a build without the native runti
 
 Saved Prefer TLS or earlier plaintext consent cannot weaken this preset. Conflicting saved TLS endpoints are refused. Worker launches freeze the strict SSL endpoint and carry no plaintext fallback parameter; retries retain that decision.
 
-The old `kryptex` preset still selects TCP port 7048. Existing explicit URLs and their ports keep their meaning. No pool-region selection, automatic configuration migration, first-run wizard, HeroMiners/F2Pool TLS preset or donation TLS route is added. The separate [consent-bound fallback](pool-tls-fallback.md) remains available only through its existing explicit declaration flow.
+The legacy `kryptex` and `herominers` presets select TCP on ports 7048 and 1200 respectively. Existing configurations can opt in through [migration review](pool-tls-migration.md). [Consent-bound fallback](pool-tls-fallback.md) is available through the separate Prefer TLS declaration flow.
 
 ## Validation
 

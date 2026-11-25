@@ -114,6 +114,10 @@ inline constexpr int kKryptexPoolTcpPort = 7048;
 inline constexpr char kKryptexUsPoolTlsUrl[] = "stratum+ssl://prl-us.kryptex.network:8048";
 inline constexpr char kKryptexHkPoolTlsUrl[] = "stratum+ssl://prl-hk.kryptex.network:8048";
 
+inline constexpr char kHeroMinersUsEastPoolHost[] = "us2.pearl.herominers.com";
+inline constexpr int kHeroMinersPoolPort = 1200;
+inline constexpr char kHeroMinersUsEastPoolTlsUrl[] = "stratum+ssl://us2.pearl.herominers.com:1200";
+
 /** Presets whose pool speaks the v2 gzip dialect. A custom HOST:PORT never offers it. */
 inline bool poolPresetSpeaksV2(const std::string &name) {
     return name == "kryptex" || name == "f2pool";
@@ -122,7 +126,7 @@ inline bool poolPresetSpeaksV2(const std::string &name) {
 inline const PoolPreset *poolPresets(size_t *count) {
     static const PoolPreset kPresets[] = {
         {"kryptex", kKryptexUsPoolHost, kKryptexPoolTcpPort},
-        {"herominers", "us2.pearl.herominers.com", 1200},
+        {"herominers", kHeroMinersUsEastPoolHost, kHeroMinersPoolPort},
         {"f2pool", "pearl.f2pool.com", 5500},
     };
     *count = sizeof(kPresets) / sizeof(kPresets[0]);
@@ -176,7 +180,7 @@ inline bool normalizePoolTlsDns(std::string *host) {
 /**
  * A pool given as a preset name, HOST:PORT, or stratum+tcp://HOST:PORT (CLI --pool and string entries in the config).
  * A host of a known pool gets that pool's preset name, so its quirks apply (v2 gzip login for kryptex and f2pool). The
- * endpoint stays the one the user typed. Explicit stratum+ssl:// and the secure Kryptex presets require strict runtime admission.
+ * endpoint stays the one the user typed. Explicit stratum+ssl:// and secure presets require strict runtime admission.
  */
 inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *error) {
     size_t n = 0;
@@ -193,10 +197,11 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
         }
     }
     // A secure alias has the same meaning in every build; runtime availability never changes it to TCP.
-    // Use the ordinary URL path so the canonical Kryptex protocol/policy identity is retained.
+    // Use the ordinary URL path so the pool-specific protocol/policy identity is retained.
     std::string endpoint = spec;
     if (spec == "kryptex-tls") endpoint = kKryptexUsPoolTlsUrl;
     else if (spec == "kryptex-hk-tls") endpoint = kKryptexHkPoolTlsUrl;
+    else if (spec == "herominers-tls") endpoint = kHeroMinersUsEastPoolTlsUrl;
     if (endpoint.rfind("stratum+ssl://", 0) == 0) {
         e.tls=true;endpoint=endpoint.substr(std::string("stratum+ssl://").size());
     }

@@ -17,13 +17,13 @@
       "description": "Ordered. Failover is not implemented in this build: the first entry is used.",
       "items": {
         "oneOf": [
-          { "type": "string", "description": "A preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool), HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT. The strict TLS Kryptex presets use port 8048 on prl-us.kryptex.network and prl-hk.kryptex.network respectively. They require TLS runtime support and donation:false." },
+          { "type": "string", "description": "A preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, herominers-tls, f2pool), HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT. The strict TLS Kryptex presets use port 8048 on prl-us.kryptex.network and prl-hk.kryptex.network respectively. herominers-tls uses us2.pearl.herominers.com:1200. Strict user-pool TLS requires TLS runtime support and donation:false for these presets." },
           {
             "type": "object",
             "additionalProperties": false,
             "required": ["url"],
             "properties": {
-              "url": { "type": "string", "description": "Same endpoint or preset forms as a string pool entry. kryptex-tls and kryptex-hk-tls request strict TLS with plaintext fallback disabled." },
+              "url": { "type": "string", "description": "Same endpoint or preset forms as a string pool entry. kryptex-tls, kryptex-hk-tls and herominers-tls request strict TLS with plaintext fallback disabled." },
               "network": { "enum": ["mainnet"], "default": "mainnet" },
               "target_semantics": { "enum": ["base-before-penalty", "final-adjusted-bound"], "default": "base-before-penalty" },
               "compression": { "enum": ["auto", "off"], "default": "auto", "description": "auto offers the gzip v2 dialect at login for the Kryptex presets (including kryptex-tls and kryptex-hk-tls) and f2pool only, and uses it only when the pool answers type v2; off never offers it. Custom HOST:PORT endpoints never offer it." },

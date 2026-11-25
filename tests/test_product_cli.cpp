@@ -69,6 +69,13 @@ int main() {
               e.port == 5500 && e.policyKnown);
         CHECK(parsePoolSpec("prl-us.kryptex.network:7048", &e, &err) && e.preset == "kryptex" && e.policyKnown);
         CHECK(parsePoolSpec("stratum+tcp://us2.pearl.herominers.com:1200", &e, &err) && e.preset == "herominers" && e.port == 1200);
+        CHECK(parsePoolSpec("herominers", &e, &err) && !e.tls && e.host == "us2.pearl.herominers.com" &&
+              e.port == 1200 && e.preset == "herominers");
+        for (const auto *spec : {"herominers-tls", "stratum+ssl://us2.pearl.herominers.com:1200"}) {
+            CHECK(parsePoolSpec(spec, &e, &err) && e.tls && e.host == "us2.pearl.herominers.com" &&
+                  e.port == 1200 && e.preset == "herominers" && e.policyKnown && e.network == "mainnet" &&
+                  e.targetSemantics == "base-before-penalty" && !poolPresetSpeaksV2(e.preset));
+        }
         CHECK(parsePoolSpec("example.net:3333", &e, &err) && e.preset.empty() && !e.policyKnown && e.host == "example.net");
         CHECK(parsePoolSpec("stratum+ssl://pearl.f2pool.com:5500", &e, &err) && e.tls && e.host=="pearl.f2pool.com" && e.port==5500 && e.preset=="f2pool");
         CHECK(!parsePoolSpec("stratum+ssl://127.0.0.1:5500", &e, &err) && contains(err,"no TCP fallback"));
@@ -214,7 +221,7 @@ int main() {
         for (const char *word : {"Pool", "Devices", "API", "Donation", "Other", "--pool", "--wallet", "--api-enable", "--gpu-id",
                                  "--no-donation", "--gpu-cclock", "--gpu-mclock", "--gpu-coffset", "--gpu-moffset", "--gpu-plimit", "--gpu-fan",
                                  "--oc-delay", "--oc-reset-only", "tuning.gpu_cclock", "Windows:", "Linux:", "mined on F2Pool to the developer",
-                                 "kryptex-tls", "kryptex-hk-tls", "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
+                                 "kryptex-tls", "kryptex-hk-tls", "herominers-tls", "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
             CHECK_MSG(word, contains(help, word));
         // Amendment 2: the rendered help must not show the donation account or payout address (values come from fee.h)
         CHECK_MSG("help hides donation account", !contains(help, CANARY_FEE_POOL_ACCOUNT));

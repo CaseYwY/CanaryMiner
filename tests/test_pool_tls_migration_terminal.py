@@ -21,12 +21,13 @@ def main():
     import termios
 
     executable = str(Path(sys.argv[1]).resolve(strict=True))
-    pool, host = {
-        "us": ("kryptex", "prl-us.kryptex.network"),
-        "hk": ("stratum+tcp://prl-hk.kryptex.network:7048", "prl-hk.kryptex.network"),
+    pool, host, tcp_port, tls_port = {
+        "us": ("kryptex", "prl-us.kryptex.network", 7048, 8048),
+        "hk": ("stratum+tcp://prl-hk.kryptex.network:7048", "prl-hk.kryptex.network", 7048, 8048),
+        "hero": ("herominers", "us2.pearl.herominers.com", 1200, 1200),
     }[sys.argv[2] if len(sys.argv) > 2 else "us"]
-    source = f"stratum+tcp://{host}:7048"
-    target = f"stratum+ssl://{host}:8048"
+    source = f"stratum+tcp://{host}:{tcp_port}"
+    target = f"stratum+ssl://{host}:{tls_port}"
     checks = 0
     default_rule = {"mode": "unchanged", "tls_url": "", "plaintext_url": "", "plaintext_consent": False}
     original = {
@@ -59,7 +60,7 @@ def main():
             (state / "runtime-preferences.json").write_text(json.dumps({
                 "schema_version": 1, "work_wait_ms": 0, "history_enabled": False,
             }), encoding="utf-8")
-            (state / "fixture-pool-transport.txt").write_text("plaintext\n", encoding="ascii")
+            (state / "fixture-pool-transport.txt").write_text(f"plaintext {tcp_port}\n", encoding="ascii")
             self.master, slave = pty.openpty()
             try:
                 self.resize(120, 36, slave)
@@ -117,7 +118,7 @@ def main():
 
         def __enter__(self):
             try:
-                self.until("[S]", "Plaintext", "7048")
+                self.until("[S]", "Plaintext", str(tcp_port))
                 self.starts = (self.state / "fixture-worker-starts.txt").read_bytes()
                 assert self.starts == b"start\n", "fixture must begin with exactly one owned worker"
                 floor = self.send(b"s")
@@ -136,7 +137,7 @@ def main():
 
         def current_plaintext(self, frame):
             text = " ".join(frame.split())
-            assert "First user pool transport: Plaintext (port 7048)" in text
+            assert f"First user pool transport: Plaintext (port {tcp_port})" in text
             assert "Effective first-user policy: Plaintext" in text
             assert f"First-user host (frozen): {host}" in text
             assert "Verified TLS" not in text
