@@ -17,7 +17,7 @@ inline constexpr std::size_t maxInvoiceBytes = 16 * 1024;
 
 struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
-    int archiveArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0;
+    int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0;
     std::string archiveName;
     int64_t reviewCutoffUtcMs = 0;
     bool help = false;
@@ -40,6 +40,7 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             else if (name == "--octopus-rates" && !options.ratesArg) options.ratesArg = i+1;
             else if (name == "--invoice" && !options.invoiceArg) options.invoiceArg = i+1;
             else if (name == "--open-review" && !options.archiveArg) options.archiveArg = i+1;
+            else if (name == "--extend-review" && !options.extendArg) options.extendArg = i+1;
             else if (name == "--save-review" && !options.saveArg && localExportName(value, ".cmr")) {
                 options.saveArg = i+1;
                 options.archiveName = value;
@@ -51,8 +52,11 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
                 options.reviewCutoffArg = i+1;
             } else return false;
         }
-        if (options.archiveArg ? operands != (options.invoiceArg ? 4 : 2) : !options.tariffArg || !options.intervalsArg)
-            return false;
+        if (options.archiveArg) {
+            if (operands != (options.invoiceArg ? 4 : 2)) return false;
+        } else if (options.extendArg) {
+            if (options.tariffArg || options.ratesArg || !options.intervalsArg || !options.saveArg) return false;
+        } else if (!options.tariffArg || !options.intervalsArg) return false;
     }
     *out = std::move(options);
     return true;

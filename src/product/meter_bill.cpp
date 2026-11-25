@@ -19,19 +19,21 @@ namespace {
 using namespace meter_bill_detail;
 constexpr size_t maxMeterIntervals = 8192;
 
-using MeterReadings = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
+using MeterSeries = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
+struct MeterReadings {
+    MeterSeries series;
+    std::optional<ExactDecimal> registerStart;
+    int64_t octopusObserved = 0;
+    uint64_t version = 0;
+};
+
 struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
-    const auto validIndex = [argc](int index) { return index >= 3 && index < argc; };
-    if (options.archiveArg ? !validIndex(options.archiveArg)
-                           : !validIndex(options.tariffArg) || !validIndex(options.intervalsArg))
-        return std::nullopt;
-    if ((options.reviewCutoffArg && !validIndex(options.reviewCutoffArg)) ||
-        (options.saveArg && !validIndex(options.saveArg)) ||
-        (options.ratesArg && !validIndex(options.ratesArg)) ||
-        (options.invoiceArg && !validIndex(options.invoiceArg)))
-        return std::nullopt;
+    const auto archiveIndex = options.archiveArg ? options.archiveArg : options.extendArg;
+    for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
+                      options.saveArg, options.ratesArg, options.invoiceArg})
+        if (index && (index < 3 || index >= argc)) return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
     // The narrow CRT argv may lose path characters and best-fit non-ASCII option spellings.
@@ -44,16 +46,11 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     if (!args.values || count != argc || std::wstring_view(args.values[1]) != L"meter-bill")
         return std::nullopt;
     const auto matches = [&](int index, std::wstring_view flag) {
-        return std::wstring_view(args.values[index-1]) == flag;
+        return !index || std::wstring_view(args.values[index-1]) == flag;
     };
-    if (options.invoiceArg && !matches(options.invoiceArg, L"--invoice")) return std::nullopt;
-    std::filesystem::path invoice;
-    if (options.invoiceArg) invoice = args.values[options.invoiceArg];
-    if (options.archiveArg) {
-        if (!matches(options.archiveArg, L"--open-review")) return std::nullopt;
-        return MeterBillPaths{{}, {}, args.values[options.archiveArg], {}, std::move(invoice)};
-    }
-    if (!matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals"))
+    if (!matches(options.archiveArg, L"--open-review") || !matches(options.extendArg, L"--extend-review") ||
+        !matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals") ||
+        !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates"))
         return std::nullopt;
     if (options.reviewCutoffArg &&
         (!matches(options.reviewCutoffArg, L"--as-of-utc-ms") ||
@@ -63,17 +60,12 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         (!matches(options.saveArg, L"--save-review") ||
          std::wstring_view(args.values[options.saveArg]) != std::wstring(options.archiveName.begin(), options.archiveName.end())))
         return std::nullopt;
-    if (options.ratesArg && !matches(options.ratesArg, L"--octopus-rates"))
-        return std::nullopt;
-    return MeterBillPaths{args.values[options.tariffArg], args.values[options.intervalsArg], {},
-                          options.ratesArg ? std::filesystem::path(args.values[options.ratesArg]) : std::filesystem::path{},
-                          std::move(invoice)};
+    const auto path = [&](int i) { return i ? std::filesystem::path(args.values[i]) : std::filesystem::path{}; };
 #else
-    const std::filesystem::path invoice = options.invoiceArg ? argv[options.invoiceArg] : "";
-    if (options.archiveArg) return MeterBillPaths{{}, {}, argv[options.archiveArg], {}, invoice};
-    return MeterBillPaths{argv[options.tariffArg], argv[options.intervalsArg], {},
-                          options.ratesArg ? std::filesystem::path(argv[options.ratesArg]) : std::filesystem::path{}, invoice};
+    const auto path = [&](int i) { return i ? std::filesystem::path(argv[i]) : std::filesystem::path{}; };
 #endif
+    return MeterBillPaths{path(options.tariffArg), path(options.intervalsArg), path(archiveIndex),
+                          path(options.ratesArg), path(options.invoiceArg)};
 }
 
 bool instant(const JsonValue *value, int64_t &result, bool allowEpoch = false) {
@@ -108,7 +100,7 @@ const char *decodeIntervals(const JsonValue &intervals, const BillOpening &openi
 }
 
 const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, int64_t cutoff,
-                           std::vector<MeterImportInterval> &readings) {
+                           std::vector<MeterImportInterval> &readings, ExactDecimal &start) {
     std::optional<int64_t> previousUtc;
     ExactDecimal previous;
     readings.reserve(rows.items.size() - 1);
@@ -121,6 +113,7 @@ const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, in
         if (utc > cutoff) return "meter register reading is after the review cutoff";
         if (!previousUtc) {
             if (utc != opening.throughUtcMs) return "first meter register reading must match the saved opening time";
+            start = cumulative;
         } else {
             if (utc <= *previousUtc) return "meter register timestamps must strictly increase";
             if (cumulative.compare(previous) < 0) return "meter register decreased (reset or rollover is unsupported)";
@@ -137,7 +130,7 @@ const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, in
 }
 
 const char *decodeMeterReadings(const std::string &text, const TariffDeclaration &declaration, int64_t cutoff,
-                               const char *lateReadingError, MeterReadings &readings, int64_t &octopusObserved,
+                               const char *lateReadingError, MeterReadings &readings,
                                const std::function<bool()> &stopped) {
     const auto &opening = declaration.opening;
     JsonValue root;
@@ -155,16 +148,18 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     if (version == 2 ? size < 2 || size > maxMeterIntervals + 1 : size < 1 || size > maxMeterIntervals)
         return "invalid interval document";
     if (scope->text != opening.evidence.scope) return "meter scope differs from the saved opening";
+    readings.version = version;
     if (version == 1)
-        return decodeIntervals(*rows, opening, cutoff, lateReadingError, readings.emplace<std::vector<PowerInterval>>());
-    auto &imports = readings.emplace<std::vector<MeterImportInterval>>();
-    if (version == 2) return decodeRegister(*rows, opening, cutoff, imports);
+        return decodeIntervals(*rows, opening, cutoff, lateReadingError,
+                               readings.series.emplace<std::vector<PowerInterval>>());
+    auto &imports = readings.series.emplace<std::vector<MeterImportInterval>>();
+    if (version == 2) return decodeRegister(*rows, opening, cutoff, imports, readings.registerStart.emplace());
 
     int64_t end = 0;
-    if (!instant(root.find("end_utc_ms"), end) || !instant(root.find("observed_utc_ms"), octopusObserved) ||
-        end <= opening.throughUtcMs || end > octopusObserved)
+    if (!instant(root.find("end_utc_ms"), end) || !instant(root.find("observed_utc_ms"), readings.octopusObserved) ||
+        end <= opening.throughUtcMs || end > readings.octopusObserved)
         return "invalid Octopus consumption window or observation";
-    if (octopusObserved > cutoff) return "Octopus consumption observed after the review cutoff";
+    if (readings.octopusObserved > cutoff) return "Octopus consumption observed after the review cutoff";
     if (declaration.plan.supplier != "Octopus Energy" || declaration.plan.currency != "GBP" ||
         declaration.plan.rounding != TariffRounding::MeterHalfHourKwhHalfEven2)
         return "Octopus consumption requires a declared Octopus Energy GBP tariff with half-hour rounding";
@@ -172,7 +167,7 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
 }
 
 bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration &declaration,
-                  const BillOpening &opening, const BillAccrual &accrual, std::string *exact) {
+                  const BillOpening &opening, const BillAccrual &accrual, std::string &exact) {
     ElectricityAmount usage;
     std::string usageText, change, total;
     if (!accrual.ending->importedKwh.numerator.subtract(opening.importedKwh.numerator, &usage.numerator) ||
@@ -196,25 +191,24 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (opening.throughUtcMs != opening.cycleBeginUtcMs) report += " (includes declared opening)";
     report += '\n';
     if (accrual.settlementDependent) report += "  Closing charges depend on full-cycle usage.\n";
-    if (exact) {
-        const auto &ending = *accrual.ending;
-        *exact += "[" + std::to_string(opening.cycleBeginUtcMs) + "," + std::to_string(opening.cycleEndUtcMs) +
-                  "," + std::to_string(opening.throughUtcMs) + "," + std::to_string(ending.throughUtcMs) +
-                  "," + jsonQuote(ending.timeDatabaseVersion) + "," + jsonQuote(usage.numerator.text()) +
-                  "," + jsonQuote(ending.importedKwh.numerator.text()) + "," + jsonQuote(ending.accruedSubtotal.numerator.text()) +
-                  "," + jsonQuote(accrual.provisionalChange->numerator.text()) + "," + jsonQuote(accrual.provisionalTotal->numerator.text()) +
-                  "," + (accrual.settledTotal ? jsonQuote(accrual.settledTotal->numerator.text()) : "null") +
-                  (accrual.settlementDependent ? ",true" : ",false");
-        if (accrual.billedKwh) *exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
-        *exact += "]\n";
-    }
+    const auto &ending = *accrual.ending;
+    exact += "[" + std::to_string(opening.cycleBeginUtcMs) + "," + std::to_string(opening.cycleEndUtcMs) +
+              "," + std::to_string(opening.throughUtcMs) + "," + std::to_string(ending.throughUtcMs) +
+              "," + jsonQuote(ending.timeDatabaseVersion) + "," + jsonQuote(usage.numerator.text()) +
+              "," + jsonQuote(ending.importedKwh.numerator.text()) + "," + jsonQuote(ending.accruedSubtotal.numerator.text()) +
+              "," + jsonQuote(accrual.provisionalChange->numerator.text()) + "," + jsonQuote(accrual.provisionalTotal->numerator.text()) +
+              "," + (accrual.settledTotal ? jsonQuote(accrual.settledTotal->numerator.text()) : "null") +
+              (accrual.settlementDependent ? ",true" : ",false");
+    if (accrual.billedKwh) exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
+    exact += "]\n";
     return true;
 }
 
 template<class Interval>
 const char *reviewReadings(const std::vector<Interval> &readings, const TariffDeclaration &declaration, int64_t cutoff,
-                           const std::function<bool()> &stopped, std::string &report, std::string *exactResults,
-                           const MeterInvoice *invoice, std::string *exactInvoice) {
+                           const std::function<bool()> &stopped, std::string &report, std::string &exactResults,
+                           const MeterInvoice *invoice, std::string *exactInvoice,
+                           std::string *meterOnlyExact = nullptr) {
     constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
     using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
     auto opening = declaration.opening;
@@ -245,8 +239,10 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
             accrual = accrueBill(declaration.plan, opening, slice, cursor, cutoff, stopped, allocation);
         if (stopped()) return "review cancelled";
         if (accrual.status != ElectricityStatus::Ok) return electricityStatusName(accrual.status);
+        const auto exactStart = exactResults.size();
         if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults))
             return "amount exceeds the display range";
+        if (meterOnlyExact) meterOnlyExact->append(exactResults, exactStart);
         if (invoice) {
             if (const auto *problem = appendInvoiceComparison(*invoice, cycle - 1, opening, accrual,
                                                               declaration.plan.currency, report, exactInvoice))
@@ -265,6 +261,131 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
     return nullptr;
 }
 
+struct MeterReview {
+    TariffDeclaration declaration;
+    MeterReadings readings;
+    std::string report, exact;
+};
+
+const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool showCutoff,
+                               const char *lateReadingError, const std::function<bool()> &stopped,
+                               MeterReview &review) {
+    JsonValue root;
+    auto &declaration = review.declaration;
+    if (stopped()) return "review cancelled";
+    if (!parseJsonStrict(original.tariff, &root, nullptr))
+        return "saved tariff declaration unavailable or invalid";
+    const auto *schema = root.find("schema_version");
+    uint64_t schemaVersion = 0;
+    const bool namedTariff = schema && schema->asUint64(&schemaVersion) && schemaVersion == 4;
+    if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
+        return "reviewed tariff time database unavailable or invalid";
+    if (!decodeTariffDeclaration(root, &declaration)) return "saved tariff declaration unavailable or invalid";
+    if (now < 1 || now > meterBillMaxUtcMs || static_cast<int64_t>(declaration.confirmedUtc * 1000) > now)
+        return "local clock precedes the review or is unavailable";
+    const auto cutoff = original.cutoff;
+    if (cutoff > now) return "review cutoff is in the future";
+    if (stopped()) return "review cancelled";
+    if (const auto *problem = decodeMeterReadings(original.intervals, declaration, cutoff, lateReadingError,
+                                                   review.readings, stopped))
+        return problem;
+
+    auto &report = review.report;
+    report = std::holds_alternative<std::vector<MeterImportInterval>>(review.readings.series)
+        ? "Estimated electricity costs from a declared tariff and user-supplied meter register readings\n"
+          "Uses exact differences between cumulative import readings in kWh.\n"
+        : "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
+          "Average import is applied uniformly within each interval.\n";
+    if (review.readings.octopusObserved) {
+        report = "Estimated electricity costs from declared Octopus Energy whole-meter electricity imports\n";
+        report += "API quantities are reported to 0.001 kWh. Local bundle observation " +
+            std::to_string(review.readings.octopusObserved) + " UTC ms.\n";
+    }
+    if (namedTariff) report += std::string("Reviewed IANA time database ") + tariffTzdbVersion + "\n";
+    if (showCutoff) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
+    if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
+        report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";
+    if (declaration.plan.rounding == TariffRounding::MeterHalfHourKwhHalfEven2) {
+        if (!std::holds_alternative<std::vector<MeterImportInterval>>(review.readings.series))
+            return "half-hour rounding requires cumulative whole-meter register readings or Octopus imports";
+        report += "Billing rounds each complete UTC half hour to 0.01 kWh, ties to even, before applying the rate.\n";
+    }
+    if (!original.supplierRates.empty()) {
+        OctopusRateImport imported;
+        if (const auto *problem = importOctopusRates(original.supplierRates, cutoff, declaration, imported, stopped))
+            return problem;
+        report += std::string(imported.go ? "Octopus Go" : "Octopus Agile") +
+            " public rate snapshot (" + imported.paymentMethod + ")\n";
+        report += "  Observed " + std::to_string(imported.observedUtcMs) + " UTC ms, " +
+                  std::to_string(imported.intervals) +
+                  (imported.go ? " published price intervals including VAT.\n" : " half-hour prices including VAT.\n");
+    }
+
+    return nullptr;
+}
+
+const char *calculateMeterReview(const ReviewOriginal &original, bool includeInvoiceInExact,
+                                 const std::function<bool()> &stopped, MeterReview &review,
+                                 std::string *meterOnlyExact = nullptr) {
+    std::optional<MeterInvoice> invoice;
+    if (!original.invoice.empty()) {
+        if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice.emplace()))
+            return problem;
+        review.report += "Invoice comparison uses " + std::to_string(invoice->places) + " decimal places with ties ";
+        review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
+    }
+    return std::visit([&](const auto &series) {
+        return reviewReadings(series, review.declaration, original.cutoff, stopped, review.report, review.exact,
+                              invoice ? &*invoice : nullptr, includeInvoiceInExact ? &review.exact : nullptr,
+                              meterOnlyExact);
+    }, review.readings.series);
+}
+
+// Bind the previous meter observations as well as their exact accrued amounts. Absolute register
+// readings are determined by the first reading and the exact adjacent differences.
+template<class Interval>
+std::string meterPrefixDigest(const MeterReadings &readings, const std::vector<Interval> &series,
+                              const std::string &meterExact) {
+    std::string original = std::to_string(readings.version) + '\n';
+    if (readings.registerStart) original += readings.registerStart->text() + '\n';
+    for (const auto &interval : series) {
+        original += std::to_string(interval.beginUtcMs) + ' ' + std::to_string(interval.endUtcMs) + ' ';
+        if constexpr (std::is_same_v<Interval, MeterImportInterval>)
+            original += interval.importedKwh.numerator.text();
+        else
+            original += interval.watts.text();
+        original += '\n';
+    }
+    return sha256Hex(original + meterExact);
+}
+
+const char *verifyMeterPrefix(const ReviewOriginal &original, const MeterReview &review,
+                              const std::function<bool()> &stopped) {
+    if (!original.previous) return nullptr;
+    const auto &previous = *original.previous;
+    return std::visit([&](const auto &series) -> const char * {
+        const auto last = std::lower_bound(series.begin(), series.end(), previous.through,
+            [](const auto &interval, int64_t through) { return interval.endUtcMs < through; });
+        if (last == series.end() || last->endUtcMs != previous.through || last + 1 == series.end())
+            return "new readings must extend the saved meter coverage";
+        using Series = std::decay_t<decltype(series)>;
+        const Series prefix(series.begin(), last + 1);
+        std::string ignored, prefixExact;
+        if (const auto *problem = reviewReadings(prefix, review.declaration, previous.cutoff, stopped, ignored,
+                                                 prefixExact, nullptr, nullptr)) return problem;
+        if (meterPrefixDigest(review.readings, prefix, prefixExact) != previous.prefixSha256)
+            return "new readings or exact charges differ from the saved review prefix";
+        if (original.cutoff != previous.cutoff) {
+            ignored.clear();
+            std::string currentExact;
+            if (const auto *problem = reviewReadings(prefix, review.declaration, original.cutoff, stopped, ignored,
+                                                     currentExact, nullptr, nullptr)) return problem;
+            if (currentExact != prefixExact) return "the new cutoff would change the saved review charges";
+        }
+        return nullptr;
+    }, review.readings.series);
+}
+
 int refuse(const char *reason) {
     std::fprintf(stderr, "meter-bill: %s\n", reason);
     return 3;
@@ -277,6 +398,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
                   "    [--invoice FILE] [--save-review NAME.cmr]\n"
                   "canary-miner meter-bill --open-review FILE [--invoice FILE]\n"
+                  "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
+                  "    [--as-of-utc-ms MS] [--invoice FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
                   "Also accepts local Octopus electricity import bundles in schema version 3.\n"
@@ -286,7 +409,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Use --invoice to compare declared supply charges for complete billing cycles.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
-                  "Open rechecks the saved inputs and results at their original cutoff without writing files.");
+                  "Open rechecks the saved inputs and results at their original cutoff without writing files.\n"
+                  "Extend verifies the saved review and requires the complete interval history with additional readings.");
         return 0;
     }
     const std::function<bool()> stopped = [stop] { return stop && *stop; };
@@ -307,103 +431,73 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                                                          "could not resolve input file arguments");
         ReviewOriginal original;
         const bool reopening = options.archiveArg != 0;
+        const bool extending = options.extendArg != 0;
         const bool archiving = options.saveArg != 0;
-        if (reopening) {
+        const char *lateReadingError = options.reviewCutoffArg || reopening || extending
+            ? "interval ends after the review cutoff" : "interval ends in the future";
+        int64_t previousConsumptionObservation = 0;
+        if (reopening || extending) {
             std::string bytes;
             if (!readLocalReviewInput(paths->archive, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, original))
                 return fail("review archive unavailable or invalid");
+            if (extending) {
+                const auto cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
+                if (cutoff < original.cutoff) return fail("new review cutoff precedes the saved cutoff");
+                MeterReview earlier;
+                if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, earlier))
+                    return fail(problem);
+                if (const auto *problem = verifyMeterPrefix(original, earlier, stopped)) return fail(problem);
+                std::string meterExact;
+                if (const auto *problem = calculateMeterReview(original, true, stopped, earlier, &meterExact))
+                    return fail(problem);
+                if (original.results != earlier.exact)
+                    return fail("saved review amounts differ from the recalculated amounts");
+                auto &previous = original.previous.emplace();
+                previous.cutoff = original.cutoff;
+                previous.archiveSha256 = sha256Hex(bytes);
+                std::visit([&](const auto &series) {
+                    previous.through = series.back().endUtcMs;
+                    previous.prefixSha256 = meterPrefixDigest(earlier.readings, series, meterExact);
+                }, earlier.readings.series);
+                previousConsumptionObservation = earlier.readings.octopusObserved;
+                original.cutoff = cutoff;
+                original.invoice.clear();
+            }
         } else {
             original.cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
             if (!readLocalReviewInput(paths->tariff, tariffDeclarationMaxBytes, original.tariff))
                 return fail("saved tariff declaration unavailable or invalid");
         }
-
-        JsonValue root;
-        TariffDeclaration declaration;
-        if (stopped()) return stopResult();
-        if (!parseJsonStrict(original.tariff, &root, nullptr))
-            return fail("saved tariff declaration unavailable or invalid");
-        const auto *schema = root.find("schema_version");
-        uint64_t schemaVersion = 0;
-        const bool namedTariff = schema && schema->asUint64(&schemaVersion) && schemaVersion == 4;
-        if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
-            return fail("reviewed tariff time database unavailable or invalid");
-        if (!decodeTariffDeclaration(root, &declaration)) return fail("saved tariff declaration unavailable or invalid");
-        if (now < 1 || now > meterBillMaxUtcMs || static_cast<int64_t>(declaration.confirmedUtc * 1000) > now)
-            return fail("local clock precedes the review or is unavailable");
-        const auto cutoff = original.cutoff;
-        if (cutoff > now) return fail("review cutoff is in the future");
-        const char *lateReadingError = options.reviewCutoffArg || reopening ? "interval ends after the review cutoff" :
-                                                                           "interval ends in the future";
         if (stopped()) return stopResult();
         if (!reopening && !readLocalReviewInput(paths->intervals, maxMeterFileBytes, original.intervals))
             return fail("interval file unavailable, oversized or not a regular file");
-        MeterReadings readings;
-        int64_t octopusObserved = 0;
-        if (const char *problem = decodeMeterReadings(original.intervals, declaration, cutoff, lateReadingError,
-                                                      readings, octopusObserved, stopped))
-            return fail(problem);
-
-        std::string report = std::holds_alternative<std::vector<MeterImportInterval>>(readings)
-            ? "Estimated electricity costs from a declared tariff and user-supplied meter register readings\n"
-              "Uses exact differences between cumulative import readings in kWh.\n"
-            : "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
-              "Average import is applied uniformly within each interval.\n";
-        if (octopusObserved) {
-            report = "Estimated electricity costs from declared Octopus Energy whole-meter electricity imports\n";
-            report += "API quantities are reported to 0.001 kWh. Local bundle observation " +
-                std::to_string(octopusObserved) + " UTC ms.\n";
-        }
-        if (namedTariff) report += std::string("Reviewed IANA time database ") + tariffTzdbVersion + "\n";
-        if (options.reviewCutoffArg || reopening || archiving) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
-        if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
-            report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";
-        if (declaration.plan.rounding == TariffRounding::MeterHalfHourKwhHalfEven2) {
-            if (!std::holds_alternative<std::vector<MeterImportInterval>>(readings))
-                return fail("half-hour rounding requires cumulative whole-meter register readings or Octopus imports");
-            report += "Billing rounds each complete UTC half hour to 0.01 kWh, ties to even, before applying the rate.\n";
-        }
         if (options.ratesArg &&
             (!readLocalReviewInput(paths->rates, maxOctopusRateFileBytes, original.supplierRates) ||
              original.supplierRates.empty()))
             return fail("Octopus rate file unavailable, empty, oversized or not a regular file");
-        if (!original.supplierRates.empty()) {
-            OctopusRateImport imported;
-            if (const auto *problem = importOctopusRates(original.supplierRates, cutoff, declaration, imported, stopped))
-                return fail(problem);
-            report += std::string(imported.go ? "Octopus Go" : "Octopus Agile") +
-                " public rate snapshot (" + imported.paymentMethod + ")\n";
-            report += "  Observed " + std::to_string(imported.observedUtcMs) + " UTC ms, " +
-                      std::to_string(imported.intervals) +
-                      (imported.go ? " published price intervals including VAT.\n" : " half-hour prices including VAT.\n");
-        }
 
+        MeterReview review;
+        if (const auto *problem = prepareMeterReview(original, now, options.reviewCutoffArg || reopening || archiving,
+                                                      lateReadingError, stopped, review)) return fail(problem);
+        if (review.readings.octopusObserved < previousConsumptionObservation)
+            return fail("new Octopus consumption observation precedes the saved observation");
+        if (const auto *problem = verifyMeterPrefix(original, review, stopped)) return fail(problem);
+        if (original.previous)
+            review.report += "Extends verified meter coverage through " + std::to_string(original.previous->through) +
+                             " UTC ms (previous archive SHA-256 " + original.previous->archiveSha256 + ")\n";
         const bool retainedInvoice = !original.invoice.empty();
         if (options.invoiceArg) {
             if (retainedInvoice) return fail("saved review already contains an invoice comparison");
             if (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty())
                 return fail("invoice file unavailable, empty, oversized or not a regular file");
         }
-        std::optional<MeterInvoice> invoice;
-        if (!original.invoice.empty()) {
-            if (const auto *problem = decodeMeterInvoice(original.invoice, declaration, invoice.emplace()))
-                return fail(problem);
-            report += "Invoice comparison uses " + std::to_string(invoice->places) + " decimal places with ties ";
-            report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
-        }
-
-        std::string exact;
-        auto *exactResults = archiving || reopening ? &exact : nullptr;
-        auto *exactInvoice = archiving || retainedInvoice ? exactResults : nullptr;
-        if (const auto *problem = std::visit([&](const auto &series) {
-            return reviewReadings(series, declaration, cutoff, stopped, report, exactResults,
-                                  invoice ? &*invoice : nullptr, exactInvoice);
-        }, readings)) return fail(problem);
+        if (const auto *problem = calculateMeterReview(original, archiving || retainedInvoice, stopped, review))
+            return fail(problem);
         if (stopped()) return stopResult();
-        if (reopening && original.results != exact) return fail("saved review amounts differ from the recalculated amounts");
+        if (reopening && original.results != review.exact) return fail("saved review amounts differ from the recalculated amounts");
         if (archiving) {
-            if (exact.size() > maxExactResultsBytes) return fail("exact results exceed the archive bound");
-            original.results = std::move(exact);
+            if (review.exact.size() > maxExactResultsBytes) return fail("exact results exceed the archive bound");
+            original.results = std::move(review.exact);
             const auto state = local_review_archive::save(options.archiveName, ".cmr", encodeReviewOriginal(original),
                                                           maxArchiveBytes, stop);
             if (state == local_review_archive::ReviewSave::Stopped) return stopResult();
@@ -412,7 +506,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (state != local_review_archive::ReviewSave::Written)
                 return refuse("could not create the new review archive; any existing archive was preserved");
         }
-        if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
+        if (std::fwrite(review.report.data(), 1, review.report.size(), stdout) != review.report.size() ||
+            std::fflush(stdout) != 0)
             return 1;
         return 0;
     } catch (...) {
