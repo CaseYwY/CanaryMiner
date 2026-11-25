@@ -3,6 +3,7 @@
 #include "product/supervisor.h"
 #include "product/manual_market.h"
 #include "product/market_reference_runtime.h"
+#include "product/market_ticker_runtime.h"
 #include <csignal>
 #include <fstream>
 #include <iostream>
@@ -14,7 +15,8 @@ struct Counts {unsigned factories=0,starts=0,views=0,joins=0;std::atomic<unsigne
 class Counted final:public MarketReferenceSink {
     Counts &counts_;std::unique_ptr<MarketReferenceSink> runtime_;
    public:
-    explicit Counted(Counts &counts):counts_(counts){
+    explicit Counted(Counts &counts, std::unique_ptr<MarketReferenceSink> installed):counts_(counts),runtime_(std::move(installed)){
+        if(runtime_)return;
         runtime_=makeMarketReferenceRuntime([&counts](const PublicJsonRequest &request,const std::atomic<bool> &,PublicHttpsLimits){
             ++counts.fetches;PublicJsonResponse response;response.status=PublicHttpsStatus::Ok;response.httpStatus=200;response.observedUtc=static_cast<uint64_t>(time(nullptr));
             response.body=request.feed==PublicFeed::GatePearlTicker?"[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]":"{\"error\":[],\"result\":{\"USDTZUSD\":{\"c\":[\"0.98\",\"1\"]}}}";return response;
@@ -43,7 +45,15 @@ int main(int argc,char **argv){
     options.noMarket=argc==3&&std::string(argv[2])=="--no-market";
     options.manualMarketPreferencesPath=(dir/"manual-market-preferences.json").u8string();options.manualMarketFactory=makeManualMarketProjector;
     options.uiPreferencesPath=(dir/"ui-preferences.json").u8string();options.runtimePreferencesPath=(dir/"runtime-preferences.json").u8string();
-    options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{++counts.factories;return std::make_unique<Counted>(counts);};
+    MarketReferenceFactory installed;
+    if(argc==3&&std::string_view(argv[2])=="--hour-fixture"){
+        installed=installedPublicTickerFactory(std::filesystem::u8path(options.exe),{true,true,true,true,false,true});
+        if(!installed){local.stop();platformShutdown();return 2;}
+    }
+    options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{
+        ++counts.factories;
+        return std::make_unique<Counted>(counts,installed?installed():nullptr);
+    };
     Supervisor supervisor(std::move(options));const auto result=supervisor.run();local.stop();platformShutdown();
     std::ofstream(dir/"result.json")<<"{\"factories\":"<<counts.factories<<",\"starts\":"<<counts.starts<<",\"views\":"<<counts.views<<",\"joins\":"<<counts.joins<<",\"fetches\":"<<counts.fetches.load()<<",\"late\":"<<(counts.late?"true":"false")<<"}\n";
     return result;

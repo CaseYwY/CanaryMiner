@@ -95,6 +95,42 @@ int main() {
     CHECK(!plan.health()[0].latched && plan.health()[0].nextDueMs == 5000);
     plan.stop();
 
+    auto hours = policy;
+    hours.publicHour = true;
+    hours.scheduleEconomicRequests = false;
+    MarketPollingPlan hourPlan;
+    CHECK(!hourPlan.start(1, 0, E + 64, hours, true));
+    CHECK(hourPlan.start(1, 0, E + 64, hours, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker}) {
+        ticket = hourPlan.next(0, E + 64);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && hourPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 64));
+    }
+    ticket = hourPlan.next(0, E + 64);
+    CHECK(ticket && ticket->request.feed == PublicFeed::MexcPearlHour &&
+        ticket->request.fromUtc == E - 3600 && ticket->request.toUtc == E);
+    CHECK(ticket && hourPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 1000, E + 65));
+    ticket = hourPlan.next(2000, E + 66);
+    CHECK(ticket && ticket->request.feed == PublicFeed::CoinbaseUsdtHour &&
+        ticket->request.fromUtc == E - 3600 && ticket->request.toUtc == E);
+    failure.status = PublicHttpsStatus::HttpStatus; failure.httpStatus = 429; failure.retryAfterSeconds = 100;
+    CHECK(ticket && hourPlan.complete(*ticket, failure, MarketDataStatus::Transport, 2000, E + 66));
+    CHECK(!hourPlan.next(59999, E + 123));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker}) {
+        ticket = hourPlan.next(60000, E + 124);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && hourPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 60000, E + 124));
+    }
+    ticket = hourPlan.next(61000, E + 125);
+    CHECK(ticket && ticket->request.feed == PublicFeed::MexcPearlHour && ticket->request.toUtc == E + 120);
+    CHECK(ticket && hourPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 61000, E + 125));
+    CHECK(!hourPlan.next(101999, E + 165));
+    ticket = hourPlan.next(102000, E + 166);
+    CHECK(ticket && ticket->request.feed == PublicFeed::CoinbaseUsdtHour && ticket->request.toUtc == E + 120);
+    CHECK(ticket && hourPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 102000, E + 166));
+    CHECK(!hourPlan.takeEconomicRequest(102000, E + 166));
+    hourPlan.stop();
+
     std::atomic<uint64_t> ms{0};
     std::atomic<unsigned> pearlCalls{0}, fxCalls{0};
     auto clock = [&] { const auto t = ms.load(); return std::make_pair(t, E + 10 + t / 1000); };

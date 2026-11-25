@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
-    int publicTickerPermissionArg = 0;
+    int publicTickerPermissionArg = 0, publicHourPermissionArg = 0;
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
     bool workerPoolFallbackSeen=false;
@@ -283,6 +283,17 @@ int main(int argc, char **argv) {
         }
         else if (a.rfind("--allow-public-tickers=", 0) == 0) {
             fprintf(stderr, "--allow-public-tickers takes no value\n");
+            return kExitUsage;
+        }
+        else if (a == "--allow-public-candles") {
+            if (cli.command != Command::Run || publicHourPermissionArg) {
+                fprintf(stderr, "--allow-public-candles is accepted once, for run only\n");
+                return kExitUsage;
+            }
+            publicHourPermissionArg = cli.restArgIndices[i];
+        }
+        else if (a.rfind("--allow-public-candles=", 0) == 0) {
+            fprintf(stderr, "--allow-public-candles takes no value\n");
             return kExitUsage;
         }
         else if (a == "--algo") algoName = next();
@@ -481,6 +492,7 @@ int main(int argc, char **argv) {
                 "  --no-history      disable local accepted history this run; existing data stays\n"
                 "  --no-market       suppress manual and public references for this run\n"
                 "  --allow-public-tickers  allow saved public tickers in an opt-in dashboard build\n"
+                "  --allow-public-candles  also allow public hourly candles for this dashboard run\n"
                 "  --no-energy       disable optional session board-energy recording this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
                 "                    not duty cycle; runtime defaults can be edited in Settings\n"
@@ -539,6 +551,17 @@ int main(int argc, char **argv) {
             // hole open for every other flag.
             fprintf(stderr, "unknown option. Run with --help for the list; rejected original omitted.\n");
             return 1;
+        }
+    }
+
+    if (publicHourPermissionArg && !publicTickerPermissionArg) {
+        fprintf(stderr, "Dashboard candles require --allow-public-tickers as well\n");
+        return kExitUsage;
+    }
+    if constexpr (kPublicTickerRuntimeBuilt) {
+        if (publicHourPermissionArg && !validDashboardHourConsent(argc, argv, publicTickerPermissionArg, publicHourPermissionArg)) {
+            fprintf(stderr, "Dashboard candles require the exact public-feed flags\n");
+            return kExitUsage;
         }
     }
 
@@ -1109,6 +1132,7 @@ int main(int argc, char **argv) {
         }
         for (int i = 1; i < argc; i++) {
             if (i == publicTickerPermissionArg) continue;
+            if (i == publicHourPermissionArg) continue;
             if (std::string(argv[i]) == "--gpu-id") { ++i; continue; }
             so.userArgs.push_back(argv[i]);
         }
@@ -1159,7 +1183,8 @@ int main(int argc, char **argv) {
         so.noMarket = cli.ov.noMarket;
         if constexpr (kPublicTickerRuntimeBuilt) {
             const PublicTickerLaunch launch{kPublicTickerRuntimeBuilt, so.runtimeContext.effective.publicTickersRequested,
-                publicTickerPermissionArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket};
+                publicTickerPermissionArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket,
+                publicHourPermissionArg != 0};
             so.marketReferenceFactory = installedPublicTickerFactory(std::filesystem::u8path(so.exe), launch);
         }
         so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();

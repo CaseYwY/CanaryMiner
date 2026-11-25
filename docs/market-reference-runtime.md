@@ -72,6 +72,21 @@ The path uses only the Gate `api.gateio.ws` ticker for `PEARL_USDT` and the Krak
 for refresh, timeout and retry. The ticker path excludes minute candles and economic scheduling. The default
 CMake build and current release policy keep the HTTPS capability off.
 
+### Show a public hour in the Dashboard
+
+In an opt-in build, save the public ticker request and launch the ordinary Dashboard with both
+`--allow-public-tickers` and `--allow-public-candles`. The second permission is per launch and covers
+MEXC `PEARLUSDT` and Coinbase `USDT-USD` minute candles. A ticker-only launch keeps its existing request set.
+Plain output, automatic tuning, `--no-market`, and a conflicting manual request suppress the public Dashboard path.
+
+The background owner refreshes candles about once a minute. When both sources are ready, it requests the same
+fixed UTC window from each. Each source shows its own elapsed-minute coverage, receipt age and latest request status.
+The one-hour mean is a TWAP approximation using equally weighted minute closes. USDT per PRL requires all 60 Pearl minutes. USD per PRL also
+requires 60 FX closes for the exact same minutes. The display labels the exact UTC bounds and marks a previous
+minute window while waiting for the next update. The default age limit is two minutes on both local clocks.
+The hour remains a candidate reference with unverified candle finality. Economic mode defaults off and consumes
+no data from this display.
+
 The installed-path test uses a synthetic helper beside an inert executable. Live provider requests, source-use
 approval and helper trust/deployment qualification require separate evidence.
 
@@ -90,7 +105,7 @@ identifies the last row as provisional and leaves the other rows' timestamps uns
 
 The [2026-11-06 primary-source recheck](research/market-source-qualification-2026-11.md) does not settle Gate's REST candle
 shape or either REST minute time anchor. Public-feed use rights, regional/deployment/trust approval and any required
-trade-event-age basis remain separate. `ProviderResponse` candles still return `UnsupportedConvention`; only explicit
+trade-event-age basis remain separate. Gate and Kraken `ProviderResponse` candles still return `UnsupportedConvention`; only explicit
 synthetic fixture minute starts are accepted. Ticker receipt age is never a fabricated trade-event age, one-hour coverage,
 credited income, reward calibration, net estimate or economic/mining permission.
 

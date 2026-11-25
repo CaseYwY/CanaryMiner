@@ -10,7 +10,7 @@ import tempfile
 import time
 
 
-def main(cli_path, fixture, enabled):
+def main(cli_path, fixture, enabled, sample_only=False):
     worker_name = "canary_public_json_worker" + (".exe" if os.name == "nt" else "")
     allow = "--allow-public-candles"
     with tempfile.TemporaryDirectory(prefix="canary-hour-sample-") as directory:
@@ -58,6 +58,20 @@ def main(cli_path, fixture, enabled):
             assert result.returncode == 2 and not result.stdout and not requests.exists(), result
         result = call("market-hou\uff52", allow)
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
+
+        ticker = "--allow-public-tickers"
+        dashboard_refusals = (
+            ([allow], "Dashboard candles require --allow-public-tickers as well"),
+            ([ticker, allow, allow], "--allow-public-candles is accepted once, for run only"),
+            ([ticker, allow + "=true"], "--allow-public-candles takes no value"),
+            (["--pass", ticker, allow], "Dashboard candles require --allow-public-tickers as well"),
+        )
+        # Native installs only exercise the one-shot command; run refusals use the inert host binary.
+        for args, expected in (() if sample_only else dashboard_refusals):
+            result = subprocess.run([cli, "run", "--pool", "kryptex", "--wallet", "prl1" + "q" * 59,
+                                     *args], cwd=installed, capture_output=True, text=True, timeout=8)
+            assert result.returncode == 2 and not result.stdout and expected in result.stderr, result
+            assert not requests.exists() and not (installed / "ticker-requests").exists()
 
         if not enabled:
             result = run(allow)
@@ -128,4 +142,4 @@ def main(cli_path, fixture, enabled):
 
 
 if __name__ == "__main__":
-    sys.exit(main(Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3] == "1"))
+    sys.exit(main(Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3] == "1", "--sample-only" in sys.argv[4:]))

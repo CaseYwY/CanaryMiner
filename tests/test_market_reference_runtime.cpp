@@ -5,6 +5,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
+#include <fstream>
 #include <mutex>
 #include <thread>
 using namespace om;
@@ -64,9 +65,9 @@ void helperFault(){
 
 void launchPolicy(){
     const auto module=std::filesystem::absolute("synthetic-module");
-    for(unsigned mask=0;mask<32;++mask){
-        const PublicTickerLaunch launch{bool(mask&1),bool(mask&2),bool(mask&4),bool(mask&8),bool(mask&16)};
-        CHECK(static_cast<bool>(installedPublicTickerFactory(module,launch))==(mask==15));
+    for(unsigned mask=0;mask<64;++mask){
+        const PublicTickerLaunch launch{bool(mask&1),bool(mask&2),bool(mask&4),bool(mask&8),bool(mask&16),bool(mask&32)};
+        CHECK(static_cast<bool>(installedPublicTickerFactory(module,launch))==((mask&31)==15));
     }
     const PublicTickerLaunch enabled{true,true,true,true,false};
     CHECK(!installedPublicTickerFactory("relative-module",enabled));
@@ -129,6 +130,49 @@ int installedPath(const std::filesystem::path &fixture){
     CHECK(view(*runtime).find("Latest PRL/USD reference: N/A")!=std::string::npos);
     runtime->stop();
     CHECK(!runtime->start(3));
+    const auto requests = directory / "candle-requests";
+    CHECK(!std::filesystem::exists(requests));
+    const auto withHour = installedPublicTickerFactory(directory/"synthetic-module",{true,true,true,true,false,true});
+    for (const auto *mode : {"full", "gap-fx", "gap-pearl", "future"}) {
+        std::ofstream(directory / "candle-scenario") << mode;
+        auto session = withHour();
+        CHECK(session->start(1));
+        CHECK(waitUntil([&] {
+            const auto text = view(*session);
+            const auto fxAt = text.find("Coinbase USDT-USD: ");
+            return fxAt != text.npos && (text.find("60/60", fxAt) != text.npos ||
+                text.find("59/60", fxAt) != text.npos || text.find("ok/invalid market observation/minute time", fxAt) != text.npos);
+        }));
+        const std::string_view scenario(mode);
+        const auto text = view(*session);
+        CHECK(text.find("Latest PRL/USD reference: 2.45") != text.npos);
+        CHECK(text.find("TWAP approximation | candidate data, finality unverified") != text.npos);
+        const auto mean = "1h mean of minute closes: " +
+            std::string(scenario == "gap-pearl" ? "N/A" : "3.000000") + " USDT/PRL | " +
+            (scenario == "full" ? "3.500000" : "N/A") + " USD/PRL";
+        CHECK(text.find(mean) != text.npos);
+        CHECK(text.find(scenario == "gap-pearl" ? "MEXC PEARLUSDT: 59/60" : "MEXC PEARLUSDT: 60/60") != text.npos);
+        if (scenario == "gap-fx") CHECK(text.find("Coinbase USDT-USD: 59/60") != text.npos);
+
+        std::ifstream input(requests);
+        unsigned pearlFeed=0, fxFeed=0;
+        uint64_t pearlStart=0, pearlEnd=0, fxStart=0, fxEnd=0;
+        CHECK(bool(input >> pearlFeed >> pearlStart >> pearlEnd >> fxFeed >> fxStart >> fxEnd));
+        CHECK(pearlFeed == 4 && fxFeed == 5 && pearlStart == fxStart && pearlEnd == fxEnd && pearlEnd - pearlStart == 3600);
+        unsigned unexpected=0;
+        CHECK(!(input >> unexpected));
+        input.close();
+        std::filesystem::remove(requests);
+        CHECK(text.find("1h UTC seconds [" + std::to_string(pearlStart) + ", " + std::to_string(pearlEnd) + ")") != text.npos);
+
+        const auto t = now();
+        const auto unavailable = "N/A USDT/PRL | N/A USD/PRL";
+        CHECK(joined(session->view(t.first + 121, t.second)).find(unavailable) != text.npos);
+        CHECK(joined(session->view(t.first, t.second + 121000)).find(unavailable) != text.npos);
+        session->requestStop();
+        CHECK(view(*session).find(unavailable) != text.npos);
+        session->stop();
+    }
     std::error_code ignored;
     std::filesystem::remove_all(directory,ignored); // only the scratch directory created above
     return finishTests("installed ticker helper path and native process");
