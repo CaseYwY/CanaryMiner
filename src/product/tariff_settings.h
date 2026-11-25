@@ -48,7 +48,7 @@ class TariffSettingsPanel {
                 const auto location=path();
                 const bool changed=v->text!=input;
                 const bool openingChanged=changed&&location=="opening";
-                const bool components=hasComponents();
+                const bool components=requiresComponentOpeningReview();
                 const bool changedOpeningPoint=openingChanged&&(seasonal()||components)&&
                     (name=="through_utc_ms"||name=="cycle_begin_utc_ms");
                 const bool changedAllowance=changed&&(seasonRow()||(openingChanged&&seasonal()&&name=="cycle_end_utc_ms"));
@@ -84,7 +84,7 @@ class TariffSettingsPanel {
             if(key==27)page=TariffSettingsPage::Browse;
             else if(key=='\r'||key=='\n'){
                 auto *v=node();
-                const bool rateRows=hasComponents()&&(revision()||path()=="plan.revisions");
+                const bool rateRows=requiresComponentOpeningReview()&&(revision()||path()=="plan.revisions");
                 if(v->isArray()&&field<v->items.size()){
                     v->items.erase(v->items.begin()+field);
                     if(field&&field==v->items.size())--field;
@@ -140,7 +140,7 @@ class TariffSettingsPanel {
                     field=count()-1;
                     message=i18n::tariffNoticeEnglish(NoticeKey::AddedBlank);
                     if(collection=="seasons")reviewChangedSeasonalAllowance();
-                    if(hasComponents()&&(revision()||collection=="revisions"))reviewChangedComponents();
+                    if(requiresComponentOpeningReview()&&(revision()||collection=="revisions"))reviewChangedComponents();
                 }
             }
         }else if((key=='x'||key=='X')&&node()->isArray()&&count())page=TariffSettingsPage::Remove;
@@ -228,12 +228,15 @@ class TariffSettingsPanel {
     bool onCyclePolicy()const{return route.empty()&&selectedName()=="reset_policy";}
     bool seasonal()const{return draft.find("seasonal_allowance")!=nullptr;}
     bool onSeasonalToggle()const{return onCyclePolicy()||(route.empty()&&selectedName()=="seasonal_allowance");}
-    bool hasComponents()const{
-        const auto *plan=draft.find("plan");
+    static bool hasComponents(const JsonValue &value){
+        const auto *plan=value.find("plan");
         const auto *revisions=plan?plan->find("revisions"):nullptr;
         return revisions&&std::any_of(revisions->items.begin(),revisions->items.end(),[](const JsonValue &row){
             return row.find("component_multiplier")!=nullptr;
         });
+    }
+    bool requiresComponentOpeningReview()const{
+        return hasComponents(active)||hasComponents(draft);
     }
     const JsonValue *revision()const{
         if(route.size()<3||draft.members[route[0]].first!="plan")return nullptr;
@@ -274,7 +277,7 @@ class TariffSettingsPanel {
         if(!schema||!opening||!plan||!policy)return;
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
-        schema->text=hasComponents()?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        schema->text=hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -568,7 +571,7 @@ class TariffSettingsPanel {
             i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
         if(seasonal())review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::SeasonalReview));
-        if(hasComponents())review.insert(review.begin()+4,
+        if(hasComponents(draft))review.insert(review.begin()+4,
             "Unit rate = unscaled part + multiplied part x factor. Use new plan and opening keys after a rate change.");
         if(prorated)review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::FeeReview));
         const auto *plan=draft.find("plan");
