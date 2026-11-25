@@ -65,9 +65,16 @@ int main(int argc,char **argv){using namespace om;if(argc!=3)return 4;
     }
     auto submission=owner.load(PreferencesKind::Ui);CHECK(submission.status==PreferencesAdmission::Queued);
     if(scenario=="hold-load"){
+        auto held=targets[0];held+=".fixture-load-held";
+        CHECK(await(owner,[&](const auto &v){return v.inFlight&&read(held)=="1";}));
         CHECK(owner.load(PreferencesKind::Runtime).status==PreferencesAdmission::Busy);
         owner.requestStop();CHECK(owner.snapshot().state==PreferencesOwnerState::Stopped&&!owner.snapshot().uncertain&&intent.permits(token));
-        owner.stop();CHECK(owner.snapshot().settled&&fs::is_empty(root));return finishTests("held native preference read cannot block memory stop/control");
+        owner.stop();
+        CHECK(owner.snapshot().settled);
+        CHECK(read(held)=="1");
+        CHECK(fs::remove(held,error)&&!error);
+        CHECK(fs::is_empty(root));
+        return finishTests("held native preference read cannot block memory stop/control");
     }
     if(scenario=="invalid-loaded"){
         CHECK(await(owner,[](const auto &v){return v.state==PreferencesOwnerState::Faulted;}));CHECK(owner.snapshot().transport==LocalTaskStatus::Invalid&&!owner.takeReply(submission.ticket)&&!owner.snapshot().uncertain);owner.stop();CHECK(owner.snapshot().settled);return finishTests("noncanonical helper data withheld before current review");

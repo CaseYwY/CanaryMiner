@@ -62,6 +62,35 @@ int main(int argc, char **argv) {
     delta(counterfactualBill(p,s,load("8000"),load("9000"),T+hour,T),"0.000000");
     delta(counterfactualBill(p,s,load("8000"),load("11000"),T+hour,T),"1.000000");
 
+    // Demand charges depend on the shared whole-meter peak, including the declared opening. T19/T20.
+    {
+        const auto middle=T+15*60000,close=middle+15*60000;
+        auto demandPlan=plan(T,close);
+        demandPlan.revisions[0].baseRatePerKwh=d("0");
+        demandPlan.demandCharge=DemandChargeRule{15,0,T,d("5")};
+        auto beginning=opening(T,close);
+        beginning.peakDemandKw=ElectricityAmount{};
+        const auto known=accrueBill(demandPlan,beginning,load("10000",T,middle),middle,middle);
+        CHECK(known.ending&&known.provisionalTotal&&display(*known.provisionalTotal)=="50.000000");
+        const auto prior=known.ending.value_or(beginning);
+        CHECK(display(prior.importedKwh)=="2.500000");
+        const auto baseline=load("8000",middle,close);
+        const auto oneMiner=load("10000",middle,close);
+        const auto bothMiners=load("12000",middle,close);
+        delta(counterfactualBill(demandPlan,prior,baseline,baseline,close,T),"0.000000");
+        delta(counterfactualBill(demandPlan,prior,baseline,oneMiner,close,T),"0.000000");
+        const auto joint=counterfactualBill(demandPlan,prior,baseline,bothMiners,close,T);
+        delta(joint,"10.000000");
+        CHECK(joint.withoutMining.ending&&display(*joint.withoutMining.ending->peakDemandKw)=="10.000000");
+        CHECK(joint.withMining.ending&&display(*joint.withMining.ending->peakDemandKw)=="12.000000");
+        CHECK(display(*prior.peakDemandKw)=="10.000000");
+        const auto projected=accrueBill(demandPlan,prior,bothMiners,close,close);
+        CHECK(projected.settledTotal&&display(*projected.settledTotal)=="60.000000");
+        auto incomplete=opening(T,close);
+        incomplete.peakDemandKw=ElectricityAmount{};
+        CHECK(evaluateBill(demandPlan,incomplete,load("8000",T,T+hour/3),T+hour/3,T).status==
+              ElectricityStatus::DemandWindowBoundary);
+    }
     // Immutable chronological price revisions do not replenish tier allowances. T17, T33/T34.
     p = plan(T,T+2*hour); s = opening(T,T+2*hour); p.revisions[0].baseRatePerKwh = d("1");
     auto r = p.revisions[0]; r.key = "fixture.revision.2"; r.beginUtcMs = T+hour; r.baseRatePerKwh = d("3");

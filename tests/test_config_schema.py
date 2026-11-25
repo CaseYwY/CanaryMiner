@@ -445,6 +445,19 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         row['calendar'][0]['multiplier'] = '-1'
         self.assertTrue(validate(example, schema, schema))
 
+    def test_demand_charge_requires_v9_and_an_explicit_opening_peak(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 9
+        self.assertTrue(validate(example, schema, schema))
+        example['demand_charge'] = dict(window_minutes=15, offset_minutes=0, published_utc_ms=0, rate_per_kw='5')
+        self.assertTrue(validate(example, schema, schema))
+        example['opening']['peak_demand_kw'] = '0'
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 1}, schema, schema))
+        example['demand_charge']['window_minutes'] = 7
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -475,6 +488,7 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'revision': {'component_multiplier'},
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
+                    'opening': {'peak_demand_kw'},
                 }.get(name, set())
                 self.assertEqual(set(definition['required']), set(definition['properties']) - optional)
 

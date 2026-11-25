@@ -5,7 +5,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -13,9 +13,10 @@
     "reset_policy": {},
     "plan": {"$ref": "#/$defs/plan"},
     "opening": {"$ref": "#/$defs/opening"},
-    "seasonal_allowance": {"$ref": "#/$defs/seasonalAllowance"}
+    "seasonal_allowance": {"$ref": "#/$defs/seasonalAllowance"},
+    "demand_charge": {"$ref": "#/$defs/demandCharge"}
   },
-  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8]}}},
+  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8, 9]}}},
   "then": {
     "if": {"properties": {"schema_version": {"const": 4}}},
     "then": {
@@ -35,7 +36,7 @@
         "if": {"properties": {"schema_version": {"const": 6}}},
         "then": {"properties": {"reset_policy": {"$ref": "#/$defs/bimonthlyReset"}}},
         "else": {
-          "if": {"properties": {"schema_version": {"const": 7}}},
+          "if": {"properties": {"schema_version": {"enum": [7, 9]}}},
           "then": {"properties": {"reset_policy": {"$ref": "#/$defs/seasonalReset"}}},
           "else": {"properties": {"reset_policy": {"oneOf": [
             {"$ref": "#/$defs/seasonalReset"}, {"$ref": "#/$defs/bimonthlyReset"}
@@ -62,7 +63,7 @@
       "if": {"properties": {"schema_version": {"const": 7}}},
       "then": {"required": ["seasonal_allowance"]},
       "else": {
-        "if": {"properties": {"schema_version": {"const": 8}}},
+        "if": {"properties": {"schema_version": {"enum": [8, 9]}}},
         "else": {"not": {"required": ["seasonal_allowance"]}}
       }
     },
@@ -71,9 +72,23 @@
       "then": {"properties": {"plan": {"properties": {
         "revisions": {"contains": {"required": ["component_multiplier"]}}
       }}}},
-      "else": {"properties": {"plan": {"properties": {
-        "revisions": {"items": {"not": {"required": ["component_multiplier"]}}}
-      }}}}
+      "else": {
+        "if": {"properties": {"schema_version": {"const": 9}}},
+        "else": {"properties": {"plan": {"properties": {
+          "revisions": {"items": {"not": {"required": ["component_multiplier"]}}}
+        }}}}
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": 9}}},
+      "then": {
+        "required": ["demand_charge"],
+        "properties": {"opening": {"required": ["peak_demand_kw"]}}
+      },
+      "else": {
+        "not": {"required": ["demand_charge"]},
+        "properties": {"opening": {"not": {"required": ["peak_demand_kw"]}}}
+      }
     },
     {
       "if": {"required": ["seasonal_allowance"]},
@@ -157,6 +172,16 @@
       {"const": "explicit_cycle_only"}, {"$ref": "#/$defs/monthlyReset"},
       {"$ref": "#/$defs/proratedMonthlyReset"}, {"$ref": "#/$defs/annualReset"}
     ]},
+    "demandCharge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["window_minutes", "offset_minutes", "published_utc_ms", "rate_per_kw"],
+      "properties": {
+        "window_minutes": {"type": "integer", "enum": [5, 6, 10, 12, 15, 20, 30, 60]},
+        "offset_minutes": {"type": "integer", "minimum": 0, "maximum": 59},
+        "published_utc_ms": {"$ref": "#/$defs/instant"},
+        "rate_per_kw": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]}
+      }
+    },
     "seasonalAllowance": {
       "type": "object", "additionalProperties": false, "required": ["published_utc_ms", "seasons"],
       "properties": {
@@ -251,7 +276,8 @@
       "properties": {
         "key": {"$ref": "#/$defs/label"}, "scope": {"$ref": "#/$defs/label"}, "adapter": {"$ref": "#/$defs/label"}, "basis": {"const": "whole_meter_import"}, "origin": {"const": "declared_forecast"},
         "cycle_begin_utc_ms": {"$ref": "#/$defs/instant"}, "cycle_end_utc_ms": {"$ref": "#/$defs/instant"}, "through_utc_ms": {"$ref": "#/$defs/instant"},
-        "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"enum": ["explicit-fixed-clock", "2026e"]}
+        "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"enum": ["explicit-fixed-clock", "2026e"]},
+        "peak_demand_kw": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]}
       }
     }
   }

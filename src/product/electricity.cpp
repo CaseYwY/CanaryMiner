@@ -36,6 +36,98 @@ ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) 
     return cursor == end ? ElectricityStatus::Ok : ElectricityStatus::Unavailable;
 }
 constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
+ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &opening,int64_t end,int64_t decision) {
+    if (!plan.demandCharge) return opening.peakDemandKw ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
+    const auto &rule=*plan.demandCharge;
+    if (opening.evidence.basis!=PowerBasis::WholeMeterImport) return ElectricityStatus::Unsupported;
+    if (!opening.peakDemandKw || opening.peakDemandKw->numerator.negative() || rule.windowMinutes<5 ||
+        rule.windowMinutes>60 || 60%rule.windowMinutes || rule.offsetMinutes>=rule.windowMinutes ||
+        rule.ratePerKw.negative() || !instant(rule.publishedUtcMs)) return ElectricityStatus::Invalid;
+    const int64_t span=rule.windowMinutes*minuteMs, offset=rule.offsetMinutes*minuteMs;
+    for (const auto t:{opening.cycleBeginUtcMs,opening.throughUtcMs,opening.cycleEndUtcMs,end})
+        if ((t-offset)%span) return ElectricityStatus::DemandWindowBoundary;
+    // Total window energy bounds the peak from both sides.
+    ExactDecimal scaledImport, maximumScaledImport;
+    const auto &peak=opening.peakDemandKw->numerator;
+    const auto windows=(opening.throughUtcMs-opening.cycleBeginUtcMs)/span;
+    if (!opening.importedKwh.numerator.multiply(number(60/rule.windowMinutes),&scaledImport) ||
+        !peak.multiply(number(windows),&maximumScaledImport)) return ElectricityStatus::Capacity;
+    if (peak.compare(scaledImport)>0 || scaledImport.compare(maximumScaledImport)>0)
+        return ElectricityStatus::Invalid;
+    return rule.publishedUtcMs>decision ? ElectricityStatus::NotYetKnown : ElectricityStatus::Ok;
+}
+
+template<class Trace>
+ElectricityStatus measureDemand(const DemandChargeRule &rule,const Trace &trace,int64_t begin,
+                                ElectricityAmount &peak,const std::atomic<bool> *cancel,
+                                const std::function<bool()> &stop) {
+    const int64_t span=rule.windowMinutes*minuteMs;
+    const auto kwNumeratorScale=number(60/rule.windowMinutes);
+    auto windowEnd=begin+span;
+    ExactDecimal integrated;
+    const auto retainMaximum=[&](const ExactDecimal &energy){
+        ExactDecimal kwNumerator;
+        if (!energy.multiply(kwNumeratorScale,&kwNumerator)) return false;
+        if (kwNumerator.compare(peak.numerator)>0) peak.numerator=std::move(kwNumerator);
+        return true;
+    };
+    for (const auto &interval:trace.intervals) {
+        if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+            return ElectricityStatus::Unavailable;
+        if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+            // A nonzero register delta cannot be assigned to two demand windows.
+            if (interval.endUtcMs>windowEnd&&!interval.importedKwh.numerator.zero())
+                return ElectricityStatus::DemandWindowBoundary;
+        }
+        const auto energyFor=[&](int64_t duration,ExactDecimal &energy){
+            if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+                energy=interval.importedKwh.numerator;
+                return true;
+            } else return interval.watts.multiply(number(duration),&energy);
+        };
+        auto through=(std::min)(interval.endUtcMs,windowEnd);
+        ExactDecimal energy;
+        if (!energyFor(through-interval.beginUtcMs,energy)||!accumulate(integrated,energy))
+            return ElectricityStatus::Capacity;
+        if (through<windowEnd) continue;
+        if (!retainMaximum(integrated)) return ElectricityStatus::Capacity;
+        integrated={};
+        // Complete intervening windows have the same constant power, or zero register import.
+        const auto complete=(interval.endUtcMs-through)/span;
+        if (complete) {
+            if (!energyFor(span,energy)||!retainMaximum(energy)) return ElectricityStatus::Capacity;
+            through+=complete*span;
+        }
+        windowEnd=through+span;
+        if (interval.endUtcMs>through&&!energyFor(interval.endUtcMs-through,integrated))
+            return ElectricityStatus::Capacity;
+    }
+    return ElectricityStatus::Ok;
+}
+
+ElectricityStatus foldHalfHours(const MeterImportTrace &trace,std::vector<MeterImportInterval> &halfHours,
+                                const std::atomic<bool> *cancel,const std::function<bool()> &stop) {
+    auto begin=trace.intervals.front().beginUtcMs;
+    auto boundary=begin+meterHalfHourMs;
+    ExactDecimal usage;
+    for (const auto &interval:trace.intervals) {
+        if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+            return ElectricityStatus::Unavailable;
+        if (interval.endUtcMs>boundary&&!interval.importedKwh.numerator.zero())
+            return ElectricityStatus::MeterRoundingBoundary;
+        if (!accumulate(usage,interval.importedKwh.numerator)) return ElectricityStatus::Capacity;
+        while (interval.endUtcMs>=boundary) {
+            if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+                return ElectricityStatus::Unavailable;
+            halfHours.push_back({begin,boundary,{std::move(usage)}});
+            usage={};
+            begin=boundary;
+            boundary+=meterHalfHourMs;
+        }
+    }
+    return ElectricityStatus::Ok;
+}
+
 ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_t end, int64_t decision,bool accrual=false) {
     if (!p.declared || !s.declared) return ElectricityStatus::Unavailable;
     const bool roundMeter = p.rounding == TariffRounding::MeterHalfHourKwhHalfEven2;
@@ -51,6 +143,8 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
                        s.throughUtcMs % meterHalfHourMs || end % meterHalfHourMs))
         return ElectricityStatus::MeterRoundingBoundary;
     if (s.throughUtcMs == s.cycleBeginUtcMs && (!s.importedKwh.numerator.zero() || !s.accruedSubtotal.numerator.zero())) return ElectricityStatus::Invalid;
+    const auto demandStatus=validateDemand(p,s,end,decision);
+    if (demandStatus!=ElectricityStatus::Ok) return demandStatus;
     if (p.revisions.empty()) return ElectricityStatus::Unavailable;
     if (p.revisions.size() > 128) return ElectricityStatus::Capacity;
     if (p.tiers != TierMode::None && p.tiers != TierMode::Progressive && p.tiers != TierMode::AllUnits) return ElectricityStatus::Unsupported;
@@ -214,6 +308,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::MeterBoundary: return "meter register needs a reading at an energy-rate boundary";
         case ElectricityStatus::MeterRoundingBoundary: return "meter rounding needs readings and cycle boundaries on the UTC half hour";
         case ElectricityStatus::SeasonalDayBoundary: return "seasonal allowance requires complete tariff civil days without skipped or disjoint dates";
+        case ElectricityStatus::DemandWindowBoundary: return "demand requires complete aligned windows and nonzero meter deltas within each window";
     }
     return "unknown electricity status";
 }
@@ -282,6 +377,16 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     }
     auto state = opening; state.timeDatabaseVersion = result.timeDatabaseVersion;
     ExactDecimal cost, billedQuantity, quantity = state.importedKwh.numerator;
+    if (p.demandCharge) {
+        result.status=measureDemand(*p.demandCharge,trace,opening.throughUtcMs,*state.peakDemandKw,cancel,stop);
+        if (result.status!=ElectricityStatus::Ok) return result;
+        ExactDecimal increase;
+        if (!state.peakDemandKw->numerator.subtract(opening.peakDemandKw->numerator,&increase) ||
+            !productAdd(cost,increase,p.demandCharge->ratePerKw)) {
+            result.status=ElectricityStatus::Capacity;
+            return result;
+        }
+    }
     if (opening.throughUtcMs == opening.cycleBeginUtcMs && !productAdd(cost,p.cycleCharge,number(wattMsPerKwh))) { result.status = ElectricityStatus::Capacity; return result; }
     size_t revision = 0, count = 0;
     std::optional<CivilDate> previousDate;
@@ -290,7 +395,19 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         if (past.status != CivilStatus::Ok) { result.status = ElectricityStatus::Unavailable; return result; }
         previousDate = past.date;
     }
-    for (const auto &i : trace.intervals) {
+    using Intervals=std::decay_t<decltype(trace.intervals)>;
+    Intervals halfHours;
+    const auto *billingIntervals=&trace.intervals;
+    if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+        if (roundMeter && p.demandCharge) {
+            // Demand already used the finer physical deltas. Energy is rounded once per half hour.
+            halfHours.reserve(static_cast<size_t>((end-opening.throughUtcMs)/meterHalfHourMs));
+            result.status=foldHalfHours(trace,halfHours,cancel,stop);
+            if (result.status!=ElectricityStatus::Ok) return result;
+            billingIntervals=&halfHours;
+        }
+    }
+    for (const auto &i : *billingIntervals) {
         if (roundMeter && (i.beginUtcMs % meterHalfHourMs || i.endUtcMs - i.beginUtcMs != meterHalfHourMs)) {
             result.status = ElectricityStatus::MeterRoundingBoundary;
             return result;
@@ -392,7 +509,7 @@ static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening
     result.ending=step.ending;result.provisionalChange=step.charge;result.provisionalTotal=total;
     result.billedKwh=step.billedKwh;
     if(step.cycleSettled)result.settledTotal=total;
-    else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value();
+    else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value()||p.demandCharge.has_value();
     return result;
 }
 BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed,

@@ -23,13 +23,13 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families include contracted capacity, demand ratchets, apparent power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -166,6 +166,36 @@ Review and save with **V** and **Enter**. Archives retain the declared amounts a
 This rule covers the T24 fixture. Supplier rates need separate qualification. The Octopus
 published-rate import uses its own price inputs and requires a declaration without this rule.
 
+### Charge for maximum average demand
+
+Select `reset_policy` and press **D**. Declare the window length, its UTC offset in minutes,
+the publication time and the price per kW. Supported windows divide an hour and run for
+5 to 60 minutes. Offset zero aligns the windows to the UTC epoch. A 15-minute window
+with offset 5 starts at :05, :20, :35 and :50 UTC. All windows in the declared cycle are eligible.
+
+Version 9 adds the rule and `opening.peak_demand_kw`. Declare zero peak at the start of a cycle.
+For a mid-cycle opening, enter the highest average kW already reached and the accrued
+energy and fixed charges **before** the demand charge and subtotal multiplier. The program
+adds the opening demand charge. Each later window adds a charge only for the increase
+in peak. The charge is part of the subtotal before the optional closing minimum and
+subtotal multiplier. Use new plan and opening keys after changing a saved rule.
+
+The opening, review end and cycle boundaries must align with the demand grid. Use a meter
+reading at each demand boundary where import is nonzero. An exact zero delta can span
+multiple windows. Power-interval input assumes a uniform load within each supplied interval.
+Its result is a scenario estimate when the intervals represent averages over longer periods.
+The local archive retains the original readings and exact peak and charge for replay.
+
+Five minutes at 12 kW and ten minutes at zero yield 1 kWh and a 15-minute peak of 4 kW.
+The same data under a five-minute rule yields a peak of 12 kW. A plan with an established
+10 kW peak and a price of 5 per kW adds zero for a later 8 kW window and 10 for a 12 kW
+window. Two loads considered together can increase the bill even when each alone stays
+within the existing peak.
+
+The peak resets at the declared cycle boundary. This covers fixtures T18–T20. Ratchets,
+apparent-power charges, separate demand-reset calendars, eligible time bands and supplier
+qualification remain open. The two-month monthly-average rule has no demand allocation.
+
 ### Apply a seasonal baseline allowance
 
 Select `reset_policy` and press **A** to add the seasonal rule. Open `seasonal_allowance`, enter
@@ -274,7 +304,7 @@ invalid. The saved declaration still supplies
 the opening values, so the cutoff describes rate publication and reading coverage, and local confirmation can be later.
 Omit the option to use the current UTC time.
 
-Regular meter files for an annual policy can contain up to 1.75 MiB and 18,432 intervals. Other policies retain 1 MiB and 8,192 intervals. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
+Annual policies and policies with a demand charge accept files up to 1.75 MiB and 18,432 intervals. Other policies accept 1 MiB and 8,192 intervals. Dense full-cycle register files can exceed these limits. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
 unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
 additional cycle that starts within a charged tariff day requires the declared [daily-fee rule](#prorate-a-daily-fee-across-a-recurring-reset). Use regular files in a trusted
 local directory. Windows accepts native Unicode paths on local drives and rejects redirected directories. The command
@@ -317,7 +347,7 @@ Use the same command with an interval file in schema version 2:
 }
 ```
 
-Provide 2–8,193 strictly ordered timestamps from one whole-meter import register, or up to 18,433 for an annual policy. The first timestamp
+Provide 2–8,193 strictly ordered timestamps from one whole-meter import register, or up to 18,433 for an annual policy or a demand charge. The first timestamp
 must match the saved opening's through-time. It anchors subsequent differences. The saved opening
 supplies the cycle's accrued kWh and subtotal separately. Values are canonical, nonnegative decimal
 strings in kWh, with up to 38 digits and 18 decimal places. A repeated register value records zero import.
@@ -334,9 +364,9 @@ cutoff, twelve-cycle limit and private archive replay apply.
 
 ### Round cumulative readings for half-hour billing
 
-Select the `rounding` field under **Plan** in Settings and press Enter to switch between display-only rounding and half-hour meter rounding. In a tariff file, the latter is `"rounding": "meter_import_half_hour_kwh_half_even_2"`. The rule requires readings on every UTC half hour, including the opening, review endpoint and each cycle boundary. Rates must agree throughout a nonzero interval. The regular calendar and time-zone rules still select the applicable rate and daily fee.
+Select the `rounding` field under **Plan** in Settings and press Enter to switch between display-only rounding and half-hour meter rounding. In a tariff file, the latter is `"rounding": "meter_import_half_hour_kwh_half_even_2"`. The opening, review endpoint and each cycle boundary must be on UTC half hours. Without a demand charge, provide a reading at each UTC half-hour boundary. Rates must agree throughout a nonzero half hour. The regular calendar and time-zone rules still select the applicable rate and daily fee.
 
-The review takes the difference between adjacent cumulative readings and rounds each interval's kWh to the nearest 0.01 before applying its rate. At a tie it chooses the even hundredth. For example, 0.015 and 0.025 each bill as 0.02 kWh. The opening and ending register quantities still use the exact differences. The report shows physical import and billed usage for the reviewed intervals, and the archive checks both on replay. [Octopus Energy's documented consumption rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints) is a reference for the rule.
+The review rounds each UTC half hour's total kWh to the nearest 0.01 before applying its rate. With a demand charge, supply readings at both grids wherever a boundary splits nonzero import. Demand uses the original physical differences. Energy sums the differences within each half hour and rounds the sum once. A zero delta can cross either grid. At a tie it chooses the even hundredth. For example, 0.015 and 0.025 each bill as 0.02 kWh. The opening and ending register quantities still use the exact differences. The report shows physical import and billed usage for the reviewed intervals, and the archive checks both on replay. [Octopus Energy's documented consumption rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints) is a reference for the rule.
 
 Changing the rule during a cycle clears the accrued subtotal and requires a new reviewed value. It preserves the physical import. The option applies with no tiers to cumulative whole-meter register files and prepared Octopus import bundles. Average-watt files, Dashboard scenarios, and the durable fixture billing ledger require display-only rounding. Existing declarations keep their saved rule. Select display-only rounding and review the opening before using the declaration in a release that predates this option.
 
