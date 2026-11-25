@@ -1,37 +1,21 @@
 #include "octopus_meter_rates.h"
 
-#include "meter_bill.h"
+#include "octopus_json.h"
 
 #include <algorithm>
-#include <charconv>
-#include <initializer_list>
 #include <string_view>
 #include <utility>
 
 namespace om {
 namespace {
 
-constexpr int64_t halfHourMs = 1800000;
+using namespace octopus_detail;
 constexpr std::size_t maxUnitRows = 8192, maxStandingRows = 256, maxPages = 96;
 
 struct Rate {
     int64_t begin = 0, end = 0;
     ExactDecimal pounds;
 };
-
-bool fields(const JsonValue &value, std::initializer_list<const char *> names) {
-    return value.isObject() && value.members.size() == names.size() &&
-        std::all_of(names.begin(), names.end(), [&](const char *name) { return value.find(name) != nullptr; });
-}
-
-unsigned digits(std::string_view value) {
-    unsigned result = 0;
-    for (char c : value) {
-        if (c < '0' || c > '9') return 10000;
-        result = result * 10 + static_cast<unsigned>(c - '0');
-    }
-    return result;
-}
 
 bool agileProduct(std::string_view product) {
     constexpr std::string_view flex = "AGILE-FLEX-", agile = "AGILE-";
@@ -44,19 +28,6 @@ bool agileProduct(std::string_view product) {
                                        digits(product.substr(6, 2))});
 }
 
-bool utcInstant(const JsonValue &value, int64_t &instant) {
-    if (!value.isString()) return false;
-    std::string_view s = value.text;
-    if (s.size() != 20 || s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' ||
-        s[16] != ':' || s[19] != 'Z') return false;
-    const auto day = civilSerialDay({static_cast<int>(digits(s.substr(0, 4))), digits(s.substr(5, 2)),
-                                     digits(s.substr(8, 2))});
-    const auto hour = digits(s.substr(11, 2)), minute = digits(s.substr(14, 2)), second = digits(s.substr(17, 2));
-    if (!day || *day < 0 || hour >= 24 || minute >= 60 || second >= 60) return false;
-    instant = (*day * 86400 + hour * 3600 + minute * 60 + second) * 1000;
-    return instant <= meterBillMaxUtcMs;
-}
-
 bool validLink(const JsonValue &value, bool present) {
     return present ? value.isString() && !value.text.empty() && value.text.size() <= 2048
                    : value.type == JsonValue::Type::Null;
@@ -64,53 +35,6 @@ bool validLink(const JsonValue &value, bool present) {
 
 bool paymentName(const JsonValue &method) {
     return method.isString() && (method.text == "DIRECT_DEBIT" || method.text == "NON_DIRECT_DEBIT");
-}
-
-bool exactPence(const JsonValue &value, ExactDecimal &amount) {
-    const std::string &token = value.text;
-    if (!value.isNumber() || token.size() > ExactDecimal::maxDigits + ExactDecimal::maxScale + 7)
-        return false;
-    const auto power = token.find_first_of("eE");
-    if (power == std::string::npos)
-        return ExactDecimal::parse(token, &amount) && amount.digits() <= 38 && amount.scale() <= 18;
-
-    const auto *exponentStart = token.data() + power + 1;
-    const auto *end = token.data() + token.size();
-    if (*exponentStart == '+') ++exponentStart;
-    int exponent = 0;
-    const auto parsed = std::from_chars(exponentStart, end, exponent);
-    constexpr int exponentLimit = ExactDecimal::maxDigits + ExactDecimal::maxScale;
-    if (parsed.ec != std::errc{} || parsed.ptr != end || exponent < -exponentLimit || exponent > exponentLimit)
-        return false;
-
-    const bool negative = token.front() == '-';
-    std::string coefficient = token.substr(negative, power - negative);
-    int scale = -exponent;
-    const auto point = coefficient.find('.');
-    if (point != std::string::npos) {
-        scale += static_cast<int>(coefficient.size() - point - 1);
-        coefficient.erase(point, 1);
-    }
-    const auto first = coefficient.find_first_not_of('0');
-    if (first == std::string::npos) {
-        amount = ExactDecimal{};
-        return true;
-    }
-    coefficient.erase(0, first);
-    while (scale > 0 && coefficient.back() == '0') {
-        coefficient.pop_back();
-        --scale;
-    }
-    if (scale > 18 || coefficient.size() + static_cast<std::size_t>((std::max)(0, -scale)) > 38)
-        return false;
-    if (scale < 0) {
-        coefficient.append(static_cast<std::size_t>(-scale), '0');
-    } else if (scale > 0) {
-        const auto places = static_cast<std::size_t>(scale);
-        if (coefficient.size() <= places) coefficient.insert(0, places + 1 - coefficient.size(), '0');
-        coefficient.insert(coefficient.size() - places, 1, '.');
-    }
-    return ExactDecimal::parse(negative ? "-" + coefficient : coefficient, &amount);
 }
 
 bool rates(const JsonValue &pages, const std::string &payment, std::size_t maxRows, bool standing,
@@ -146,7 +70,7 @@ bool rates(const JsonValue &pages, const std::string &payment, std::size_t maxRo
             ExactDecimal pence, untaxed;
             if (!utcInstant(*entry.find("valid_from"), rate.begin) ||
                 (!(standing && end.type == JsonValue::Type::Null) && !utcInstant(end, rate.end)) ||
-                rate.end <= rate.begin || !exactPence(inclusive, pence) || !exactPence(exclusive, untaxed) ||
+                rate.end <= rate.begin || !exactNumber(inclusive, pence) || !exactNumber(exclusive, untaxed) ||
                 (standing && (pence.negative() || untaxed.negative())) ||
                 !pence.divideExact(100, &rate.pounds))
                 return false;

@@ -1,5 +1,6 @@
 #include "meter_bill.h"
 #include "meter_bill_archive.h"
+#include "octopus_meter_consumption.h"
 
 #include <algorithm>
 #include <chrono>
@@ -128,25 +129,39 @@ const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, in
     return nullptr;
 }
 
-const char *decodeMeterReadings(const std::string &text, const BillOpening &opening, int64_t cutoff,
-                               const char *lateReadingError, MeterReadings &readings) {
+const char *decodeMeterReadings(const std::string &text, const TariffDeclaration &declaration, int64_t cutoff,
+                               const char *lateReadingError, MeterReadings &readings, int64_t &octopusObserved,
+                               const std::function<bool()> &stopped) {
+    const auto &opening = declaration.opening;
     JsonValue root;
-    if (!parseJsonStrict(text, &root, nullptr) || !root.isObject() || root.members.size() != 3)
+    if (!parseJsonStrict(text, &root, nullptr, {maxMeterFileBytes, 5}) || !root.isObject())
         return "invalid interval document";
     const auto *schema = root.find("schema_version");
     const auto *scope = root.find("scope");
     uint64_t version = 0;
-    if (!schema || !schema->asUint64(&version) || (version != 1 && version != 2) || !scope || !scope->isString())
+    if (!schema || !schema->asUint64(&version) || version < 1 || version > 3 || !scope || !scope->isString() ||
+        root.members.size() != (version == 3 ? 5u : 3u))
         return "invalid interval document";
-    const auto *rows = root.find(version == 1 ? "intervals" : "register_readings");
+    const auto *rows = root.find(version == 1 ? "intervals" : version == 2 ? "register_readings" : "consumption");
     if (!rows || !rows->isArray()) return "invalid interval document";
     const auto size = rows->items.size();
-    if (version == 1 ? size < 1 || size > maxMeterIntervals : size < 2 || size > maxMeterIntervals + 1)
+    if (version == 2 ? size < 2 || size > maxMeterIntervals + 1 : size < 1 || size > maxMeterIntervals)
         return "invalid interval document";
     if (scope->text != opening.evidence.scope) return "meter scope differs from the saved opening";
     if (version == 1)
         return decodeIntervals(*rows, opening, cutoff, lateReadingError, readings.emplace<std::vector<PowerInterval>>());
-    return decodeRegister(*rows, opening, cutoff, readings.emplace<std::vector<MeterImportInterval>>());
+    auto &imports = readings.emplace<std::vector<MeterImportInterval>>();
+    if (version == 2) return decodeRegister(*rows, opening, cutoff, imports);
+
+    int64_t end = 0;
+    if (!instant(root.find("end_utc_ms"), end) || !instant(root.find("observed_utc_ms"), octopusObserved) ||
+        end <= opening.throughUtcMs || end > octopusObserved)
+        return "invalid Octopus consumption window or observation";
+    if (octopusObserved > cutoff) return "Octopus consumption observed after the review cutoff";
+    if (declaration.plan.supplier != "Octopus Energy" || declaration.plan.currency != "GBP" ||
+        declaration.plan.rounding != TariffRounding::MeterHalfHourKwhHalfEven2)
+        return "Octopus consumption requires a declared Octopus Energy GBP tariff with half-hour rounding";
+    return octopus_detail::decodeConsumption(*rows, opening.throughUtcMs, end, imports, stopped);
 }
 
 bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration &declaration,
@@ -247,8 +262,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "canary-miner meter-bill --open-review FILE\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
+                  "Also accepts local Octopus electricity import bundles in schema version 3.\n"
                   "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
-                  "Half-hour rounding requires cumulative register readings at every UTC half hour.\n"
+                  "Half-hour rounding requires a reading for every UTC half hour.\n"
                   "Use --octopus-rates to apply captured public Agile prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
@@ -304,7 +320,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (!reopening && !readLocalReviewInput(paths->intervals, maxMeterFileBytes, original.intervals))
             return fail("interval file unavailable, oversized or not a regular file");
         MeterReadings readings;
-        if (const char *problem = decodeMeterReadings(original.intervals, declaration.opening, cutoff, lateReadingError, readings))
+        int64_t octopusObserved = 0;
+        if (const char *problem = decodeMeterReadings(original.intervals, declaration, cutoff, lateReadingError,
+                                                      readings, octopusObserved, stopped))
             return fail(problem);
 
         std::string report = std::holds_alternative<std::vector<MeterImportInterval>>(readings)
@@ -312,13 +330,18 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
               "Uses exact differences between cumulative import readings in kWh.\n"
             : "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
               "Average import is applied uniformly within each interval.\n";
+        if (octopusObserved) {
+            report = "Estimated electricity costs from declared Octopus Energy whole-meter electricity imports\n";
+            report += "API quantities are reported to 0.001 kWh. Local bundle observation " +
+                std::to_string(octopusObserved) + " UTC ms.\n";
+        }
         if (namedTariff) report += std::string("Reviewed IANA time database ") + tariffTzdbVersion + "\n";
         if (options.reviewCutoffArg || reopening || archiving) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
         if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
             report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";
         if (declaration.plan.rounding == TariffRounding::MeterHalfHourKwhHalfEven2) {
             if (!std::holds_alternative<std::vector<MeterImportInterval>>(readings))
-                return fail("half-hour rounding requires cumulative whole-meter register readings");
+                return fail("half-hour rounding requires cumulative whole-meter register readings or Octopus imports");
             report += "Billing rounds each complete UTC half hour to 0.01 kWh, ties to even, before applying the rate.\n";
         }
         if (options.ratesArg &&
