@@ -54,12 +54,22 @@ def main():
             os.close(slave)
             transcript = b''
 
-            def until(needle, fresh=False):
+            def until(needle, fresh=False, complete_frame=False):
                 nonlocal transcript
                 if fresh:
                     transcript = b''
+
+                def matching_output():
+                    if not complete_frame:
+                        return transcript if needle in transcript else None
+                    for output in transcript.split(b'\x1b[H')[1:]:
+                        frame, trailer, _ = output.partition(b'\x1b[K\x1b[J')
+                        if trailer and needle in frame:
+                            return frame
+                    return None
+
                 deadline = time.monotonic() + 10
-                while needle not in transcript:
+                while (matched := matching_output()) is None:
                     if time.monotonic() > deadline:
                         raise AssertionError('tariff terminal readiness deadline: ' + needle.decode('ascii'))
                     if select.select([master], [], [], 0.1)[0]:
@@ -70,7 +80,7 @@ def main():
                         if not data:
                             raise AssertionError('terminal EOF')
                         transcript += data
-                return transcript
+                return matched
 
             def send(data):
                 os.write(master, data)
@@ -180,8 +190,8 @@ def main():
             until(b'CanaryMiner / Settings')
             tariff()
             send(b'\x1b[B' * 6 + b'\r' + b'\x1b[B' * 8 + b'\r3\rv\r')
-            refused = until(b'Preferences UNKNOWN', True)
-            assert b'NOT Saved' in refused and b'confirmed_utc' not in refused
+            refused = until(b'Preferences UNKNOWN - NOT Saved', True, complete_frame=True)
+            assert b'No private bytes shown.' in refused and b'confirmed_utc' not in refused
             assert file.read_bytes() == saved_bytes
             checks += 1
             send(b'q')
