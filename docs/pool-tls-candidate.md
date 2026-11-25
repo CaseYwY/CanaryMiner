@@ -1,6 +1,6 @@
 # Windows and Linux TLS release candidates
 
-The candidate tool packages an enabled production SM120 build for installation and validation. The established release scripts still use the ordinary TLS-off policy. A candidate uses three fixed siblings in `bin/`: the miner, the preferences worker and the TLS stream worker.
+The candidate tool packages an enabled production SM120 build for installation and validation. The established release scripts still use the ordinary TLS-off policy. The base inventory has the miner, preferences worker and TLS stream worker together in `bin/`.
 
 ## Build inputs and archive creation
 
@@ -15,7 +15,7 @@ python3 -B packaging/release/tls_candidate.py pack --platform linux \
   --archive canaryminer-tls-candidate-linux-x86_64.tar.gz
 ```
 
-On Windows use `--platform windows`, the configured `dumpbin.exe`, and an archive ending in `.zip`. The packer reads the CMake cache and requires the enabled capabilities to match the selected candidate profile. It checks each complete image without running it. Only the miner role may import the GPU driver. Linux also checks the native pidfd symbol contract and the highest glibc requirement. All three images pass the existing private-content scan. The tool re-reads the written archive before making it available at the requested new path.
+On Windows use `--platform windows`, the configured `dumpbin.exe`, and an archive ending in `.zip`. The packer reads the CMake cache and requires the enabled capabilities to match the selected candidate profile. It checks each complete image without running it. Only the miner role may import the GPU driver. Linux also checks the native pidfd symbol contract and the highest glibc requirement. Every included image passes the private-content scan. The tool re-reads the written archive before making it available at the requested new path.
 
 The archive carries the strict TLS example, candidate instructions, project and component licences and a manifest of payload sizes and SHA-256 digests. Private build records and trust material stay outside the package. The archives contain no separate OpenSSL, CUDA driver or VC runtime installers.
 
@@ -29,14 +29,36 @@ from the same build directory as the three binaries and compares it to the nativ
 It installs the data as regular files under `bin/canary-tzdb-2026e`, next to the miner. The Windows package
 includes `windowsZones.xml` as required by its backend.
 
-The verifier recognizes both manifest schemas automatically. It checks the named data pins and
+The verifier recognizes the candidate schemas automatically. It checks the named data pins and
 looks for those pins in both native consumers, the miner and the preferences worker. It also checks
 the miner's compiled reference to the TLS stream worker. Use the updated verifier to install a named-clock package.
 Keep the directory beside the miner when moving the installation. You can use the installed
 [`meter-bill` command](tariff-declaration.md) with named tariff and reset clocks and reopen existing local market hour
 archives with [`market-hour --open-review`](market-reference-runtime.md#save-and-replay-a-public-hour).
-Both candidate profiles keep public HTTPS disabled. To make the original TLS-only candidate, use the
-TLS build without the named backend and omit `--with-named-tzdb`.
+The v1 and v2 profiles use a build with public HTTPS disabled. To make the original TLS-only candidate,
+also disable the named backend and omit `--with-named-tzdb`.
+
+## Candidate with opt-in public HTTPS
+
+Build the named tariff profile with `CANARY_ENABLE_PUBLIC_HTTPS=ON` and supply the reviewed static libcurl
+8.23.0 and c-ares 1.34.9 installation through `CMAKE_PREFIX_PATH`. Use Schannel on Windows and the pinned static
+OpenSSL 3.5.9 build on Linux for libcurl as well as the pool TLS worker. Set `CMAKE_SKIP_RPATH=ON` on Linux
+so the candidate uses system library paths. Build c-ares with `CARES_STATIC=ON` and
+`CARES_SHARED=OFF`. Build libcurl with `BUILD_STATIC_LIBS=ON`, `BUILD_SHARED_LIBS=OFF`, `ENABLE_ARES=ON`,
+`CURL_DISABLE_LDAP=ON` and `CURL_DISABLE_LDAPS=ON`. Supply c-ares to libcurl through its CMake prefix and omit
+third-party protocol, decompression, HTTP/2 and SSH dependencies. Use the system CA paths on Linux and Schannel's
+system trust on Windows. See [dependency provenance](public-https.md#development-dependency-provenance-not-approved-release-locks)
+and [curl's source build instructions](https://curl.se/docs/install.html).
+
+Add `--with-named-tzdb --with-public-https` to the pack command. A v3 candidate has four programs in `bin/`,
+including `canary_public_json_worker`. The packer checks each native dependency table and the worker's compiled
+backend and version strings. Windows permits IP Helper imports for this worker's resolver. The candidate
+does not include a separate curl, c-ares or OpenSSL shared library. The verifier checks the expected inventory,
+build markers and corresponding notices. The `version` command prints `public-https=opt-in` on this build.
+
+One-shot requests still require explicit flags for each invocation. A Dashboard launch requires a saved
+public ticker request and permission for that launch. See [public market commands](market-reference-runtime.md#check-public-tickers-without-mining).
+The package can be installed and verified offline. Live provider use and distribution approval remain separate.
 
 ## Verification and installation
 
@@ -54,7 +76,7 @@ Installation writes to a new directory after the complete verification step. The
 
 Use the extracted miner's `version` and interactive `settings` commands for CPU-only acceptance. The examples request strict TLS for the first user pool and turn donation off. Qualified native GPU, real pool login and proof submission, donation TLS and redistribution acceptance are separate release checks.
 
-Settings keeps economic mode off for fresh installations and old preferences that have no economic mode field. An explicitly saved request remains selected on reopening Settings. This candidate disables the public HTTPS transport at build time.
+Settings keeps economic mode off for fresh installations and old preferences that have no economic mode field. An explicitly saved request remains selected on reopening Settings.
 
 ## Candidate evidence
 

@@ -3,11 +3,12 @@ CanaryMiner TLS candidate
 This opt-in candidate is for local validation. manifest.json records the source
 revision, platform, TLS backend and SHA-256 of every payload file.
 
-Keep all three programs in the same bin directory:
+Keep these three programs in the same bin directory:
   canary-miner
   canary_preferences_worker
   canary_pool_tls_stream_worker
-Windows adds .exe to each name.
+A v3 market candidate also keeps canary_public_json_worker in bin.
+Windows adds .exe to each program name.
 
 Use the package SHA-256 from a trusted channel. Extract into a new directory.
 Start with ./bin/canary-miner version (.\bin\canary-miner.exe version on Windows).
@@ -25,11 +26,14 @@ at least as recent as the build toolset. Linux uses static OpenSSL 3.5.9
 and the system CA store. Linux needs the glibc floor in manifest.json,
 compatible C++ runtime libraries, and kernel pidfd support.
 
-If the manifest schema is canaryminer-tls-named-tzdb-candidate-v2, keep
-the bin/canary-tzdb-2026e directory with the programs. It contains the
-verified data required by named tariff clocks in meter-bill. Both package
-profiles support offline market archive replay and leave economic mode
-disabled on first use.
+In the v2 and v3 candidates, keep bin/canary-tzdb-2026e with the
+programs. It contains the verified data used by named tariff clocks.
+All profiles support offline market archive replay.
+
+The v3 candidate reports public-https=opt-in in the version command.
+Public-ticker settings and economic mode start disabled. One-shot market
+commands require explicit flags for each invocation. Actual public-source
+validation and permission to distribute this build are separate gates.
 
 See THIRD_PARTY.md and LICENSES for provenance and notices. GPU and mining
 acceptance and distribution approval are separate from this candidate check.

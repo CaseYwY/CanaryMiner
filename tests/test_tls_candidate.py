@@ -44,7 +44,7 @@ class CandidateTests(unittest.TestCase):
             cache = Path(directory) / 'CMakeCache.txt'
             base = ['CANARY_PROFILE:STRING=production-sm120', 'CMAKE_BUILD_TYPE:STRING=Release',
                     'CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON', '_OPENSSL_VERSION:INTERNAL=3.5.9',
-                    'CANARY_ENABLE_NAMED_TZDB:BOOL=OFF',
+                    'CANARY_ENABLE_NAMED_TZDB:BOOL=OFF', 'CANARY_ENABLE_PUBLIC_HTTPS:BOOL=OFF',
                     *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF)]
             cache.write_text('\n'.join(base), encoding='utf8')
             CANDIDATE.check_cache(cache, 'linux')
@@ -76,6 +76,7 @@ class CandidateTests(unittest.TestCase):
             cache = root / 'CMakeCache.txt'
             base = ['CANARY_PROFILE:STRING=production-sm120', 'CMAKE_BUILD_TYPE:STRING=Release',
                     'CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON', 'CANARY_ENABLE_NAMED_TZDB:BOOL=ON',
+                    'CANARY_ENABLE_PUBLIC_HTTPS:BOOL=OFF',
                     *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF)]
             bundle = f'CANARY_BUNDLED_TZDB_DIR:PATH={root.as_posix()}'
             cache.write_text('\n'.join([*base, bundle]), encoding='utf8')
@@ -89,6 +90,35 @@ class CandidateTests(unittest.TestCase):
                     cache.write_text('\n'.join(entries), encoding='utf8')
                     with self.assertRaises(ValueError):
                         CANDIDATE.check_cache(cache, 'windows', named_tzdb=True)
+
+    def test_public_https_profile_and_worker_dependencies_are_explicit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / 'CMakeCache.txt'
+            base = ['CANARY_PROFILE:STRING=production-sm120', 'CMAKE_BUILD_TYPE:STRING=Release',
+                    'CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON', 'CANARY_ENABLE_NAMED_TZDB:BOOL=ON',
+                    'CANARY_ENABLE_PUBLIC_HTTPS:BOOL=ON', f'CANARY_BUNDLED_TZDB_DIR:PATH={cache.parent}',
+                    '_OPENSSL_VERSION:INTERNAL=3.5.9', *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF)]
+            cache.write_text('\n'.join(base), encoding='utf8')
+            for platform in ('linux', 'windows'):
+                CANDIDATE.check_cache(cache, platform, named_tzdb=True, public_https=True)
+                with self.assertRaises(ValueError):
+                    CANDIDATE.check_cache(cache, platform, named_tzdb=True)
+                with self.assertRaises(ValueError):
+                    CANDIDATE.check_cache(cache, platform, public_https=True)
+            with self.assertRaises(ValueError):
+                RELEASE.check_cache(cache)
+
+        windows_worker = 'canary_public_json_worker.exe'
+        deps = 'Image has the following dependencies:\n\n KERNEL32.dll\n IPHLPAPI.DLL\n\n'
+        self.assertEqual(RELEASE.dependency_check('windows', windows_worker, deps), ())
+        for name in CANDIDATE.images('windows'):
+            with self.assertRaises(ValueError):
+                RELEASE.dependency_check('windows', name, deps)
+        with self.assertRaises(ValueError):
+            RELEASE.dependency_check('windows', windows_worker, deps.replace('IPHLPAPI.DLL', 'WLDAP32.DLL'))
+        with self.assertRaises(ValueError):
+            RELEASE.dependency_check('linux', 'canary_public_json_worker', ' NEEDED libssl.so.3\n',
+                                     ' *UND* (GLIBC_2.39) pidfd_spawn\n')
 
     def test_standalone_tzdb_pins_match_native_runtime(self):
         pins = Path(__file__).resolve().parents[1] / 'src/product/tariff_tzdb_files.inc'
@@ -190,6 +220,19 @@ class CandidateTests(unittest.TestCase):
                     with self.assertRaises(FileExistsError):
                         CANDIDATE.install(platform, archive, digest, prefix)
 
+    def named_payload(self, platform):
+        files = self.files(platform)
+        tzdb = CANDIDATE.tzdb_paths(platform)
+        for name, destination in tzdb.items():
+            files[destination] = f'{name} fixture contents'.encode()
+        inventory = ''.join(f'{name} {hashlib.sha256(files[path]).hexdigest()}\n'
+                            for name, path in sorted(tzdb.items())).encode('ascii')
+        miner, preferences, stream_worker = CANDIDATE.images(platform)
+        for image in (miner, preferences):
+            files[f'bin/{image}'] += inventory
+        files[f'bin/{miner}'] += stream_worker.encode('ascii') + b'\0'
+        return files, hashlib.sha256(inventory).hexdigest()
+
     def test_named_tzdb_inventory_and_pins_are_checked_before_install(self):
         for platform in ('windows', 'linux'):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
@@ -197,19 +240,12 @@ class CandidateTests(unittest.TestCase):
                 archive = root / ('named' + CANDIDATE.suffix(platform))
                 other = root / ('renamed' + CANDIDATE.suffix(platform))
                 prefix = root / 'installed'
-                files = self.files(platform)
+                files, fixture_pin = self.named_payload(platform)
                 tzdb = CANDIDATE.tzdb_paths(platform)
-                for name, destination in tzdb.items():
-                    files[destination] = f'{name} fixture contents'.encode()
-                hashes = {name: hashlib.sha256(files[path]).hexdigest() for name, path in tzdb.items()}
-                inventory = ''.join(f'{name} {digest}\n' for name, digest in sorted(hashes.items()))
-                fixture_pin = hashlib.sha256(inventory.encode('ascii')).hexdigest()
                 miner, preferences, stream_worker = CANDIDATE.images(platform)
                 consumers = (f'bin/{miner}', f'bin/{preferences}')
-                for consumer in consumers:
-                    files[consumer] += inventory.encode('ascii')
-                named_only_miner = files[consumers[0]]
-                files[consumers[0]] += stream_worker.encode('ascii') + b'\0'
+                worker_reference = stream_worker.encode('ascii') + b'\0'
+                named_only_miner = files[consumers[0]][:-len(worker_reference)]
                 glibc = '2.40' if platform == 'linux' else None
 
                 def rewrite_manifest(payloads, named_tzdb=True):
@@ -241,6 +277,61 @@ class CandidateTests(unittest.TestCase):
                         self.assertEqual((prefix / tzdb['version']).read_bytes(), files[tzdb['version']])
                         if platform == 'linux':
                             self.assertEqual(stat.S_IMODE((prefix / tzdb['version']).stat().st_mode), 0o644)
+
+    def test_public_https_install_refuses_mixed_native_images_and_wrong_inventory(self):
+        for platform in ('windows', 'linux'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / ('market' + CANDIDATE.suffix(platform))
+                prefix = root / 'installed'
+                files, fixture_pin = self.named_payload(platform)
+                source = Path(__file__).resolve().parents[1]
+                for name in CANDIDATE.PUBLIC_HTTPS_NOTICE_SHA256:
+                    files[name] = (source / name).read_bytes()
+                miner, preferences, pool, worker = (f'bin/{name}' for name in CANDIDATE.images(platform, True))
+                offline_miner = files[miner]
+                files[miner] += b'  public-https=opt-in\0'
+                backend_name = b'Schannel\0' if platform == 'windows' else b'OpenSSL 3.5.9 '
+                backend = (b'schannel: AcquireCredentialsHandle failed:' if platform == 'windows'
+                           else b'OpenSSL SSL_connect:')
+                files[worker] = (b'CMJSON1 libcurl\0CanaryMiner-PublicData/1\0' +
+                                 backend_name + backend + b'8.23.0\0' + b'1.34.9\0')
+
+                def with_manifest(payload, public_https=True):
+                    data = {name: value for name, value in payload.items() if name != CANDIDATE.MANIFEST}
+                    doc = CANDIDATE.manifest(platform, REVISION, '2.40' if platform == 'linux' else None,
+                                             data, named_tzdb=True, public_https=public_https)
+                    return {**data, CANDIDATE.MANIFEST: json.dumps(doc).encode()}
+
+                with patch.dict(CANDIDATE.TZDB_INVENTORY_SHA256, {platform: fixture_pin}), \
+                        patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+                    for mixed in (
+                        with_manifest({**files, miner: offline_miner}),
+                        with_manifest({**files, preferences: files[preferences] + files[worker]}),
+                        with_manifest({**files, pool: files[pool] + files[worker]}),
+                        with_manifest({**files, worker: files[worker].replace(b'8.23.0', b'8.12.0')}),
+                        with_manifest({**files, worker: files[worker].replace(b'1.34.9', b'1.34.8')}),
+                        with_manifest({**files, worker: files[worker].replace(backend, b'invalid backend')}),
+                        with_manifest({**files, worker: files[worker] + b'fixture.test.invalid'}),
+                        with_manifest({**files, worker: files[worker] + b'MultiSSL\0'}),
+                        with_manifest({**files, 'LICENSES/curl-8.23.0.txt': b'unrelated notice'}),
+                        with_manifest({name: value for name, value in files.items() if name != worker}),
+                        with_manifest({name: value for name, value in files.items() if name != worker}, False),
+                    ):
+                        digest = self.archive(platform, mixed, archive)
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.install(platform, archive, digest, prefix)
+                    self.assertFalse(prefix.exists())
+                    valid = with_manifest(files)
+                    digest = self.archive(platform, valid, archive)
+                    _, document, _ = CANDIDATE.load(platform, archive, digest)
+                    self.assertEqual(document['schema'], CANDIDATE.PUBLIC_HTTPS_SCHEMA)
+                    self.assertEqual(document['public_https']['tls_backend'], document['tls_backend'])
+                    if platform == 'windows' or os.name == 'posix':
+                        CANDIDATE.install(platform, archive, digest, prefix)
+                        self.assertEqual((prefix / worker).read_bytes(), files[worker])
+                        if platform == 'linux':
+                            self.assertEqual(stat.S_IMODE((prefix / worker).stat().st_mode), 0o755)
 
     def test_refuses_wrong_hash_changed_file_extra_and_missing_members(self):
         for platform in ('linux', 'windows'):
