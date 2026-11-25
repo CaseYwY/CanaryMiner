@@ -78,50 +78,69 @@ CivilDate monthlyDate(CivilDate month,unsigned day){
     while(!validCivilDate(month))--month.day;
     return month;
 }
-TariffMonthlyReset decodeMonthlyReset(const JsonValue &policy,bool allowNamed){
-    const auto *allocation=policy.find("daily_fee_allocation");
-    if(allocation){
-        keys(policy,"reset_policy",{"monthly_day","clock","daily_fee_allocation"});
-        choice(*allocation,"reset_policy.daily_fee_allocation",{"prorate_by_cycle_minutes"});
-    }else keys(policy,"reset_policy",{"monthly_day","clock"});
-    const auto day=static_cast<unsigned>(integer(*policy.find("monthly_day"),"reset_policy.monthly_day",31));
-    if(!day)bad("reset_policy.monthly_day","Enter a monthly reset day from 1 to 31.",TariffProblemKind::Unknown);
-    return {day,decodeClock(*policy.find("clock"),"reset_policy.clock",allowNamed),
-        allocation ? DailyFeeAllocation::ProrateByCycleMinutes : DailyFeeAllocation::WholeDay};
-}
-TariffCycleBounds monthlyCycle(const TariffMonthlyReset &policy,int64_t through){
-    const auto day=policy.day;
-    const auto &clock=policy.clock;
-    if(!day||day>31)bad("reset_policy.monthly_day","Enter a monthly reset day from 1 to 31.",TariffProblemKind::Unknown);
-    const auto stamp=civilAt(clock,through);
-    if(stamp.status!=CivilStatus::Ok)
-        bad("opening.through_utc_ms","Through-time is outside the reset clock range.",TariffProblemKind::Unknown);
-    auto first=monthlyDate(stamp.date,day);
-    if(stamp.date.day<first.day)first=monthlyDate(adjacentMonth(first,-1),day);
-    const auto next=monthlyDate(adjacentMonth(first,1),day);
-    const auto boundary=[&](CivilDate date)->std::optional<int64_t>{
-        if(clock.kind!=CivilClockKind::NamedIana)return civilResolve(clock,date,0).utcMs;
-        const auto window=civilDay(clock,date);
-        if(window.status!=CivilStatus::Ok)return std::nullopt;
-        return window.beginUtcMs; // first valid instant of a real reset date, including a midnight fold/gap
-    };
-    auto begin=boundary(first),end=boundary(next);
-    if(clock.kind==CivilClockKind::NamedIana&&begin&&end&&through>=*end){
-        // A backward transition can re-enter the previous local date after this month's reset.
-        begin=end;
-        end=boundary(monthlyDate(adjacentMonth(next,1),day));
+TariffResetSchedule decodeResetSchedule(const JsonValue &policy, bool allowNamed, bool annual) {
+    const auto *allocation = policy.find("daily_fee_allocation");
+    if (annual) {
+        if (allocation) keys(policy, "reset_policy", {"annual_month", "annual_day", "clock", "daily_fee_allocation"});
+        else keys(policy, "reset_policy", {"annual_month", "annual_day", "clock"});
+    } else {
+        if (allocation) keys(policy, "reset_policy", {"monthly_day", "clock", "daily_fee_allocation"});
+        else keys(policy, "reset_policy", {"monthly_day", "clock"});
     }
-    if(!begin||!end||through<*begin||through>=*end)
-        bad("opening.through_utc_ms","Monthly cycle requires two valid reset dates bracketing its through-time.",TariffProblemKind::Unknown);
-    return {*begin,*end};
+    if (allocation) choice(*allocation, "reset_policy.daily_fee_allocation", {"prorate_by_cycle_minutes"});
+    const char *dayField = annual ? "annual_day" : "monthly_day";
+    const auto dayPath = child("reset_policy", dayField);
+    const auto day = static_cast<unsigned>(integer(*policy.find(dayField), dayPath, 31));
+    if (!day) bad(dayPath, "Enter a reset day from 1 to 31.", TariffProblemKind::Unknown);
+    unsigned month = 0;
+    if (annual) {
+        month = static_cast<unsigned>(integer(*policy.find("annual_month"), "reset_policy.annual_month", 12));
+        if (!month) bad("reset_policy.annual_month", "Enter a month from 1 to 12.", TariffProblemKind::Unknown);
+    }
+    return {day, decodeClock(*policy.find("clock"), "reset_policy.clock", allowNamed),
+            allocation ? DailyFeeAllocation::ProrateByCycleMinutes : DailyFeeAllocation::WholeDay, month};
+}
+
+TariffCycleBounds recurringCycle(const TariffResetSchedule &policy, int64_t through) {
+    const auto day = policy.day;
+    const auto &clock = policy.clock;
+    if (!day || day > 31 || policy.annualMonth > 12)
+        bad("reset_policy", "The recurring reset requires a valid day and month.", TariffProblemKind::Unknown);
+    const auto stamp = civilAt(clock, through);
+    if (stamp.status != CivilStatus::Ok)
+        bad("opening.through_utc_ms", "Through-time is outside the reset clock range.", TariffProblemKind::Unknown);
+    const auto neighbor = [&](CivilDate date, int direction) {
+        return monthlyDate(policy.annualMonth ? CivilDate{date.year + direction, policy.annualMonth, 1}
+                                             : adjacentMonth(date, direction), day);
+    };
+    auto first = monthlyDate(policy.annualMonth ? CivilDate{stamp.date.year, policy.annualMonth, 1} : stamp.date, day);
+    if (stamp.date.month < first.month || (stamp.date.month == first.month && stamp.date.day < first.day))
+        first = neighbor(first, -1);
+    const auto next = neighbor(first, 1);
+    const auto boundary = [&](CivilDate date) -> std::optional<int64_t> {
+        if (clock.kind != CivilClockKind::NamedIana) return civilResolve(clock, date, 0).utcMs;
+        const auto window = civilDay(clock, date);
+        if (window.status != CivilStatus::Ok) return std::nullopt;
+        return window.beginUtcMs;  // First valid instant of a real reset date.
+    };
+    auto begin = boundary(first), end = boundary(next);
+    if (clock.kind == CivilClockKind::NamedIana && begin && end && through >= *end) {
+        // A backward transition can re-enter the preceding local date after the reset.
+        begin = end;
+        end = boundary(neighbor(next, 1));
+    }
+    if (!begin || !end || through < *begin || through >= *end)
+        bad("opening.through_utc_ms", "The cycle requires two valid reset dates bracketing its through-time.",
+            TariffProblemKind::Unknown);
+    return {*begin, *end};
 }
 std::vector<TariffCycleBounds> comparisonCycles(const TariffDeclaration &d,unsigned cycles){
-    if(cycles<1||cycles>maxTariffComparisonCycles||(cycles>1&&!d.monthlyReset))return {};
+    if(cycles<1||cycles>maxTariffComparisonCycles||(cycles>1&&!d.resetSchedule))return {};
     std::vector<TariffCycleBounds> windows{{d.opening.cycleBeginUtcMs,d.opening.cycleEndUtcMs}};
     try{
         while(windows.size()<cycles){
             const auto boundary=windows.back().endUtcMs;
-            const auto next=monthlyCycle(*d.monthlyReset,boundary);
+            const auto next=recurringCycle(*d.resetSchedule,boundary);
             if(next.beginUtcMs!=boundary||next.endUtcMs<=boundary)return {};
             windows.push_back(next);
         }
@@ -131,7 +150,7 @@ std::vector<TariffCycleBounds> comparisonCycles(const TariffDeclaration &d,unsig
 
 bool splitsChargedDay(const TariffPlan &plan,int64_t boundary,std::optional<int64_t> publishedThroughUtcMs=std::nullopt){
     const auto day=civilDayAt(plan.clock,boundary);
-    // A monthly reset inside a charged tariff day needs an explicit allocation rule.
+    // A reset inside a charged tariff day needs an explicit allocation rule.
     return day.status==CivilStatus::Ok && day.beginUtcMs<boundary &&
         std::any_of(plan.revisions.begin(),plan.revisions.end(),[&](const TariffRevision &r){
             return (!publishedThroughUtcMs || r.publishedUtcMs<=*publishedThroughUtcMs) &&
@@ -188,13 +207,20 @@ JsonValue tariffDeclarationTemplate(){
     for(auto &m:v.members)if(m.first=="plan")for(auto &p:m.second.members)if(p.first=="revisions")p.second.items.push_back(tariffRowTemplate("revisions"));
     return v;
 }
-bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
+static bool deriveCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem,bool annual){
     try{
         const auto at=static_cast<int64_t>(integer(through,"opening.through_utc_ms"));
-        bounds=monthlyCycle(decodeMonthlyReset(policy,true),at);
+        bounds=recurringCycle(decodeResetSchedule(policy,true,annual),at);
         if(problem)*problem={};
         return true;
     }catch(const Invalid &e){if(problem)*problem=e.problem;return false;}
+}
+
+bool deriveTariffRecurringCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
+    return deriveCycle(policy,through,bounds,problem,policy.find("annual_month")!=nullptr);
+}
+bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
+    return deriveCycle(policy,through,bounds,problem,false);
 }
 
 std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d,unsigned cycles){
@@ -207,10 +233,10 @@ ElectricityStatus advanceTariffOpening(const TariffDeclaration &d,BillOpening &s
                                        bool &chargedDaySplit){
     chargedDaySplit=false;
     if(settled.throughUtcMs!=settled.cycleEndUtcMs)return ElectricityStatus::Invalid;
-    if(!d.monthlyReset)return ElectricityStatus::Unsupported;
+    if(!d.resetSchedule)return ElectricityStatus::Unsupported;
     try{
         const auto boundary=settled.cycleEndUtcMs;
-        const auto window=monthlyCycle(*d.monthlyReset,boundary);
+        const auto window=recurringCycle(*d.resetSchedule,boundary);
         if(window.beginUtcMs!=boundary||window.endUtcMs<=boundary)return ElectricityStatus::Invalid;
         chargedDaySplit=d.dailyFeeAllocation()==DailyFeeAllocation::WholeDay&&
             splitsChargedDay(d.plan,boundary,publishedThroughUtcMs);
@@ -258,7 +284,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(!out)bad("","No declaration output.",TariffProblemKind::NoOutput);
         if(tariffJson(root).size()>tariffDeclarationMaxBytes)bad("","Declaration exceeds 64 KiB.",TariffProblemKind::Oversized);
         keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"});
-        const auto version=integer(*root.find("schema_version"),"schema_version",4);
+        const auto version=integer(*root.find("schema_version"),"schema_version",5);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         const auto &policy=*root.find("reset_policy");
         const bool explicitCycle=version==1||(version==4&&policy.isString());
@@ -274,7 +300,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         for(const auto &binding:std::vector<std::pair<const char *,std::string *>>{{"key",&p.key},{"territory",&p.territory},{"supplier",&p.supplier},{"product",&p.product},{"currency",&p.currency}})
             *binding.second=label(*plan.find(binding.first),child("plan",binding.first));
         if(p.currency.size()!=3||p.currency.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")!=std::string::npos)bad("plan.currency","Three uppercase letters required; no currency/FX inference.",TariffProblemKind::Currency);
-        p.clock=decodeClock(*plan.find("clock"),"plan.clock",version==4);
+        p.clock=decodeClock(*plan.find("clock"),"plan.clock",version>=4);
         const auto tiers=choice(*plan.find("tiers"),"plan.tiers",{"none","progressive","all_units"});p.tiers=tiers=="none"?TierMode::None:tiers=="progressive"?TierMode::Progressive:TierMode::AllUnits;
         p.cycleCharge=decimal(*plan.find("cycle_charge"),"plan.cycle_charge");
         if(!null(*plan.find("minimum_cycle_subtotal")))p.minimumCycleSubtotal=decimal(*plan.find("minimum_cycle_subtotal"),"plan.minimum_cycle_subtotal");
@@ -324,14 +350,14 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             {namedRate?tariffTzdbVersion:"explicit-fixed-clock"});
         s.cycleBeginUtcMs=integer(*opening.find("cycle_begin_utc_ms"),"opening.cycle_begin_utc_ms");s.cycleEndUtcMs=integer(*opening.find("cycle_end_utc_ms"),"opening.cycle_end_utc_ms");s.throughUtcMs=integer(*opening.find("through_utc_ms"),"opening.through_utc_ms");
         if(!explicitCycle){
-            d.monthlyReset=decodeMonthlyReset(policy,version==4);
-            if(version!=4&&(version==3)!=(d.dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes))
+            d.resetSchedule=decodeResetSchedule(policy,version>=4,version==5);
+            if(version<4&&(version==3)!=(d.dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes))
                 bad("reset_policy.daily_fee_allocation","The chosen daily fee rule must match the schema version.",TariffProblemKind::Unknown);
-            const auto bounds=monthlyCycle(*d.monthlyReset,s.throughUtcMs);
+            const auto bounds=recurringCycle(*d.resetSchedule,s.throughUtcMs);
             if(s.cycleBeginUtcMs!=bounds.beginUtcMs||s.cycleEndUtcMs!=bounds.endUtcMs)
-                bad("opening","Derive both cycle boundaries from the monthly rule and through-time.",TariffProblemKind::Unknown);
+                bad("opening","Derive both cycle boundaries from the reset rule and through-time.",TariffProblemKind::Unknown);
         }
-        const bool namedReset=d.monthlyReset&&d.monthlyReset->clock.kind==CivilClockKind::NamedIana;
+        const bool namedReset=d.resetSchedule&&d.resetSchedule->clock.kind==CivilClockKind::NamedIana;
         if(version==4&&!namedRate&&!namedReset)
             bad("schema_version","Version 4 requires an explicitly named tariff or reset clock.",TariffProblemKind::SchemaVersion);
         auto quantity=electricityKwh(decimal(*opening.find("imported_kwh"),"opening.imported_kwh"));if(!quantity)bad("opening.imported_kwh","Nonnegative whole-meter quantity required.",TariffProblemKind::OpeningQuantity);s.importedKwh=*quantity;

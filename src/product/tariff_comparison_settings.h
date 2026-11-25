@@ -31,7 +31,7 @@ class TariffComparisonSettings {
         if (key == '\t' || key == kKeyUp || key == kKeyDown || key == kKeyBackTab) {
             focus_ = 1 - focus_;
         } else if (key == kKeyLeft || key == kKeyRight) {
-            if (!declaration_->monthlyReset) return;
+            if (!declaration_->resetSchedule) return;
             auto cycles = cycles_;
             if (key == kKeyLeft && cycles > 1) --cycles;
             if (key == kKeyRight && cycles < maxTariffComparisonCycles) ++cycles;
@@ -86,7 +86,7 @@ class TariffComparisonSettings {
         };
         add(end_ ? tariffComparisonEnglish(Key::Span, {{"begin", std::to_string(o.throughUtcMs)}, {"end", std::to_string(*end_)}})
                  : tariffComparisonEnglish(Key::EndUnavailable));
-        auto cycleLabel=declaration_->monthlyReset
+        auto cycleLabel=declaration_->resetSchedule
             ? tariffComparisonEnglish(Key::Cycles, {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
             : tariffComparisonEnglish(Key::Instruction);
         if(declaration_->dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes)

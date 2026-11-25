@@ -41,7 +41,7 @@ void comparisonHorizon(JsonValue saved){
     const std::array<ExactDecimal,2> watts{dec("0"),dec("1000")};
     TariffDeclaration declaration;
     CHECK(decodeTariffDeclaration(saved,&declaration));
-    CHECK(declaration.monthlyReset&&declaration.monthlyReset->day==31);
+    CHECK(declaration.resetSchedule&&declaration.resetSchedule->day==31);
     CHECK(tariffComparisonEnd(declaration,1)==march&&tariffComparisonEnd(declaration,2)==april);
     CHECK(tariffComparisonEnd(declaration,12)==nextFebruary);
     CHECK(!tariffComparisonEnd(declaration,0)&&!tariffComparisonEnd(declaration,13));
@@ -105,16 +105,16 @@ void comparisonHorizon(JsonValue saved){
     auto fee=declaration;
     fee.plan.revisions[0].chargePerCivilDay=dec("0.1");
     checkComparison(compareTariffCycles(fee,watts,2,T),"5.610000","169.290000","163.680000");
-    fee.monthlyReset->clock={CivilClockKind::FixedStandardOffset,{},19800};
+    fee.resetSchedule->clock={CivilClockKind::FixedStandardOffset,{},19800};
     fee.opening.cycleBeginUtcMs-=19800000;
     fee.opening.cycleEndUtcMs-=19800000;
     const auto split=compareTariffCycles(fee,watts,2,T);
     CHECK(split.status==ElectricityStatus::Unsupported&&split.failedCycle==2&&split.splitsChargedDay);
-    fee.monthlyReset->dailyFeeAllocation=DailyFeeAllocation::ProrateByCycleMinutes;
+    fee.resetSchedule->dailyFeeAllocation=DailyFeeAllocation::ProrateByCycleMinutes;
     fee.plan.revisions[0].chargePerCivilDay=dec("1.44");
     const auto prorated=compareTariffCycles(fee,watts,2,T);
     CHECK(prorated.status==ElectricityStatus::Ok&&!prorated.splitsChargedDay);
-    fee.monthlyReset->dailyFeeAllocation=DailyFeeAllocation::WholeDay;
+    fee.resetSchedule->dailyFeeAllocation=DailyFeeAllocation::WholeDay;
     fee.plan.revisions[0].chargePerCivilDay={};
     const auto unaligned=compareTariffCycles(fee,watts,2,T);
     CHECK(unaligned.status==ElectricityStatus::Ok&&tariffComparisonEnd(fee,2)==april-19800000);
@@ -133,8 +133,89 @@ void comparisonHorizon(JsonValue saved){
     CHECK(late.status==ElectricityStatus::NotYetKnown&&late.failedCycle==2&&late.withMining.numerator.zero());
     const std::atomic<bool> cancelled{true};
     CHECK(compareTariffCycles(declaration,watts,2,T,&cancelled).status==ElectricityStatus::Unavailable);
-    declaration.monthlyReset.reset();
+    declaration.resetSchedule.reset();
     CHECK(!tariffComparisonEnd(declaration,2));
+}
+
+void annualCycles(const JsonValue &original) {
+    constexpr int64_t feb2023=1677542400000, feb2024=1709164800000, feb2025=1740700800000, feb2026=1772236800000;
+    const auto policy=json(R"({"annual_month":2,"annual_day":29,"clock":{"kind":"utc","fixed_offset_seconds":0}})");
+    TariffCycleBounds bounds;
+    TariffProblem error;
+    CHECK(deriveTariffRecurringCycle(policy,json(std::to_string(feb2024-1)),bounds,&error));
+    CHECK(bounds.beginUtcMs==feb2023&&bounds.endUtcMs==feb2024);
+    CHECK(deriveTariffRecurringCycle(policy,json(std::to_string(feb2024)),bounds,&error));
+    CHECK(bounds.beginUtcMs==feb2024&&bounds.endUtcMs==feb2025);
+    CHECK(!deriveTariffMonthlyCycle(policy,json(std::to_string(feb2024)),bounds,&error));
+    auto fixed=policy;
+    set(fixed,"clock",R"({"kind":"fixed_standard","fixed_offset_seconds":-19800})");
+    CHECK(deriveTariffRecurringCycle(fixed,json(std::to_string(feb2024+19800000)),bounds,&error));
+    CHECK(bounds.beginUtcMs==feb2024+19800000&&bounds.endUtcMs==feb2025+19800000);
+    const auto prior=bounds;
+    for(const auto *invalid:{"0","13","true","2.0","\"2\""}){
+        auto bad=policy;
+        set(bad,"annual_month",invalid);
+        CHECK(!deriveTariffRecurringCycle(bad,json(std::to_string(feb2024)),bounds,&error));
+        CHECK(error.path=="reset_policy.annual_month"&&bounds.beginUtcMs==prior.beginUtcMs&&bounds.endUtcMs==prior.endUtcMs);
+    }
+
+    auto v=original;
+    auto &plan=member(v,"plan");
+    auto &opening=member(v,"opening");
+    auto &revision=member(plan,"revisions").items[0];
+    set(plan,"tiers","\"none\"");
+    set(plan,"cycle_charge","\"10\"");
+    set(plan,"minimum_cycle_subtotal","null");
+    set(plan,"subtotal_multiplier","\"1\"");
+    set(revision,"base_rate_per_kwh","\"0.1\"");
+    set(revision,"time_mode","\"constant\"");
+    set(revision,"charge_per_civil_day","\"0\"");
+    set(revision,"calendar","[]");
+    set(revision,"bands","[]");
+    set(revision,"begin_utc_ms",std::to_string(feb2024));
+    set(revision,"end_utc_ms",std::to_string(feb2026));
+    set(revision,"published_utc_ms","1700000000000");
+    set(opening,"cycle_begin_utc_ms",std::to_string(feb2024));
+    set(opening,"cycle_end_utc_ms",std::to_string(feb2025));
+    set(opening,"through_utc_ms",std::to_string(feb2024));
+
+    TariffSettingsPanel panel;
+    panel.open(v);
+    enter(panel,"reset_policy");
+    CHECK(panel.render(85,18,ColorLevel::None).find("[Y] Annual reset")!=std::string::npos);
+    panel.key('y',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="5"&&panel.active.find("schema_version")->text=="1");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    enter(panel,"reset_policy");
+    enter(panel,"annual_month");type(panel,"2");
+    enter(panel,"annual_day");type(panel,"29");
+    panel.key('g',{},T/1000);
+    CHECK(panel.path()=="opening"&&panel.message.find("Draft cycle dates derived")!=std::string::npos);
+    enter(panel,"imported_kwh");type(panel,"0");
+    enter(panel,"accrued_subtotal");type(panel,"0");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,100,ColorLevel::None).find("Usage carries across months.")!=std::string::npos);
+    TariffDeclaration decoded;
+    CHECK(decodeTariffDeclaration(panel.draft,&decoded,&error));
+    CHECK(decoded.resetSchedule&&decoded.resetSchedule->annualMonth==2);
+    CHECK(tariffComparisonEnd(decoded,2)==feb2026);
+    const std::array<ExactDecimal,2> watts{dec("0"),dec("1000")};
+    checkComparison(compareTariffCycles(decoded,watts,2,T),"20.000000","1772.000000","1752.000000");
+    auto settled=decoded.opening;
+    settled.throughUtcMs=feb2025;
+    settled.importedKwh=*electricityKwh(dec("20"));
+    bool chargedDaySplit=false;
+    CHECK(advanceTariffOpening(decoded,settled,T,chargedDaySplit)==ElectricityStatus::Ok);
+    CHECK(settled.cycleBeginUtcMs==feb2025&&settled.cycleEndUtcMs==feb2026&&settled.importedKwh.numerator.zero());
+
+    panel.open(panel.draft);
+    enter(panel,"reset_policy");
+    panel.key(27,{},T/1000);
+    panel.key('m',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="2");
+    CHECK(panel.draft.find("reset_policy")->find("monthly_day")->text=="29");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
 }
 
 void monthlyCycles(const JsonValue &original) {
@@ -313,6 +394,7 @@ void monthlyCycles(const JsonValue &original) {
 int main(int argc,char **argv){
     auto original=fixture();TariffDeclaration d;TariffProblem error;CHECK(decodeTariffDeclaration(original,&d,&error));
     monthlyCycles(original);
+    annualCycles(original);
     CHECK(d.plan.tiers==TierMode::Progressive&&d.plan.revisions[0].timeMode==TimeRateMode::Calendar&&d.opening.evidence.origin==PowerOrigin::DeclaredForecast);
     CHECK(d.opening.planKey==d.plan.key&&d.sourceReference.find("SYNTHETIC")!=std::string::npos);
     PowerTrace trace{d.opening.evidence,{{static_cast<int64_t>(T),static_cast<int64_t>(T+86400000),dec("1000")}}};
