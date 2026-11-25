@@ -447,6 +447,48 @@ def main():
             send(b'q')
 
         session([cli, 'settings', '--config', str(config)], reopen_explicit)
+        if '--named' in sys.argv[3:]:
+            explicit = file.read_bytes()
+
+            def save_named(send, until, open_tariff):
+                nonlocal checks
+                down = b'\x1b[B'
+                until(b'CanaryMiner / Settings')
+                open_tariff()
+                send(down * 6 + b'\r\rsynthetic-named-plan\r' + down * 5)
+                until(b'[Z] Named/UTC clock', True)
+                send(b'z')
+                until(b'Rate clock changed.', True)
+                send(b'\r' + down + b'\rEtc/UTC\r\x1b')
+                until(b'> clock:', True)
+                send(b'\x1b')
+                until(b'> plan:', True)
+                send(down + b'\r\rsynthetic-named-opening\r' + down * 9 + b'\r0.6\rv')
+                until(b'Review tariff-declaration.json ONLY', True)
+                assert file.read_bytes() == explicit
+                send(b'\r')
+                until(b'Saved offline declaration + opening ONLY', True)
+                saved = json.loads(file.read_text())
+                assert saved['schema_version'] == 4
+                assert saved['plan']['clock'] == {
+                    'kind': 'named_iana', 'zone': 'Etc/UTC', 'time_database_version': '2026e'
+                }
+                assert saved['opening']['time_database_version'] == '2026e'
+                checks += 4
+                send(b'q')
+
+            session([cli, 'settings', '--config', str(config)], save_named)
+
+            def reopen_named(send, until, open_tariff):
+                nonlocal checks
+                until(b'CanaryMiner / Settings')
+                open_tariff()
+                send(b'\x1b[B' * 6 + b'\r' + b'\x1b[B' * 5 + b'\r')
+                until(b'zone: "Etc/UTC"', True)
+                checks += 1
+                send(b'q')
+
+            session([cli, 'settings', '--config', str(config)], reopen_named)
     print(f'tariff declaration PTY: {checks} checks; author/review/save/comparison/conflict/active-session/stop/monthly policy passed')
 
 

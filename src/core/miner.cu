@@ -221,6 +221,8 @@ int main(int argc, char **argv) {
         if(g_stop)return kExitOk;
         if(!nativeProcessEpochCurrent(inspected.nativeEpoch))return kExitFaultLatched;
         loadLanguageContext(inspected.language,inspected.languageAvailable);
+        configureBundledCivilTimeData();
+        if(g_stop)return kExitOk;
         PoolSecuritySettingsContext poolContext;
         poolContext.migrationCandidate=migrationCandidate;
         poolContext.migrationRuntimeAvailable=poolTlsRuntimeAvailable();
@@ -1165,6 +1167,7 @@ int main(int argc, char **argv) {
         // Never printed: the wallet, the donation account and its payout destination (H-031 Amendment 2).
         so.secrets = {cfg.wallet, std::string(CANARY_FEE_POOL_ACCOUNT), feeDestination()};
         so.dashboard = stdoutIsTty() && !noDashboard;
+        if (so.dashboard && !opt.plain && !g_stop) configureBundledCivilTimeData();
         so.uiPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "ui-preferences.json").u8string();
         if (runtimeContext.effective.historyEnabled && !cli.ov.noHistory)
             so.historyPath = (std::filesystem::u8path(cfg.stateDir) / "accepted-history.sqlite3").u8string();

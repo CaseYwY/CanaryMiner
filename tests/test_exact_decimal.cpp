@@ -27,6 +27,15 @@ int main() {
     CHECK(!ExactDecimal::parse("0." + std::string(48, '0') + "1", &n));
     n = number("0." + std::string(47, '0') + "1");
     CHECK(!n.multiply(number("0.1"), &out)); CHECK(out.text() == "123");
+    CHECK(number("1").divideExact(8,&out)&&out.text()=="0.125");
+    CHECK(number("-2.5").divideExact(5,&out)&&out.text()=="-0.5");
+    CHECK(number("0.12").divideExact(3,&out)&&out.text()=="0.04");
+    CHECK(number("0").divideExact(UINT32_MAX,&out)&&out.zero());
+    out=number("17");
+    CHECK(!number("1").divideExact(23,&out)&&out.text()=="17");
+    CHECK(!number("1").divideExact(0,&out)&&out.text()=="17");
+    CHECK(!n.divideExact(2,&out)&&out.text()=="17");
+    CHECK(!n.divideExact(1,nullptr));
     std::string text;
     for (auto entry : {std::pair<const char *, const char *>{"1.245", "1.24"}, {"1.255", "1.26"}, {"-1.245", "-1.24"},
                        {"-1.255", "-1.26"}, {"0.005", "0.00"}, {"0.015", "0.02"}, {"9.999", "10.00"}, {"-0.0001", "0.00"}}) {

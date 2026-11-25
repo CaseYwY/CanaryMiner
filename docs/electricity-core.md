@@ -113,6 +113,20 @@ Artifacts were downloaded via official HTTPS into an isolated development direct
 
 CLDR files came from `unicode-org/cldr` at the exact revision above. Hashes identify the observed development bytes only: independent release-signature/trusted-key authentication, maintained/security-baseline review and packaging are **not** complete. The upstream date per-file MIT notices, IANA licence and CLDR copyright/permission notice remain required in any distributing package; see `THIRD_PARTY.md`. The Unicode LDML publication restriction in CLDR's root notice is distinct from its data-file licence; no LDML publication is copied into this repository.
 
+## Local installation of the reviewed tariff time data
+
+Use the pinned date-tz source above with its manual text database and remote APIs disabled.
+Extract the pinned IANA 2026e archive into a local source directory. On Windows, place the
+pinned CLDR Windows mapping in that directory as windowsZones.xml. Configure
+CANARY_ENABLE_NAMED_TZDB=ON and set CANARY_BUNDLED_TZDB_DIR to the absolute source directory.
+The build verifies the selected parser inputs against checked-in SHA-256 digests. A local
+CMake install puts the selected files in bin/canary-tzdb-2026e and includes their notices.
+
+Use a protected local installation directory. The miner and preferences helper check the
+same fixed sibling path and full inventory before loading the database. Named clock use binds
+the calculation to 2026e. These integrity checks support local qualification. Distribution
+provenance, approved upgrade handling and publication remain separate deployment requirements.
+
 ## Migration, rollback and remaining work
 
 No settings, SQLite schemas, worker state, donation rules, pool traffic or installed binary changes. Disable the named option/remove the development targets to roll back; do not delete user history or modify OS timezone data. Future persistence needs its own immutable plan/state schema, semantic diff/review, recovery and explicit activation.

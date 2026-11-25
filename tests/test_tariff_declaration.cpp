@@ -180,7 +180,7 @@ void monthlyCycles(const JsonValue &original) {
     }
     auto named=utc;
     set(member(named,"clock"),"kind","\"named_iana\"");
-    CHECK(!deriveTariffMonthlyCycle(named,json(std::to_string(feb2024)),bounds,&error)&&error.path=="reset_policy.clock.kind");
+    CHECK(!deriveTariffMonthlyCycle(named,json(std::to_string(feb2024)),bounds,&error)&&error.path=="reset_policy.clock");
 
     auto v=original;
     auto &plan=member(v,"plan");
@@ -310,7 +310,7 @@ void monthlyCycles(const JsonValue &original) {
     CHECK(decodeTariffDeclaration(panel.draft,&decoded,&error));
 }
 }
-int main(){
+int main(int argc,char **argv){
     auto original=fixture();TariffDeclaration d;TariffProblem error;CHECK(decodeTariffDeclaration(original,&d,&error));
     monthlyCycles(original);
     CHECK(d.plan.tiers==TierMode::Progressive&&d.plan.revisions[0].timeMode==TimeRateMode::Calendar&&d.opening.evidence.origin==PowerOrigin::DeclaredForecast);
@@ -466,5 +466,32 @@ int main(){
     SettingsPanel settings;settings.open({});settings.group=2;settings.groupsFocused=false;settings.field=1;CHECK(settings.fields()==5&&settings.key('\r',{})==SettingsResult::OpenTariff);
     openTariffControls(&settings,&store);CHECK(settings.tariff.visible);CHECK(settings.key(3,{})==SettingsResult::Quit);
     std::filesystem::remove_all(root);
+    if(argc==2){
+        CHECK(configureCivilTimeData(std::filesystem::u8path(argv[1]),tariffTzdbVersion)==CivilStatus::Ok);
+        panel.open(original);
+        enter(panel,"plan");
+        panel.field=5;
+        CHECK(panel.render(120,24,ColorLevel::None).find("[Z] Named/UTC clock")!=std::string::npos);
+        panel.key('z',{},T/1000);
+        CHECK(panel.draft.find("schema_version")->text=="4");
+        CHECK(panel.draft.find("opening")->find("time_database_version")->text==tariffTzdbVersion);
+        enter(panel,"clock");enter(panel,"zone");type(panel,"Etc/UTC");
+        TariffDeclaration validated;
+        CHECK(decodeTariffDeclaration(panel.draft,&validated)&&validated.plan.clock.zone=="Etc/UTC");
+        CHECK(validated.opening.timeDatabaseVersion==tariffTzdbVersion);
+        panel.key(27,{},T/1000);panel.key(27,{},T/1000);
+        panel.field=5;
+        panel.key('m',{},T/1000);
+        const auto *reset=panel.draft.find("reset_policy");
+        CHECK(reset->find("clock")->find("zone")->text=="Etc/UTC"&&panel.draft.find("schema_version")->text=="4");
+        enter(panel,"reset_policy");
+        panel.field=1;
+        panel.key('z',{},T/1000);
+        CHECK(panel.draft.find("reset_policy")->find("clock")->find("kind")->text=="utc");
+        CHECK(panel.draft.find("schema_version")->text=="4");
+        panel.key(27,{},T/1000);panel.key('m',{},T/1000);
+        enter(panel,"plan");panel.field=5;panel.key('z',{},T/1000);
+        CHECK(!panel.dirty()&&panel.draft.find("opening")->find("time_database_version")->text=="explicit-fixed-clock");
+    }
     return finishTests("tariff declaration");
 }

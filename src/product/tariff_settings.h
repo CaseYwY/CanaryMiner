@@ -45,12 +45,15 @@ class TariffSettingsPanel {
                 if(inputRejected){message=i18n::tariffNoticeEnglish(NoticeKey::InputRejected);return TariffSettingsResult::None;}
                 auto *v=selected();if(!v)return TariffSettingsResult::None;
                 const auto name=selectedName();
+                const bool changedRateZone=name=="zone"&&path()=="plan.clock"&&v->text!=input;
                 if(input.empty()&&(name=="minimum_cycle_subtotal"||name=="through_kwh"||name=="date"))*v={};
                 else if(v->isNumber()){
                     JsonValue number;if(!parseJsonStrict(input,&number,nullptr)||!number.isNumber()||input.find_first_not_of("-0123456789")!=std::string::npos){message=i18n::tariffNoticeEnglish(NoticeKey::IntegerOnly);return TariffSettingsResult::None;}
                     *v=std::move(number);
                 }else{v->type=JsonValue::Type::String;v->text=input;}
                 page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::DraftOnly);
+                if(changedRateZone&&clearMidcycleSubtotal())
+                    message="Rate clock changed. Re-enter the opening subtotal using the new clock.";
             }else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;inputRejected=false;}
             else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<128)input+=static_cast<char>(key);else{inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::TooLong);}}
             else if(key>=128&&key<=255){inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::AsciiOnly);}
@@ -86,6 +89,7 @@ class TariffSettingsPanel {
         else if(key=='p'||key=='P')comparison_.open(active);
         else if((key=='m'||key=='M')&&onCyclePolicy())toggleCyclePolicy();
         else if((key=='f'||key=='F')&&onCyclePolicy()&&monthly())toggleDailyFeeAllocation();
+        else if((key=='z'||key=='Z')&&onTariffClock())toggleNamedClock();
         else if((key=='g'||key=='G')&&monthly())deriveCycle();
         else if(key==kKeyDown||key=='\t'){const auto n=count();if(n)field=(field+1)%n;}
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
@@ -117,6 +121,7 @@ class TariffSettingsPanel {
                 if(monthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::FeeToggle)+" ";
             }
             if(monthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
+            if(onTariffClock()&&civilNamedTimeAvailable())shortcuts+="[Z] Named/UTC clock ";
             shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
         }
         const auto footer=wrapText(shortcuts+i18n::tariffPanelEnglish(page==TariffSettingsPage::Edit?PanelKey::FooterEdit:page==TariffSettingsPage::Review?PanelKey::FooterReview:PanelKey::FooterBrowse),width);
@@ -163,7 +168,16 @@ class TariffSettingsPanel {
     std::string collectionName()const{const auto s=path();const auto at=s.rfind('.');return at==std::string::npos?s:s.substr(at+1);}
     bool monthly()const{const auto *policy=draft.find("reset_policy");return policy&&policy->isObject();}
     bool onCyclePolicy()const{return route.empty()&&selectedName()=="reset_policy";}
+    bool onTariffClock()const{
+        const auto at=path();
+        return selectedName()=="clock"&&(at=="plan"||at=="reset_policy");
+    }
+    static bool named(const JsonValue *clock){
+        const auto *kind=clock?clock->find("kind"):nullptr;
+        return kind&&kind->text=="named_iana";
+    }
     bool readOnly(const std::string &s)const{
+        if(s=="kind"&&named(node()))return true;
         if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return monthly();
         return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="daily_fee_allocation"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";
     }
@@ -171,19 +185,51 @@ class TariffSettingsPanel {
         for(auto &m:object.members)if(m.first==name)return &m.second;
         return nullptr;
     }
+    void refreshClockContract(){
+        auto *schema=member(draft,"schema_version");
+        auto *opening=member(draft,"opening");
+        const auto *plan=draft.find("plan");
+        const auto *policy=draft.find("reset_policy");
+        if(!schema||!opening||!plan||!policy)return;
+        const bool namedRate=named(plan->find("clock"));
+        const bool namedReset=named(policy->find("clock"));
+        schema->text=namedRate||namedReset?"4":!monthly()?"1":policy->find("daily_fee_allocation")?"3":"2";
+        if(auto *version=member(*opening,"time_database_version"))
+            version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
+    }
+    void toggleNamedClock(){
+        if(!civilNamedTimeAvailable()){
+            message="Reviewed tariff time data unavailable.";
+            return;
+        }
+        auto *clock=selected();
+        if(!clock||!clock->isObject())return;
+        const bool rate=path()=="plan";
+        if(named(clock)){
+            parseJsonStrict(R"({"kind":"utc","fixed_offset_seconds":0})",clock,nullptr);
+        }else{
+            parseJsonStrict(R"({"kind":"named_iana","zone":"","time_database_version":""})",clock,nullptr);
+            member(*clock,"time_database_version")->text=tariffTzdbVersion;
+        }
+        refreshClockContract();
+        if(rate&&clearMidcycleSubtotal()){
+            message="Rate clock changed. Re-enter the opening subtotal using the new clock.";
+        }else{
+            message=rate?"Draft rate clock changed. Review the zone and opening.":"Draft reset clock changed. Derive and review the billing cycle.";
+        }
+    }
     void toggleCyclePolicy(){
         using Key=i18n::TariffMonthlyMessageKey;
-        auto *schema=member(draft,"schema_version");
         auto *policy=selected();
         const auto *plan=draft.find("plan");
         const auto *clock=plan?plan->find("clock"):nullptr;
-        if(!schema||!policy||!clock)return;
+        if(!policy||!clock)return;
         if(monthly()){
             const bool hadAllocation=policy->find("daily_fee_allocation")!=nullptr;
             *policy=JsonValue{};
             policy->type=JsonValue::Type::String;
             policy->text="explicit_cycle_only";
-            schema->text="1";
+            refreshClockContract();
             if(hadAllocation)reviewChangedDailyFeeRule();
             else message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
             return;
@@ -194,13 +240,12 @@ class TariffSettingsPanel {
         policy->type=JsonValue::Type::Object;
         policy->text.clear();
         policy->members={{"monthly_day",std::move(day)},{"clock",*clock}};
-        schema->text="2";
+        refreshClockContract();
         message=i18n::tariffMonthlyEnglish(Key::Enabled);
     }
     void toggleDailyFeeAllocation(){
-        auto *schema=member(draft,"schema_version");
         auto *policy=selected();
-        if(!schema||!policy||!policy->isObject())return;
+        if(!policy||!policy->isObject())return;
         const auto allocation=std::find_if(policy->members.begin(),policy->members.end(),[](const auto &entry){
             return entry.first=="daily_fee_allocation";
         });
@@ -209,22 +254,24 @@ class TariffSettingsPanel {
             value.type=JsonValue::Type::String;
             value.text="prorate_by_cycle_minutes";
             policy->members.emplace_back("daily_fee_allocation",std::move(value));
-            schema->text="3";
         }else{
             policy->members.erase(allocation);
-            schema->text="2";
         }
+        refreshClockContract();
         reviewChangedDailyFeeRule();
     }
-    void reviewChangedDailyFeeRule(){
+    bool clearMidcycleSubtotal(){
         auto *opening=member(draft,"opening");
         const auto *begin=opening?opening->find("cycle_begin_utc_ms"):nullptr;
         const auto *through=opening?opening->find("through_utc_ms"):nullptr;
         auto *subtotal=opening?member(*opening,"accrued_subtotal"):nullptr;
-        if(begin&&through&&subtotal&&begin->text!=through->text){
-            subtotal->text.clear();
-            message=i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeOpeningRequired);
-        }else message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
+        if(!begin||!through||!subtotal||begin->text==through->text)return false;
+        subtotal->text.clear();
+        return true;
+    }
+    void reviewChangedDailyFeeRule(){
+        if(clearMidcycleSubtotal())message=i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeOpeningRequired);
+        else message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
     }
     void deriveCycle(){
         using Key=i18n::TariffMonthlyMessageKey;
@@ -260,6 +307,7 @@ class TariffSettingsPanel {
         if(s=="tiers")return i18n::tariffHintEnglish(HintKey::Tiers);
         if(s=="time_mode")return i18n::tariffHintEnglish(HintKey::TimeMode);
         if(s=="kind")return i18n::tariffHintEnglish(HintKey::ClockKind);
+        if(s=="zone")return "Enter an IANA zone from the reviewed time database, for example America/New_York.";
         if(s=="date")return i18n::tariffHintEnglish(HintKey::Date);
         if(s=="minimum_cycle_subtotal"||s=="through_kwh")return i18n::tariffHintEnglish(HintKey::OptionalDecimal);
         if(s.find("utc_ms")!=std::string::npos)return i18n::tariffHintEnglish(HintKey::UtcMs);

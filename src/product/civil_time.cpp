@@ -2,6 +2,11 @@
 #include <algorithm>
 #include <fstream>
 #include <mutex>
+#if defined(CANARY_BUNDLED_TZDB)
+#include "executable_path.h"
+#include "hash.h"
+#include "local_review_input.h"
+#endif
 #if defined(CANARY_NAMED_TZDB)
 #include <date/tz.h>
 #endif
@@ -108,6 +113,48 @@ CivilStatus configureCivilTimeData(const std::filesystem::path &directory, const
         if (!date::locate_zone("Etc/UTC")) return CivilStatus::DataInvalid;
         r.ready = true; return CivilStatus::Ok;
     } catch (...) { return CivilStatus::DataInvalid; }
+#else
+    return CivilStatus::Unavailable;
+#endif
+}
+CivilStatus configureBundledCivilTimeData() {
+#if defined(CANARY_BUNDLED_TZDB)
+    static const auto result = [] {
+        try {
+            const auto module = std::filesystem::u8path(selfExecutablePath());
+            if (!module.is_absolute() || !module.has_filename()) return CivilStatus::Unavailable;
+            const auto directory = module.parent_path() / (std::string("canary-tzdb-") + tariffTzdbVersion);
+            if (!localReviewPath(directory / "version") ||
+                !std::filesystem::is_directory(std::filesystem::symlink_status(directory)))
+                return CivilStatus::Unavailable;
+
+            struct File { const char *name, *sha256; };
+            constexpr File required[] = {
+#define TARIFF_TZDB_FILE(name, hash) {name, hash},
+#if defined(_WIN32)
+#define TARIFF_TZDB_WINDOWS(name, hash) {name, hash},
+#else
+#define TARIFF_TZDB_WINDOWS(name, hash)
+#endif
+#include "tariff_tzdb_files.inc"
+#undef TARIFF_TZDB_WINDOWS
+#undef TARIFF_TZDB_FILE
+            };
+            // Reject optional upstream input files too. date-tz would otherwise parse several of them.
+            for (const auto &entry : std::filesystem::directory_iterator(directory)) {
+                const auto name = entry.path().filename().u8string();
+                if (std::none_of(std::begin(required),std::end(required),[&](const File &file){return name == file.name;}))
+                    return CivilStatus::DataInvalid;
+            }
+            for (const auto &file : required) {
+                std::string bytes;
+                if (!readLocalReviewInput(directory/file.name,2*1024*1024,bytes) || sha256Hex(bytes) != file.sha256)
+                    return CivilStatus::DataInvalid;
+            }
+            return configureCivilTimeData(directory,tariffTzdbVersion);
+        } catch (...) { return CivilStatus::DataInvalid; }
+    }();
+    return result;
 #else
     return CivilStatus::Unavailable;
 #endif
