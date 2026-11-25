@@ -1,4 +1,4 @@
-"""Review a complete London civil month of paginated Agile prices through the native CLI."""
+"""Review complete London civil months of Agile and Go prices through the native CLI."""
 import copy
 import datetime as dt
 from decimal import Decimal, ROUND_HALF_EVEN
@@ -14,6 +14,7 @@ from test_meter_bill_named_cli import BUNDLE, HOUR, SCOPE, named, plan, register
 
 
 PRODUCT = 'AGILE-FLEX-22-11-25'
+GO_PRODUCT = 'GO-VAR-22-10-14'
 PAYMENT = 'DIRECT_DEBIT'
 HALF_HOUR = HOUR // 2
 BEGIN = utc('2023-03-01T00:00:00')
@@ -185,7 +186,57 @@ def main(cli, bundle):
         write(tariff, declaration)
         rate_file.write_bytes(b'')
         reject(review(), 'rate file unavailable, empty')
+
+        # Go prices can straddle both ends of the requested window and a London midnight.
+        go = copy.deepcopy(declaration)
+        go['plan']['product'] = GO_PRODUCT
+        early = BEGIN + 5 * HOUR
+        late = FEE_CHANGE + HALF_HOUR
+        go_rows = [
+            row(BEGIN - HALF_HOUR, early, 12.5),
+            row(early, late, 36.25, PAYMENT),
+            row(late, END + HOUR, 18),
+            row(BEGIN, END, 99, 'NON_DIRECT_DEBIT'),
+            row(BEGIN - 2 * HOUR, BEGIN - HOUR, 77),
+        ]
+        go_snapshot = {**snapshot, 'product_code': GO_PRODUCT, 'tariff_code': f'E-1R-{GO_PRODUCT}-C',
+                       'unit_rate_pages': pages(list(reversed(go_rows)), 2)}
+        points = readings['register_readings']
+        usage_cost = Decimal(0)
+        for left, right in zip(points, points[1:]):
+            delta = Decimal(right['imported_kwh']) - Decimal(left['imported_kwh'])
+            rounded = delta.quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)
+            start = left['utc_ms']
+            pence = Decimal('12.5' if start < early else '36.25' if start < late else '18')
+            usage_cost += rounded * pence / 100
+        total = usage_cost + (26 * Decimal('31.51') + 5 * Decimal('43.125')) / 100
+        write(tariff, go)
+        write(meter, readings)
+        write(rate_file, go_snapshot)
+        saved = review('--save-review', 'go.cmr')
+        assert saved.returncode == 0 and not saved.stderr, saved
+        assert 'Octopus Go public rate snapshot' in saved.stdout and '3 published price intervals' in saved.stdout
+        assert f'Cycle estimate at closing {total:.6f} GBP' in saved.stdout, saved
+        reject(review(cutoff=OBSERVED - 1), 'Octopus Go rates observed after the review cutoff')
+
+        for gap_or_overlap in (-HALF_HOUR, HALF_HOUR):
+            bad = copy.deepcopy(go_rows)
+            bad[1]['valid_from'] = timestamp(early + gap_or_overlap)
+            write(rate_file, {**go_snapshot, 'unit_rate_pages': pages(bad, 2)})
+            reject(review(), 'Octopus Go energy rates must align to UTC half hours')
+
+        off_grid = copy.deepcopy(go_rows)
+        off_grid[0]['valid_to'] = off_grid[1]['valid_from'] = timestamp(early + HALF_HOUR // 2)
+        write(rate_file, {**go_snapshot, 'unit_rate_pages': pages(off_grid)})
+        reject(review(), 'Octopus Go energy rates must align to UTC half hours')
+        write(rate_file, {**go_snapshot, 'tariff_code': f'E-1R-{GO_PRODUCT}-D'})
+        reject(review(), 'invalid Octopus Go rate identity')
+        for path in (tariff, meter, rate_file):
+            path.unlink()
+        restored = run('--open-review', 'go.cmr')
+        assert restored.returncode == 0 and not restored.stderr and restored.stdout == saved.stdout, restored
     print(f'Octopus Agile CLI: {SLOTS} half hours, 31 London days, exact signed prices, standing changes, and archive replay')
+    print('Octopus Go CLI: multi-hour price intervals, clipped bounds, standing change, exact bill and archive replay')
 
 
 if __name__ == '__main__':

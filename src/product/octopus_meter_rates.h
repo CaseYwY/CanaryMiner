@@ -15,9 +15,10 @@ struct OctopusRateImport {
     int64_t observedUtcMs = 0;
     std::size_t intervals = 0;
     std::string paymentMethod;
+    bool go = false;
 };
 
-// Bind a locally captured Agile rate file to a declared tariff for this review only.
+// Bind a locally captured Octopus Agile or Go rate file to a declared tariff for this review only.
 const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffDeclaration &declaration,
                               OctopusRateImport &summary, const std::function<bool()> &stop);
 

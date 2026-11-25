@@ -17,11 +17,9 @@ struct Rate {
     ExactDecimal pounds;
 };
 
-bool agileProduct(std::string_view product) {
-    constexpr std::string_view flex = "AGILE-FLEX-", agile = "AGILE-";
-    if (product.substr(0, flex.size()) == flex) product.remove_prefix(flex.size());
-    else if (product.substr(0, agile.size()) == agile) product.remove_prefix(agile.size());
-    else return false;
+bool datedProduct(std::string_view product, std::string_view prefix) {
+    if (product.substr(0, prefix.size()) != prefix) return false;
+    product.remove_prefix(prefix.size());
     if (product.size() != 8 || product[2] != '-' || product[5] != '-') return false;
     const auto year = digits(product.substr(0, 2));
     return year < 100 && validCivilDate({2000 + static_cast<int>(year), digits(product.substr(3, 2)),
@@ -84,7 +82,7 @@ bool rates(const JsonValue &pages, const std::string &payment, std::size_t maxRo
 
 bool compatiblePlan(const TariffPlan &plan) {
     if (plan.origin != TariffOrigin::UserDeclaredOffline || plan.supplier != "Octopus Energy" ||
-        !agileProduct(plan.product) || plan.territory.size() != 1 ||
+        plan.territory.size() != 1 ||
         std::string_view("ABCDEFGHJKLMNP").find(plan.territory) == std::string_view::npos ||
         plan.currency != "GBP" || plan.tiers != TierMode::None ||
         plan.rounding != TariffRounding::MeterHalfHourKwhHalfEven2 ||
@@ -101,18 +99,46 @@ bool localMidnight(const CivilClock &clock, int64_t instant) {
     return date.status == CivilStatus::Ok && date.millisecondOfDay == 0;
 }
 
+bool alignUnitRates(std::vector<Rate> &rates, bool go, int64_t begin, int64_t end) {
+    if (go) {
+        // Go rates can run from the preceding day into the review or extend past it.
+        rates.erase(std::remove_if(rates.begin(), rates.end(), [=](const Rate &rate) {
+            return rate.end <= begin || rate.begin >= end;
+        }), rates.end());
+    }
+    auto cursor = begin;
+    for (auto &rate : rates) {
+        if (go) {
+            if (rate.begin % halfHourMs || rate.end % halfHourMs) return false;
+            rate.begin = (std::max)(rate.begin, begin);
+            rate.end = (std::min)(rate.end, end);
+        } else if (rate.end - rate.begin != halfHourMs) {
+            return false;
+        }
+        if (rate.begin != cursor || rate.end > end) return false;
+        cursor = rate.end;
+    }
+    return cursor == end;
+}
+
 }  // namespace
 
 const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffDeclaration &declaration,
                               OctopusRateImport &summary, const std::function<bool()> &stop) {
     auto &plan = declaration.plan;
-    if (!compatiblePlan(plan)) return "tariff declaration is unsuitable for an Octopus Agile rate import";
+    const bool go = datedProduct(plan.product, "GO-VAR-");
+    const auto error = [go](const char *agile, const char *goProduct) { return go ? goProduct : agile; };
+    if (!go && !datedProduct(plan.product, "AGILE-") && !datedProduct(plan.product, "AGILE-FLEX-"))
+        return "tariff declaration is unsuitable for an Octopus rate import";
+    if (!compatiblePlan(plan))
+        return error("tariff declaration is unsuitable for an Octopus Agile rate import",
+                     "tariff declaration is unsuitable for an Octopus Go rate import");
 
     JsonValue root;
     if (!parseJsonStrict(bytes, &root, nullptr, {maxOctopusRateFileBytes, 7}) ||
         !fields(root, {"schema_version", "product_code", "tariff_code", "payment_method", "observed_utc_ms",
                        "unit_rate_pages", "standing_charge_pages"}))
-        return "invalid Octopus Agile rate file";
+        return error("invalid Octopus Agile rate file", "invalid Octopus Go rate file");
     uint64_t version = 0, observed = 0;
     const auto &product = *root.find("product_code");
     const auto &tariff = *root.find("tariff_code");
@@ -122,57 +148,60 @@ const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffD
         !product.isString() || product.text != plan.product || !tariff.isString() ||
         tariff.text != "E-1R-" + plan.product + "-" + plan.territory || !paymentName(method) ||
         !root.find("observed_utc_ms")->asUint64(&observed) || !observed || observed > meterBillMaxUtcMs)
-        return "invalid Octopus Agile rate identity or observation";
+        return error("invalid Octopus Agile rate identity or observation", "invalid Octopus Go rate identity or observation");
     if (cutoff <= 0 || observed > static_cast<uint64_t>(cutoff))
-        return "Octopus Agile rates observed after the review cutoff";
+        return error("Octopus Agile rates observed after the review cutoff", "Octopus Go rates observed after the review cutoff");
     if (placeholder.endUtcMs > static_cast<int64_t>(observed))
-        return "Octopus Agile review requires a wholly observed rate window";
+        return error("Octopus Agile review requires a wholly observed rate window",
+                     "Octopus Go review requires a wholly observed rate window");
     if (!localMidnight(plan.clock, placeholder.beginUtcMs) || !localMidnight(plan.clock, placeholder.endUtcMs))
-        return "Octopus Agile rate window must start and end at London local midnight";
+        return error("Octopus Agile rate window must start and end at London local midnight",
+                     "Octopus Go rate window must start and end at London local midnight");
 
     std::vector<Rate> unit, fees;
     if (!rates(*root.find("unit_rate_pages"), method.text, maxUnitRows, false, unit, stop) ||
         !rates(*root.find("standing_charge_pages"), method.text, maxStandingRows, true, fees, stop))
-        return "invalid or incomplete Octopus Agile rate pages";
-    int64_t cursor = placeholder.beginUtcMs;
-    for (const auto &rate : unit) {
-        if (rate.begin != cursor || rate.end - rate.begin != halfHourMs || rate.end > placeholder.endUtcMs)
-            return "Octopus Agile energy rates must cover every exact half hour once";
-        cursor = rate.end;
-    }
-    if (cursor != placeholder.endUtcMs)
-        return "Octopus Agile energy rates must cover every exact half hour once";
+        return error("invalid or incomplete Octopus Agile rate pages", "invalid or incomplete Octopus Go rate pages");
+    if (!alignUnitRates(unit, go, placeholder.beginUtcMs, placeholder.endUtcMs))
+        return error("Octopus Agile energy rates must cover every exact half hour once",
+                     "Octopus Go energy rates must align to UTC half hours without gaps or overlaps");
 
-    cursor = placeholder.beginUtcMs;
+    int64_t cursor = placeholder.beginUtcMs;
     std::size_t slot = 0;
     std::vector<TariffRevision> revisions;
     const auto published = (std::max)(placeholder.publishedUtcMs, static_cast<int64_t>(observed));
     for (const auto &fee : fees) {
-        if (stop && stop()) return "Octopus Agile rate import cancelled";
+        if (stop && stop()) return error("Octopus Agile rate import cancelled", "Octopus Go rate import cancelled");
         const auto begin = (std::max)(placeholder.beginUtcMs, fee.begin);
         const auto end = (std::min)(placeholder.endUtcMs, fee.end);
         if (begin >= end) continue;
         if (cursor != begin || !localMidnight(plan.clock, begin) || !localMidnight(plan.clock, end) ||
             revisions.size() == 128)
-            return "Octopus Agile standing charges need complete, unambiguous London days";
+            return error("Octopus Agile standing charges need complete, unambiguous London days",
+                         "Octopus Go standing charges need complete, unambiguous London days");
         TariffRevision revision;
-        revision.key = "octopus-agile-" + std::to_string(revisions.size() + 1);
+        revision.key = (go ? "octopus-go-" : "octopus-agile-") + std::to_string(revisions.size() + 1);
         revision.beginUtcMs = begin;
         revision.endUtcMs = end;
         revision.publishedUtcMs = published;
         revision.timeMode = TimeRateMode::Dynamic;
         revision.chargePerCivilDay = fee.pounds;
         while (slot < unit.size() && unit[slot].begin < end) {
-            const auto &rate = unit[slot++];
-            if (rate.end > end) return "Octopus Agile standing charge changes inside a half hour";
-            revision.dynamic.push_back({rate.begin, rate.end, published, rate.pounds});
+            const auto &rate = unit[slot];
+            const auto unitBegin = (std::max)(rate.begin, begin);
+            const auto unitEnd = (std::min)(rate.end, end);
+            if (!go && unitEnd != rate.end) return "Octopus Agile standing charge changes inside a half hour";
+            revision.dynamic.push_back({unitBegin, unitEnd, published, rate.pounds});
+            if (unitEnd != rate.end) break;
+            ++slot;
         }
         revisions.push_back(std::move(revision));
         cursor = end;
     }
     if (cursor != placeholder.endUtcMs || slot != unit.size())
-        return "Octopus Agile standing charges need complete, unambiguous London days";
-    summary = {static_cast<int64_t>(observed), unit.size(), method.text};
+        return error("Octopus Agile standing charges need complete, unambiguous London days",
+                     "Octopus Go standing charges need complete, unambiguous London days");
+    summary = {static_cast<int64_t>(observed), unit.size(), method.text, go};
     plan.revisions = std::move(revisions);
     return nullptr;
 }
