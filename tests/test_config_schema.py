@@ -499,6 +499,29 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['opening']['demand_history'][0]['peak_kw'] = '20'
         self.assertTrue(validate(example, schema, schema))
 
+    def test_export_payment_requires_v12_and_a_separate_opening_quantity(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 12
+        self.assertTrue(validate(example, schema, schema))
+        example['plan']['export_payment'] = {'rate_per_kwh': '1', 'published_utc_ms': 0}
+        self.assertTrue(validate(example, schema, schema))
+        example['opening']['exported_kwh'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+        example['opening']['accrued_export_payment'] = '0'
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 1}, schema, schema))
+        example['demand_charge'] = {'rate_per_kw': '5', 'window_minutes': 15, 'offset_minutes': 0, 'published_utc_ms': 0}
+        self.assertTrue(validate(example, schema, schema))
+        example['opening']['peak_demand_kw'] = '0'
+        self.assertEqual(validate(example, schema, schema), [])
+        example['demand_charge']['rate_per_kva'] = '5'
+        self.assertTrue(validate(example, schema, schema))
+        example.pop('demand_charge')
+        example['opening'].pop('peak_demand_kw')
+        example['plan']['export_payment']['rate_per_kwh'] = '-1'
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -529,7 +552,8 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'revision': {'component_multiplier'},
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
-                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history'},
+                    'plan': {'export_payment'},
+                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh', 'accrued_export_payment'},
                     'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
                 }.get(name, set())

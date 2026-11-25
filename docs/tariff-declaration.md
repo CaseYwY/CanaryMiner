@@ -23,13 +23,13 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). Version 12 declares a [separate payment for exports](#price-electricity-exports-separately). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families include contracted capacity, reactive power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families include contracted capacity, reactive power, export netting and restricted export credits, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -262,6 +262,45 @@ second line describes the complete meter with mining. Enter its apparent-power e
 independently. This covers T22. Tariffs that use kVA at the maximum kW window, reactive
 charges or contracted capacity require their own rule and supplier qualification.
 
+### Price electricity exports separately
+
+Select Plan in Settings and press **E** to add the export rule. Version 12 declares
+`plan.export_payment.rate_per_kwh` and `published_utc_ms`. Enter one nonnegative
+fixed export payment per kWh in the same currency as the supply tariff. In the opening,
+enter both `exported_kwh` and `accrued_export_payment` earned from the cycle start to
+the opening time. Enter zero for both at cycle start. The declared rate prices new exports.
+When changing the rate mid-cycle, carry forward the amount already earned and use new
+plan and opening keys. A change in plan currency requires re-entering the earned
+payment in the new currency. The import quantity and accrued supply subtotal retain their meanings.
+
+A local meter review requires explicit export evidence even when export is zero.
+
+- Input version 6 uses `intervals` with `begin_utc_ms`, `end_utc_ms` and
+  `average_net_watts`. A positive decimal string denotes import, a negative one
+  denotes export, and zero denotes neither. Each row models a constant flow in one
+  direction. Where import and export change direction within a metering interval,
+  use the separate registers.
+- Input version 7 uses `register_readings` with `utc_ms`, `imported_kwh` and
+  `exported_kwh`. The last two are independent, cumulative, nonnegative decimal
+  strings. Each can increase during the same interval. Take paired readings at
+  billing-cycle boundaries.
+
+The report gives supply charges, export payment and net electricity cost. Active imports
+alone count toward tiers, demand windows and supply floors. The separate payment does
+not enter supply multipliers or supply-invoice matching. A negative net cost means the
+declared payment exceeds the supply charge. The archive saves the original readings and
+exact results. Extension freezes the starting readings and deltas of both registers.
+
+In the whole-meter comparison, enter the net watts for each constant scenario. Across
+one hour, moving from -2,000 W to -1,000 W loses 1 kWh of export. At 1 USD/kWh that
+costs 1 USD. Moving from -1,000 W to +1,000 W loses the same payment and adds 1 kWh of
+import. At 3 USD/kWh for import, the difference is 4 USD. These examples cover T28 and T29.
+
+This rule models a separate payment using a fixed price. Banked or restricted credits,
+expiry, time-varying export pricing, supplier-specific settlement and the combination
+with apparent-power demand need their own declarations and evidence.
+[Example of provider-specific export credits](https://www.pge.com/en/clean-energy/solar/getting-started-with-solar/solar-billing-plan.html)
+
 ### Apply a seasonal baseline allowance
 
 Select `reset_policy` and press **A** to add the seasonal rule. Open `seasonal_allowance`, enter
@@ -312,21 +351,25 @@ The allocation uses whole-minute boundaries and exact arithmetic through the cyc
 
 ## Compare two whole-meter scenarios
 
-Open Combined tariff from the Dashboard Settings or the idle `settings` command and press **P**. Enter the constant whole-meter import watts
-for the **without mining** and **with mining** scenarios. Use **Tab** to change fields and **Enter** to calculate.
-The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
-applies to the full displayed UTC interval from the opening's through-time to the selected end.
+Open Combined tariff from the Dashboard Settings or the idle `settings` command and press **P**.
+Enter a constant whole-meter value for each scenario. Standard supply tariffs use import watts.
+A [kVA declaration](#charge-for-apparent-demand-in-kva) also needs apparent-power evidence.
+For a [separate export payment](#price-electricity-exports-separately), enter signed net watts.
+Positive values import energy and negative values export it. Use **Tab** to change fields and
+**Enter** to calculate. Each value applies from the saved opening's through-time to the selected UTC end.
 
 For a saved monthly, annual or two-month reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
 the saved cycle. Each additional cycle runs from one declared reset to the next. The same entered watts apply
-through the displayed end. Later cycles start with zero use and zero accrued subtotal, and each cycle applies its
-own fees, tier allowance and minimum. Charges are added exactly before display rounding. A declaration with
+through the displayed end. Later cycles start with zero imported and exported energy and zero accrued supply subtotal.
+Each cycle applies its own fees, tier allowance and minimum. The comparison adds exact
+amounts before display rounding. A declaration with
 explicit cycle dates still has one horizon.
 
 Every selected cycle needs complete rates known at the original comparison time. A missing rate in any selected
 cycle withholds all three amounts. The first cycle uses the saved opening's daily-fee rule. Without allocation, the comparison reports the first later cycle that splits a charged tariff day. With the declared allocation, it splits the daily fee across the affected cycles. Selecting a horizon applies only to the estimate.
 
-The amounts are the hypothetical remaining charges for both scenarios and their difference, in the plan currency.
+The amounts are the hypothetical remaining costs for both scenarios and their difference in the plan currency.
+With a separate export payment, the displayed amounts are net of the export payout.
 The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
 unavailable result. A background calculation uses the inputs and local time captured at Enter. Escape returns to the
 tariff declaration and cancels the calculation. The new comparison starts with empty inputs. If a cancelled calculation
@@ -340,8 +383,10 @@ Run `canary-miner meter-bill --tariff tariff-declaration.json --intervals meter-
 saved tariff and source file. The command reads those files and prints the review to stdout. Its estimates remain local
 to the command and include any declared opening used for the first cycle.
 
-The interval file has schema version 1. Use the same scope as the tariff opening and supply ordered, adjoining
-whole-meter import intervals. Each interval uses UTC milliseconds and a canonical nonnegative decimal string in watts.
+The import-only interval file has schema version 1. For [apparent demand](#charge-for-apparent-demand-in-kva),
+use input version 4 or 5. For [separate export payments](#price-electricity-exports-separately), use version 6 or 7.
+In the version 1 format, use the same scope as the tariff opening and supply ordered, adjoining whole-meter
+import intervals. Each interval uses UTC milliseconds and a canonical nonnegative decimal string in watts.
 
 ```json
 {
@@ -370,7 +415,7 @@ invalid. The saved declaration still supplies
 the opening values, so the cutoff describes rate publication and reading coverage, and local confirmation can be later.
 Omit the option to use the current UTC time.
 
-Annual policies and policies with a demand charge accept files up to 1.75 MiB and 18,432 intervals. Other policies accept 1 MiB and 8,192 intervals. Dense full-cycle register files can exceed these limits. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
+Annual policies and policies with demand charges or separate export payment accept files up to 1.75 MiB and 18,432 intervals. Other policies accept 1 MiB and 8,192 intervals. Dense full-cycle register files can exceed these limits. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
 unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
 additional cycle that starts within a charged tariff day requires the declared [daily-fee rule](#prorate-a-daily-fee-across-a-recurring-reset). Use regular files in a trusted
 local directory. Windows accepts native Unicode paths on local drives and rejects redirected directories. The command

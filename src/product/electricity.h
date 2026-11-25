@@ -9,7 +9,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for quantities and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -28,6 +28,7 @@ struct PowerInterval {
     int64_t beginUtcMs = 0, endUtcMs = 0;
     ExactDecimal watts;
     std::optional<ExactDecimal> apparentVa{};  // independent whole-meter average
+    std::optional<ExactDecimal> exportWatts{};  // positive in the direction from meter to grid
 };
 struct PowerTrace { PowerEvidence evidence; std::vector<PowerInterval> intervals; };
 // A measured quantity over the full interval carries no implied power profile within it.
@@ -35,6 +36,7 @@ struct MeterImportInterval {
     int64_t beginUtcMs = 0, endUtcMs = 0;
     ElectricityAmount importedKwh;
     std::optional<ElectricityAmount> apparentKvah{};  // delta from the paired apparent-energy register
+    std::optional<ElectricityAmount> exportedKwh{};  // delta from the separate export register
 };
 struct MeterImportTrace { PowerEvidence evidence; std::vector<MeterImportInterval> intervals; };
 struct PowerObservation {
@@ -99,6 +101,13 @@ struct DemandChargeRule {
         return peak.numerator.multiply(ratePerUnit, &out->numerator);
     }
 };
+struct ExportPaymentRule {
+    int64_t publishedUtcMs = 0;
+    ExactDecimal ratePerKwh;
+    bool payment(const ElectricityAmount &exported, ElectricityAmount &out) const {
+        return exported.numerator.multiply(ratePerKwh,&out.numerator);
+    }
+};
 struct TariffPlan {
     bool declared = false;
     TariffOrigin origin = TariffOrigin::Unknown;
@@ -113,6 +122,10 @@ struct TariffPlan {
     std::optional<ExactDecimal> subtotalMultiplier;  // explicit single multiplier on entire subtotal, no inferred tax order
     uint32_t unsupportedRules = 0;             // any unmodelled rule rejects evaluation
     std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter demand windows
+    std::optional<ExportPaymentRule> exportPayment{};  // independent payout, outside the supply subtotal
+};
+struct BillExportOpening {
+    ElectricityAmount exportedKwh, accruedPayment;
 };
 struct BillOpening {
     bool declared = false;
@@ -123,6 +136,7 @@ struct BillOpening {
     std::optional<ElectricityAmount> peakDemand;
     std::vector<ElectricityAmount> demandHistory;  // completed monthly measured peaks, oldest first
     bool apparentDemand = false;  // binds the opening peak and history to the demand rule's unit
+    std::optional<BillExportOpening> exports{};  // earned through the opening, before the current trace
 };
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
@@ -141,6 +155,13 @@ struct BillEstimate {
     int64_t decisionUtcMs = 0;
     bool cycleSettled = false;
     std::optional<ElectricityAmount> billedKwh;  // current trace only, when interval rounding is selected
+    std::optional<ElectricityAmount> exportPayment{};  // payout from this trace only
+    bool netChange(ElectricityAmount &out) const {
+        if (!charge) return false;
+        if (exportPayment) return charge->numerator.subtract(exportPayment->numerator,&out.numerator);
+        out=*charge;
+        return true;
+    }
 };
 // Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
 ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening);
@@ -154,12 +175,16 @@ BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, co
                           const std::atomic<bool> *cancel=nullptr);
 // Exact contiguous-prefix arithmetic. Provisional totals are NOT a payable utility bill or an incremental mining cost.
 // All-units reprices the accumulated register; minimum-cycle floors apply only at the explicit cycle end.
+struct BillExportAccrual {
+    ElectricityAmount newKwh, paymentChange, paymentTotal, netChange, netTotal;
+};
 struct BillAccrual {
     ElectricityStatus status=ElectricityStatus::Unavailable;
     std::optional<BillOpening> ending;
     std::optional<ElectricityAmount> provisionalChange,provisionalTotal,settledTotal;
     bool settlementDependent=false; // future cycle quantity can change already accrued all-units/floor amounts
     std::optional<ElectricityAmount> billedKwh;  // current trace only; ending.importedKwh retains physical usage
+    std::optional<BillExportAccrual> exportAccrual{};
 };
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
                       int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},
