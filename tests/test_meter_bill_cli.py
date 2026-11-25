@@ -195,6 +195,110 @@ def main():
         store(prorated, one_day)
         assert 'Provisional cycle estimate 10.320000 USD' in success(as_of=APRIL+1)
 
+        def register(rows):
+            return {'schema_version': 2, 'scope': SCOPE,
+                    'register_readings': [{'utc_ms': at, 'imported_kwh': amount} for at, amount in rows]}
+
+        start = APRIL-NOON
+        supplied = register([(start, '248129.75'), (APRIL, '248141.75'), (APRIL+NOON, '248153.75')])
+        store(original, supplied)
+        text = success(as_of=APRIL+NOON)
+        assert 'exact differences between cumulative import readings' in text
+        assert 'uniformly' not in text and '248129.75' not in text
+        assert text.count('Imported usage 12.000000 kWh') == 2 and 'Cycle estimate at closing 4.840000 USD' in text
+        assert 'Provisional cycle estimate 4.840000 USD' in text
+        rejected('after the review cutoff', as_of=APRIL+NOON-1)
+
+        for invalid, message in (
+            (register([(start, '10'), (APRIL+1, '11')]), 'billing-cycle boundary'),
+            (register([(start+1, '10'), (start+2, '11')]), 'match the saved opening time'),
+            (register([(start, '10'), (start-1, '11')]), 'timestamps must strictly increase'),
+            (register([(start, '10'), (start, '11')]), 'timestamps must strictly increase'),
+            (register([(start, '10'), (start+1, '9')]), 'reset or rollover'),
+            (register([(start, '10'), (start+1, '10.00')]), 'invalid meter register reading'),
+            (register([(start, '10'), (start+1, -1)]), 'invalid meter register reading'),
+            (register([(start, '10')]), 'invalid interval document'),
+            ({**supplied, 'scope': 'private-second-meter'}, 'scope differs'),
+            (register([(start+i, str(i)) for i in range(8194)]), 'invalid interval document'),
+        ):
+            store(original, invalid)
+            rejected(message)
+
+        epoch = copy.deepcopy(legacy)
+        epoch['opening'].update(cycle_begin_utc_ms=0, cycle_end_utc_ms=2*NOON, through_utc_ms=0,
+                                imported_kwh='0', accrued_subtotal='0')
+        epoch['plan']['revisions'][0].update(begin_utc_ms=0, end_utc_ms=2*NOON, published_utc_ms=0)
+        store(epoch, register([(0, '8'), (7, '9')]))
+        assert 'Imported usage 1.000000 kWh' in success(as_of=7)
+
+        # Irregular milliseconds and a fractional meter delta never have to form a decimal average wattage.
+        short = register([(start, '49.25'), (start+7, '49.5')])
+        store(original, short)
+        assert 'Imported usage 0.250000 kWh' in success()
+        assert 'Change from imported readings 0.055000 USD' in success()
+
+        earlier = copy.deepcopy(original)
+        begin = start-2*NOON
+        earlier['opening'].update(through_utc_ms=begin)
+        earlier['plan']['revisions'][0]['charge_per_civil_day'] = '0.1'
+        # A flat rate across a civil midnight can book the next daily fee without allocating the kWh.
+        store(earlier, register([(begin, '4'), (start+1, '5')]))
+        text = success()
+        assert 'Imported usage 1.000000 kWh' in text and 'Change from imported readings 0.330000 USD' in text
+
+        change = copy.deepcopy(original)
+        cut = start+7
+        first = change['plan']['revisions'][0]
+        first['end_utc_ms'] = cut
+        second = {**first, 'key': 'other-units', 'begin_utc_ms': cut, 'end_utc_ms': MAY}
+        change['plan']['revisions'].append(second)
+        combined = register([(start, '0'), (cut+7, '2')])
+        store(change, combined)
+        assert 'Change from imported readings 0.440000 USD' in success()
+        second['base_rate_per_kwh'] = '0.5'
+        store(change, combined)
+        rejected('energy-rate boundary')
+        store(change, register([(start, '0'), (cut, '1'), (cut+7, '2')]))
+        assert 'Change from imported readings 0.770000 USD' in success()
+        store(change, register([(start, '1'), (cut+7, '1')]))
+        assert 'Imported usage 0.000000 kWh' in success()
+
+        second['base_rate_per_kwh'] = first['base_rate_per_kwh']
+        change['plan']['tiers'] = 'progressive'
+        change['opening']['imported_kwh'] = '9'
+        first['bands'] = [{'through_kwh': '10', 'rate_per_kwh': '0.05'},
+                          {'through_kwh': None, 'rate_per_kwh': '0.1'}]
+        second['bands'] = copy.deepcopy(first['bands'])
+        store(change, combined)
+        assert 'Change from imported readings 0.605000 USD' in success()
+        second['bands'][1]['rate_per_kwh'] = '0.3'
+        store(change, combined)
+        rejected('energy-rate boundary')
+        store(change, register([(start, '0'), (cut, '1'), (cut+7, '2')]))
+        assert 'Change from imported readings 0.825000 USD' in success()
+
+        prices = copy.deepcopy(original)
+        prices['confirmed_utc'] = (cut+1000) // 1000
+        prices['plan']['revisions'][0].update(
+            time_mode='dynamic', base_rate_per_kwh='0',
+            dynamic=[
+                {'begin_utc_ms': MARCH, 'end_utc_ms': cut, 'published_utc_ms': MARCH, 'rate_per_kwh': '0.2'},
+                {'begin_utc_ms': cut, 'end_utc_ms': MAY, 'published_utc_ms': cut, 'rate_per_kwh': '-0.1'},
+            ])
+        store(prices, combined)
+        rejected('energy-rate boundary')
+        store(prices, register([(start, '0'), (cut, '1'), (cut+7, '2')]))
+        assert 'Change from imported readings 0.110000 USD' in success(as_of=cut+7)
+        no_future = copy.deepcopy(prices)
+        no_future['plan']['revisions'][0]['dynamic'][1]['published_utc_ms'] = cut+8
+        store(no_future, register([(start, '0'), (cut, '1'), (cut+7, '2')]))
+        rejected('rate published after decision instant', as_of=cut+7)
+
+        daily_register = register([(tariff_midnight, '20'), (boundary, '20'), (boundary+7, '20')])
+        store(prorated, daily_register)
+        text = success(as_of=boundary+7)
+        assert 'Cycle estimate at closing 1.110000 USD' in text and 'Provisional cycle estimate 0.330000 USD' in text
+
         historical_split = copy.deepcopy(split_day)
         announcement = boundary + 3 * 3600000
         fee_start = boundary + 4 * 3600000

@@ -5,6 +5,8 @@
 #include <chrono>
 #include <cstdio>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 #if defined(_WIN32)
 #include <shellapi.h>
 #endif
@@ -15,6 +17,7 @@ namespace {
 using namespace meter_bill_detail;
 constexpr size_t maxMeterIntervals = 8192;
 
+using MeterReadings = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
 struct MeterBillPaths { std::filesystem::path tariff, intervals, archive; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
@@ -60,38 +63,28 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
 #endif
 }
 
-bool instant(const JsonValue *value, int64_t &result) {
+bool instant(const JsonValue *value, int64_t &result, bool allowEpoch = false) {
     uint64_t number = 0;
-    if (!value || !value->asUint64(&number) || !number || number > meterBillMaxUtcMs) return false;
+    if (!value || !value->asUint64(&number) || (!allowEpoch && !number) || number > meterBillMaxUtcMs) return false;
     result = static_cast<int64_t>(number);
     return true;
 }
 
-const char *decodeIntervals(const std::string &text, const BillOpening &opening, int64_t cutoff,
-                            const char *lateReadingError, std::vector<PowerInterval> &readings) {
-    JsonValue root;
-    if (!parseJsonStrict(text, &root, nullptr) || !root.isObject() || root.members.size() != 3)
-        return "invalid interval document";
-    const auto *schema = root.find("schema_version");
-    const auto *scope = root.find("scope");
-    const auto *intervals = root.find("intervals");
-    uint64_t version = 0;
-    if (!schema || !schema->asUint64(&version) || version != 1 || !scope || !scope->isString() ||
-        !intervals || !intervals->isArray() || intervals->items.empty() || intervals->items.size() > maxMeterIntervals)
-        return "invalid interval document";
-    if (scope->text != opening.evidence.scope) return "meter scope differs from the saved opening";
+bool nonnegativeAmount(const JsonValue *value, ExactDecimal &amount) {
+    return value && value->isString() && ExactDecimal::parse(value->text, &amount) &&
+           amount.text() == value->text && !amount.negative() && amount.digits() <= 38 && amount.scale() <= 18;
+}
 
+const char *decodeIntervals(const JsonValue &intervals, const BillOpening &opening, int64_t cutoff,
+                            const char *lateReadingError, std::vector<PowerInterval> &readings) {
     auto cursor = opening.throughUtcMs;
-    readings.reserve(intervals->items.size());
-    for (const auto &row : intervals->items) {
+    readings.reserve(intervals.items.size());
+    for (const auto &row : intervals.items) {
         PowerInterval reading;
-        const auto *watts = row.find("average_watts");
         if (!row.isObject() || row.members.size() != 3 ||
             !instant(row.find("begin_utc_ms"), reading.beginUtcMs) ||
             !instant(row.find("end_utc_ms"), reading.endUtcMs) || reading.endUtcMs <= reading.beginUtcMs ||
-            !watts || !watts->isString() || !ExactDecimal::parse(watts->text, &reading.watts) ||
-            reading.watts.text() != watts->text || reading.watts.negative() ||
-            reading.watts.digits() > 38 || reading.watts.scale() > 18)
+            !nonnegativeAmount(row.find("average_watts"), reading.watts))
             return "invalid meter interval";
         if (reading.beginUtcMs != cursor) return "interval coverage has a gap or overlap";
         if (reading.endUtcMs > cutoff) return lateReadingError;
@@ -99,6 +92,56 @@ const char *decodeIntervals(const std::string &text, const BillOpening &opening,
         readings.push_back(std::move(reading));
     }
     return nullptr;
+}
+
+const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, int64_t cutoff,
+                           std::vector<MeterImportInterval> &readings) {
+    std::optional<int64_t> previousUtc;
+    ExactDecimal previous;
+    readings.reserve(rows.items.size() - 1);
+    for (const auto &row : rows.items) {
+        int64_t utc = 0;
+        ExactDecimal cumulative;
+        if (!row.isObject() || row.members.size() != 2 || !instant(row.find("utc_ms"), utc, true) ||
+            !nonnegativeAmount(row.find("imported_kwh"), cumulative))
+            return "invalid meter register reading";
+        if (utc > cutoff) return "meter register reading is after the review cutoff";
+        if (!previousUtc) {
+            if (utc != opening.throughUtcMs) return "first meter register reading must match the saved opening time";
+        } else {
+            if (utc <= *previousUtc) return "meter register timestamps must strictly increase";
+            if (cumulative.compare(previous) < 0) return "meter register decreased (reset or rollover is unsupported)";
+            ExactDecimal delta;
+            if (!cumulative.subtract(previous, &delta)) return "meter register quantity exceeds arithmetic capacity";
+            auto imported = electricityKwh(delta);
+            if (!imported) return "meter register quantity exceeds arithmetic capacity";
+            readings.push_back({*previousUtc, utc, std::move(*imported)});
+        }
+        previous = std::move(cumulative);
+        previousUtc = utc;
+    }
+    return nullptr;
+}
+
+const char *decodeMeterReadings(const std::string &text, const BillOpening &opening, int64_t cutoff,
+                               const char *lateReadingError, MeterReadings &readings) {
+    JsonValue root;
+    if (!parseJsonStrict(text, &root, nullptr) || !root.isObject() || root.members.size() != 3)
+        return "invalid interval document";
+    const auto *schema = root.find("schema_version");
+    const auto *scope = root.find("scope");
+    uint64_t version = 0;
+    if (!schema || !schema->asUint64(&version) || (version != 1 && version != 2) || !scope || !scope->isString())
+        return "invalid interval document";
+    const auto *rows = root.find(version == 1 ? "intervals" : "register_readings");
+    if (!rows || !rows->isArray()) return "invalid interval document";
+    const auto size = rows->items.size();
+    if (version == 1 ? size < 1 || size > maxMeterIntervals : size < 2 || size > maxMeterIntervals + 1)
+        return "invalid interval document";
+    if (scope->text != opening.evidence.scope) return "meter scope differs from the saved opening";
+    if (version == 1)
+        return decodeIntervals(*rows, opening, cutoff, lateReadingError, readings.emplace<std::vector<PowerInterval>>());
+    return decodeRegister(*rows, opening, cutoff, readings.emplace<std::vector<MeterImportInterval>>());
 }
 
 bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration &declaration,
@@ -134,6 +177,51 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     return true;
 }
 
+template<class Interval>
+const char *reviewReadings(const std::vector<Interval> &readings, const TariffDeclaration &declaration, int64_t cutoff,
+                           const std::function<bool()> &stopped, std::string &report, std::string *exactResults) {
+    constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
+    using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
+    auto opening = declaration.opening;
+    size_t next = 0;
+    auto cursor = opening.throughUtcMs;
+    for (unsigned cycle = 1; next < readings.size(); ++cycle) {
+        if (stopped()) return "review cancelled";
+        if (cycle > maxTariffComparisonCycles) return "intervals span more than 12 cycles";
+        Trace slice{opening.evidence, {}};
+        while (next < readings.size() && cursor < opening.cycleEndUtcMs) {
+            const auto &reading = readings[next];
+            const auto end = (std::min)(reading.endUtcMs, opening.cycleEndUtcMs);
+            if constexpr (isRegister) {
+                if (end != reading.endUtcMs) return "meter register needs a reading at the billing-cycle boundary";
+                slice.intervals.push_back(reading);
+            } else {
+                slice.intervals.push_back({cursor, end, reading.watts});
+            }
+            cursor = end;
+            if (cursor == reading.endUtcMs) ++next;
+        }
+        BillAccrual accrual;
+        const auto allocation = declaration.dailyFeeAllocation();
+        if constexpr (isRegister)
+            accrual = accrueMeterImport(declaration.plan, opening, slice, cursor, cutoff, stopped, allocation);
+        else
+            accrual = accrueBill(declaration.plan, opening, slice, cursor, cutoff, stopped, allocation);
+        if (stopped()) return "review cancelled";
+        if (accrual.status != ElectricityStatus::Ok) return electricityStatusName(accrual.status);
+        if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults))
+            return "amount exceeds the display range";
+        if (next < readings.size()) {
+            opening = *accrual.ending;
+            bool chargedDaySplit = false;
+            if (advanceTariffOpening(declaration, opening, cutoff, chargedDaySplit) != ElectricityStatus::Ok)
+                return chargedDaySplit ? "a reset splits a tariff day with a daily fee" :
+                                         "next cycle unavailable under the saved reset rule";
+        }
+    }
+    return nullptr;
+}
+
 int refuse(const char *reason) {
     std::fprintf(stderr, "meter-bill: %s\n", reason);
     return 3;
@@ -146,7 +234,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--as-of-utc-ms MS] [--save-review NAME.cmr]\n"
                   "canary-miner meter-bill --open-review FILE\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
-                  "Uses average watts as constant import within each interval. Prints an estimate to stdout.\n"
+                  "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
+                  "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.");
@@ -194,44 +283,23 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (stopped()) return stopResult();
         if (!reopening && !readLocalReviewInput(paths->intervals, maxMeterFileBytes, original.intervals))
             return fail("interval file unavailable, oversized or not a regular file");
-        std::vector<PowerInterval> readings;
-        if (const char *problem = decodeIntervals(original.intervals, declaration.opening, cutoff, lateReadingError, readings))
+        MeterReadings readings;
+        if (const char *problem = decodeMeterReadings(original.intervals, declaration.opening, cutoff, lateReadingError, readings))
             return fail(problem);
 
-        std::string report = "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
-                             "Average import is applied uniformly within each interval.\n";
+        std::string report = std::holds_alternative<std::vector<MeterImportInterval>>(readings)
+            ? "Estimated electricity costs from a declared tariff and user-supplied meter register readings\n"
+              "Uses exact differences between cumulative import readings in kWh.\n"
+            : "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
+              "Average import is applied uniformly within each interval.\n";
         if (options.reviewCutoffArg || reopening || archiving) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
         if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
             report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";
         std::string exact;
         auto *exactResults = archiving || reopening ? &exact : nullptr;
-        auto opening = declaration.opening;
-        size_t next = 0;
-        auto cursor = opening.throughUtcMs;
-        for (unsigned cycle = 1; next < readings.size(); ++cycle) {
-            if (stopped()) return stopResult();
-            if (cycle > maxTariffComparisonCycles) return fail("intervals span more than 12 cycles");
-            PowerTrace slice{opening.evidence, {}};
-            while (next < readings.size() && cursor < opening.cycleEndUtcMs) {
-                const auto &reading = readings[next];
-                const auto end = (std::min)(reading.endUtcMs, opening.cycleEndUtcMs);
-                slice.intervals.push_back({cursor, end, reading.watts});
-                cursor = end;
-                if (cursor == reading.endUtcMs) ++next;
-            }
-            const auto accrual = accrueBill(declaration.plan, opening, slice, cursor, cutoff, stopped,
-                                            declaration.dailyFeeAllocation());
-            if (stopped()) return stopResult();
-            if (accrual.status != ElectricityStatus::Ok) return fail(electricityStatusName(accrual.status));
-            if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults)) return fail("amount exceeds the display range");
-            if (next < readings.size()) {
-                opening = *accrual.ending;
-                bool chargedDaySplit = false;
-                if (advanceTariffOpening(declaration, opening, cutoff, chargedDaySplit) != ElectricityStatus::Ok)
-                    return fail(chargedDaySplit ? "a reset splits a tariff day with a daily fee" :
-                                                    "next cycle unavailable under the saved reset rule");
-            }
-        }
+        if (const auto *problem = std::visit([&](const auto &series) {
+            return reviewReadings(series, declaration, cutoff, stopped, report, exactResults);
+        }, readings)) return fail(problem);
         if (stopped()) return stopResult();
         if (reopening && original.results != exact) return fail("saved review amounts differ from the recalculated amounts");
         if (archiving) {

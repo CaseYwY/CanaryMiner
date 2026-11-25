@@ -124,6 +124,36 @@ local directory. Windows accepts native Unicode paths on local drives and reject
 prints no file paths or scope labels. Ctrl+C cancels the calculation. A stalled filesystem read can delay exit.
 Estimation from submitted data and qualified live collection remain separate acceptance steps.
 
+### Review cumulative meter readings
+
+Use the same command with an interval file in schema version 2:
+
+```json
+{
+  "schema_version": 2,
+  "scope": "synthetic-whole-meter-scenario",
+  "register_readings": [
+    {"utc_ms": 1711886400000, "imported_kwh": "248129.75"},
+    {"utc_ms": 1711887300000, "imported_kwh": "248130.01"}
+  ]
+}
+```
+
+Provide 2–8,193 strictly ordered timestamps from one whole-meter import register. The first timestamp
+must match the saved opening's through-time. It anchors subsequent differences. The saved opening
+supplies the cycle's accrued kWh and subtotal separately. Values are canonical, nonnegative decimal
+strings in kWh, with up to 38 digits and 18 decimal places. A repeated register value records zero import.
+Timestamp duplicates, decreasing readings, meter replacements and register rollovers require a
+corrected source file or a new review with a corresponding opening.
+
+A positive difference is priced once at the energy rate and tier schedule that apply to its entire
+interval. A stable energy rate can cover a civil midnight. Daily fees still follow the saved tariff.
+If a positive interval contains a base rate or progressive tier price change, supply a reading at
+that change.
+Always supply readings at billing-cycle boundaries inside the review. The report uses exact
+differences and rejects an incomplete review before printing cycle amounts. The same historical
+cutoff, twelve-cycle limit and private archive replay apply.
+
 ### Save and reopen a local meter review
 
 Add `--save-review NAME.cmr` to a successful `meter-bill` review to save a new archive in the current directory. Use an ASCII basename ending in `.cmr`. Run the command from a private, trusted local directory. The archive contains the original tariff declaration and all supplied meter readings, so it carries the same privacy considerations as those files.
