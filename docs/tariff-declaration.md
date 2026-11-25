@@ -106,7 +106,8 @@ with fresh allowances and fees from the saved rule. An interval that ends exactl
 
 Add `--as-of-utc-ms MS` with a positive ASCII decimal UTC millisecond timestamp to replay a historical review.
 The cutoff appears in the report. Every supplied interval must end at or before the cutoff. A rate published later cannot affect the estimate.
-If such a rate is needed, the entire review is refused. A future cutoff is invalid. The saved declaration still supplies
+If such a rate is needed, the entire review is refused. Reset-day fee checks use the same cutoff. A future cutoff is
+invalid. The saved declaration still supplies
 the opening values, so the cutoff describes rate publication and reading coverage, and local confirmation can be later.
 Omit the option to use the current UTC time.
 

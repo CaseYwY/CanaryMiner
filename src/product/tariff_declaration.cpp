@@ -101,12 +101,13 @@ std::vector<TariffCycleBounds> comparisonCycles(const TariffDeclaration &d,unsig
     return windows;
 }
 
-bool splitsChargedDay(const TariffPlan &plan,int64_t boundary){
+bool splitsChargedDay(const TariffPlan &plan,int64_t boundary,std::optional<int64_t> publishedThroughUtcMs=std::nullopt){
     const auto day=civilDayAt(plan.clock,boundary);
     // A monthly reset inside a charged tariff day needs an explicit allocation rule.
     return day.status==CivilStatus::Ok && day.beginUtcMs<boundary &&
         std::any_of(plan.revisions.begin(),plan.revisions.end(),[&](const TariffRevision &r){
-            return !r.chargePerCivilDay.zero() && r.beginUtcMs<day.endUtcMs && r.endUtcMs>day.beginUtcMs;
+            return (!publishedThroughUtcMs || r.publishedUtcMs<=*publishedThroughUtcMs) &&
+                !r.chargePerCivilDay.zero() && r.beginUtcMs<day.endUtcMs && r.endUtcMs>day.beginUtcMs;
         });
 }
 
@@ -172,7 +173,8 @@ std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d,unsigned c
     return windows.back().endUtcMs;
 }
 
-ElectricityStatus advanceTariffOpening(const TariffDeclaration &d,BillOpening &settled,bool &chargedDaySplit){
+ElectricityStatus advanceTariffOpening(const TariffDeclaration &d,BillOpening &settled,int64_t publishedThroughUtcMs,
+                                       bool &chargedDaySplit){
     chargedDaySplit=false;
     if(settled.throughUtcMs!=settled.cycleEndUtcMs)return ElectricityStatus::Invalid;
     if(!d.monthlyReset)return ElectricityStatus::Unsupported;
@@ -180,7 +182,7 @@ ElectricityStatus advanceTariffOpening(const TariffDeclaration &d,BillOpening &s
         const auto boundary=settled.cycleEndUtcMs;
         const auto window=monthlyCycle(*d.monthlyReset,boundary);
         if(window.beginUtcMs!=boundary||window.endUtcMs<=boundary)return ElectricityStatus::Invalid;
-        chargedDaySplit=splitsChargedDay(d.plan,boundary);
+        chargedDaySplit=splitsChargedDay(d.plan,boundary,publishedThroughUtcMs);
         if(chargedDaySplit)return ElectricityStatus::Unsupported;
         resetOpening(settled,window);
         return ElectricityStatus::Ok;

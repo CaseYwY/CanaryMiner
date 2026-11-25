@@ -168,6 +168,23 @@ def main():
         store(split_day)
         rejected('daily fee')
 
+        boundary = APRIL - offset
+        historical_split = copy.deepcopy(split_day)
+        announcement = boundary + 3 * 3600000
+        fee_start = boundary + 4 * 3600000
+        historical_split['confirmed_utc'] = announcement // 1000
+        before_fee = historical_split['plan']['revisions'][0]
+        before_fee.update(end_utc_ms=fee_start, charge_per_civil_day='0')
+        historical_split['plan']['revisions'].append(
+            {**before_fee, 'key': 'synthetic-later-daily-fee', 'begin_utc_ms': fee_start, 'end_utc_ms': MAY,
+             'published_utc_ms': announcement, 'charge_per_civil_day': '0.1'})
+        early_cutoff = boundary + 2 * 3600000
+        store(historical_split, {**source, 'intervals': [{**reading, 'end_utc_ms': early_cutoff}]})
+        text = success(as_of=early_cutoff)
+        assert f'Review cutoff {early_cutoff} UTC ms' in text and 'Cycle 2 ' in text
+        rejected('daily fee', as_of=announcement)
+        rejected('daily fee')
+
         long_plan = copy.deepcopy(original)
         end = int(datetime.datetime(2025, 4, 2, tzinfo=datetime.timezone.utc).timestamp() * 1000)
         may_2025 = int(datetime.datetime(2025, 5, 1, tzinfo=datetime.timezone.utc).timestamp() * 1000)

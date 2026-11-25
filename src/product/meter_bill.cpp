@@ -201,7 +201,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (next < readings.size()) {
                 opening = *accrual.ending;
                 bool chargedDaySplit = false;
-                if (advanceTariffOpening(declaration, opening, chargedDaySplit) != ElectricityStatus::Ok)
+                if (advanceTariffOpening(declaration, opening, cutoff, chargedDaySplit) != ElectricityStatus::Ok)
                     return fail(chargedDaySplit ? "a reset splits a tariff day with a daily fee" :
                                                     "next cycle unavailable under the saved reset rule");
             }
