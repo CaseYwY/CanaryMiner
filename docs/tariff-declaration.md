@@ -23,13 +23,13 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families include contracted capacity, demand ratchets, apparent power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families include contracted capacity, apparent power, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -192,9 +192,37 @@ The same data under a five-minute rule yields a peak of 12 kW. A plan with an es
 window. Two loads considered together can increase the bill even when each alone stays
 within the existing peak.
 
-The peak resets at the declared cycle boundary. This covers fixtures T18–T20. Ratchets,
-apparent-power charges, separate demand-reset calendars, eligible time bands and supplier
-qualification remain open. The two-month monthly-average rule has no demand allocation.
+The peak resets at the declared cycle boundary. This covers fixtures T18–T20. Apparent-power
+charges, separate demand-reset calendars, eligible time bands and supplier qualification
+remain open. The two-month monthly-average rule has no demand allocation.
+
+### Use a historical demand floor
+
+Set a monthly reset and add a demand charge. In Settings, select `demand_charge` and press **R**.
+Version 10 adds `demand_charge.ratchet` with `lookback_months` from 1 to 12 and a `fraction`
+greater than zero and up to one. For 80 percent, enter `0.8`.
+
+In `opening.demand_history`, add one row for every immediately preceding completed
+month, oldest first. Each row contains its exact `cycle_end_utc_ms` under the saved reset
+clock and its `peak_kw` measured on the declared demand grid. Enter actual peaks before
+applying any floor. Missing months or mismatched boundaries block the review. The separate
+`peak_demand_kw` field still holds the current cycle's actual peak, or zero at cycle start.
+
+The billable amount is the larger of the current month's actual peak and the lookback
+maximum multiplied by the fraction. With a historical peak of 20 kW and a factor of
+0.8, current peaks of 10, 15 and 17 kW produce billable demand of 16, 16 and 17 kW.
+The review displays the actual peak, the floor and the billable kW. The opening subtotal
+still excludes demand. A mid-cycle review calculates its change from the already established
+billable demand.
+
+At each monthly reset the actual peak of the completed cycle enters the lookback, the
+oldest peak expires and the new current-month peak starts at zero. A whole-meter
+comparison carries each scenario's actual history independently. Archive replay
+reconstructs the same history and verifies the exact floor and billable demand for
+each reviewed cycle.
+
+This covers T21 for one all-day maximum with consecutive monthly resets. Contracted
+capacity, kVA measurement and independent reset schedules remain open.
 
 ### Apply a seasonal baseline allowance
 

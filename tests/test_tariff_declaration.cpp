@@ -396,6 +396,81 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
 }
 
+void demandRatchet(JsonValue draft,const std::filesystem::path &target) {
+    constexpr int64_t jan=1704067200000,feb=1706745600000,mar=1709251200000;
+    auto &plan=member(draft,"plan");
+    set(plan,"tiers",R"("none")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    auto &row=member(plan,"revisions").items.front();
+    set(row,"begin_utc_ms",std::to_string(jan));
+    set(row,"end_utc_ms",std::to_string(mar));
+    set(row,"published_utc_ms",std::to_string(jan));
+    set(row,"time_mode",R"("constant")");
+    set(row,"base_rate_per_kwh",R"("0")");
+    set(row,"charge_per_civil_day",R"("0")");
+    set(row,"calendar","[]");
+    set(row,"bands","[]");
+    set(draft,"schema_version","9");
+    set(draft,"reset_policy",R"({"monthly_day":1,"clock":{"kind":"utc","fixed_offset_seconds":0}})");
+    draft.members.emplace_back("demand_charge",json(R"({"window_minutes":15,"offset_minutes":0,"published_utc_ms":0,"rate_per_kw":"5"})"));
+    auto &opening=member(draft,"opening");
+    set(opening,"cycle_begin_utc_ms",std::to_string(jan));
+    set(opening,"through_utc_ms",std::to_string(jan));
+    set(opening,"cycle_end_utc_ms",std::to_string(feb));
+    opening.members.emplace_back("peak_demand_kw",json(R"("0")"));
+
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"demand_charge");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,26,ColorLevel::None).find("[R] Historical demand floor")!=std::string::npos);
+    panel.key('r',{},T/1000);
+    enter(panel,"ratchet");
+    enter(panel,"lookback_months");type(panel,"1");
+    enter(panel,"fraction");type(panel,"0.8");
+    panel.key(27,{},T/1000);
+    panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"demand_history");
+    panel.key('a',{},T/1000);
+    panel.key('\r',{},T/1000);
+    enter(panel,"cycle_end_utc_ms");type(panel,std::to_string(jan));
+    enter(panel,"peak_kw");type(panel,"20");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,27,ColorLevel::None).find("larger of this month's actual peak")!=std::string::npos);
+
+    auto store=TariffDeclarationStore(target);
+    std::string reason;
+    JsonValue saved;
+    CHECK(store.load(&saved,&reason));
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    CHECK(store.load(&saved,&reason)&&saved.find("schema_version")->text=="10");
+    TariffDeclaration decoded;
+    CHECK(decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharge->ratchet);
+    CHECK(decoded.opening.accruedSubtotal.numerator.zero());
+    const std::array<ExactDecimal,2> watts{dec("10000"),dec("24000")};
+    checkComparison(compareTariffCycles(decoded,watts,1,T),"80.000000","120.000000","40.000000");
+    checkComparison(compareTariffCycles(decoded,watts,2,T),"130.000000","240.000000","110.000000");
+
+    auto &history=member(member(saved,"opening"),"demand_history");
+    set(history.items.front(),"peak_kw",R"("21")");
+    CHECK(!store.save(saved,&reason)&&reason.find("NEW opening.key")!=std::string::npos);
+    set(member(saved,"opening"),"key",R"("new-ratchet-history")");
+    CHECK(store.save(saved,&reason));
+
+    panel.open(saved);
+    enter(panel,"demand_charge");
+    enter(panel,"window_minutes");type(panel,"5");
+    CHECK(panel.draft.find("opening")->find("demand_history")->items.empty());
+    panel.open(saved);
+    enter(panel,"demand_charge");
+    panel.key(27,{},T/1000);
+    panel.key('r',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="9");
+    CHECK(!panel.draft.find("opening")->find("demand_history"));
+}
+
 void seasonalCycles(JsonValue draft,const std::filesystem::path &target) {
     constexpr int64_t begin=1713657600000, middle=1714521600000, end=1716249600000, next=1718928000000;
     auto &plan=member(draft,"plan");
@@ -858,6 +933,7 @@ int main(int argc,char **argv){
     seasonalCycles(original,root/"seasonal-version-test.json");
     componentMultipliers(original,root/"component-version-test.json");
     demandWindows(original,root/"demand-version-test.json");
+    demandRatchet(original,root/"ratchet-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));

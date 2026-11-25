@@ -73,11 +73,16 @@ struct TariffRevision {
 };
 enum class TariffOrigin { Unknown, SyntheticFixture, UserDeclaredOffline };
 enum class TariffRounding { Unsupported, FinalDisplayOnly, MeterHalfHourKwhHalfEven2 };
+struct DemandRatchet {
+    unsigned lookbackMonths = 0;
+    ExactDecimal fraction;
+};
 struct DemandChargeRule {
     unsigned windowMinutes = 0;
     unsigned offsetMinutes = 0;  // UTC phase from the Unix epoch, less than one window
     int64_t publishedUtcMs = 0;
     ExactDecimal ratePerKw;
+    std::optional<DemandRatchet> ratchet{};
     bool charge(const ElectricityAmount &peak, ElectricityAmount *out) const {
         return peak.numerator.multiply(ratePerKw, &out->numerator);
     }
@@ -104,7 +109,10 @@ struct BillOpening {
     int64_t cycleBeginUtcMs = 0, cycleEndUtcMs = 0, throughUtcMs = 0;
     ElectricityAmount importedKwh, accruedSubtotal;  // pre-multiplier subtotal includes the established demand charge
     std::optional<ElectricityAmount> peakDemandKw;
+    std::vector<ElectricityAmount> demandHistoryKw;  // completed monthly measured peaks, oldest first
 };
+bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
+                    ElectricityAmount &peak,ElectricityAmount &ratchetFloor);
 struct BillEstimate {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     std::optional<ElectricityAmount> charge;
@@ -120,14 +128,16 @@ struct BillEstimate {
 };
 // Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
 ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening);
-// Full coverage only. Horizon stays within one explicitly supplied cycle (<=370 elapsed days).
-// All-units/floor require the remainder through cycle end; no short-horizon free allowance or assumed future load.
-BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, const PowerTrace &trace,
-                          int64_t endUtcMs, int64_t decisionUtcMs);
-// Exact contiguous-prefix arithmetic. Provisional totals are NOT a payable utility bill or an incremental mining cost.
-// All-units reprices the accumulated register; minimum-cycle floors apply only at the explicit cycle end.
 // The opt-in rule splits the fee selected at civil midnight by each cycle's share of that day.
 enum class DailyFeeAllocation { WholeDay, ProrateByCycleMinutes };
+// Full coverage only. Horizon stays within one explicitly supplied cycle (<=370 elapsed days).
+// All-units/floor require the remainder through cycle end.
+BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, const PowerTrace &trace,
+                          int64_t endUtcMs, int64_t decisionUtcMs,
+                          DailyFeeAllocation allocation=DailyFeeAllocation::WholeDay,
+                          const std::atomic<bool> *cancel=nullptr);
+// Exact contiguous-prefix arithmetic. Provisional totals are NOT a payable utility bill or an incremental mining cost.
+// All-units reprices the accumulated register; minimum-cycle floors apply only at the explicit cycle end.
 struct BillAccrual {
     ElectricityStatus status=ElectricityStatus::Unavailable;
     std::optional<BillOpening> ending;

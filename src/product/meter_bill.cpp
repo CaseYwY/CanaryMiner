@@ -198,13 +198,20 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         }
     }
     if (seasonal) report += "  Seasonal allowance for cycle " + seasonal->allowanceKwh.text() + " kWh\n";
-    ElectricityAmount demandSubtotal;
+    ElectricityAmount demandSubtotal,billablePeak,ratchetFloor;
     if (const auto &demand=declaration.plan.demandCharge) {
         std::string peak, amount;
-        if (!accrual.ending->peakDemandKw->format(6,&peak) ||
-            !demand->charge(*accrual.ending->peakDemandKw,&demandSubtotal) ||
+        if (!billableDemand(*demand,*accrual.ending,billablePeak,ratchetFloor) ||
+            !accrual.ending->peakDemandKw->format(6,&peak) ||
+            !demand->charge(billablePeak,&demandSubtotal) ||
             !demandSubtotal.format(6,&amount)) return false;
         report += "  Peak demand " + peak + " kW over " + std::to_string(demand->windowMinutes) + " minute windows\n";
+        if (demand->ratchet) {
+            std::string floor,billable;
+            if (!ratchetFloor.format(6,&floor) || !billablePeak.format(6,&billable)) return false;
+            report += "  Demand ratchet floor " + floor + " kW\n";
+            report += "  Billable demand " + billable + " kW\n";
+        }
         report += "  Demand charge before subtotal multiplier " + amount + " " + currency + "\n";
     }
     if (accrual.billedKwh) {
@@ -230,6 +237,8 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (seasonal) exact += "," + jsonQuote(seasonal->allowanceKwh.text());
     if (ending.peakDemandKw)
         exact += "," + jsonQuote(ending.peakDemandKw->numerator.text()) + "," + jsonQuote(demandSubtotal.numerator.text());
+    if (declaration.plan.demandCharge && declaration.plan.demandCharge->ratchet)
+        exact += "," + jsonQuote(ratchetFloor.numerator.text()) + "," + jsonQuote(billablePeak.numerator.text());
     exact += "]\n";
     return true;
 }
@@ -317,7 +326,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 9 &&
+        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 10 &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
