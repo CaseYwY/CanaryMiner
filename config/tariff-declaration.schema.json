@@ -93,11 +93,11 @@
       "if": {"properties": {"schema_version": {"const": 12}}},
       "then": {"properties": {
         "plan": {"required": ["export_payment"]},
-        "opening": {"required": ["exported_kwh"]}
+        "opening": {"required": ["exported_kwh", "accrued_export_payment"]}
       }},
       "else": {"properties": {
         "plan": {"not": {"required": ["export_payment"]}},
-        "opening": {"not": {"required": ["exported_kwh"]}}
+        "opening": {"not": {"anyOf": [{"required": ["exported_kwh"]}, {"required": ["accrued_export_payment"]}]}}
       }}
     },
     {
@@ -364,6 +364,7 @@
         "cycle_begin_utc_ms": {"$ref": "#/$defs/instant"}, "cycle_end_utc_ms": {"$ref": "#/$defs/instant"}, "through_utc_ms": {"$ref": "#/$defs/instant"},
         "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"enum": ["explicit-fixed-clock", "2026e"]},
         "exported_kwh": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
+        "accrued_export_payment": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "peak_demand_kw": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "peak_demand_kva": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "demand_history": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"$ref": "#/$defs/demandHistoryRow"}}

@@ -194,13 +194,15 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
                        s.throughUtcMs % meterHalfHourMs || end % meterHalfHourMs))
         return ElectricityStatus::MeterRoundingBoundary;
     if (s.throughUtcMs == s.cycleBeginUtcMs && (!s.importedKwh.numerator.zero() || !s.accruedSubtotal.numerator.zero())) return ElectricityStatus::Invalid;
-    if (p.exportPayment.has_value()!=s.exportedKwh.has_value()) return ElectricityStatus::Invalid;
+    if (p.exportPayment.has_value()!=s.exports.has_value()) return ElectricityStatus::Invalid;
     if (p.exportPayment) {
         if (s.evidence.basis!=PowerBasis::WholeMeterImport || (p.demandCharge && p.demandCharge->apparent()))
             return ElectricityStatus::Unsupported;
         const auto &exportRule=*p.exportPayment;
-        const auto &exported=s.exportedKwh->numerator;
+        const auto &exported=s.exports->exportedKwh.numerator;
+        const auto &earned=s.exports->accruedPayment.numerator;
         if (!instant(exportRule.publishedUtcMs) || exportRule.ratePerKwh.negative() || exported.negative() ||
+            earned.negative() || (exported.zero() && !earned.zero()) ||
             (s.throughUtcMs==s.cycleBeginUtcMs && !exported.zero()))
             return ElectricityStatus::Invalid;
         if (exportRule.publishedUtcMs>decision) return ElectricityStatus::NotYetKnown;
@@ -478,8 +480,9 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         ElectricityAmount newExport;
         result.status=sumExport(trace,newExport,cancel,stop);
         if (result.status!=ElectricityStatus::Ok) return result;
-        if (!accumulate(state.exportedKwh->numerator,newExport.numerator) ||
-            !p.exportPayment->payment(newExport,exportPayment.emplace())) {
+        if (!p.exportPayment->payment(newExport,exportPayment.emplace()) ||
+            !accumulate(state.exports->exportedKwh.numerator,newExport.numerator) ||
+            !accumulate(state.exports->accruedPayment.numerator,exportPayment->numerator)) {
             result.status=ElectricityStatus::Capacity;
             return result;
         }
@@ -624,8 +627,8 @@ static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening
     if (p.exportPayment) {
         BillExportAccrual exported;
         exported.paymentChange=*step.exportPayment;
-        if (!step.ending->exportedKwh->numerator.subtract(opening.exportedKwh->numerator,&exported.newKwh.numerator) ||
-            !p.exportPayment->payment(*step.ending->exportedKwh,exported.paymentTotal) ||
+        exported.paymentTotal=step.ending->exports->accruedPayment;
+        if (!step.ending->exports->exportedKwh.numerator.subtract(opening.exports->exportedKwh.numerator,&exported.newKwh.numerator) ||
             !step.netChange(exported.netChange) ||
             !total.numerator.subtract(exported.paymentTotal.numerator,&exported.netTotal.numerator)) {
             result.status=ElectricityStatus::Capacity;

@@ -322,7 +322,7 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (ending.apparentDemand) exact += ",\"kVA\"";
     if (const auto &exported=accrual.exportAccrual)
         exact += ",\"export_payment\"," + jsonQuote(exported->newKwh.numerator.text()) +
-                 "," + jsonQuote(ending.exportedKwh->numerator.text()) +
+                 "," + jsonQuote(ending.exports->exportedKwh.numerator.text()) +
                  "," + jsonQuote(exported->paymentChange.numerator.text()) +
                  "," + jsonQuote(exported->paymentTotal.numerator.text()) +
                  "," + jsonQuote(exported->netChange.numerator.text()) +

@@ -75,9 +75,9 @@ charge accrues.
 
 A declared [separate export payment](tariff-declaration.md#price-electricity-exports-separately)
 uses signed direction-resolved power or a separate cumulative export register. At the
-cycle reset, start the export total at zero. Compute payout on exported kWh, outside
-gross supply charges. The net comparison subtracts the change in payout from the
-change in gross supply charges. Import tiers, floors, and invoice matching keep using
+cycle reset, start both export totals at zero. Apply the price to new exported kWh
+and add that amount to the already earned opening payment. The net comparison
+subtracts the change in payout from the change in gross supply charges. Import tiers, floors, and invoice matching keep using
 gross supply quantities and charges.
 
 All flags for unknown rule families reject evaluation. **Not implemented:** contracted capacity, reactive power, apparent demand based on a different trigger such as maximum kW, prepaid purchase/inventory/debt, import/export netting, time-varying export pricing, restricted credits, independent annual/purchase/reset ledgers, seasonal allowance outside the offline declaration adapter, provisional/annual true-up, all-units monthly-average normalization in the pure core, tier reallocation/threshold revisions, other supplier-specific intermediate rounding, ordered/selective taxes/multipliers, contracted eligibility or persistent beyond-cycle consequences. These need separate declared adapters/state, not zero-valued placeholders. Choosing a simpler energy-only scenario must be explicit and visibly exclude the omitted rules.

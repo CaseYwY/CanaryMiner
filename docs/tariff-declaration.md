@@ -267,9 +267,11 @@ charges or contracted capacity require their own rule and supplier qualification
 Select Plan in Settings and press **E** to add the export rule. Version 12 declares
 `plan.export_payment.rate_per_kwh` and `published_utc_ms`. Enter one nonnegative
 fixed export payment per kWh in the same currency as the supply tariff. In the opening,
-enter `exported_kwh` from the cycle start to the opening time. Enter zero at the cycle
-start. The import quantity and accrued supply subtotal retain their existing meanings.
-Use new plan and opening keys when changing a saved rule.
+enter both `exported_kwh` and `accrued_export_payment` earned from the cycle start to
+the opening time. Enter zero for both at cycle start. The declared rate prices new exports.
+When changing the rate mid-cycle, carry forward the amount already earned and use new
+plan and opening keys. A change in plan currency requires re-entering the earned
+payment in the new currency. The import quantity and accrued supply subtotal retain their meanings.
 
 A local meter review requires explicit export evidence even when export is zero.
 

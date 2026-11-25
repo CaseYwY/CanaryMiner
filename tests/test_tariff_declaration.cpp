@@ -424,6 +424,7 @@ void exportPayment(JsonValue draft,const std::filesystem::path &target) {
     panel.key(27,{},T/1000);
     enter(panel,"opening");
     enter(panel,"exported_kwh");type(panel,"0");
+    enter(panel,"accrued_export_payment");type(panel,"0");
 
     TariffDeclarationStore store(target);
     std::string reason;
@@ -485,6 +486,22 @@ void exportPayment(JsonValue draft,const std::filesystem::path &target) {
         frame(narrow,60,12);
     }
 
+    auto mid=saved;
+    auto &midOpening=member(mid,"opening");
+    set(midOpening,"through_utc_ms",std::to_string(T+1800000));
+    set(midOpening,"exported_kwh",R"("2")");
+    set(midOpening,"accrued_export_payment",R"("4")");
+    panel.open(mid);
+    enter(panel,"plan");
+    enter(panel,"currency");type(panel,"EUR");
+    CHECK(panel.draft.find("opening")->find("exported_kwh")->text=="2");
+    CHECK(panel.draft.find("opening")->find("accrued_export_payment")->text.empty());
+    panel.open(mid);
+    enter(panel,"plan");
+    enter(panel,"export_payment");
+    enter(panel,"rate_per_kwh");type(panel,"2");
+    CHECK(panel.draft.find("opening")->find("accrued_export_payment")->text=="4");
+
     auto changed=saved;
     set(member(member(changed,"plan"),"export_payment"),"rate_per_kwh",R"("0.5")");
     CHECK(!store.save(changed,&reason)&&reason.find("NEW plan.key")!=std::string::npos);
@@ -498,6 +515,7 @@ void exportPayment(JsonValue draft,const std::filesystem::path &target) {
     CHECK(panel.draft.find("schema_version")->text=="1");
     CHECK(!panel.draft.find("plan")->find("export_payment"));
     CHECK(!panel.draft.find("opening")->find("exported_kwh"));
+    CHECK(!panel.draft.find("opening")->find("accrued_export_payment"));
 }
 
 void apparentDemand(JsonValue draft,const std::filesystem::path &target) {

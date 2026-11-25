@@ -59,6 +59,7 @@ class TariffSettingsPanel {
                      (location=="reset_policy"&&name=="monthly_day")||
                      (openingChanged&&name=="cycle_begin_utc_ms"));
                 const bool changedPlanSubtotal=location=="plan"&&(name=="tiers"||name=="cycle_charge"||name=="currency");
+                const bool changedExportCurrency=changed&&location=="plan"&&name=="currency"&&exports(draft);
                 const bool changedComponents=changed&&components&&(revision()||changedPlanSubtotal);
                 const bool changedRateClock=changed&&location=="plan.clock"&&
                     (name=="zone"||((seasonal()||components)&&(name=="kind"||name=="fixed_offset_seconds")));
@@ -86,6 +87,13 @@ class TariffSettingsPanel {
                 else if(changedComponents)reviewChangedComponents();
                 if(changedHistoryBasis&&clearDemandHistory())
                     message+=" Re-enter the prior monthly peaks for the new basis.";
+                if(changedExportCurrency){
+                    auto &opening=*member(draft,"opening");
+                    if(opening.find("through_utc_ms")->text!=opening.find("cycle_begin_utc_ms")->text){
+                        member(opening,"accrued_export_payment")->text.clear();
+                        message+=" Re-enter the accrued export payment in the new currency.";
+                    }
+                }
             }else if(key==8||key==127){if(replaceInput)input.clear();else if(!input.empty())input.pop_back();replaceInput=false;inputRejected=false;}
             else if(key>=32&&key<=126){if(replaceInput){input.clear();inputRejected=false;}replaceInput=false;if(input.size()<128)input+=static_cast<char>(key);else{inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::TooLong);}}
             else if(key>=128&&key<=255){inputRejected=true;message=i18n::tariffNoticeEnglish(NoticeKey::AsciiOnly);}
@@ -472,7 +480,7 @@ class TariffSettingsPanel {
                 return entry.first=="export_payment";
             }),plan.members.end());
             opening.members.erase(std::remove_if(opening.members.begin(),opening.members.end(),[](const auto &entry){
-                return entry.first=="exported_kwh";
+                return entry.first=="exported_kwh"||entry.first=="accrued_export_payment";
             }),opening.members.end());
             focus("plan");
             message="Export payment removed from the draft.";
@@ -481,9 +489,10 @@ class TariffSettingsPanel {
             parseJsonStrict(R"({"rate_per_kwh":"","published_utc_ms":0})",&payment,nullptr);
             quantity.type=JsonValue::Type::String;
             plan.members.emplace_back("export_payment",std::move(payment));
-            opening.members.emplace_back("exported_kwh",std::move(quantity));
+            opening.members.emplace_back("exported_kwh",quantity);
+            opening.members.emplace_back("accrued_export_payment",std::move(quantity));
             focus("plan.export_payment");
-            message="Enter the separate export rate and the exported kWh at the opening.";
+            message="Enter the export rate, opening export quantity and payment already earned.";
         }
         refreshClockContract();
     }
@@ -582,7 +591,7 @@ class TariffSettingsPanel {
     }
     void clearDraftOpeningAmounts(){
         if(auto *opening=member(draft,"opening")){
-            for(const auto *amount:{"imported_kwh","accrued_subtotal","exported_kwh",openingPeakField()})
+            for(const auto *amount:{"imported_kwh","accrued_subtotal","exported_kwh","accrued_export_payment",openingPeakField()})
                 if(auto *value=member(*opening,amount))value->text.clear();
         }
     }
@@ -642,6 +651,7 @@ class TariffSettingsPanel {
         const auto *subtotal=opening->find("accrued_subtotal");
         const auto *peak=opening->find(openingPeakField());
         const auto *exported=opening->find("exported_kwh");
+        const auto *exportPayment=opening->find("accrued_export_payment");
         if(!begin||!end||!through||!quantity||!subtotal)return;
         TariffCycleBounds bounds;
         TariffProblem error;
@@ -651,12 +661,14 @@ class TariffSettingsPanel {
         }
         auto beginText=std::to_string(bounds.beginUtcMs);
         if(begin->text!=beginText&&(!quantity->text.empty()||!subtotal->text.empty()||(peak&&!peak->text.empty())||
-                                  (exported&&!exported->text.empty()))){
+                                  (exported&&!exported->text.empty())||
+                                  (exportPayment&&!exportPayment->text.empty()))){
             if(!quantity->text.empty())focus("opening.imported_kwh");
             else if(!subtotal->text.empty())focus("opening.accrued_subtotal");
             else if(exported&&!exported->text.empty())focus("opening.exported_kwh");
+            else if(exportPayment&&!exportPayment->text.empty())focus("opening.accrued_export_payment");
             else focus(std::string("opening.")+openingPeakField());
-            message=exported?"Clear the opening amounts, including exported kWh, before changing the cycle start.":
+            message=exported?"Clear the opening amounts, including accrued export, before changing the cycle start.":
                 peak?"Clear the opening import, subtotal and demand peak before changing the cycle start.":
                 i18n::tariffMonthlyEnglish(Key::RetainAmounts);
             return;
@@ -699,6 +711,7 @@ class TariffSettingsPanel {
         if(s=="window_minutes")return "Choose 5 to 60 minutes. The window must divide one hour.";
         if(s=="offset_minutes")return "Enter the UTC grid offset in minutes, smaller than the window.";
         if(s=="exported_kwh")return "Enter nonnegative exported energy since the cycle start. Enter zero at the start.";
+        if(s=="accrued_export_payment")return "Enter export payment already earned, in the plan currency. Enter zero without prior exports.";
         if(path()=="plan.export_payment"&&s=="rate_per_kwh")return "Enter the separate payment per exported kWh in the plan currency.";
         if(s=="rate_per_kw")return "Enter the price per kW of the billable demand for this cycle.";
         if(s=="rate_per_kva")return "Enter the price per kVA of the billable demand for this cycle.";
@@ -768,7 +781,7 @@ class TariffSettingsPanel {
         if(ratchet())review.insert(review.begin()+4,
             "Billable demand is the larger of this month's actual peak and the fraction of the prior maximum.");
         if(exports(draft))review.insert(review.begin()+4,
-            "Export is paid separately. Supply charges, tiers and minimums use imported energy.");
+            "Export is paid separately. The declared rate applies after the opening. Supply charges use imported energy.");
         if(apparentDemand())review.insert(review.begin()+4,
             "Demand uses kVA and requires whole-meter apparent-power evidence. Energy uses active import in kWh.");
         if(demand())review.insert(review.begin()+4,

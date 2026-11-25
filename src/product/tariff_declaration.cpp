@@ -336,7 +336,7 @@ bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const Tar
     opening.importedKwh={};
     opening.accruedSubtotal={};
     if(opening.peakDemand)opening.peakDemand=ElectricityAmount{};
-    if(opening.exportedKwh)opening.exportedKwh=ElectricityAmount{};
+    if(opening.exports)opening.exports=BillExportOpening{};
     return true;
 }
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
@@ -649,8 +649,9 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             bad("schema_version","Version 8 requires a revision with a component multiplier.",TariffProblemKind::SchemaVersion);
         auto &s=d.opening;const auto &opening=*root.find("opening");
         keys(opening,"opening",{"key","scope","adapter","basis","origin","cycle_begin_utc_ms","cycle_end_utc_ms","through_utc_ms","imported_kwh","accrued_subtotal","time_database_version"},
-             exportRule?(ratchet?Fields{openingPeak,"demand_history","exported_kwh"}:
-                                   demand?Fields{openingPeak,"exported_kwh"}:Fields{"exported_kwh"}):
+             exportRule?(ratchet?Fields{openingPeak,"demand_history","exported_kwh","accrued_export_payment"}:
+                                   demand?Fields{openingPeak,"exported_kwh","accrued_export_payment"}:
+                                          Fields{"exported_kwh","accrued_export_payment"}):
                         (ratchet?Fields{openingPeak,"demand_history"}:demand?Fields{openingPeak}:Fields{}));
         choice(*opening.find("basis"),"opening.basis",{"whole_meter_import"});choice(*opening.find("origin"),"opening.origin",{"declared_forecast"});
         s.declared=true;s.planKey=p.key;s.evidence={PowerBasis::WholeMeterImport,PowerOrigin::DeclaredForecast,label(*opening.find("scope"),"opening.scope"),label(*opening.find("adapter"),"opening.adapter")};
@@ -680,9 +681,17 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         if(exportRule){
             constexpr char path[]="opening.exported_kwh";
-            s.exportedKwh=electricityKwh(decimal(*opening.find("exported_kwh"),path));
-            if(!s.exportedKwh||(s.throughUtcMs==s.cycleBeginUtcMs&&!s.exportedKwh->numerator.zero()))
+            auto exported=electricityKwh(decimal(*opening.find("exported_kwh"),path));
+            if(!exported||(s.throughUtcMs==s.cycleBeginUtcMs&&!exported->numerator.zero()))
                 bad(path,"Use nonnegative exported kWh and enter zero at cycle start.",TariffProblemKind::OpeningQuantity);
+            constexpr char paymentPath[]="opening.accrued_export_payment";
+            auto paid=decimal(*opening.find("accrued_export_payment"),paymentPath);
+            if(paid.negative()||(exported->numerator.zero()&&!paid.zero()))
+                bad(paymentPath,"Use a nonnegative accrued export payment. Enter zero without prior exports.",TariffProblemKind::OpeningQuantity);
+            ElectricityAmount accrued;
+            if(!paid.multiply(denominator,&accrued.numerator))
+                bad(paymentPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+            s.exports=BillExportOpening{std::move(*exported),std::move(accrued)};
         }
         if(p.demandCharge){
             s.apparentDemand=apparent;

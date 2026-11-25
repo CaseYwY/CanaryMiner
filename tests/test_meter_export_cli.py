@@ -17,7 +17,7 @@ def export_tariff(begin, end, clock=UTC, reset="explicit_cycle_only", rates_end=
     tariff["schema_version"] = 12
     tariff["plan"]["export_payment"] = {"rate_per_kwh": "1", "published_utc_ms": begin}
     tariff["plan"]["revisions"][0]["base_rate_per_kwh"] = "3"
-    tariff["opening"]["exported_kwh"] = "0"
+    tariff["opening"].update(exported_kwh="0", accrued_export_payment="0")
     return tariff
 
 
@@ -124,11 +124,15 @@ def main(cli, bundle=None):
             old.update(schema_version=1)
             old["plan"].pop("export_payment")
             old["opening"].pop("exported_kwh")
+            old["opening"].pop("accrued_export_payment")
             review(old, source, end, error="require a saved export-payment tariff")
             old["plan"]["export_payment"] = declaration["plan"]["export_payment"]
             review(old, interval(begin, end), end, error="saved tariff declaration")
             invalid = copy.deepcopy(declaration)
             invalid["opening"]["exported_kwh"] = "1"
+            review(invalid, source, end, error="saved tariff declaration")
+            invalid = copy.deepcopy(declaration)
+            invalid["opening"]["accrued_export_payment"] = "1"
             review(invalid, source, end, error="saved tariff declaration")
             invalid = copy.deepcopy(declaration)
             invalid["plan"]["export_payment"]["published_utc_ms"] = begin + 1
@@ -162,10 +166,14 @@ def main(cli, bundle=None):
 
             # Carry forward previously declared exports and freeze both evidence paths when extending.
             mid = copy.deepcopy(declaration)
-            mid["opening"].update(through_utc_ms=half, imported_kwh="1", accrued_subtotal="3", exported_kwh="2")
-            report = review(mid, net_power((half, end, "-2000")), end)
-            amounts(report, "0.000000", "1.000000", "3.000000", "3.000000", "0.000000")
+            mid["opening"].update(through_utc_ms=half, imported_kwh="1", accrued_subtotal="3",
+                                  exported_kwh="2", accrued_export_payment="4")
+            report = review(mid, net_power((half, end, "-2000")), end, "--save-review", "mid.cmr")
+            amounts(report, "0.000000", "1.000000", "3.000000", "5.000000", "-2.000000")
             assert "Net change after export payment -1.000000 USD" in report
+            assert run("--open-review", "mid.cmr") == report
+            mid["opening"].pop("accrued_export_payment")
+            review(mid, net_power((half, end, "-2000")), end, error="saved tariff declaration")
 
             initial = paired((begin, "70", "90"), (half, "71", "92"))
             review(declaration, initial, half, "--save-review", "split.cmr")

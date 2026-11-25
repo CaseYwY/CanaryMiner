@@ -124,6 +124,9 @@ struct TariffPlan {
     std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter demand windows
     std::optional<ExportPaymentRule> exportPayment{};  // independent payout, outside the supply subtotal
 };
+struct BillExportOpening {
+    ElectricityAmount exportedKwh, accruedPayment;
+};
 struct BillOpening {
     bool declared = false;
     std::string planKey, timeDatabaseVersion;  // after cycle start, bind the data version used by the existing state
@@ -133,7 +136,7 @@ struct BillOpening {
     std::optional<ElectricityAmount> peakDemand;
     std::vector<ElectricityAmount> demandHistory;  // completed monthly measured peaks, oldest first
     bool apparentDemand = false;  // binds the opening peak and history to the demand rule's unit
-    std::optional<ElectricityAmount> exportedKwh{};  // within this cycle only
+    std::optional<BillExportOpening> exports{};  // earned through the opening, before the current trace
 };
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,

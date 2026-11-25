@@ -507,6 +507,8 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['plan']['export_payment'] = {'rate_per_kwh': '1', 'published_utc_ms': 0}
         self.assertTrue(validate(example, schema, schema))
         example['opening']['exported_kwh'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+        example['opening']['accrued_export_payment'] = '0'
         self.assertEqual(validate(example, schema, schema), [])
         self.assertTrue(validate({**example, 'schema_version': 1}, schema, schema))
         example['demand_charge'] = {'rate_per_kw': '5', 'window_minutes': 15, 'offset_minutes': 0, 'published_utc_ms': 0}
@@ -551,7 +553,7 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
                     'plan': {'export_payment'},
-                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh'},
+                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh', 'accrued_export_payment'},
                     'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
                 }.get(name, set())
