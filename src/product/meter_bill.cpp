@@ -272,8 +272,14 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         JsonValue root;
         TariffDeclaration declaration;
         if (stopped()) return stopResult();
-        if (!parseJsonStrict(original.tariff, &root, nullptr) || !decodeTariffDeclaration(root, &declaration))
+        if (!parseJsonStrict(original.tariff, &root, nullptr))
             return fail("saved tariff declaration unavailable or invalid");
+        const auto *schema = root.find("schema_version");
+        uint64_t schemaVersion = 0;
+        const bool namedTariff = schema && schema->asUint64(&schemaVersion) && schemaVersion == 4;
+        if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
+            return fail("reviewed tariff time database unavailable or invalid");
+        if (!decodeTariffDeclaration(root, &declaration)) return fail("saved tariff declaration unavailable or invalid");
         if (now < 1 || now > meterBillMaxUtcMs || static_cast<int64_t>(declaration.confirmedUtc * 1000) > now)
             return fail("local clock precedes the review or is unavailable");
         const auto cutoff = original.cutoff;
@@ -292,6 +298,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
               "Uses exact differences between cumulative import readings in kWh.\n"
             : "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
               "Average import is applied uniformly within each interval.\n";
+        if (namedTariff) report += std::string("Reviewed IANA time database ") + tariffTzdbVersion + "\n";
         if (options.reviewCutoffArg || reopening || archiving) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
         if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
             report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";

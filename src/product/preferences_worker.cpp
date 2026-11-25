@@ -3,6 +3,7 @@
 #include "duplex_task_process.h"
 #include "startup_config_service.h"
 #include "console_output_service.h"
+#include "civil_time.h"
 #include <chrono>
 #include <thread>
 int main(int argc,char **argv){using namespace om;
@@ -31,7 +32,10 @@ int main(int argc,char **argv){using namespace om;
                         if(first){StartupConfigRequest config;if(decodeStartupConfigRequest(input,&config))return serveStartupConfigRead(channel,config);}
                         first=false;
                         PreferencesRequest request;PreferencesReply reply;
-                        if(!decodePreferencesRequest(input,&request)||!channel.parentAlive()||!service.transact(request,&reply)||!encodePreferencesReply(reply,&output))return 2;
+                        if(!decodePreferencesRequest(input,&request)||!channel.parentAlive())return 2;
+                        if(request.kind==PreferencesKind::Tariff && request.operation!=PreferencesOperation::Init)
+                            configureBundledCivilTimeData();
+                        if(!channel.parentAlive()||!service.transact(request,&reply)||!encodePreferencesReply(reply,&output))return 2;
                         input.clear();
                     }
                 }

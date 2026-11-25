@@ -46,6 +46,9 @@ struct CivilDay {
 // Explicit process-lifetime configuration of reviewed app-private text TZDB. No hot reload or fallback to OS data.
 CivilStatus configureCivilTimeData(const std::filesystem::path &absoluteDirectory, const std::string &exactVersion);
 bool civilNamedTimeAvailable();
+inline constexpr char tariffTzdbVersion[] = "2026e";
+// Configures only the verified fixed sibling of the running executable. Feature off or missing data is unavailable.
+CivilStatus configureBundledCivilTimeData();
 CivilStamp civilAt(const CivilClock &clock, int64_t utcMs);
 CivilResolved civilResolve(const CivilClock &clock, CivilDate date, uint32_t millisecondOfDay, CivilChoose choose = CivilChoose::Reject);
 CivilDay civilDay(const CivilClock &clock, CivilDate date);

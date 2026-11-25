@@ -100,6 +100,20 @@ bool ExactDecimal::multiply(const ExactDecimal &b, ExactDecimal *out) const {
     for (unsigned digit : digits) result.push_back(static_cast<char>('0' + digit));
     return make(std::move(result), scale_ + b.scale_, negative_ != b.negative_, out);
 }
+bool ExactDecimal::divideExact(uint32_t denominator, ExactDecimal *out) const {
+    if (!denominator || !out) return false;
+    uint64_t remainder=0;
+    unsigned scale=scale_;
+    std::string quotient;
+    auto digit=[&](unsigned value){
+        const auto n=remainder*10+value;
+        quotient.push_back(static_cast<char>('0'+n/denominator));
+        remainder=n%denominator;
+    };
+    for(char c:coefficient_)digit(static_cast<unsigned>(c-'0'));
+    while(remainder&&scale<maxScale){digit(0);++scale;}
+    return !remainder&&make(std::move(quotient),scale,negative_,out);
+}
 bool ExactDecimal::formatRatio(uint32_t denominator, unsigned places, std::string *out) const {
     if (!out || !denominator || places > 24) return false;
     std::string digits = coefficient_;

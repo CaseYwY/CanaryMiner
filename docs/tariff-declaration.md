@@ -9,7 +9,7 @@ Requirements R-UI-007/008, R-TAR-001–006 and R-PRIV-002 remain partial. Settin
 - Arrows/Tab select fields. Enter opens a section/table or edits a value; Space toggles acknowledgement. Esc cancels an edit, returns to the parent, then offers review/discard/continue on dirty exit. Q/D/L/S inside editors are text; Ctrl+C stops. No browser/GUI runtime is added.
 - A appends a **blank** revision/calendar/dynamic/band row; X confirms removal from the draft. Changing a rule mode never clears an incompatible table automatically; validation fails until explicitly edited.
 - Empty monetary/quantity text is missing, not zero. Cycle/day fees, multiplier and opening amounts require explicit entries, even when zero/one. Canonical signed decimals allow at most 38 coefficient digits / 18 fractional places. No exponent, float storage or intermediate rounding. Clearing an optional minimum/final band/date chooses `null`, distinct from zero.
-- Clocks are UTC or whole-minute fixed STANDARD offsets within +/-18 hours. No DST/OS-zone inference. Rule/opening instants use **UTC milliseconds**; local confirmation uses seconds. Revision ends are exclusive; all-units upper thresholds are inclusive.
+- Select UTC, a whole-minute fixed standard offset within ±18 hours, or an [explicit IANA zone](#use-named-tariff-and-reset-clocks) with the reviewed offline data. Rule/opening instants use **UTC milliseconds**; local confirmation uses seconds. Revision ends are exclusive; all-units upper thresholds are inclusive.
 - Field names match the schema. Hints explain enums, minute bounds, masks and units. Weekday bit 0 is Monday; month bit 0 is January. Dates use YYYY-MM-DD or null. Split overnight windows; explicit priorities resolve declared calendar events.
 - V/F2 shows before/after changes, the complete draft and exclusions. Enter/F2 saves only `tariff-declaration.json`. Errors preserve drafts; field-specific errors focus the relevant field. Cross-field failures identify the plan/opening contract. UI/runtime/manual-price/flat-energy drafts save independently.
 - Confirmation stamps the local action only; it cannot alter publication/effective bounds, renew a feed or authenticate a supplier. Claimed publication after confirmation is rejected. Loading never silently renews a declaration.
@@ -31,12 +31,45 @@ A saved opening is an offline scenario assertion, **not** an observed accumulato
 
 Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent resets/annual true-up, other proration, threshold revisions, provider intermediate rounding and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
+## Use named tariff and reset clocks
+
+The combined tariff editor supports independently selected IANA rate and monthly reset clocks
+in an opt-in installation with the verified 2026e database. Select the Clock object under Plan
+or Monthly reset and press **Z**. Enter the IANA zone in the Zone field and review the draft.
+Changing the rate clock in a cycle requires re-entering the accrued opening subtotal.
+Changing the reset clock requires deriving the cycle again with **G** and reviewing its opening.
+Press **Z** again to select UTC. The rate clock controls calendar prices and daily fees.
+The reset clock controls monthly boundaries.
+
+A declaration with at least one named clock uses schema version 4. The named clock object is:
+
+```json
+{"kind":"named_iana","zone":"America/New_York","time_database_version":"2026e"}
+```
+
+The opening time database version matches the rate clock. Use **2026e** for a named rate
+clock and **explicit-fixed-clock** for UTC or a fixed-offset rate clock. The reset clock
+keeps its own version. With named rate clocks, monthly or explicit cycle dates are supported.
+Monthly reset dates use the first valid instant of the selected local date. A completely
+skipped date blocks derivation. The older UTC and fixed-offset declaration schemas remain readable.
+
+Calendar prices follow the chosen zone across transitions. A repeated wall-clock hour prices
+both elapsed hours. A skipped wall-clock hour contributes zero elapsed usage. With daily-fee
+proration, split by the actual minutes in the tariff day, including 23-hour and 25-hour days.
+A split that cannot be stored exactly within the supported decimal precision is refused.
+Historical second-level boundaries require a supported whole-minute allocation to prorate.
+An out-of-order repeated tariff date caused by a historical rollback across midnight is refused.
+
+Named configurations, including archived meter reviews, require the reviewed version on replay.
+A missing, changed, or mismatched dataset withholds named-time results. No operating-system
+default timezone is selected. See [local build and installation](electricity-core.md#local-installation-of-the-reviewed-tariff-time-data).
+
 ## Derive a monthly whole-meter cycle
 
 Select `reset_policy` and press **M** to choose the monthly policy. Open the policy with **Enter** and enter a day
 from 1 to 31. The draft starts with the rate clock as a suggested value. Review the reset clock and edit it if your
-billing cycle uses a different UTC or fixed standard offset. The saved reset clock is independent of the rate clock.
-Each month starts the cycle at 00:00 on the chosen day. Short months use their last day and the original day applies
+billing cycle uses a different clock. The saved reset clock is independent of the rate clock.
+Each month starts the cycle at the first valid local instant on the chosen day, usually 00:00. Short months use their last day and the original day applies
 again the following month.
 
 Enter the opening's through-time in UTC milliseconds, then press **G** to derive the dates of the cycle containing
@@ -51,11 +84,11 @@ opening against them. It does not advance with elapsed time or reset a bill, rea
 
 ### Prorate a daily fee across the monthly reset
 
-With the monthly rule selected on `reset_policy`, press **F** to toggle the daily-fee rule. Review with **V** and save with **Enter**. Enabling it uses schema version 3 and stores `"daily_fee_allocation": "prorate_by_cycle_minutes"` inside `reset_policy`. Changing the rule requires new plan and opening keys. If the opening starts after the reset, the editor clears its draft accrued subtotal. Re-enter the amount using the selected fee rule before saving.
+With the monthly rule selected on `reset_policy`, press **F** to toggle the daily-fee rule. Review with **V** and save with **Enter**. Enabling it uses schema version 3 for fixed clocks or keeps schema version 4 for a named clock. It stores `"daily_fee_allocation": "prorate_by_cycle_minutes"` inside `reset_policy`. Changing the rule requires new plan and opening keys. If the opening starts after the reset, the editor clears its draft accrued subtotal. Re-enter the amount using the selected fee rule before saving. Deriving a changed end for a prorated mid-cycle opening also clears the subtotal because it may include a share calculated from the previous end.
 
-The fee for a tariff day comes from the rate revision effective at the tariff clock's midnight. Each billing cycle receives the fee times its overlapping minutes divided by 1,440. For example, a 1.44 daily fee split at 18:30 in the tariff clock contributes 1.11 to the closing cycle and 0.33 to the new cycle. A revision at 18:30 can change the energy rate that minute. Its daily fee starts on the next tariff day. Each cycle books its share once, on first covered use or zero-usage coverage of that day. When the calculation first books a share, it requires a midnight revision published by the review cutoff. A declared mid-day opening may already include that share.
+The fee for a tariff day comes from the rate revision effective at the tariff clock's midnight. Each billing cycle receives the fee times its overlapping minutes divided by the tariff day's actual minutes. For example, a 1.44 daily fee split at 18:30 in the tariff clock contributes 1.11 to the closing cycle and 0.33 to the new cycle. A revision at 18:30 can change the energy rate that minute. Its daily fee starts on the next tariff day. Each cycle books its share once, on first covered use or zero-usage coverage of that day. When the calculation first books a share, it requires a midnight revision published by the review cutoff. A declared mid-day opening may already include that share.
 
-The rule uses UTC or a fixed standard offset, with whole-minute boundaries and exact arithmetic through the cycle minimum and multiplier. Midnight-based boundaries in the same clock allocate a whole day to a single cycle. Version 2 retains its existing split-day refusal in a later cycle.
+The allocation uses whole-minute boundaries and exact arithmetic through the cycle minimum and multiplier. Midnight-based boundaries in the same clock allocate a whole day to a single cycle. Version 2 retains its existing split-day refusal in a later cycle.
 
 ## Compare two whole-meter scenarios
 

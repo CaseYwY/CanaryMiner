@@ -4,7 +4,6 @@
 #include "product_test_util.h"
 #include <chrono>
 #include <condition_variable>
-#include <ctime>
 #include <fstream>
 #include <mutex>
 #include <thread>
@@ -103,9 +102,8 @@ int installedPath(const std::filesystem::path &fixture){
 #endif
     CHECK(factory && !std::filesystem::exists(helper));
     auto now=[]{
-        const auto utc=static_cast<uint64_t>(std::time(nullptr));
-        const auto mono=std::chrono::steady_clock::now().time_since_epoch();
-        return std::make_pair(utc,static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(mono).count()));
+        const auto [mono, utc] = marketSystemClock();
+        return std::make_pair(utc, mono);
     };
     auto view=[&now](const MarketReferenceSink &runtime){
         const auto t=now();
@@ -145,7 +143,8 @@ int installedPath(const std::filesystem::path &fixture){
         }));
         const std::string_view scenario(mode);
         const auto text = view(*session);
-        CHECK(text.find("Latest PRL/USD reference: 2.45") != text.npos);
+        CHECK_MSG((std::string("Latest ticker with candle scenario ") + mode + "\n" + text).c_str(),
+                  text.find("Latest PRL/USD reference: 2.45") != text.npos);
         CHECK(text.find("TWAP approximation | candidate data, finality unverified") != text.npos);
         const auto mean = "1h mean of minute closes: " +
             std::string(scenario == "gap-pearl" ? "N/A" : "3.000000") + " USDT/PRL | " +
