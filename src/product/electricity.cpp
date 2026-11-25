@@ -105,6 +105,29 @@ ElectricityStatus measureDemand(const DemandChargeRule &rule,const Trace &trace,
     return ElectricityStatus::Ok;
 }
 
+ElectricityStatus foldHalfHours(const MeterImportTrace &trace,std::vector<MeterImportInterval> &halfHours,
+                                const std::atomic<bool> *cancel,const std::function<bool()> &stop) {
+    auto begin=trace.intervals.front().beginUtcMs;
+    auto boundary=begin+meterHalfHourMs;
+    ExactDecimal usage;
+    for (const auto &interval:trace.intervals) {
+        if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+            return ElectricityStatus::Unavailable;
+        if (interval.endUtcMs>boundary&&!interval.importedKwh.numerator.zero())
+            return ElectricityStatus::MeterRoundingBoundary;
+        if (!accumulate(usage,interval.importedKwh.numerator)) return ElectricityStatus::Capacity;
+        while (interval.endUtcMs>=boundary) {
+            if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+                return ElectricityStatus::Unavailable;
+            halfHours.push_back({begin,boundary,{std::move(usage)}});
+            usage={};
+            begin=boundary;
+            boundary+=meterHalfHourMs;
+        }
+    }
+    return ElectricityStatus::Ok;
+}
+
 ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_t end, int64_t decision,bool accrual=false) {
     if (!p.declared || !s.declared) return ElectricityStatus::Unavailable;
     const bool roundMeter = p.rounding == TariffRounding::MeterHalfHourKwhHalfEven2;
@@ -372,7 +395,19 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         if (past.status != CivilStatus::Ok) { result.status = ElectricityStatus::Unavailable; return result; }
         previousDate = past.date;
     }
-    for (const auto &i : trace.intervals) {
+    using Intervals=std::decay_t<decltype(trace.intervals)>;
+    Intervals halfHours;
+    const auto *billingIntervals=&trace.intervals;
+    if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+        if (roundMeter && p.demandCharge) {
+            // Demand already used the finer physical deltas. Energy is rounded once per half hour.
+            halfHours.reserve(static_cast<size_t>((end-opening.throughUtcMs)/meterHalfHourMs));
+            result.status=foldHalfHours(trace,halfHours,cancel,stop);
+            if (result.status!=ElectricityStatus::Ok) return result;
+            billingIntervals=&halfHours;
+        }
+    }
+    for (const auto &i : *billingIntervals) {
         if (roundMeter && (i.beginUtcMs % meterHalfHourMs || i.endUtcMs - i.beginUtcMs != meterHalfHourMs)) {
             result.status = ElectricityStatus::MeterRoundingBoundary;
             return result;

@@ -347,7 +347,7 @@ Use the same command with an interval file in schema version 2:
 }
 ```
 
-Provide 2–8,193 strictly ordered timestamps from one whole-meter import register, or up to 18,433 for an annual policy. The first timestamp
+Provide 2–8,193 strictly ordered timestamps from one whole-meter import register, or up to 18,433 for an annual policy or a demand charge. The first timestamp
 must match the saved opening's through-time. It anchors subsequent differences. The saved opening
 supplies the cycle's accrued kWh and subtotal separately. Values are canonical, nonnegative decimal
 strings in kWh, with up to 38 digits and 18 decimal places. A repeated register value records zero import.
@@ -364,9 +364,9 @@ cutoff, twelve-cycle limit and private archive replay apply.
 
 ### Round cumulative readings for half-hour billing
 
-Select the `rounding` field under **Plan** in Settings and press Enter to switch between display-only rounding and half-hour meter rounding. In a tariff file, the latter is `"rounding": "meter_import_half_hour_kwh_half_even_2"`. The rule requires readings on every UTC half hour, including the opening, review endpoint and each cycle boundary. Rates must agree throughout a nonzero interval. The regular calendar and time-zone rules still select the applicable rate and daily fee.
+Select the `rounding` field under **Plan** in Settings and press Enter to switch between display-only rounding and half-hour meter rounding. In a tariff file, the latter is `"rounding": "meter_import_half_hour_kwh_half_even_2"`. The opening, review endpoint and each cycle boundary must be on UTC half hours. Without a demand charge, provide a reading at each UTC half-hour boundary. Rates must agree throughout a nonzero half hour. The regular calendar and time-zone rules still select the applicable rate and daily fee.
 
-The review takes the difference between adjacent cumulative readings and rounds each interval's kWh to the nearest 0.01 before applying its rate. At a tie it chooses the even hundredth. For example, 0.015 and 0.025 each bill as 0.02 kWh. The opening and ending register quantities still use the exact differences. The report shows physical import and billed usage for the reviewed intervals, and the archive checks both on replay. [Octopus Energy's documented consumption rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints) is a reference for the rule.
+The review rounds each UTC half hour's total kWh to the nearest 0.01 before applying its rate. With a demand charge, supply readings at both grids wherever a boundary splits nonzero import. Demand uses the original physical differences. Energy sums the differences within each half hour and rounds the sum once. A zero delta can cross either grid. At a tie it chooses the even hundredth. For example, 0.015 and 0.025 each bill as 0.02 kWh. The opening and ending register quantities still use the exact differences. The report shows physical import and billed usage for the reviewed intervals, and the archive checks both on replay. [Octopus Energy's documented consumption rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints) is a reference for the rule.
 
 Changing the rule during a cycle clears the accrued subtotal and requires a new reviewed value. It preserves the physical import. The option applies with no tiers to cumulative whole-meter register files and prepared Octopus import bundles. Average-watt files, Dashboard scenarios, and the durable fixture billing ledger require display-only rounding. Existing declarations keep their saved rule. Select display-only rounding and review the opening before using the declaration in a release that predates this option.
 

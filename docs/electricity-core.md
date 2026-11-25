@@ -64,7 +64,9 @@ An optional [demand rule](tariff-declaration.md#charge-for-maximum-average-deman
 of complete aligned average-kW windows over the whole meter. The internal opening subtotal
 includes the charge on the recorded peak. The tariff document supplies that peak and the
 subtotal before demand separately. The calculation uses physical energy even with an energy
-quantity rounding rule. Demand state resets at the same declared cycle boundary.
+quantity rounding rule. With both rules selected, finer measured differences establish the demand
+peak and are summed for energy rounding. Nonzero differences must fit within both billing
+and demand windows. Demand state resets at the same declared cycle boundary.
 
 All flags for unknown rule families reject evaluation. **Not implemented:** contracted capacity, demand ratchets and apparent/reactive power, prepaid purchase/inventory/debt, import/export netting or lost export credits, restricted credits, independent annual/purchase/reset ledgers, seasonal allowance outside the offline declaration adapter, provisional/annual true-up, all-units monthly-average normalization in the pure core, tier reallocation/threshold revisions, other supplier-specific intermediate rounding, ordered/selective taxes/multipliers, contracted eligibility or persistent beyond-cycle consequences. These need separate declared adapters/state, not zero-valued placeholders. Choosing a simpler energy-only scenario must be explicit and visibly exclude the omitted rules.
 

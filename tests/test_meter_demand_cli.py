@@ -117,6 +117,34 @@ def main(cli, bundle=None):
             totals(report, "0.030000", "0.170000")
             assert "Billed usage 0.020000 kWh" in report
 
+            # A v9 source can resolve demand and energy on different grids.
+            quarter_hour = declaration(begin, rounded_end)
+            quarter_hour["plan"]["rounding"] = "meter_import_half_hour_kwh_half_even_2"
+            quarters = register([(begin + i * HOUR // 4, amount) for i, amount in
+                                 enumerate(("0", "0.005", "0.01", "0.015", "0.02"))])
+            report = review(quarter_hour, quarters, rounded_end, archive="both-grids.cmr")
+            totals(report, "0.020000", "0.120000")
+            assert "Billed usage 0.020000 kWh" in report
+            assert run("--open-review", "both-grids.cmr") == report
+            review(quarter_hour, register([(begin, "0"), (halfway, "0.01"), (rounded_end, "0.02")]),
+                   rounded_end, error=boundary)
+            twenty = declaration(begin, rounded_end, minutes=20)
+            twenty["plan"]["rounding"] = "meter_import_half_hour_kwh_half_even_2"
+            shared = [(begin + i * 10 * MINUTE, amount) for i, amount in
+                      enumerate(("0", "0.005", "0.01", "0.015", "0.02", "0.025", "0.03"))]
+            report = review(twenty, register(shared), rounded_end)
+            totals(report, "0.030000", "0.190000")
+            assert "Billed usage 0.040000 kWh" in report
+            rounding_boundary = "meter rounding needs readings and cycle boundaries on the UTC half hour"
+            review(twenty, register(shared[:3] + shared[4:]), rounded_end, error=rounding_boundary)
+            zero_gap = register([(begin, "0"), (begin + 10 * MINUTE, "0.005"), (rounded_end, "0.005")])
+            totals(review(twenty, zero_gap, rounded_end), "0.015000", "0.075000")
+            legacy_rounding = copy.deepcopy(quarter_hour)
+            legacy_rounding["schema_version"] = 1
+            legacy_rounding.pop("demand_charge")
+            legacy_rounding["opening"].pop("peak_demand_kw")
+            review(legacy_rounding, quarters, rounded_end, error=rounding_boundary)
+
             # Review continuation retains the known peak until a later complete window establishes a new one.
             close = end + 15 * MINUTE
             later = declaration(begin, close)
