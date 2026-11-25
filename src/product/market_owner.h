@@ -3,6 +3,7 @@
 #include "market_data.h"
 #include "market_view.h"
 #include <array>
+#include <atomic>
 #include <functional>
 #include <filesystem>
 #include <memory>

@@ -1,5 +1,5 @@
 // Separate fixture-only process. URLs/loopback injection are not part of the public client API/build.
-#include "product/public_https.h"
+#include "product/public_https_client.h"
 #include "product/public_json_process.h"
 #include <chrono>
 #include <iostream>

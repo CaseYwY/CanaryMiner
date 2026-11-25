@@ -1,4 +1,5 @@
 // Test-only helper: numeric scenario -> explicit loopback fixture. Never linked into the shipping helper.
+#include "product/public_https_client.h"
 #include "product/public_json_process.h"
 #include <cstdio>
 #include <filesystem>

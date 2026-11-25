@@ -1,7 +1,9 @@
 // Process boundary for TLS trust/resolver calls that the OS may not make cancellable.
 #pragma once
 #include "public_https.h"
+#include <atomic>
 #include <filesystem>
+#include <memory>
 
 namespace om {
 
