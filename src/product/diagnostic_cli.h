@@ -1,6 +1,7 @@
 // Restricted idle diagnostic arguments. No configuration, paths or raw arguments enter a report or error.
 #pragma once
 #include "diagnostic_report.h"
+#include "local_export_name.h"
 namespace om {
 struct DiagnosticOptions {
     DiagnosticSelection selection;
@@ -12,19 +13,7 @@ inline bool diagnosticDigest(const std::string &value){
     for(char c:value)if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return false;
     return true;
 }
-inline bool diagnosticExportName(const std::string &value){
-    const auto alnum=[](char c){return (c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9');};
-    if(value.size()<6||value.size()>96||!alnum(value[0])||value.substr(value.size()-5)!=".json"||value.find("..")!=value.npos)return false;
-    for(char c:value)if(!alnum(c)&&c!='.'&&c!='_'&&c!='-')return false;
-    std::string stem=value.substr(0,value.find('.'));
-    for(char &c:stem)if(c>='a'&&c<='z')c=static_cast<char>(c-'a'+'A');
-    if(stem=="CON"||stem=="PRN"||stem=="AUX"||stem=="NUL")return false;
-    if(stem.size()>3&&(stem.substr(0,3)=="COM"||stem.substr(0,3)=="LPT")){
-        bool digits=true;for(size_t i=3;i<stem.size();++i)if(stem[i]<'0'||stem[i]>'9')digits=false;
-        if(digits)return false;
-    }
-    return true;
-}
+inline bool diagnosticExportName(const std::string &value){return localExportName(value,".json");}
 inline bool parseDiagnosticCli(int argc,const char *const *argv,int begin,DiagnosticOptions *out,std::string *error){
     const auto fail=[&](){if(error)*error="diagnostics: invalid options; use diagnostics --help. No export or mining was started.";return false;};
     if(!out||!argv||begin<0||argc<begin)return fail();

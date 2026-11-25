@@ -263,25 +263,42 @@ def main():
                 {**reading, 'begin_utc_ms': january, 'end_utc_ms': following_january}]}
             store(stopping_plan, stopping_source)
             before = (tariff.read_bytes(), intervals.read_bytes())
-            with subprocess.Popen([str(cli), 'meter-bill', '--tariff', str(tariff), '--intervals', str(intervals)],
-                                  cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
-                try:
-                    status = Path(f'/proc/{child.pid}/status')
-                    deadline = time.monotonic() + 2
-                    while child.poll() is None and time.monotonic() < deadline:
-                        mask = next(line for line in status.read_text().splitlines() if line.startswith('SigCgt:'))
-                        if int(mask.split()[1], 16) & (1 << (signal.SIGTERM - 1)):
-                            break
-                        time.sleep(0.001)
-                    else:
-                        raise AssertionError('Meter review did not reach installed stop handling')
-                    child.terminate()
-                    out, err = child.communicate(timeout=3)
-                    assert child.returncode == 0 and not out and not err
-                finally:
-                    if child.poll() is None:
-                        child.kill()
-                        child.wait(timeout=3)
+            archive_name = 'verified-before-interrupt.cmr'
+            import_args = ('--tariff', str(tariff), '--intervals', str(intervals))
+            prepared = subprocess.run([str(cli), 'meter-bill', *import_args, '--save-review', archive_name],
+                                      cwd=root, capture_output=True, timeout=8)
+            assert prepared.returncode == 0 and prepared.stdout and not prepared.stderr
+            archive = root / archive_name
+            original_archive = archive.read_bytes()
+            for args, code, expected_error in (
+                (import_args, 0, b''),
+                ((*import_args, '--save-review', 'stopped.cmr'), 130,
+                 b'meter-bill: archive save stopped before publication\n'),
+                (('--open-review', archive_name), 130, b'meter-bill: saved review verification stopped\n'),
+            ):
+                with subprocess.Popen([str(cli), 'meter-bill', *args],
+                                      cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+                    try:
+                        status = Path(f'/proc/{child.pid}/status')
+                        deadline = time.monotonic() + 2
+                        while child.poll() is None and time.monotonic() < deadline:
+                            mask = next(line for line in status.read_text().splitlines() if line.startswith('SigCgt:'))
+                            if int(mask.split()[1], 16) & (1 << (signal.SIGTERM - 1)):
+                                break
+                            time.sleep(0.001)
+                        else:
+                            raise AssertionError('Meter review did not reach installed stop handling')
+                        child.terminate()
+                        out, err = child.communicate(timeout=3)
+                        assert child.returncode == code and not out
+                        assert err == expected_error
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                            child.wait(timeout=3)
+
+            assert not (root / 'stopped.cmr').exists() and not (root / 'stopped.cmr.tmp').exists()
+            assert archive.read_bytes() == original_archive
             assert before == (tariff.read_bytes(), intervals.read_bytes())
             checks += 1
 
