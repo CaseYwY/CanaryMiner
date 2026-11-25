@@ -193,7 +193,7 @@ Select the `rounding` field under **Plan** in Settings and press Enter to switch
 
 The review takes the difference between adjacent cumulative readings and rounds each interval's kWh to the nearest 0.01 before applying its rate. At a tie it chooses the even hundredth. For example, 0.015 and 0.025 each bill as 0.02 kWh. The opening and ending register quantities still use the exact differences. The report shows physical import and billed usage for the reviewed intervals, and the archive checks both on replay. [Octopus Energy's documented consumption rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints) is a reference for the rule.
 
-Changing the rule during a cycle clears the accrued subtotal and requires a new reviewed value. It preserves the physical import. The option applies to cumulative whole-meter register files with no tiers. Average-watt files, Dashboard scenarios, and the durable fixture billing ledger require display-only rounding. Existing declarations keep their saved rule. Select display-only rounding and review the opening before using the declaration in a release that predates this option.
+Changing the rule during a cycle clears the accrued subtotal and requires a new reviewed value. It preserves the physical import. The option applies with no tiers to cumulative whole-meter register files and prepared Octopus import bundles. Average-watt files, Dashboard scenarios, and the durable fixture billing ledger require display-only rounding. Existing declarations keep their saved rule. Select display-only rounding and review the opening before using the declaration in a release that predates this option.
 
 ### Review publicly listed Octopus Agile prices
 
@@ -228,6 +228,33 @@ supplied files. It carries no invoice reconciliation or proof of the supplier's 
 
 When saving, the archive also keeps the captured pages byte for byte and replays them together with the declaration
 and readings. Archives made with captured rates require a version of CanaryMiner with Agile import support.
+
+### Review saved Octopus electricity import pages
+
+Use all JSON pages from one whole-meter **electricity import** export, in pagination order. Use the UTC bounds
+of the window you want to review and match the start to the tariff opening's through-time. This path accepts
+half-hour records only. Octopus export and gas responses can use the same fields. Confirm the meter type before
+preparing the bundle. [Octopus consumption format, resolution and billing rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints)
+
+```text
+python tools/prepare_octopus_consumption.py --confirm-electricity-import --scope synthetic-whole-meter-scenario --begin 2023-03-01T00:00:00Z --end 2023-03-31T23:00:00Z --output march-usage.json page-1.json page-2.json
+canary-miner meter-bill --tariff config/tariff-declaration.octopus.example.json --intervals march-usage.json --octopus-rates march-rates.json --save-review march.cmr
+canary-miner meter-bill --open-review march.cmr
+```
+
+Pass every saved page in the first command. The two filenames in the example illustrate pagination. Use a
+private local directory and match the alias to the saved tariff opening. The tool checks that pagination links
+refer to the same electricity meter, drops those links, and writes a new schema 3 bundle. It retains interval times
+and exact reported quantities and records the UTC assembly time as the observation. It preserves the source pages.
+Use a review cutoff at or after that observation. The tool makes no network request and takes no credentials.
+
+`meter-bill` requires a declared Octopus Energy tariff in GBP with half-hour rounding. It accepts UTC and signed
+offset timestamps, verifies that the declared window contains each elapsed half hour once, and uses the API
+quantities as reported at 0.001 kWh resolution. The existing billing rule rounds each half hour to the nearest
+even hundredth at a tie. A gap, duplicate or grouped record withholds the review. With the Agile example, supply
+the corresponding public price bundle described above. A private archive keeps the prepared consumption bundle
+and the calculated amounts for offline replay. Source account identity, observations before assembly, and
+agreement with a supplier invoice require separate evidence.
 
 ### Save and reopen a local meter review
 
