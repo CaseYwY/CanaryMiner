@@ -14,6 +14,16 @@ The application-facing `PublicJsonProcessClient` therefore owns one installed si
 
 An OS termination cleanup wait is capped at 250 ms per attempt. [P-06e](public-helper-ownership.md) makes unconfirmed settlement a parent-only Unreaped result, retains native owners across client destruction and blocks new public-helper launches across replacement clients. Linux requires compatible SIGCHLD policy and pidfd/waitid capability, verifies the pinned child and never signals a copied numeric PID/group; it targets the trusted single-process public helper, not arbitrary descendant trees. This is module-local, not application-wide quarantine or a hard realtime guarantee on process creation, filesystem access, kernel termination, loader or scheduling. Destruction must not race a running `get`. Deliberately uninterruptible kernel/native deployment qualification remains open.
 
+The HTTPS transport and its curl/resolver dependencies link into the installed worker, including in an enabled
+build. The miner links the owned process client and shared request/response validation. This keeps the market
+transport's native dependencies out of the miner's loader graph. The enabled-build linkage regression checks the
+real host CLI and worker images without starting them. The send/receive protocol and per-launch consent still apply.
+
+The opt-in production images passed native inspection on Windows and Linux. The Windows market-enabled miner
+no longer imports the worker's `WLDAP32` and `IPHLPAPI` DLLs. The market-only Linux miner no longer imports
+`libssl.so.3` or `libcrypto.so.3`. Fresh installations ran both one-shot commands through a separate synthetic
+sibling and checked that calls without permission exit before starting the genuine worker.
+
 The helper path is application-owned, absolute and local; Windows UNC/device paths are rejected. Package it beside the executable in a protected installation directory. This is an ownership/timeout boundary, **not an OS security sandbox**. Native trust auxiliary fetches follow the OS/backend policy and are not governed by curl's payload-socket callback. Audit that egress, revocation, credential behaviour and loader graph before enabling a public runtime integration; do not describe the entire helper as network-allowlisted or credential-sandboxed.
 
 ## Request/response boundary
@@ -35,8 +45,9 @@ Normal builds use `CANARY_ENABLE_PUBLIC_HTTPS=OFF` and need no curl headers/libr
 
 ```sh
 cmake --preset tests -B build/public-https -DCANARY_ENABLE_PUBLIC_HTTPS=ON -DCMAKE_PREFIX_PATH=<reviewed-prefix>
-cmake --build build/public-https --target test_public_https test_public_json_process public_json_fake_worker public_https_probe public_https_fixture_worker canary_public_json_worker
-ctest --test-dir build/public-https -R '^public_(https|json_process)$' --output-on-failure
+cmake --build build/public-https --target test_public_https test_public_json_process public_json_fake_worker \
+  public_https_probe public_https_fixture_worker canary_public_json_worker test_pearl_cuda_cli_host
+ctest --test-dir build/public-https -R '^public_(https(_linkage)?|json_process)$' --output-on-failure
 python -B tests/test_public_https_loopback.py build/public-https/tests/public_https_probe --fixture-worker build/public-https/tests/public_https_fixture_worker
 ```
 

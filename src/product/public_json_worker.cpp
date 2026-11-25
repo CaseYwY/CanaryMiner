@@ -1,4 +1,5 @@
 // Installed sibling helper. Fixed public request identifiers/numbers only, never mining credentials or arbitrary URLs.
+#include "public_https_client.h"
 #include "public_json_process.h"
 #include <cstdio>
 #include <limits>

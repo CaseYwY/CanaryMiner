@@ -1,5 +1,5 @@
 // Pure validation and backend availability only; no network, credentials or miner.
-#include "product/public_https.h"
+#include "product/public_https_client.h"
 #include <array>
 #include "product_test_util.h"
 
