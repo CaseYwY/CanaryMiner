@@ -70,6 +70,9 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
     if (!nativeMarketConsent(argc, argv, "market-hour", "--allow-public-candles"))
         return hourError("exact --allow-public-candles required", 2);
     if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
+    const auto ownershipUncertain = [] { return hourError("helper ownership uncertain"); };
+    NativeProcessLifetime lifetime;
+    if (!lifetime.begin()) return ownershipUncertain();
     try {
         const auto helper = installedPublicTickerHelper(module);
         if (helper.empty()) return hourError("installed helper path unavailable");
@@ -85,6 +88,7 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
         auto previous = initial;
         HourSample pearl, fx;
         for (const auto feed : {HourFeed::MexcPearl, HourFeed::CoinbaseFx}) {
+            if (!lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
             const auto sent = marketSystemClock();
             if (!clockContinuous(initial, previous, sent))
@@ -92,8 +96,8 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
             const bool token = feed == HourFeed::MexcPearl;
             const PublicJsonRequest request{token ? PublicFeed::MexcPearlHour : PublicFeed::CoinbaseUsdtHour,
                 static_cast<int64_t>(start), static_cast<int64_t>(end)};
-            const auto reply = awaitPublicMarketReply(fetch, request, limits, stop);
-            if (reply.status == PublicHttpsStatus::Unreaped) return hourError("helper ownership uncertain");
+            const auto reply = awaitPublicMarketReply(fetch, request, limits, lifetime, stop);
+            if (reply.status == PublicHttpsStatus::Unreaped || !lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
             const auto received = marketSystemClock();
             if (!clockContinuous(initial, sent, received))
@@ -117,10 +121,12 @@ int commandPublicMarketHour(const std::filesystem::path &module, int argc, const
             window.tokenUsdt && fx.minutes.size() == marketHourMinutes ? "N/A (exact arithmetic limit exceeded)" :
             "N/A (requires complete aligned PRL and FX coverage)";
         report += '\n';
+        if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
         if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0) return 1;
         return window.tokenUsd ? 0 : 3;
     } catch (...) {
+        if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
         return hourError("could not complete the public sample");
     }

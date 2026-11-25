@@ -128,3 +128,9 @@ Run `canary-miner market-hour --allow-public-candles` from a public-HTTPS-enable
 The report names each source, the UTC window, minute coverage, local receipt times and ages, and exact sums divided by 60. The USDT mean requires every Pearl minute. The USD mean additionally requires a valid FX close for each of those exact minutes. The report labels candle finality as unverified. A missing or malformed response gets a bounded reason, while an independent complete Pearl series can still supply the USDT mean.
 
 Exit code 0 indicates both means were available, 3 means a mean or the helper was unavailable, and 130 indicates a cancelled sample with confirmed helper cleanup. If cleanup is uncertain, the command exits with 3, withholds both means and admits no further request. The command leaves Settings, Dashboard polling and economic mode alone. Live provider response qualification and deployment acceptance remain open.
+
+### Native ownership across a one-shot sample
+
+Both requests share one native ownership lifetime when an explicit command starts. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.
+
+The CLI regression uses the real native process client with an installed synthetic worker. It checks stale caller scopes on Windows and Linux. On Linux it also changes the ownership epoch at the first or second request-thread creation. A valid sample launches both workers. A stale caller or first-request fault launches none, and a second-request fault launches only the first. These cases use no provider connection.

@@ -15,7 +15,7 @@ struct TickerSample {
 };
 
 TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPollingPolicy &policy,
-                           const volatile sig_atomic_t *stop) {
+                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop) {
     TickerSample result;
     const auto start = marketSystemClock();
     MarketPollingPlan plan;
@@ -27,6 +27,10 @@ TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPoll
     const auto fetch = marketProcessFetch(helper);
     for (const auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker}) {
         // Only the control thread can admit each new request. The helper worker completes one.
+        if (!lifetime.permitted()) {
+            result.snapshot.helperFault = true;
+            return result;
+        }
         if (marketSampleStopped(stop)) return result;
         const auto sent = marketSystemClock();
         const auto ticket = plan.next(sent.first, sent.second);
@@ -34,9 +38,9 @@ TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPoll
             result.snapshot.clockFault = true;
             return result;
         }
-        const auto reply = awaitPublicMarketReply(fetch, ticket->request, policy.https, stop);
+        const auto reply = awaitPublicMarketReply(fetch, ticket->request, policy.https, lifetime, stop);
         // Parent-side cleanup uncertainty outranks a simultaneous stop and invalidates both quotes.
-        if (reply.status == PublicHttpsStatus::Unreaped) {
+        if (reply.status == PublicHttpsStatus::Unreaped || !lifetime.permitted()) {
             result.snapshot.helperFault = true;
             return result;
         }
@@ -60,6 +64,11 @@ TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPoll
     return result;
 }
 
+int ownershipUncertain() {
+    std::fputs("market-tickers: helper ownership uncertain\n", stderr);
+    return 3;
+}
+
 int interrupted() {
     std::fputs("market-tickers: sample cancelled\n", stderr);
     return 130;
@@ -74,6 +83,8 @@ int commandPublicTickers(const std::filesystem::path &module, int argc, const ch
         return 2;
     }
     if (marketSampleStopped(stop)) return interrupted();
+    NativeProcessLifetime lifetime;
+    if (!lifetime.begin()) return ownershipUncertain();
     try {
         const auto helper = installedPublicTickerHelper(module);
         if (helper.empty()) {
@@ -83,11 +94,8 @@ int commandPublicTickers(const std::filesystem::path &module, int argc, const ch
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.maxAttempts = 1;
-        const auto sample = sampleTickers(helper, policy, stop);
-        if (sample.snapshot.helperFault) {
-            std::fputs("market-tickers: helper ownership uncertain\n", stderr);
-            return 3;
-        }
+        const auto sample = sampleTickers(helper, policy, lifetime, stop);
+        if (sample.snapshot.helperFault || !lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return interrupted();
         if (sample.snapshot.clockFault) {
             std::fputs("market-tickers: local clock unavailable or changed during sampling\n", stderr);
@@ -99,10 +107,12 @@ int commandPublicTickers(const std::filesystem::path &module, int argc, const ch
         std::string report = "One public ticker sample (local observation times; no trade-event timestamps)\n";
         for (const auto &line : marketTickerLines(sample.snapshot, policy.freshness, sample.utc, sample.mono))
             report += line + '\n';
+        if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return interrupted();
         if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0) return 1;
         return latest.tokenUsd ? 0 : 3;
     } catch (...) {
+        if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return interrupted();
         std::fputs("market-tickers: could not complete the public sample\n", stderr);
         return 3;
