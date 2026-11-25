@@ -349,21 +349,25 @@ The allocation uses whole-minute boundaries and exact arithmetic through the cyc
 
 ## Compare two whole-meter scenarios
 
-Open Combined tariff from the Dashboard Settings or the idle `settings` command and press **P**. Enter the constant whole-meter import watts
-for the **without mining** and **with mining** scenarios. Use **Tab** to change fields and **Enter** to calculate.
-The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
-applies to the full displayed UTC interval from the opening's through-time to the selected end.
+Open Combined tariff from the Dashboard Settings or the idle `settings` command and press **P**.
+Enter a constant whole-meter value for each scenario. Standard supply tariffs use import watts.
+A [kVA declaration](#charge-for-apparent-demand-in-kva) also needs apparent-power evidence.
+For a [separate export payment](#price-electricity-exports-separately), enter signed net watts.
+Positive values import energy and negative values export it. Use **Tab** to change fields and
+**Enter** to calculate. Each value applies from the saved opening's through-time to the selected UTC end.
 
 For a saved monthly, annual or two-month reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
 the saved cycle. Each additional cycle runs from one declared reset to the next. The same entered watts apply
-through the displayed end. Later cycles start with zero use and zero accrued subtotal, and each cycle applies its
-own fees, tier allowance and minimum. Charges are added exactly before display rounding. A declaration with
+through the displayed end. Later cycles start with zero imported and exported energy and zero accrued supply subtotal.
+Each cycle applies its own fees, tier allowance and minimum. The comparison adds exact
+amounts before display rounding. A declaration with
 explicit cycle dates still has one horizon.
 
 Every selected cycle needs complete rates known at the original comparison time. A missing rate in any selected
 cycle withholds all three amounts. The first cycle uses the saved opening's daily-fee rule. Without allocation, the comparison reports the first later cycle that splits a charged tariff day. With the declared allocation, it splits the daily fee across the affected cycles. Selecting a horizon applies only to the estimate.
 
-The amounts are the hypothetical remaining charges for both scenarios and their difference, in the plan currency.
+The amounts are the hypothetical remaining costs for both scenarios and their difference in the plan currency.
+With a separate export payment, the displayed amounts are net of the export payout.
 The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
 unavailable result. A background calculation uses the inputs and local time captured at Enter. Escape returns to the
 tariff declaration and cancels the calculation. The new comparison starts with empty inputs. If a cancelled calculation
@@ -377,8 +381,10 @@ Run `canary-miner meter-bill --tariff tariff-declaration.json --intervals meter-
 saved tariff and source file. The command reads those files and prints the review to stdout. Its estimates remain local
 to the command and include any declared opening used for the first cycle.
 
-The interval file has schema version 1. Use the same scope as the tariff opening and supply ordered, adjoining
-whole-meter import intervals. Each interval uses UTC milliseconds and a canonical nonnegative decimal string in watts.
+The import-only interval file has schema version 1. For [apparent demand](#charge-for-apparent-demand-in-kva),
+use input version 4 or 5. For [separate export payments](#price-electricity-exports-separately), use version 6 or 7.
+In the version 1 format, use the same scope as the tariff opening and supply ordered, adjoining whole-meter
+import intervals. Each interval uses UTC milliseconds and a canonical nonnegative decimal string in watts.
 
 ```json
 {
@@ -407,7 +413,7 @@ invalid. The saved declaration still supplies
 the opening values, so the cutoff describes rate publication and reading coverage, and local confirmation can be later.
 Omit the option to use the current UTC time.
 
-Annual policies and policies with a demand charge accept files up to 1.75 MiB and 18,432 intervals. Other policies accept 1 MiB and 8,192 intervals. Dense full-cycle register files can exceed these limits. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
+Annual policies and policies with demand charges or separate export payment accept files up to 1.75 MiB and 18,432 intervals. Other policies accept 1 MiB and 8,192 intervals. Dense full-cycle register files can exceed these limits. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
 unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
 additional cycle that starts within a charged tariff day requires the declared [daily-fee rule](#prorate-a-daily-fee-across-a-recurring-reset). Use regular files in a trusted
 local directory. Windows accepts native Unicode paths on local drives and rejects redirected directories. The command
