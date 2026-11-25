@@ -93,3 +93,14 @@ Set `schema_version` to `2` in the same local document. The hour still uses `end
 | Optional `fx` | `coinbase-usdt-usd-v1` | The raw Coinbase Advanced Trade public `ONE_MINUTE` object for `USDT-USD`. The object has one field, `candles`, with rows of `start`, `open`, `high`, `low`, `close` and `volume`. Start is a Unix seconds string. [Coinbase candle format](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product-candles) |
 
 The review validates prices and volumes as decimals, rejects inconsistent OHLC values, duplicate minute starts and starts after the stated observation, and sorts by UTC minute. Valid rows outside the requested hour are skipped, including an open row at the hour's exclusive end. The limits are 500 MEXC rows and 350 Coinbase rows within the same 64 KiB document. Missing Pearl minutes withhold the report. Incomplete aligned FX withholds the USD mean. Version 2 reports elapsed minute buckets and labels candle finality as unverified. Source identity and observation time are user declarations.
+
+### Save and reopen a local hour review
+
+```sh
+canary-miner market-hour --file candles.json --save-review hour.cmh
+canary-miner market-hour --open-review hour.cmh
+```
+
+Both input versions can be saved. Run the save command in a trusted private local folder. It creates a new archive with a simple ASCII `.cmh` name and preserves any existing file or temporary sibling. The archive contains the exact input bytes, original review UTC second, calculated report and SHA-256 checksum. It contains financial input in readable form, protected by the folder's access controls.
+
+Opening reads the archive without writing files. It verifies the checksum and recalculates the report at the saved UTC second, including the ages and exact means. The saved report must match the calculation before anything is printed. Version 1 archives bind the report format as well as the values. A renamed or removed source document has no effect on replay. The checksum detects corruption, while the source and its observation time remain user declarations. The archive supplies a historical offline review. Settings, Dashboard polling and economic mode keep their existing inputs.

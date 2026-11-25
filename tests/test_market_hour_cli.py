@@ -1,8 +1,11 @@
 """Exercise the ordinary offline command with the actual miner's host CLI."""
+from concurrent.futures import ThreadPoolExecutor
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -251,6 +254,118 @@ class MarketHourCli(unittest.TestCase):
         text = json.dumps(sample()).replace('"schema_version": 1', '"schema_version": 1, "schema_version": 1')
         self.file.write_text(text, encoding="utf-8")
         self.assert_refusal(self.run_miner("market-hour", "--file", self.file.name), "invalid hour document")
+
+    def test_save_and_recalculate_original_report(self):
+        cases = ((sample(), "closed minutes", "Mean USD per PRL (exact sum / minutes): 236.25 / 60"),
+                 (vendor_sample(fx_begin=1), "Candle finality is unverified",
+                  "Mean USD per PRL unavailable (incomplete aligned FX coverage)"))
+        for index, (doc, coverage, usd) in enumerate(cases):
+            with self.subTest(schema=doc["schema_version"]):
+                original = (json.dumps(doc, indent=2) + "\n").encode()
+                self.file.write_bytes(original)
+                archive = self.stage / f"hour-{index}.cmh"
+                saved = self.run_miner("market-hour", "--file", self.file.name, "--save-review", archive.name)
+                self.assertEqual(saved.returncode, 0, saved)
+                self.assertIn(coverage, saved.stdout)
+                self.assertIn(usd, saved.stdout)
+                self.assertIn("Review UTC ", saved.stdout)
+
+                saved_bytes = archive.read_bytes()
+                body, digest = saved_bytes[:-65], saved_bytes[-65:]
+                self.assertEqual(digest, hashlib.sha256(body).hexdigest().encode() + b"\n")
+                header, cutoff, input_size, parts = body.split(b"\n", 3)
+                self.assertEqual(header, b"CANARY-MARKET-HOUR-REVIEW-1")
+                self.assertEqual(parts[:int(input_size)], original)
+                report_size, report = parts[int(input_size):].split(b"\n", 1)
+                self.assertEqual(int(report_size), len(report))
+                self.assertEqual(report.decode(), saved.stdout)
+                self.assertIn(f"Review UTC {int(cutoff)}", saved.stdout)
+                if os.name != "nt":
+                    self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
+
+                self.file.unlink()
+                reopened = self.run_miner("market-hour", "--open-review", archive.name)
+                self.assertEqual((reopened.returncode, reopened.stdout), (0, saved.stdout), reopened)
+                renamed = self.stage / f"review-\u884c\u60c5-{index}.cmh"
+                renamed.write_bytes(saved_bytes)
+                reopened = self.run_miner("market-hour", "--open-review", str(renamed))
+                self.assertEqual((reopened.returncode, reopened.stdout), (0, saved.stdout), reopened)
+                self.assertEqual(archive.read_bytes(), saved_bytes)
+                self.assertFalse(self.file.exists())
+                self.assertFalse(archive.with_suffix(".cmh.tmp").exists())
+                self.assertEqual((self.stage / "config.json").read_text(), "CONFIG_SENTINEL")
+
+    def test_replay_rejects_corrupt_or_changed_archives(self):
+        self.file.write_text(json.dumps(sample()), encoding="utf-8")
+        archive = self.stage / "hour.cmh"
+        saved = self.run_miner("market-hour", "--file", self.file.name, "--save-review", archive.name)
+        self.assertEqual(saved.returncode, 0, saved)
+        complete = archive.read_bytes()
+        body = complete[:-65]
+
+        def rehash(data):
+            return data + hashlib.sha256(data).hexdigest().encode() + b"\n"
+
+        header, cutoff, parts = body.split(b"\n", 2)
+        future = str(int(time.time()) + 3600).encode()
+        altered = body.replace(b"236.25 / 60", b"236.26 / 60")
+        changed_input = body.replace(b'"2.25"', b'"2.26"', 1)
+        self.assertNotEqual(altered, body)
+        self.assertNotEqual(changed_input, body)
+        cases = (
+            (complete[:-1], "archive unavailable or invalid"),
+            (altered + complete[-65:], "archive unavailable or invalid"),
+            (rehash(altered), "report differs from the recalculated report"),
+            (rehash(changed_input), "report differs from the recalculated report"),
+            (rehash(b"\n".join((header, future, parts))), "cutoff is in the future"),
+            (rehash(b"\n".join((header, b"0" + cutoff, parts))), "archive unavailable or invalid"),
+        )
+        for data, message in cases:
+            with self.subTest(message=message):
+                archive.write_bytes(data)
+                self.assert_refusal(self.run_miner("market-hour", "--open-review", archive.name), message)
+                self.assertEqual(archive.read_bytes(), data)
+
+    def test_archive_publish_never_replaces_a_file(self):
+        self.file.write_text(json.dumps(sample()), encoding="utf-8")
+
+        def create():
+            return self.run_miner("market-hour", "--file", self.file.name, "--save-review", "hour.cmh")
+
+        archive = self.stage / "hour.cmh"
+        temporary = self.stage / "hour.cmh.tmp"
+        temporary.write_bytes(b"waiting")
+        self.assert_refusal(create(), "could not create")
+        self.assertEqual(temporary.read_bytes(), b"waiting")
+        self.assertFalse(archive.exists())
+        temporary.unlink()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            attempts = [pool.submit(create) for _ in range(2)]
+            results = sorted((attempt.result() for attempt in attempts), key=lambda result: result.returncode)
+        self.assertEqual([result.returncode for result in results], [0, 3], results)
+        self.assert_refusal(results[1], "could not create")
+        self.assertFalse(temporary.exists())
+        original = archive.read_bytes()
+        self.assert_refusal(create(), "existing archive was preserved")
+        self.assertEqual(archive.read_bytes(), original)
+
+        incomplete = vendor_sample(pearl_begin=1)
+        self.file.write_text(json.dumps(incomplete), encoding="utf-8")
+        archive.unlink()
+        self.assert_refusal(create(), "requires all 60 elapsed minute buckets")
+        self.assertFalse(archive.exists())
+        self.assertFalse(temporary.exists())
+
+    def test_archive_options_exclude_public_sampling_and_unsafe_names(self):
+        for args in (("--open-review",), ("--open-review", ""),
+                     ("--open-review", "hour.cmh", "--allow-public-candles"),
+                     ("--allow-public-candles", "--save-review", "hour.cmh"),
+                     ("--file", self.file.name, "--save-review", "bad/name.cmh"),
+                     ("--file", self.file.name, "--save-review", "CON.cmh"),
+                     ("--file", self.file.name, "--save-review", "not-an-hour.cmr")):
+            with self.subTest(args=args):
+                self.assert_refusal(self.run_miner("market-hour", *args), code=2)
 
     def test_nonregular_missing_and_oversized_input(self):
         def run_file(path):

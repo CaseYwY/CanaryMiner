@@ -312,11 +312,12 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (archiving) {
             if (exact.size() > maxExactResultsBytes) return fail("exact results exceed the archive bound");
             original.results = std::move(exact);
-            const auto state = saveReviewOriginal(options.archiveName, encodeReviewOriginal(original), stop);
-            if (state == ReviewSave::Stopped) return stopResult();
-            if (state == ReviewSave::Uncertain)
+            const auto state = local_review_archive::save(options.archiveName, ".cmr", encodeReviewOriginal(original),
+                                                          maxArchiveBytes, stop);
+            if (state == local_review_archive::ReviewSave::Stopped) return stopResult();
+            if (state == local_review_archive::ReviewSave::Uncertain)
                 return refuse("archive publication or cleanup is uncertain; inspect the review and its temporary file");
-            if (state != ReviewSave::Written)
+            if (state != local_review_archive::ReviewSave::Written)
                 return refuse("could not create the new review archive; any existing archive was preserved");
         }
         if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)

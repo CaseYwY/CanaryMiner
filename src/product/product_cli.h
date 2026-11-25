@@ -93,7 +93,7 @@ struct CliParse {
     CliOverrides ov;
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     MeterBillOptions meterBill;
-    bool publicMarketHour = false;
+    MarketHourOptions marketHour;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
 };
@@ -158,13 +158,11 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         return true;
     }
     if (r.command == Command::MarketHour) {
-        r.help = argc == i + 1 && (std::string_view(argv[i]) == "--help" || std::string_view(argv[i]) == "-h");
-        r.publicMarketHour = argc == i + 1 && std::string_view(argv[i]) == "--allow-public-candles";
-        if (!r.help && !r.publicMarketHour &&
-            !(argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0])) {
+        if (!parseMarketHourCli(argc, argv, i, r.marketHour)) {
             if (error) *error = "market-hour: invalid options; use market-hour --help";
             return false;
         }
+        r.help = r.marketHour.action == MarketHourAction::Help;
         *out = std::move(r);
         return true;
     }

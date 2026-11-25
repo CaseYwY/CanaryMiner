@@ -139,13 +139,14 @@ int main(int argc, char **argv) {
         return commandMeterBill(cli.meterBill, argc, argv, &g_stop);
     }
     if (cli.command == Command::MarketHour) {
-        if (!cli.publicMarketHour) return commandMarketHour(cli.help, argc, argv);
-        if constexpr (kPublicTickerRuntimeBuilt) {
-            signal(SIGINT, onSignal);
-            signal(SIGTERM, onSignal);
+        signal(SIGINT, onSignal);
+        signal(SIGTERM, onSignal);
 #if defined(SIGBREAK)
-            signal(SIGBREAK, onSignal);
+        signal(SIGBREAK, onSignal);
 #endif
+        if (cli.marketHour.action != MarketHourAction::PublicSample)
+            return commandMarketHour(cli.marketHour, argc, argv, &g_stop);
+        if constexpr (kPublicTickerRuntimeBuilt) {
             return commandPublicMarketHour(std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
         }
         std::fputs("market-hour: public HTTPS unavailable in this build\n", stderr);

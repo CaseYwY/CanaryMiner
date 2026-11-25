@@ -1,6 +1,7 @@
 #include "market_hour.h"
+#include "hash.h"
 #include "json_dom.h"
-#include "local_review_input.h"
+#include "local_review_archive.h"
 #include "market_hour_payload.h"
 
 #include <algorithm>
@@ -20,6 +21,9 @@ using market_detail::marketHourMinutes;
 using market_detail::marketHourSeconds;
 using market_detail::marketUtcLimit;
 constexpr size_t maxInputBytes = 64 * 1024;
+constexpr size_t maxReportBytes = 4 * 1024;
+constexpr size_t maxArchiveBytes = maxInputBytes + maxReportBytes + 256;
+constexpr std::string_view archiveHeader = "CANARY-MARKET-HOUR-REVIEW-1\n";
 constexpr char pearlSeriesId[] = "gate-pearl-mainnet-usdt-v1";
 constexpr char fxSeriesId[] = "kraken-usdt-usd-v1";
 constexpr char mexcSeriesId[] = "mexc-pearl-mainnet-usdt-v1";
@@ -163,28 +167,18 @@ void appendMean(std::string &report, const char *units, const MarketExactMean &m
               market_detail::exactHourMean(mean) + "\n";
 }
 
-int reviewHour(const std::filesystem::path &path) {
-    std::string text;
-    if (!readLocalReviewInput(path, maxInputBytes, text))
-        return refuse("input file unavailable, oversized or unsuitable");
-
-    const auto clock = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    if (clock < 1 || static_cast<uint64_t>(clock) > marketUtcLimit)
-        return refuse("local UTC clock unavailable");
-    const auto now = static_cast<uint64_t>(clock);
-
+const char *makeHourReport(const std::string &text, uint64_t now, std::string &report) {
     JsonValue root;
     uint64_t version = 0, end = 0;
     if (!parseJsonStrict(text, &root, nullptr) || !root.isObject())
-        return refuse("invalid hour document");
+        return "invalid hour document";
     const auto *pearlJson = root.find("pearl");
     const auto *fxJson = root.find("fx");
     if (root.members.size() != (fxJson ? 4u : 3u) || !integer(root, "schema_version", version) ||
         (version != 1 && version != 2) || !integer(root, "end_utc", end) || !pearlJson)
-        return refuse("invalid hour document");
+        return "invalid hour document";
     if (end <= marketHourSeconds || end % 60 || end > now)
-        return refuse("end_utc must be a completed UTC minute boundary");
+        return "end_utc must be a completed UTC minute boundary";
 
     const uint64_t start = end - marketHourSeconds;
     LocalSeries pearl, fx;
@@ -193,17 +187,17 @@ int reviewHour(const std::filesystem::path &path) {
         return vendor ? readCandleSeries(json, token, start, end, now, series) :
             readSeries(json, token ? pearlSeriesId : fxSeriesId, start, end, now, series);
     };
-    if (!read(*pearlJson, true, pearl)) return refuse("invalid Pearl mainnet minute series");
-    if (fxJson && !read(*fxJson, false, fx)) return refuse("invalid USDT/USD minute series");
+    if (!read(*pearlJson, true, pearl)) return "invalid Pearl mainnet minute series";
+    if (fxJson && !read(*fxJson, false, fx)) return "invalid USDT/USD minute series";
 
     const auto fxCovered = static_cast<unsigned>(fx.minutes.size());
     const auto window = market_detail::calculateMarketHour(start, end, pearl.minutes, fx.minutes);
-    if (window.status == MarketDataStatus::Arithmetic) return refuse("exact PRL arithmetic limit exceeded");
+    if (window.status == MarketDataStatus::Arithmetic) return "exact PRL arithmetic limit exceeded";
     if (!window.tokenUsdt)
-        return refuse(vendor ? "Pearl mainnet requires all 60 elapsed minute buckets" :
-                               "Pearl mainnet requires all 60 closed minutes");
+        return vendor ? "Pearl mainnet requires all 60 elapsed minute buckets" :
+                        "Pearl mainnet requires all 60 closed minutes";
 
-    std::string report = "Historical market review from user-declared data (offline; freshness unverified)\n";
+    report = "Historical market review from user-declared data (offline; freshness unverified)\n";
     if (vendor) report += "Candle finality is unverified; coverage is based on elapsed minute buckets.\n";
     report += "UTC seconds [" + std::to_string(start) + ", " + std::to_string(end) +
               "); window ended " + std::to_string(now - end) + " s ago\n";
@@ -224,6 +218,82 @@ int reviewHour(const std::filesystem::path &path) {
             report += "Mean USD per PRL unavailable (exact arithmetic limit exceeded)\n";
     }
 
+    return nullptr;
+}
+
+struct HourReviewOriginal {
+    int64_t cutoff = 0;
+    std::string input, report;
+};
+
+std::string encodeHourReview(const HourReviewOriginal &original) {
+    std::string body(archiveHeader);
+    body += std::to_string(original.cutoff) + '\n';
+    for (const auto *part : {&original.input, &original.report}) {
+        body += std::to_string(part->size()) + '\n';
+        body += *part;
+    }
+    return body + sha256Hex(body) + '\n';
+}
+
+bool decodeHourReview(const std::string &bytes, HourReviewOriginal &original) {
+    using local_review_archive::readArchiveNumber;
+    using local_review_archive::readArchivePart;
+    if (std::string_view(bytes).substr(0, archiveHeader.size()) != archiveHeader) return false;
+    size_t offset = archiveHeader.size();
+    return readArchiveNumber(bytes, offset, marketUtcLimit, original.cutoff) &&
+           readArchivePart(bytes, offset, maxInputBytes, original.input) &&
+           readArchivePart(bytes, offset, maxReportBytes, original.report) &&
+           bytes.size() - offset == 65 && bytes.back() == '\n' &&
+           bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) == 0;
+}
+
+int reviewHour(const MarketHourOptions &options, const std::filesystem::path &path,
+               const volatile sig_atomic_t *stop) {
+    using local_review_archive::ReviewSave;
+    const bool saving = options.action == MarketHourAction::Save;
+    const bool reopening = options.action == MarketHourAction::Open;
+    const auto stopped = [stop] { return stop && *stop; };
+    const auto cancelled = [] { return refuse("local market review stopped", 130); };
+
+    if (stopped()) return cancelled();
+    HourReviewOriginal original;
+    if (reopening) {
+        std::string bytes;
+        if (!readLocalReviewInput(path, maxArchiveBytes, bytes) || !decodeHourReview(bytes, original))
+            return refuse("review archive unavailable or invalid");
+    } else if (!readLocalReviewInput(path, maxInputBytes, original.input)) {
+        return refuse("input file unavailable, oversized or unsuitable");
+    }
+
+    if (stopped()) return cancelled();
+    const auto clock = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (clock < 1 || static_cast<uint64_t>(clock) > marketUtcLimit)
+        return refuse("local UTC clock unavailable");
+    if (original.cutoff > clock) return refuse("saved review cutoff is in the future");
+    if (!reopening) original.cutoff = clock;
+
+    std::string report;
+    if (const char *problem = makeHourReport(original.input, static_cast<uint64_t>(original.cutoff), report))
+        return refuse(problem);
+    if (saving || reopening) {
+        report += "Review UTC " + std::to_string(original.cutoff) + " (ages as of this review)\n";
+    }
+    if (stopped()) return cancelled();
+    if (reopening && original.report != report)
+        return refuse("saved review report differs from the recalculated report");
+    if (saving) {
+        if (report.size() > maxReportBytes) return refuse("review report exceeds archive bound");
+        original.report = report;
+        const auto result = local_review_archive::save(options.archiveName, marketReviewExtension,
+                                                       encodeHourReview(original), maxArchiveBytes, stop);
+        if (result == ReviewSave::Stopped) return cancelled();
+        if (result == ReviewSave::Uncertain)
+            return refuse("archive publication or cleanup is uncertain; inspect the review and its temporary file");
+        if (result != ReviewSave::Written)
+            return refuse("could not create the new review archive; any existing archive was preserved");
+    }
     if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
         return refuse("could not write report", 1);
     return 0;
@@ -231,9 +301,12 @@ int reviewHour(const std::filesystem::path &path) {
 
 }  // namespace
 
-int commandMarketHour(bool help, int argc, const char *const *argv) {
+int commandMarketHour(const MarketHourOptions &options, int argc, const char *const *argv,
+                      const volatile sig_atomic_t *stop) {
     try {
-        if (argc != (help ? 3 : 4))
+        const bool help = options.action == MarketHourAction::Help;
+        const bool saving = options.action == MarketHourAction::Save;
+        if (argc != (help ? 3 : saving ? 6 : 4))
             return refuse("invalid arguments; use market-hour --help", 2);
 #if defined(_WIN32)
         (void)argv;
@@ -246,15 +319,22 @@ int commandMarketHour(bool help, int argc, const char *const *argv) {
         const WideArguments args{CommandLineToArgvW(GetCommandLineW(), &count)};
         if (!args.values || count != argc || std::wstring_view(args.values[1]) != L"market-hour")
             return refuse("invalid arguments; use market-hour --help", 2);
-        const std::wstring_view option(args.values[2]);
-        if (help ? option != L"--help" && option != L"-h" : option != L"--file")
+        const auto option = std::wstring_view(args.values[2]);
+        const auto fileFlag = options.action == MarketHourAction::Open ? L"--open-review" : L"--file";
+        if (help ? option != L"--help" && option != L"-h" : option != fileFlag)
+            return refuse("invalid arguments; use market-hour --help", 2);
+        if (saving && (std::wstring_view(args.values[4]) != L"--save-review" ||
+                       std::wstring_view(args.values[5]) !=
+                           std::wstring(options.archiveName.begin(), options.archiveName.end())))
             return refuse("invalid arguments; use market-hour --help", 2);
 #endif
         if (help) {
-            std::printf("canary-miner market-hour --file FILE\n"
+            std::printf("canary-miner market-hour --file FILE [--save-review NAME.cmh]\n"
+                        "canary-miner market-hour --open-review FILE\n"
                         "canary-miner market-hour --allow-public-candles\n"
                         "Request one hour from the installed HTTPS helper for MEXC Pearl/USDT and Coinbase USDT/USD.\n"
                         "Review an hour of user-declared UTC minute prices, offline.\n"
+                        "Save a new archive in your trusted local folder. Open recalculates the original review.\n"
                         "JSON (up to 64 KiB): schema_version, end_utc, pearl, optional fx.\n"
                         "Version 1 accepts normalized minutes. Version 2 accepts declared MEXC and Coinbase candle payloads.\n"
                         "Version 1 series have series, observed_utc and minutes. Use %s for pearl\n"
@@ -269,9 +349,9 @@ int commandMarketHour(bool help, int argc, const char *const *argv) {
             return 0;
         }
 #if defined(_WIN32)
-        return reviewHour(args.values[3]);
+        return reviewHour(options, args.values[3], stop);
 #else
-        return reviewHour(argv[3]);
+        return reviewHour(options, argv[3], stop);
 #endif
     } catch (const std::exception &) {
         return refuse("could not review local input");
