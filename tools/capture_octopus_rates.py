@@ -1,4 +1,4 @@
-"""Capture public Octopus Agile prices for a local CanaryMiner meter review."""
+"""Capture public Octopus Agile or Go prices for a local CanaryMiner meter review."""
 import argparse
 import datetime as dt
 from http.client import HTTPException
@@ -47,14 +47,14 @@ def utc(value):
 
 
 def product_code(value):
-    match = re.fullmatch(r'AGILE-(?:FLEX-)?([0-9]{2}-[0-9]{2}-[0-9]{2})', value)
+    match = re.fullmatch(r'(?:AGILE-(?:FLEX-)?|GO-VAR-)([0-9]{2}-[0-9]{2}-[0-9]{2})', value)
     if match:
         try:
             dt.date.fromisoformat('20' + match[1])
             return value
         except ValueError:
             pass
-    raise argparse.ArgumentTypeError('expected a dated AGILE or AGILE-FLEX import product code')
+    raise argparse.ArgumentTypeError('expected a dated AGILE, AGILE-FLEX or GO-VAR import product code')
 
 
 def fetch_page(opener, url):

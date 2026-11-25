@@ -1,5 +1,6 @@
 """Offline checks for public rate pagination and exclusive publication."""
 import json
+from argparse import ArgumentTypeError
 from pathlib import Path
 import runpy
 import tempfile
@@ -11,6 +12,14 @@ CAPTURE = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'tools/captur
 
 
 class CaptureTests(unittest.TestCase):
+    def test_accepts_documented_dated_products(self):
+        parse = CAPTURE['product_code']
+        for code in ('AGILE-FLEX-22-11-25', 'AGILE-24-10-01', 'GO-VAR-22-10-14'):
+            self.assertEqual(parse(code), code)
+        for code in ('GO-VAR-23-02-29', 'INTELLI-VAR-22-10-14', 'GO-VAR-22-10-14/../'):
+            with self.assertRaises(ArgumentTypeError):
+                parse(code)
+
     def test_sequential_requests_keep_raw_price_tokens(self):
         capture_pages = CAPTURE['capture_pages']
         utc = CAPTURE['utc']

@@ -265,7 +265,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Also accepts local Octopus electricity import bundles in schema version 3.\n"
                   "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
                   "Half-hour rounding requires a reading for every UTC half hour.\n"
-                  "Use --octopus-rates to apply captured public Agile prices to a compatible tariff declaration.\n"
+                  "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.");
@@ -347,14 +347,16 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (options.ratesArg &&
             (!readLocalReviewInput(paths->rates, maxOctopusRateFileBytes, original.supplierRates) ||
              original.supplierRates.empty()))
-            return fail("Octopus Agile rate file unavailable, empty, oversized or not a regular file");
+            return fail("Octopus rate file unavailable, empty, oversized or not a regular file");
         if (!original.supplierRates.empty()) {
             OctopusRateImport imported;
             if (const auto *problem = importOctopusRates(original.supplierRates, cutoff, declaration, imported, stopped))
                 return fail(problem);
-            report += "Octopus Agile public rate snapshot (" + imported.paymentMethod + ")\n";
+            report += std::string(imported.go ? "Octopus Go" : "Octopus Agile") +
+                " public rate snapshot (" + imported.paymentMethod + ")\n";
             report += "  Observed " + std::to_string(imported.observedUtcMs) + " UTC ms, " +
-                      std::to_string(imported.intervals) + " half-hour prices including VAT.\n";
+                      std::to_string(imported.intervals) +
+                      (imported.go ? " published price intervals including VAT.\n" : " half-hour prices including VAT.\n");
         }
 
         std::string exact;

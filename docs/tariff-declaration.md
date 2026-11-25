@@ -227,7 +227,25 @@ report. A later capture cannot supply prices to an earlier historical cutoff. Th
 supplied files. It carries no invoice reconciliation or proof of the supplier's original publication time.
 
 When saving, the archive also keeps the captured pages byte for byte and replays them together with the declaration
-and readings. Archives made with captured rates require a version of CanaryMiner with Agile import support.
+and readings. Archives made with captured rates require a version of CanaryMiner with import support for that product.
+
+### Review publicly listed Octopus Go prices
+
+For a dated `GO-VAR-YY-MM-DD` product, start with the same London clock, rounding, opening and empty dynamic
+revision as for the Agile example. Set the declaration's `plan.product` to the actual Go product code.
+For the sample London window, set it to `GO-VAR-22-10-14` and save the declaration as `go-tariff.json`.
+
+```text
+python tools/capture_octopus_rates.py --product GO-VAR-22-10-14 --region C --payment-method DIRECT_DEBIT --begin 2023-03-01T00:00:00Z --end 2023-03-31T23:00:00Z --output go-rates.json
+canary-miner meter-bill --tariff go-tariff.json --intervals register-march.json --octopus-rates go-rates.json --save-review go.cmr
+canary-miner meter-bill --open-review go.cmr
+```
+
+Go unit prices can span several hours. The review uses the published UTC start and end of each price, including
+intervals that extend past either end of the review. This preserves actual day and night boundaries across
+clock changes. Every reviewed half hour needs one applicable unit price. A standing charge can change at
+London midnight within an active unit-price interval. The review applies the new daily fee from that midnight.
+[Octopus API guidance for Go prices](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#go-prices)
 
 ### Review saved Octopus electricity import pages
 
@@ -251,7 +269,7 @@ Use a review cutoff at or after that observation. The tool makes no network requ
 `meter-bill` requires a declared Octopus Energy tariff in GBP with half-hour rounding. It accepts UTC and signed
 offset timestamps, verifies that the declared window contains each elapsed half hour once, and uses the API
 quantities as reported at 0.001 kWh resolution. The existing billing rule rounds each half hour to the nearest
-even hundredth at a tie. A gap, duplicate or grouped record withholds the review. With the Agile example, supply
+even hundredth at a tie. A gap, duplicate or grouped record withholds the review. With Agile or Go, supply
 the corresponding public price bundle described above. A private archive keeps the prepared consumption bundle
 and the calculated amounts for offline replay. Source account identity, observations before assembly, and
 agreement with a supplier invoice require separate evidence.
