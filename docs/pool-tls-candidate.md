@@ -15,9 +15,28 @@ python3 -B packaging/release/tls_candidate.py pack --platform linux \
   --archive canaryminer-tls-candidate-linux-x86_64.tar.gz
 ```
 
-On Windows use `--platform windows`, the configured `dumpbin.exe`, and an archive ending in `.zip`. The packer reads the CMake cache and permits only the TLS runtime among optional capabilities. It checks each complete image without running it. Only the miner role may import the GPU driver. Linux also checks the native pidfd symbol contract and the highest glibc requirement. All three images pass the existing private-content scan. The tool re-reads the written archive before making it available at the requested new path.
+On Windows use `--platform windows`, the configured `dumpbin.exe`, and an archive ending in `.zip`. The packer reads the CMake cache and requires the enabled capabilities to match the selected candidate profile. It checks each complete image without running it. Only the miner role may import the GPU driver. Linux also checks the native pidfd symbol contract and the highest glibc requirement. All three images pass the existing private-content scan. The tool re-reads the written archive before making it available at the requested new path.
 
 The archive carries the strict TLS example, candidate instructions, project and component licences and a manifest of payload sizes and SHA-256 digests. Private build records and trust material stay outside the package. The archives contain no separate OpenSSL, CUDA driver or VC runtime installers.
+
+## Candidate with named tariff clocks
+
+The optional named tariff clock profile also packages the reviewed IANA 2026e tariff clock data.
+Configure with `CANARY_ENABLE_NAMED_TZDB=ON`, the reviewed static date-tz build via `date_DIR`, and
+`CANARY_BUNDLED_TZDB_DIR` pointing to the verified data described in [Electricity core](electricity-core.md#local-installation-of-the-reviewed-tariff-time-data).
+Add `--with-named-tzdb` to the pack command. The packer reads the staged `canary-tzdb-2026e` data
+from the same build directory as the three binaries and compares it to the native runtime pins.
+It installs the data as regular files under `bin/canary-tzdb-2026e`, next to the miner. The Windows package
+includes `windowsZones.xml` as required by its backend.
+
+The verifier recognizes both manifest schemas automatically. It checks the named data pins and
+looks for those pins in both native consumers, the miner and the preferences worker. It also checks
+the miner's compiled reference to the TLS stream worker. Use the updated verifier to install a named-clock package.
+Keep the directory beside the miner when moving the installation. You can use the installed
+[`meter-bill` command](tariff-declaration.md) with named tariff and reset clocks and reopen existing local market hour
+archives with [`market-hour --open-review`](market-reference-runtime.md#save-and-replay-a-public-hour).
+Both candidate profiles keep public HTTPS disabled. To make the original TLS-only candidate, use the
+TLS build without the named backend and omit `--with-named-tzdb`.
 
 ## Verification and installation
 
