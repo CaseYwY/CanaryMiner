@@ -23,7 +23,8 @@ constexpr size_t maxAnnualMeterIntervals = 18432;
 using MeterSeries = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
 struct MeterReadings {
     MeterSeries series;
-    std::optional<ExactDecimal> registerStart;
+    std::optional<ExactDecimal> registerStart, apparentRegisterStart;
+    std::vector<std::string> apparentSources;
     int64_t octopusObserved = 0;
     uint64_t version = 0;
 };
@@ -82,16 +83,38 @@ bool nonnegativeAmount(const JsonValue *value, ExactDecimal &amount) {
 }
 
 const char *decodeIntervals(const JsonValue &intervals, const BillOpening &opening, int64_t cutoff,
-                            const char *lateReadingError, std::vector<PowerInterval> &readings) {
+                            const char *lateReadingError, const DemandChargeRule *apparent,
+                            std::vector<PowerInterval> &readings, std::vector<std::string> &apparentSources) {
     auto cursor = opening.throughUtcMs;
     readings.reserve(intervals.items.size());
+    if (apparent) apparentSources.reserve(intervals.items.size());
     for (const auto &row : intervals.items) {
         PowerInterval reading;
-        if (!row.isObject() || row.members.size() != 3 ||
+        if (!row.isObject() || (!apparent && row.members.size() != 3) ||
             !instant(row.find("begin_utc_ms"), reading.beginUtcMs) ||
             !instant(row.find("end_utc_ms"), reading.endUtcMs) || reading.endUtcMs <= reading.beginUtcMs ||
             !nonnegativeAmount(row.find("average_watts"), reading.watts))
             return "invalid meter interval";
+        if (apparent) {
+            const auto *va = row.find("average_va");
+            const auto *pf = row.find("power_factor");
+            if (!va && !pf) return electricityStatusName(ElectricityStatus::DemandApparentEvidence);
+            if (row.members.size() != 4 || (va && pf)) return "invalid meter interval";
+            if (va) {
+                if (!nonnegativeAmount(va, reading.apparentVa.emplace()) ||
+                    reading.apparentVa->compare(reading.watts) < 0)
+                    return "apparent VA must be at least the active watts of the same meter interval";
+                apparentSources.push_back("va " + va->text);
+            } else {
+                if (!apparent->powerFactorVaPlaces)
+                    return "the saved tariff requires measured apparent VA";
+                ExactDecimal factor;
+                if (!nonnegativeAmount(pf, factor) ||
+                    !apparentDemandFromPowerFactor(*apparent, reading.watts, factor, reading.apparentVa.emplace()))
+                    return "invalid power factor or insufficient declared VA precision";
+                apparentSources.push_back("pf " + pf->text);
+            }
+        }
         if (reading.beginUtcMs != cursor) return "interval coverage has a gap or overlap";
         if (reading.endUtcMs > cutoff) return lateReadingError;
         cursor = reading.endUtcMs;
@@ -101,20 +124,23 @@ const char *decodeIntervals(const JsonValue &intervals, const BillOpening &openi
 }
 
 const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, int64_t cutoff,
-                           std::vector<MeterImportInterval> &readings, ExactDecimal &start) {
+                           std::vector<MeterImportInterval> &readings, ExactDecimal &start,
+                           ExactDecimal *apparentStart) {
     std::optional<int64_t> previousUtc;
-    ExactDecimal previous;
+    ExactDecimal previous, previousApparent;
     readings.reserve(rows.items.size() - 1);
     for (const auto &row : rows.items) {
         int64_t utc = 0;
-        ExactDecimal cumulative;
-        if (!row.isObject() || row.members.size() != 2 || !instant(row.find("utc_ms"), utc, true) ||
-            !nonnegativeAmount(row.find("imported_kwh"), cumulative))
+        ExactDecimal cumulative, apparent;
+        if (!row.isObject() || row.members.size() != (apparentStart ? 3u : 2u) ||
+            !instant(row.find("utc_ms"), utc, true) || !nonnegativeAmount(row.find("imported_kwh"), cumulative) ||
+            (apparentStart && !nonnegativeAmount(row.find("apparent_kvah"), apparent)))
             return "invalid meter register reading";
         if (utc > cutoff) return "meter register reading is after the review cutoff";
         if (!previousUtc) {
             if (utc != opening.throughUtcMs) return "first meter register reading must match the saved opening time";
             start = cumulative;
+            if (apparentStart) *apparentStart = apparent;
         } else {
             if (utc <= *previousUtc) return "meter register timestamps must strictly increase";
             if (cumulative.compare(previous) < 0) return "meter register decreased (reset or rollover is unsupported)";
@@ -122,9 +148,20 @@ const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, in
             if (!cumulative.subtract(previous, &delta)) return "meter register quantity exceeds arithmetic capacity";
             auto imported = electricityKwh(delta);
             if (!imported) return "meter register quantity exceeds arithmetic capacity";
-            readings.push_back({*previousUtc, utc, std::move(*imported)});
+            std::optional<ElectricityAmount> apparentDelta;
+            if (apparentStart) {
+                if (!apparent.subtract(previousApparent, &delta))
+                    return "apparent register quantity exceeds arithmetic capacity";
+                if (delta.negative()) return "apparent register decreased (reset or rollover is unsupported)";
+                apparentDelta = electricityKwh(delta);
+                if (!apparentDelta) return "apparent register quantity exceeds arithmetic capacity";
+                if (apparentDelta->numerator.compare(imported->numerator) < 0)
+                    return "apparent register delta must be at least the active import delta";
+            }
+            readings.push_back({*previousUtc, utc, std::move(*imported), std::move(apparentDelta)});
         }
         previous = std::move(cumulative);
+        previousApparent = std::move(apparent);
         previousUtc = utc;
     }
     return nullptr;
@@ -145,21 +182,29 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     const auto *schema = root.find("schema_version");
     const auto *scope = root.find("scope");
     uint64_t version = 0;
-    if (!schema || !schema->asUint64(&version) || version < 1 || version > 3 || !scope || !scope->isString() ||
+    if (!schema || !schema->asUint64(&version) || version < 1 || version > 5 || !scope || !scope->isString() ||
         root.members.size() != (version == 3 ? 5u : 3u))
         return "invalid interval document";
-    const auto *rows = root.find(version == 1 ? "intervals" : version == 2 ? "register_readings" : "consumption");
+    const bool apparent = declaration.plan.demandCharge && declaration.plan.demandCharge->apparent();
+    if (apparent && version < 4) return electricityStatusName(ElectricityStatus::DemandApparentEvidence);
+    if (!apparent && version >= 4) return "apparent meter readings require a saved kVA tariff";
+    const bool isPower = version == 1 || version == 4;
+    const bool isRegister = version == 2 || version == 5;
+    const auto *rows = root.find(isPower ? "intervals" : isRegister ? "register_readings" : "consumption");
     if (!rows || !rows->isArray()) return "invalid interval document";
     const auto size = rows->items.size();
-    if (version == 2 ? size < 2 || size > intervalLimit + 1 : size < 1 || size > intervalLimit)
+    if (isRegister ? size < 2 || size > intervalLimit + 1 : size < 1 || size > intervalLimit)
         return "invalid interval document";
     if (scope->text != opening.evidence.scope) return "meter scope differs from the saved opening";
     readings.version = version;
-    if (version == 1)
+    if (isPower)
         return decodeIntervals(*rows, opening, cutoff, lateReadingError,
-                               readings.series.emplace<std::vector<PowerInterval>>());
+                               apparent ? &*declaration.plan.demandCharge : nullptr,
+                               readings.series.emplace<std::vector<PowerInterval>>(), readings.apparentSources);
     auto &imports = readings.series.emplace<std::vector<MeterImportInterval>>();
-    if (version == 2) return decodeRegister(*rows, opening, cutoff, imports, readings.registerStart.emplace());
+    if (isRegister)
+        return decodeRegister(*rows, opening, cutoff, imports, readings.registerStart.emplace(),
+                              apparent ? &readings.apparentRegisterStart.emplace() : nullptr);
 
     int64_t end = 0;
     if (!instant(root.find("end_utc_ms"), end) || !instant(root.find("observed_utc_ms"), readings.octopusObserved) ||
@@ -202,15 +247,16 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (const auto &demand=declaration.plan.demandCharge) {
         std::string peak, amount;
         if (!billableDemand(*demand,*accrual.ending,billablePeak,ratchetFloor) ||
-            !accrual.ending->peakDemandKw->format(6,&peak) ||
+            !accrual.ending->peakDemand->format(6,&peak) ||
             !demand->charge(billablePeak,&demandSubtotal) ||
             !demandSubtotal.format(6,&amount)) return false;
-        report += "  Peak demand " + peak + " kW over " + std::to_string(demand->windowMinutes) + " minute windows\n";
+        const std::string unit = demand->unit();
+        report += "  Peak demand " + peak + " " + unit + " over " + std::to_string(demand->windowMinutes) + " minute windows\n";
         if (demand->ratchet) {
             std::string floor,billable;
             if (!ratchetFloor.format(6,&floor) || !billablePeak.format(6,&billable)) return false;
-            report += "  Demand ratchet floor " + floor + " kW\n";
-            report += "  Billable demand " + billable + " kW\n";
+            report += "  Demand ratchet floor " + floor + " " + unit + "\n";
+            report += "  Billable demand " + billable + " " + unit + "\n";
         }
         report += "  Demand charge before subtotal multiplier " + amount + " " + currency + "\n";
     }
@@ -235,10 +281,11 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
               (accrual.settlementDependent ? ",true" : ",false");
     if (accrual.billedKwh) exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
     if (seasonal) exact += "," + jsonQuote(seasonal->allowanceKwh.text());
-    if (ending.peakDemandKw)
-        exact += "," + jsonQuote(ending.peakDemandKw->numerator.text()) + "," + jsonQuote(demandSubtotal.numerator.text());
+    if (ending.peakDemand)
+        exact += "," + jsonQuote(ending.peakDemand->numerator.text()) + "," + jsonQuote(demandSubtotal.numerator.text());
     if (declaration.plan.demandCharge && declaration.plan.demandCharge->ratchet)
         exact += "," + jsonQuote(ratchetFloor.numerator.text()) + "," + jsonQuote(billablePeak.numerator.text());
+    if (ending.apparentDemand) exact += ",\"kVA\"";
     exact += "]\n";
     return true;
 }
@@ -265,7 +312,7 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
                 if (end != reading.endUtcMs) return "meter register needs a reading at the billing-cycle boundary";
                 slice.intervals.push_back(reading);
             } else {
-                slice.intervals.push_back({cursor, end, reading.watts});
+                slice.intervals.push_back({cursor, end, reading.watts, reading.apparentVa});
             }
             cursor = end;
             if (cursor == reading.endUtcMs) ++next;
@@ -326,7 +373,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 10 &&
+        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 11 &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
@@ -349,6 +396,10 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
           "Uses exact differences between cumulative import readings in kWh.\n"
         : "Estimated electricity costs from a declared tariff and user-supplied meter intervals\n"
           "Average import is applied uniformly within each interval.\n";
+    if (review.readings.version == 5)
+        report += "Paired kVAh differences establish apparent demand. Active kWh supplies energy pricing.\n";
+    else if (review.readings.version == 4)
+        report += "Each interval supplies measured VA or the declared power-factor conversion.\n";
     if (review.readings.octopusObserved) {
         report = "Estimated electricity costs from declared Octopus Energy whole-meter electricity imports\n";
         report += "API quantities are reported to 0.001 kWh. Local bundle observation " +
@@ -404,12 +455,18 @@ std::string meterPrefixDigest(const MeterReadings &readings, const std::vector<I
                               const std::string &meterExact) {
     std::string original = std::to_string(readings.version) + '\n';
     if (readings.registerStart) original += readings.registerStart->text() + '\n';
+    if (readings.apparentRegisterStart) original += readings.apparentRegisterStart->text() + '\n';
+    size_t index = 0;
     for (const auto &interval : series) {
         original += std::to_string(interval.beginUtcMs) + ' ' + std::to_string(interval.endUtcMs) + ' ';
-        if constexpr (std::is_same_v<Interval, MeterImportInterval>)
+        if constexpr (std::is_same_v<Interval, MeterImportInterval>) {
             original += interval.importedKwh.numerator.text();
-        else
+            if (interval.apparentKvah) original += ' ' + interval.apparentKvah->numerator.text();
+        } else {
             original += interval.watts.text();
+            if (interval.apparentVa) original += ' ' + readings.apparentSources[index];
+        }
+        ++index;
         original += '\n';
     }
     return sha256Hex(original + meterExact);
@@ -458,6 +515,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "    [--as-of-utc-ms MS] [--invoice FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
+                  "For a saved kVA tariff, include apparent VA, a permitted power factor, or paired kWh/kVAh registers.\n"
                   "Also accepts local Octopus electricity import bundles in schema version 3.\n"
                   "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
                   "Half-hour rounding uses complete UTC half hours. Without demand, give one reading per boundary.\n"

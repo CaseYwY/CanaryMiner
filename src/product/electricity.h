@@ -9,7 +9,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for quantities and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -24,10 +24,18 @@ struct PowerEvidence {
     PowerOrigin origin = PowerOrigin::Unknown;
     std::string scope, adapter;
 };
-struct PowerInterval { int64_t beginUtcMs = 0, endUtcMs = 0; ExactDecimal watts; };
+struct PowerInterval {
+    int64_t beginUtcMs = 0, endUtcMs = 0;
+    ExactDecimal watts;
+    std::optional<ExactDecimal> apparentVa{};  // independent whole-meter average
+};
 struct PowerTrace { PowerEvidence evidence; std::vector<PowerInterval> intervals; };
 // A measured quantity over the full interval carries no implied power profile within it.
-struct MeterImportInterval { int64_t beginUtcMs = 0, endUtcMs = 0; ElectricityAmount importedKwh; };
+struct MeterImportInterval {
+    int64_t beginUtcMs = 0, endUtcMs = 0;
+    ElectricityAmount importedKwh;
+    std::optional<ElectricityAmount> apparentKvah{};  // delta from the paired apparent-energy register
+};
 struct MeterImportTrace { PowerEvidence evidence; std::vector<MeterImportInterval> intervals; };
 struct PowerObservation {
     int64_t utcMs = 0, monotonicMs = 0;
@@ -81,10 +89,14 @@ struct DemandChargeRule {
     unsigned windowMinutes = 0;
     unsigned offsetMinutes = 0;  // UTC phase from the Unix epoch, less than one window
     int64_t publishedUtcMs = 0;
-    ExactDecimal ratePerKw;
+    ExactDecimal ratePerUnit;
     std::optional<DemandRatchet> ratchet{};
+    bool apparentPower = false;
+    std::optional<unsigned> powerFactorVaPlaces{};
+    bool apparent() const { return apparentPower; }
+    const char *unit() const { return apparent() ? "kVA" : "kW"; }
     bool charge(const ElectricityAmount &peak, ElectricityAmount *out) const {
-        return peak.numerator.multiply(ratePerKw, &out->numerator);
+        return peak.numerator.multiply(ratePerUnit, &out->numerator);
     }
 };
 struct TariffPlan {
@@ -100,7 +112,7 @@ struct TariffPlan {
     std::optional<ExactDecimal> minimumCycleSubtotal;
     std::optional<ExactDecimal> subtotalMultiplier;  // explicit single multiplier on entire subtotal, no inferred tax order
     uint32_t unsupportedRules = 0;             // any unmodelled rule rejects evaluation
-    std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter kW windows
+    std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter demand windows
 };
 struct BillOpening {
     bool declared = false;
@@ -108,9 +120,13 @@ struct BillOpening {
     PowerEvidence evidence;  // an opening quantity cannot be reused for a different meter/basis/source
     int64_t cycleBeginUtcMs = 0, cycleEndUtcMs = 0, throughUtcMs = 0;
     ElectricityAmount importedKwh, accruedSubtotal;  // pre-multiplier subtotal includes the established demand charge
-    std::optional<ElectricityAmount> peakDemandKw;
-    std::vector<ElectricityAmount> demandHistoryKw;  // completed monthly measured peaks, oldest first
+    std::optional<ElectricityAmount> peakDemand;
+    std::vector<ElectricityAmount> demandHistory;  // completed monthly measured peaks, oldest first
+    bool apparentDemand = false;  // binds the opening peak and history to the demand rule's unit
 };
+// Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
+bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
+                                   const ExactDecimal &factor,ExactDecimal &voltAmps);
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
                     ElectricityAmount &peak,ElectricityAmount &ratchetFloor);
 struct BillEstimate {

@@ -474,6 +474,31 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['demand_charge']['ratchet']['fraction'] = '1.1'
         self.assertTrue(validate(example, schema, schema))
 
+    def test_apparent_demand_uses_v11_and_unit_specific_fields(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 11
+        example['demand_charge'] = dict(window_minutes=15, offset_minutes=0, published_utc_ms=0,
+                                        rate_per_kva='5', power_factor_va_places=None)
+        example['opening']['peak_demand_kva'] = '0'
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 9}, schema, schema))
+        example['demand_charge']['power_factor_va_places'] = 18
+        self.assertEqual(validate(example, schema, schema), [])
+        example['demand_charge']['power_factor_va_places'] = 19
+        self.assertTrue(validate(example, schema, schema))
+        example['demand_charge']['power_factor_va_places'] = 6
+        example['opening']['peak_demand_kw'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+        example['opening'].pop('peak_demand_kw')
+        example['demand_charge']['ratchet'] = dict(lookback_months=1, fraction='0.8')
+        example['opening']['demand_history'] = [{'cycle_end_utc_ms': 1, 'peak_kva': '20'}]
+        self.assertTrue(validate(example, schema, schema))
+        example['reset_policy'] = {'monthly_day': 1, 'clock': example['plan']['clock']}
+        self.assertEqual(validate(example, schema, schema), [])
+        example['opening']['demand_history'][0]['peak_kw'] = '20'
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -504,8 +529,9 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'revision': {'component_multiplier'},
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
-                    'opening': {'peak_demand_kw', 'demand_history'},
-                    'demandCharge': {'ratchet'},
+                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history'},
+                    'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places'},
+                    'demandHistoryRow': {'peak_kw', 'peak_kva'},
                 }.get(name, set())
                 self.assertEqual(set(definition['required']), set(definition['properties']) - optional)
 

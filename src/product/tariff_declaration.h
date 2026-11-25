@@ -65,7 +65,8 @@ struct TariffCycleComparison {
 // The first cycle uses the saved opening. Subsequent complete cycles start at the declared monthly or annual reset.
 std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d, unsigned cycles);
 TariffCycleComparison compareTariffCycles(const TariffDeclaration &d, const std::array<ExactDecimal, 2> &watts,
-    unsigned cycles, int64_t decisionUtcMs, const std::atomic<bool> *cancel = nullptr);
+    unsigned cycles, int64_t decisionUtcMs, const std::atomic<bool> *cancel = nullptr,
+    const std::array<std::optional<ExactDecimal>, 2> &apparentVa = {});
 // Start the adjacent declared cycle from an opening whose prior cycle is complete.
 ElectricityStatus advanceTariffOpening(const TariffDeclaration &d, BillOpening &settled, int64_t publishedThroughUtcMs,
                                        bool &chargedDaySplit);
@@ -78,7 +79,7 @@ struct TariffDeclarationChange {
 };
 // Templates intentionally leave unknown rates, quantities and identities EMPTY, not zero.
 JsonValue tariffDeclarationTemplate();
-JsonValue tariffRowTemplate(const std::string &collection,bool componentMultiplier=false);
+JsonValue tariffRowTemplate(const std::string &collection,bool componentMultiplier=false,bool apparentDemand=false);
 std::string tariffJson(const JsonValue &value);
 // Transactional output; validates every key/type/rule and binds an explicit fixed clock.
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem=nullptr);

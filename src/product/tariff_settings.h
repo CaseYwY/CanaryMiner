@@ -62,8 +62,8 @@ class TariffSettingsPanel {
                 const bool changedComponents=changed&&components&&(revision()||changedPlanSubtotal);
                 const bool changedRateClock=changed&&location=="plan.clock"&&
                     (name=="zone"||((seasonal()||components)&&(name=="kind"||name=="fixed_offset_seconds")));
-                if(input.empty()&&(name=="minimum_cycle_subtotal"||name=="through_kwh"||name=="date"))*v={};
-                else if(v->isNumber()){
+                if(input.empty()&&(name=="minimum_cycle_subtotal"||name=="through_kwh"||name=="date"||name=="power_factor_va_places"))*v={};
+                else if(v->isNumber()||name=="power_factor_va_places"){
                     JsonValue number;if(!parseJsonStrict(input,&number,nullptr)||!number.isNumber()||input.find_first_not_of("-0123456789")!=std::string::npos){message=i18n::tariffNoticeEnglish(NoticeKey::IntegerOnly);return TariffSettingsResult::None;}
                     *v=std::move(number);
                 }else{v->type=JsonValue::Type::String;v->text=input;}
@@ -137,6 +137,7 @@ class TariffSettingsPanel {
         else if((key=='c'||key=='C')&&onComponentToggle())toggleComponentMultiplier();
         else if((key=='d'||key=='D')&&onDemandToggle())toggleDemandCharge();
         else if((key=='r'||key=='R')&&onRatchetToggle())toggleRatchet();
+        else if((key=='k'||key=='K')&&onRatchetToggle())toggleDemandUnit();
         else if((key=='f'||key=='F')&&onCyclePolicy()&&recurring()&&!bimonthly())toggleDailyFeeAllocation();
         else if((key=='z'||key=='Z')&&onTariffClock())toggleNamedClock();
         else if((key=='g'||key=='G')&&recurring())deriveCycle();
@@ -147,7 +148,7 @@ class TariffSettingsPanel {
             const size_t bound=collection=="demand_history"?12:collection=="revisions"||collection=="seasons"?16:collection=="dynamic"?256:32;
             if(count()>=bound||tariffJson(draft).size()>tariffDeclarationMaxBytes-1024)message=i18n::tariffNoticeEnglish(NoticeKey::Capacity);
             else{
-                auto value=tariffRowTemplate(collection,componentRevision());
+                auto value=tariffRowTemplate(collection,componentRevision(),apparentDemand());
                 if(value.isObject()){
                     node()->items.push_back(std::move(value));
                     field=count()-1;
@@ -184,7 +185,7 @@ class TariffSettingsPanel {
             if(onSeasonalToggle())shortcuts+=i18n::tariffMonthlyEnglish(Key::SeasonalToggle)+" ";
             if(onComponentToggle())shortcuts+="[C] Component multiplier ";
             if(onDemandToggle())shortcuts+="[D] Demand charge ";
-            if(onRatchetToggle())shortcuts+="[R] Historical demand floor ";
+            if(onRatchetToggle())shortcuts+="[R] Historical demand floor [K] kW/kVA ";
             if(recurring())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
             if(onTariffClock()&&civilNamedTimeAvailable())shortcuts+="[Z] Named/UTC clock ";
             shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
@@ -255,6 +256,11 @@ class TariffSettingsPanel {
         const auto *rule=draft.find("demand_charge");
         return rule&&rule->find("ratchet");
     }
+    bool apparentDemand()const{
+        const auto *rule=draft.find("demand_charge");
+        return rule&&rule->find("power_factor_va_places");
+    }
+    const char *openingPeakField()const{return apparentDemand()?"peak_demand_kva":"peak_demand_kw";}
     bool onRatchetToggle()const{return route.empty()&&selectedName()=="demand_charge";}
     bool onDemandToggle()const{return onCyclePolicy()||(route.empty()&&selectedName()=="demand_charge");}
     bool requiresPricedOpeningReview()const{
@@ -299,7 +305,7 @@ class TariffSettingsPanel {
         if(!schema||!opening||!plan||!policy)return;
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
-        schema->text=ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        schema->text=apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -425,7 +431,7 @@ class TariffSettingsPanel {
         auto &opening=*member(draft,"opening");
         if(demand()){
             opening.members.erase(std::remove_if(opening.members.begin(),opening.members.end(),[](const auto &entry){
-                return entry.first=="peak_demand_kw"||entry.first=="demand_history";
+                return entry.first=="peak_demand_kw"||entry.first=="peak_demand_kva"||entry.first=="demand_history";
             }),opening.members.end());
             draft.members.erase(std::remove_if(draft.members.begin(),draft.members.end(),[](const auto &entry){
                 return entry.first=="demand_charge";
@@ -442,6 +448,29 @@ class TariffSettingsPanel {
             message="Enter the aligned window, price and established peak. The opening subtotal excludes demand.";
         }
         refreshClockContract();
+    }
+    void toggleDemandUnit(){
+        auto &rule=*member(draft,"demand_charge");
+        auto &opening=*member(draft,"opening");
+        const bool useApparent=!apparentDemand();
+        const auto replaceEmptyField=[](JsonValue &object,const char *oldField,const char *newField){
+            for(auto &entry:object.members){
+                if(entry.first!=oldField)continue;
+                entry.first=newField;
+                entry.second.text.clear();
+                break;
+            }
+        };
+        replaceEmptyField(rule,useApparent?"rate_per_kw":"rate_per_kva",useApparent?"rate_per_kva":"rate_per_kw");
+        replaceEmptyField(opening,openingPeakField(),useApparent?"peak_demand_kva":"peak_demand_kw");
+        if(useApparent)rule.members.emplace_back("power_factor_va_places",JsonValue{});
+        else rule.members.erase(std::remove_if(rule.members.begin(),rule.members.end(),[](const auto &entry){
+            return entry.first=="power_factor_va_places";
+        }),rule.members.end());
+        const bool clearedHistory=clearDemandHistory();
+        refreshClockContract();
+        message="Demand unit changed. Enter the price and opening peak in the new unit.";
+        if(clearedHistory)message+=" Re-enter the prior monthly peaks.";
     }
     void toggleRatchet(){
         if(!recurring()||annual()||bimonthly()){
@@ -479,7 +508,7 @@ class TariffSettingsPanel {
     void reviewChangedDemandWindow(){
         auto &opening=*member(draft,"opening");
         if(opening.find("through_utc_ms")->text!=opening.find("cycle_begin_utc_ms")->text){
-            member(opening,"peak_demand_kw")->text.clear();
+            member(opening,openingPeakField())->text.clear();
             message="Demand window changed. Re-enter the opening peak using the new window.";
         }
     }
@@ -511,7 +540,7 @@ class TariffSettingsPanel {
     }
     void clearDraftOpeningAmounts(){
         if(auto *opening=member(draft,"opening")){
-            for(const auto *amount:{"imported_kwh","accrued_subtotal","peak_demand_kw"})
+            for(const auto *amount:{"imported_kwh","accrued_subtotal",openingPeakField()})
                 if(auto *value=member(*opening,amount))value->text.clear();
         }
     }
@@ -569,7 +598,7 @@ class TariffSettingsPanel {
         const auto *through=opening->find("through_utc_ms");
         const auto *quantity=opening->find("imported_kwh");
         const auto *subtotal=opening->find("accrued_subtotal");
-        const auto *peak=opening->find("peak_demand_kw");
+        const auto *peak=opening->find(openingPeakField());
         if(!begin||!end||!through||!quantity||!subtotal)return;
         TariffCycleBounds bounds;
         TariffProblem error;
@@ -581,7 +610,7 @@ class TariffSettingsPanel {
         if(begin->text!=beginText&&(!quantity->text.empty()||!subtotal->text.empty()||(peak&&!peak->text.empty()))){
             if(!quantity->text.empty())focus("opening.imported_kwh");
             else if(!subtotal->text.empty())focus("opening.accrued_subtotal");
-            else focus("opening.peak_demand_kw");
+            else focus(std::string("opening.")+openingPeakField());
             message=peak?"Clear the opening import, subtotal and demand peak before changing the cycle start.":
                 i18n::tariffMonthlyEnglish(Key::RetainAmounts);
             return;
@@ -624,11 +653,13 @@ class TariffSettingsPanel {
         if(s=="window_minutes")return "Choose 5 to 60 minutes. The window must divide one hour.";
         if(s=="offset_minutes")return "Enter the UTC grid offset in minutes, smaller than the window.";
         if(s=="rate_per_kw")return "Enter the price per kW of the billable demand for this cycle.";
+        if(s=="rate_per_kva")return "Enter the price per kVA of the billable demand for this cycle.";
+        if(s=="power_factor_va_places")return "Leave blank for measured VA only. Enter 0 to 18 decimals for power-factor conversion.";
         if(s=="lookback_months")return "Enter one to twelve completed monthly cycles.";
         if(s=="fraction")return "Enter a positive fraction up to one. For 80 percent, use 0.8.";
-        if(s=="peak_kw"&&collectionName().rfind("demand_history[",0)==0)
+        if((s=="peak_kw"||s=="peak_kva")&&collectionName().rfind("demand_history[",0)==0)
             return "Enter the actual measured peak, before applying any historical floor.";
-        if(s=="peak_demand_kw")return "Enter the established average-window peak. Use zero at cycle start.";
+        if(s=="peak_demand_kw"||s=="peak_demand_kva")return "Enter the established average-window peak. Use zero at cycle start.";
         if(s=="accrued_subtotal"&&demand())return "Enter accrued energy and fees before demand or the subtotal multiplier.";
         if(s=="base_multiplier")return "Enter the fallback factor as a nonnegative decimal. Use 0 in dynamic mode.";
         if(s=="multiplier")return "Enter the nonnegative factor for the multiplied part of the unit rate.";
@@ -687,6 +718,8 @@ class TariffSettingsPanel {
         if(seasonal())review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::SeasonalReview));
         if(ratchet())review.insert(review.begin()+4,
             "Billable demand is the larger of this month's actual peak and the fraction of the prior maximum.");
+        if(apparentDemand())review.insert(review.begin()+4,
+            "Demand uses kVA and requires whole-meter apparent-power evidence. Energy uses active import in kWh.");
         if(demand())review.insert(review.begin()+4,
             "Peak demand is charged once per cycle. The opening subtotal excludes it. Review the plan and opening keys.");
         if(hasComponents(draft))review.insert(review.begin()+4,
