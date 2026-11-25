@@ -3,6 +3,7 @@
 #include "local_review_input.h"
 #include "market_minute_window.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <string_view>
@@ -19,16 +20,18 @@ constexpr uint64_t maxUtc = 253402300799ULL;
 constexpr size_t maxInputBytes = 64 * 1024;
 constexpr char pearlSeriesId[] = "gate-pearl-mainnet-usdt-v1";
 constexpr char fxSeriesId[] = "kraken-usdt-usd-v1";
+constexpr char mexcSeriesId[] = "mexc-pearl-mainnet-usdt-v1";
+constexpr char coinbaseSeriesId[] = "coinbase-usdt-usd-v1";
 
-struct ClosedMinute {
+struct ReviewMinute {
     uint64_t startUtc = 0;
     ExactDecimal close;
-    bool closed = true;
+    bool closed = true;  // eligible for accumulation in this offline review
 };
 
 struct LocalSeries {
     uint64_t observedUtc = 0;
-    std::vector<ClosedMinute> minutes;
+    std::vector<ReviewMinute> minutes;
 };
 
 bool integer(const JsonValue &object, const char *key, uint64_t &value) {
@@ -36,31 +39,98 @@ bool integer(const JsonValue &object, const char *key, uint64_t &value) {
     return member && member->asUint64(&value);
 }
 
+bool declaredSeries(const JsonValue &object, const char *identity, uint64_t end, uint64_t now, LocalSeries &series) {
+    const auto *id = object.find("series");
+    return object.isObject() && object.members.size() == 3 && id && id->isString() &&
+        id->text == identity && integer(object, "observed_utc", series.observedUtc) &&
+        series.observedUtc >= end && series.observedUtc <= now;
+}
+
+bool decimal(const JsonValue *value, ExactDecimal &result, bool positive) {
+    return value && value->isString() && ExactDecimal::parse(value->text, &result) &&
+        !result.negative() && (!positive || !result.zero()) && result.digits() <= 38 && result.scale() <= 18;
+}
+
 bool readSeries(const JsonValue &object, const char *expectedSeries, uint64_t start, uint64_t end,
                 uint64_t now, LocalSeries &series) {
-    const auto *identity = object.find("series");
     const auto *rows = object.find("minutes");
-    if (!object.isObject() || object.members.size() != 3 || !identity || !identity->isString() ||
-        identity->text != expectedSeries || !integer(object, "observed_utc", series.observedUtc) ||
-        series.observedUtc < end || series.observedUtc > now || !rows || !rows->isArray() ||
+    if (!declaredSeries(object, expectedSeries, end, now, series) || !rows || !rows->isArray() ||
         rows->items.empty() || rows->items.size() > minutesPerHour)
         return false;
 
     series.minutes.reserve(rows->items.size());
     uint64_t previous = 0;
     for (const auto &row : rows->items) {
-        ClosedMinute minute;
+        ReviewMinute minute;
         const auto *closed = row.find("closed");
         const auto *close = row.find("close");
         if (!row.isObject() || row.members.size() != 3 || !integer(row, "start_utc", minute.startUtc) ||
             minute.startUtc < start || minute.startUtc >= end || minute.startUtc % 60 ||
             minute.startUtc <= previous || !closed || !closed->isBool() || !closed->boolean ||
-            !close || !close->isString() || !ExactDecimal::parse(close->text, &minute.close) ||
-            minute.close.zero() || minute.close.negative() || minute.close.digits() > 38 ||
-            minute.close.scale() > 18 || minute.close.text() != close->text)
+            !decimal(close, minute.close, true) || minute.close.text() != close->text)
             return false;
         previous = minute.startUtc;
         series.minutes.push_back(std::move(minute));
+    }
+    return true;
+}
+
+bool readPrices(const JsonValue *open, const JsonValue *high, const JsonValue *low,
+                const JsonValue *close, const JsonValue *volume, ReviewMinute &minute) {
+    ExactDecimal o, h, l, v;
+    return decimal(open, o, true) && decimal(high, h, true) && decimal(low, l, true) &&
+        decimal(close, minute.close, true) && decimal(volume, v, false) &&
+        l.compare(o) <= 0 && o.compare(h) <= 0 && l.compare(minute.close) <= 0 && minute.close.compare(h) <= 0;
+}
+
+bool readMexcMinute(const JsonValue &row, ReviewMinute &minute) {
+    if (!row.isArray() || row.items.size() != 8) return false;
+    const auto &v = row.items;
+    uint64_t openMs = 0, closeMs = 0;
+    ExactDecimal quoteVolume;
+    // Match the published millisecond example's exact 60,000-ms interval.
+    if (!v[0].asUint64(&openMs) || !openMs || openMs % 60000 || openMs / 1000 > maxUtc ||
+        !v[6].asUint64(&closeMs) || closeMs != openMs + 60000 || !decimal(&v[7], quoteVolume, false))
+        return false;
+    minute.startUtc = openMs / 1000;
+    return readPrices(&v[1], &v[2], &v[3], &v[4], &v[5], minute);
+}
+
+bool readCoinbaseMinute(const JsonValue &row, ReviewMinute &minute) {
+    const auto *start = row.find("start");
+    if (!row.isObject() || row.members.size() != 6 || !start || !start->isString()) return false;
+    JsonValue seconds;
+    seconds.type = JsonValue::Type::Number;
+    seconds.text = start->text;
+    return seconds.asUint64(&minute.startUtc) && minute.startUtc && minute.startUtc % 60 == 0 &&
+        readPrices(row.find("open"), row.find("high"), row.find("low"), row.find("close"), row.find("volume"), minute);
+}
+
+bool readCandleSeries(const JsonValue &object, bool pearl, uint64_t start, uint64_t end,
+                      uint64_t now, LocalSeries &series) {
+    if (!declaredSeries(object, pearl ? mexcSeriesId : coinbaseSeriesId, end, now, series)) return false;
+    const auto *rows = object.find("candles");
+    if (!pearl) {
+        // Coinbase's payload is an object containing exactly one candles array.
+        if (!rows || !rows->isObject() || rows->members.size() != 1) return false;
+        rows = rows->find("candles");
+    }
+    if (!rows || !rows->isArray() || rows->items.size() > (pearl ? 500u : 350u)) return false;
+    std::vector<ReviewMinute> parsed;
+    parsed.reserve(rows->items.size());
+    const auto readMinute = pearl ? readMexcMinute : readCoinbaseMinute;
+    for (const auto &row : rows->items) {
+        ReviewMinute minute;
+        if (!readMinute(row, minute) || minute.startUtc > series.observedUtc) return false;
+        parsed.push_back(std::move(minute));
+    }
+    std::sort(parsed.begin(), parsed.end(), [](const auto &a, const auto &b) { return a.startUtc < b.startUtc; });
+    uint64_t previous = 0;
+    for (auto &minute : parsed) {
+        if (minute.startUtc == previous) return false;
+        previous = minute.startUtc;
+        // Every start inside this aligned window has ended by the operator's stated observation.
+        if (minute.startUtc >= start && minute.startUtc < end) series.minutes.push_back(std::move(minute));
     }
     return true;
 }
@@ -71,9 +141,10 @@ int refuse(const char *message, int code = 3) {
 }
 
 void appendCoverage(std::string &report, const char *series, const LocalSeries &input,
-                    unsigned covered, unsigned expected, uint64_t now) {
+                    unsigned covered, unsigned expected, uint64_t now, bool vendor) {
     report += std::string(series) + ": " + std::to_string(covered) + "/" + std::to_string(expected) +
-              " closed minutes; declared observation UTC " + std::to_string(input.observedUtc) +
+              (vendor ? " elapsed minute buckets" : " closed minutes") +
+              "; declared observation UTC " + std::to_string(input.observedUtc) +
               " (age " + std::to_string(now - input.observedUtc) + " s)\n";
 }
 
@@ -100,17 +171,20 @@ int reviewHour(const std::filesystem::path &path) {
     const auto *pearlJson = root.find("pearl");
     const auto *fxJson = root.find("fx");
     if (root.members.size() != (fxJson ? 4u : 3u) || !integer(root, "schema_version", version) ||
-        version != 1 || !integer(root, "end_utc", end) || !pearlJson)
+        (version != 1 && version != 2) || !integer(root, "end_utc", end) || !pearlJson)
         return refuse("invalid hour document");
     if (end <= secondsPerHour || end % 60 || end > now)
         return refuse("end_utc must be a completed UTC minute boundary");
 
     const uint64_t start = end - secondsPerHour;
     LocalSeries pearl, fx;
-    if (!readSeries(*pearlJson, pearlSeriesId, start, end, now, pearl))
-        return refuse("invalid Pearl mainnet minute series");
-    if (fxJson && !readSeries(*fxJson, fxSeriesId, start, end, now, fx))
-        return refuse("invalid USDT/USD minute series");
+    const bool vendor = version == 2;
+    const auto read = [&](const JsonValue &json, bool token, LocalSeries &series) {
+        return vendor ? readCandleSeries(json, token, start, end, now, series) :
+            readSeries(json, token ? pearlSeriesId : fxSeriesId, start, end, now, series);
+    };
+    if (!read(*pearlJson, true, pearl)) return refuse("invalid Pearl mainnet minute series");
+    if (fxJson && !read(*fxJson, false, fx)) return refuse("invalid USDT/USD minute series");
 
     // A full set of validated FX starts aligns with a complete PRL series.
     const auto fxCovered = static_cast<unsigned>(fx.minutes.size());
@@ -119,20 +193,25 @@ int reviewHour(const std::filesystem::path &path) {
     auto window = market_detail::accumulateMinuteWindow(spec, pearl.minutes, completeFx);
     // A USD product or sum can exceed the arithmetic budget while the PRL mean is representable.
     if (completeFx && window.status == MarketDataStatus::Arithmetic)
-        window = market_detail::accumulateMinuteWindow<ClosedMinute>(spec, pearl.minutes, nullptr);
+        window = market_detail::accumulateMinuteWindow<ReviewMinute>(spec, pearl.minutes, nullptr);
     if (window.status == MarketDataStatus::Arithmetic) return refuse("exact PRL arithmetic limit exceeded");
-    if (!window.tokenUsdt) return refuse("Pearl mainnet requires all 60 closed minutes");
+    if (!window.tokenUsdt)
+        return refuse(vendor ? "Pearl mainnet requires all 60 elapsed minute buckets" :
+                               "Pearl mainnet requires all 60 closed minutes");
 
     std::string report = "Historical market review from user-declared data (offline; freshness unverified)\n";
+    if (vendor) report += "Candle finality is unverified; coverage is based on elapsed minute buckets.\n";
     report += "UTC seconds [" + std::to_string(start) + ", " + std::to_string(end) +
               "); window ended " + std::to_string(now - end) + " s ago\n";
-    appendCoverage(report, "Declared Gate Pearl mainnet PRL/USDT", pearl, window.pearlCovered, window.expected, now);
+    appendCoverage(report, vendor ? "Declared MEXC Pearl mainnet PRL/USDT" : "Declared Gate Pearl mainnet PRL/USDT",
+                   pearl, window.pearlCovered, window.expected, now, vendor);
     appendMean(report, "USDT per PRL", *window.tokenUsdt);
 
     if (!fxJson) {
         report += "Mean USD per PRL unavailable (no FX series)\n";
     } else {
-        appendCoverage(report, "Declared Kraken USDT/USD", fx, fxCovered, window.expected, now);
+        appendCoverage(report, vendor ? "Declared Coinbase USDT/USD" : "Declared Kraken USDT/USD",
+                       fx, fxCovered, window.expected, now, vendor);
         if (window.tokenUsd)
             appendMean(report, "USD per PRL", *window.tokenUsd);
         else if (!completeFx)
@@ -169,14 +248,18 @@ int commandMarketHour(bool help, int argc, const char *const *argv) {
 #endif
         if (help) {
             std::printf("canary-miner market-hour --file FILE\n"
-                        "Review an hour of user-declared closed UTC minute prices, offline.\n"
-                        "JSON (up to 64 KiB): schema_version (1), end_utc, pearl, optional fx.\n"
-                        "Each series has series, observed_utc and minutes. Use %s for pearl\n"
+                        "Review an hour of user-declared UTC minute prices, offline.\n"
+                        "JSON (up to 64 KiB): schema_version, end_utc, pearl, optional fx.\n"
+                        "Version 1 accepts normalized minutes. Version 2 accepts declared MEXC and Coinbase candle payloads.\n"
+                        "Version 1 series have series, observed_utc and minutes. Use %s for pearl\n"
                         "and %s for fx. UTC times are Unix seconds.\n"
                         "Each minute has start_utc, closed (true), and close (a positive decimal string).\n"
-                        "End is exclusive. Include 60 consecutive PRL minutes, oldest first.\n"
-                        "Aligned USDT/USD minutes produce a second exact mean when coverage is complete.\n",
-                        pearlSeriesId, fxSeriesId);
+                        "End is exclusive. In version 1, include 60 consecutive PRL minutes, oldest first.\n"
+                        "Aligned USDT/USD minutes produce a second exact mean when coverage is complete.\n"
+                        "Version 2 uses candles (raw JSON response) in place of minutes. Use %s for pearl\n"
+                        "and %s for fx. Supply the actual observation UTC in seconds.\n"
+                        "Version 2 reports elapsed minute buckets, with candle finality unverified.\n",
+                        pearlSeriesId, fxSeriesId, mexcSeriesId, coinbaseSeriesId);
             return 0;
         }
 #if defined(_WIN32)

@@ -34,6 +34,28 @@ def sample():
     }
 
 
+def vendor_sample(pearl_begin=-1, fx_begin=-1):
+    def mexc(i):
+        at = (START + i * 60) * 1000
+        price = "2.250" if i < 30 else "4.50"
+        return [at, price, price, price, price, "1.00", at + 60000, price]
+
+    def coinbase(i):
+        price = "0.500" if i < 30 else "1.50"
+        return {"start": str(START + i * 60), "open": price, "high": price,
+                "low": price, "close": price, "volume": "1.00"}
+
+    # A response can be newest first and include a prior minute and the open terminal row.
+    return {
+        "schema_version": 2,
+        "end_utc": END,
+        "pearl": {"series": "mexc-pearl-mainnet-usdt-v1", "observed_utc": END + 1,
+                  "candles": [mexc(i) for i in reversed(range(pearl_begin, 61))]},
+        "fx": {"series": "coinbase-usdt-usd-v1", "observed_utc": END + 2,
+               "candles": {"candles": [coinbase(i) for i in reversed(range(fx_begin, 61))]}},
+    }
+
+
 @unittest.skipUnless(MINER is not None, "run directly with the built miner CLI")
 class MarketHourCli(unittest.TestCase):
     def setUp(self):
@@ -84,6 +106,76 @@ class MarketHourCli(unittest.TestCase):
         self.assertEqual({p.name for p in self.stage.iterdir()}, {"config.json", self.file.name})
         self.assertEqual((self.stage / "config.json").read_text(), "CONFIG_SENTINEL")
         self.assertEqual(json.loads(self.file.read_text()), sample())
+
+    def test_vendor_payloads_normalize_the_same_hour(self):
+        doc = vendor_sample()
+        result = self.run_review(doc)
+        self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+        self.assertIn("offline; freshness unverified", result.stdout)
+        self.assertIn("Candle finality is unverified", result.stdout)
+        self.assertIn("Declared MEXC Pearl mainnet PRL/USDT: 60/60 elapsed minute buckets", result.stdout)
+        self.assertIn("Declared Coinbase USDT/USD: 60/60 elapsed minute buckets", result.stdout)
+        self.assertNotIn("closed minutes", result.stdout)
+        self.assertIn("202.5 / 60", result.stdout)
+        self.assertIn("236.25 / 60", result.stdout)
+        self.assertEqual(json.loads(self.file.read_text(encoding="utf-8")), doc)
+        self.assertEqual((self.stage / "config.json").read_text(), "CONFIG_SENTINEL")
+        self.assertEqual({p.name for p in self.stage.iterdir()}, {"config.json", self.file.name})
+
+        for missing in (1, 30, 60):
+            doc = vendor_sample()
+            del doc["pearl"]["candles"][missing]
+            self.assert_refusal(self.run_review(doc), "requires all 60 elapsed minute buckets")
+        for count in (0, 59):
+            doc = vendor_sample()
+            rows = doc["fx"]["candles"]["candles"]
+            doc["fx"]["candles"]["candles"] = rows[1:count+1]
+            result = self.run_review(doc)
+            self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+            self.assertIn(f"{count}/60 elapsed minute buckets", result.stdout)
+            self.assertIn("incomplete aligned FX coverage", result.stdout)
+            self.assertNotIn("Mean USD per PRL (exact", result.stdout)
+        doc = vendor_sample()
+        del doc["fx"]
+        self.assertIn("unavailable (no FX series)", self.run_review(doc).stdout)
+
+    def test_vendor_payloads_reject_wrong_provenance_and_malformed_candles(self):
+        for label, mutate in (
+            ("foreign symbol", lambda d: d["pearl"].update(series="private-foreign")),
+            ("v1 series in v2", lambda d: d.update(pearl=sample()["pearl"])),
+            ("wrong Coinbase shape", lambda d: d["fx"].update(candles=[])),
+            ("foreign field", lambda d: d["fx"]["candles"].update(product="private-foreign")),
+            ("premature observation", lambda d: d["pearl"].update(observed_utc=END-1)),
+            ("future observation", lambda d: d["fx"].update(observed_utc=int(time.time())+3600)),
+            ("duplicate outside hour", lambda d: d["pearl"]["candles"].append(d["pearl"]["candles"][0])),
+            ("duplicate FX", lambda d: d["fx"]["candles"]["candles"].append(d["fx"]["candles"]["candles"][1])),
+            ("MEXC wrong units", lambda d: d["pearl"]["candles"][1].__setitem__(0, END-60)),
+            ("MEXC unexpected close convention", lambda d: d["pearl"]["candles"][1].__setitem__(6, END*1000-1)),
+            ("MEXC excessive timestamp", lambda d: d["pearl"]["candles"][1].__setitem__(0, 2**64-1)),
+            ("MEXC unavailable member", lambda d: d["pearl"]["candles"][1].pop()),
+            ("MEXC impossible high", lambda d: d["pearl"]["candles"][1].__setitem__(2, "0.1")),
+            ("invalid quote volume", lambda d: d["pearl"]["candles"][1].__setitem__(7, "-10")),
+            ("large price", lambda d: d["pearl"]["candles"][1].__setitem__(4, "9"*39)),
+            ("Coinbase milliseconds", lambda d: d["fx"]["candles"]["candles"][1].update(start=str((END-60)*1000))),
+            ("Coinbase future row", lambda d: d["fx"]["candles"]["candles"][0].update(start=str(END+60))),
+            ("Coinbase start must be string", lambda d: d["fx"]["candles"]["candles"][1].update(start=END-60)),
+            ("Coinbase non-minute start", lambda d: d["fx"]["candles"]["candles"][1].update(start=str(END-61))),
+            ("Coinbase precision out of range", lambda d: d["fx"]["candles"]["candles"][1].update(close="0.0000000000000000001")),
+            ("Coinbase exponent", lambda d: d["fx"]["candles"]["candles"][1].update(close="1e0")),
+            ("Coinbase unknown field", lambda d: d["fx"]["candles"]["candles"][1].update(closed=True)),
+        ):
+            with self.subTest(case=label):
+                doc = vendor_sample()
+                mutate(doc)
+                self.assert_refusal(self.run_review(doc), "invalid")
+
+    def test_vendor_row_bounds_use_distinct_plausible_minutes(self):
+        for key, lower_bound in (("pearl_begin", -439), ("fx_begin", -289)):
+            with self.subTest(key=key):
+                result = self.run_review(vendor_sample(**{key: lower_bound}))
+                self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+                self.assertIn("236.25 / 60", result.stdout)
+                self.assert_refusal(self.run_review(vendor_sample(**{key: lower_bound-1})), "invalid")
 
     def test_missing_or_partial_fx(self):
         doc = sample()

@@ -82,3 +82,14 @@ Run `canary-miner market-hour --file FILE` to review local, user-declared closed
 Each series object contains exactly `series`, `observed_utc`, and `minutes`. The declared observation is an integer Unix UTC second at or after `end_utc` and at or before the local clock. Each `minutes` entry has exactly three fields, for example `{"start_utc":1760000040,"closed":true,"close":"0.125"}`. Supply only settled minutes in the requested hour, ordered by increasing UTC start with no duplicates. Use canonical positive base-10 strings with at most 38 digits and 18 decimal places, without a sign, exponent, or redundant leading or trailing zeros.
 
 The USDT mean is the sum of the 60 PRL closes divided by 60. The USD mean averages the 60 products of each PRL close and the FX close from the **same minute**. A valid but incomplete FX series shows its coverage and leaves the USD mean unavailable. If exact USD arithmetic exceeds the calculation limit, the report still shows the exact USDT mean. Invalid input fails the review without a report. The Dashboard's manual point reference continues to display the historical mean as unavailable.
+
+### Review saved MEXC and Coinbase candle payloads
+
+Set `schema_version` to `2` in the same local document. The hour still uses `end_utc`. Each series now contains `series`, `observed_utc` and `candles`. Set `observed_utc` to the time the payload was obtained, in Unix seconds. The review uses your declared market identity and observation time.
+
+| Field | Series ID | Value of `candles` |
+| --- | --- | --- |
+| `pearl` | `mexc-pearl-mainnet-usdt-v1` | The raw MEXC Spot one-minute array for `PEARLUSDT`. Each eight-field row has numeric open and close times in Unix milliseconds. The accepted interval is the 60,000 ms difference in the published example. [MEXC candle format](https://www.mexc.com/api-docs/spot-v3/market-data-endpoints/klinecandlestick-data) |
+| Optional `fx` | `coinbase-usdt-usd-v1` | The raw Coinbase Advanced Trade public `ONE_MINUTE` object for `USDT-USD`. The object has one field, `candles`, with rows of `start`, `open`, `high`, `low`, `close` and `volume`. Start is a Unix seconds string. [Coinbase candle format](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product-candles) |
+
+The review validates prices and volumes as decimals, rejects inconsistent OHLC values, duplicate minute starts and starts after the stated observation, and sorts by UTC minute. Valid rows outside the requested hour are skipped, including an open row at the hour's exclusive end. The limits are 500 MEXC rows and 350 Coinbase rows within the same 64 KiB document. Missing Pearl minutes withhold the report. Incomplete aligned FX withholds the USD mean. Version 2 reports elapsed minute buckets and labels candle finality as unverified. Source identity and observation time are user declarations.
