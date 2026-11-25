@@ -158,6 +158,11 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     report += "  Reviewed interval range [" + std::to_string(opening.throughUtcMs) + ", " +
               std::to_string(accrual.ending->throughUtcMs) + ") UTC ms\n";
     report += "  Imported usage " + usageText + " kWh\n";
+    if (accrual.billedKwh) {
+        std::string billed;
+        if (!accrual.billedKwh->format(6, &billed)) return false;
+        report += "  Billed usage " + billed + " kWh (rounded per half hour)\n";
+    }
     report += "  Change from imported readings " + change + " " + currency + "\n";
     report += accrual.settledTotal ? "  Cycle estimate at closing " : "  Provisional cycle estimate ";
     report += total + " " + currency;
@@ -172,7 +177,9 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
                   "," + jsonQuote(ending.importedKwh.numerator.text()) + "," + jsonQuote(ending.accruedSubtotal.numerator.text()) +
                   "," + jsonQuote(accrual.provisionalChange->numerator.text()) + "," + jsonQuote(accrual.provisionalTotal->numerator.text()) +
                   "," + (accrual.settledTotal ? jsonQuote(accrual.settledTotal->numerator.text()) : "null") +
-                  (accrual.settlementDependent ? ",true]\n" : ",false]\n");
+                  (accrual.settlementDependent ? ",true" : ",false");
+        if (accrual.billedKwh) *exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
+        *exact += "]\n";
     }
     return true;
 }
@@ -236,6 +243,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
                   "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
+                  "Half-hour rounding requires cumulative register readings at every UTC half hour.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.");
@@ -302,6 +310,11 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (options.reviewCutoffArg || reopening || archiving) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";
         if (declaration.dailyFeeAllocation() == DailyFeeAllocation::ProrateByCycleMinutes)
             report += "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.\n";
+        if (declaration.plan.rounding == TariffRounding::MeterHalfHourKwhHalfEven2) {
+            if (!std::holds_alternative<std::vector<MeterImportInterval>>(readings))
+                return fail("half-hour rounding requires cumulative whole-meter register readings");
+            report += "Billing rounds each complete UTC half hour to 0.01 kWh, ties to even, before applying the rate.\n";
+        }
         std::string exact;
         auto *exactResults = archiving || reopening ? &exact : nullptr;
         if (const auto *problem = std::visit([&](const auto &series) {

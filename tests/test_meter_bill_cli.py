@@ -1,6 +1,8 @@
 """Exercise the ordinary meter-bill command using local synthetic input files."""
 import copy
 import datetime
+from decimal import Decimal, ROUND_HALF_EVEN
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -431,6 +433,86 @@ def main():
             assert archive.read_bytes() == original_archive
             assert before == (tariff.read_bytes(), intervals.read_bytes())
             checks += 1
+
+        # Suppliers can round each half-hour quantity before pricing it. Preserve the physical register.
+        half_hour = 1_800_000
+        begin = MARCH
+        end = begin + half_hour * 3
+        rounded = copy.deepcopy(original)
+        rounded['plan'].update(currency='GBP', cycle_charge='0', subtotal_multiplier='1',
+                               rounding='meter_import_half_hour_kwh_half_even_2')
+        rounded['opening'].update(through_utc_ms=begin, imported_kwh='0', accrued_subtotal='0')
+        prices = tuple(map(Decimal, ('0.4', '-0.2', '3')))
+        quantities = tuple(map(Decimal, ('0.015', '0.025', '0.005')))
+        billed = [value.quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN) for value in quantities]
+        rounded['plan']['revisions'][0].update(time_mode='dynamic', base_rate_per_kwh='0',
+            dynamic=[{'begin_utc_ms': begin + i * half_hour, 'end_utc_ms': begin + (i + 1) * half_hour,
+                      'published_utc_ms': begin, 'rate_per_kwh': str(price)} for i, price in enumerate(prices)])
+        original_periods = register([(begin, '10'), (begin + half_hour, '10.015'),
+                                     (begin + 2 * half_hour, '10.04'), (end, '10.045')])
+        store(rounded, original_periods)
+        rounded_report = success(as_of=end)
+        assert 'Imported usage 0.045000 kWh' in rounded_report
+        assert f'Billed usage {sum(billed):.6f} kWh' in rounded_report
+        assert f'Change from imported readings {sum(q * p for q, p in zip(billed, prices)):.6f} GBP' in rounded_report
+
+        legacy = copy.deepcopy(rounded)
+        legacy['plan']['rounding'] = 'final_display_only'
+        store(legacy, original_periods)
+        legacy_report = success(as_of=end)
+        assert 'Billed usage' not in legacy_report
+        assert f'Change from imported readings {sum(q * p for q, p in zip(quantities, prices)):.6f} GBP' in legacy_report
+
+        # Validate the whole interval even when its physical quantity rounds down to zero.
+        split = copy.deepcopy(rounded)
+        mid = begin + half_hour // 2
+        split['plan']['revisions'][0]['dynamic'] = [
+            {'begin_utc_ms': begin, 'end_utc_ms': mid, 'published_utc_ms': begin, 'rate_per_kwh': '1'},
+            {'begin_utc_ms': mid, 'end_utc_ms': begin + half_hour, 'published_utc_ms': begin, 'rate_per_kwh': '2'}]
+        single = register([(begin, '10'), (begin + half_hour, '10.005')])
+        store(split, single)
+        rejected('energy-rate boundary', as_of=end)
+        split['plan']['revisions'][0]['dynamic'].pop()
+        store(split, single)
+        rejected('dynamic price gap', as_of=end)
+
+        # A shortened or missing period remains a gap even with identical readings and flat pricing.
+        flat = copy.deepcopy(rounded)
+        flat['plan']['revisions'][0].update(time_mode='constant', base_rate_per_kwh='0.4', dynamic=[])
+        store(flat, register([(begin, '10'), (begin + 2 * half_hour, '10')]))
+        rejected('UTC half hour', as_of=end)
+        store(flat, register([(begin, '10'), (begin + half_hour // 2, '10.001')]))
+        rejected('UTC half hour', as_of=end)
+        store(flat, {'schema_version': 1, 'scope': SCOPE,
+                     'intervals': [{'begin_utc_ms': begin, 'end_utc_ms': end, 'average_watts': '100'}]})
+        rejected('requires cumulative whole-meter register', as_of=end)
+        misaligned = copy.deepcopy(rounded)
+        misaligned['opening'].update(through_utc_ms=begin + 1, imported_kwh='0.001', accrued_subtotal='0')
+        store(misaligned, original_periods)
+        rejected('saved tariff declaration unavailable or invalid', as_of=end)
+        tiered = copy.deepcopy(rounded)
+        tiered['plan']['tiers'] = 'all_units'
+        tiered['plan']['revisions'][0]['bands'] = [{'through_kwh': None, 'rate_per_kwh': '0.1'}]
+        store(tiered, original_periods)
+        rejected('saved tariff declaration unavailable or invalid', as_of=end)
+
+        store(rounded, original_periods)
+        archived = subprocess.run([str(cli), 'meter-bill', '--tariff', tariff, '--intervals', intervals,
+                                   '--as-of-utc-ms', str(end), '--save-review', 'rounded-meter.cmr'],
+                                  cwd=root, capture_output=True, text=True, timeout=8)
+        assert archived.returncode == 0 and archived.stdout == rounded_report and not archived.stderr, archived
+        store(legacy, original_periods)
+        reopened = launch('--open-review', 'rounded-meter.cmr')
+        assert reopened.returncode == 0 and reopened.stdout == rounded_report, reopened
+        archive_body = (root / 'rounded-meter.cmr').read_bytes()[:-65]
+        billed_field = b',"144000000"]\n'
+        assert archive_body.count(billed_field) == 1
+        changed = archive_body.replace(billed_field, b',"144000001"]\n')
+        (root / 'changed-rounded-meter.cmr').write_bytes(changed + hashlib.sha256(changed).hexdigest().encode() + b'\n')
+        invalid = launch('--open-review', 'changed-rounded-meter.cmr')
+        assert invalid.returncode == 3 and not invalid.stdout
+        assert 'saved review amounts differ' in invalid.stderr
+
 
     print(f'meter-bill CLI: {checks} cases, resets, coverage, rate changes, read-only inputs and redacted errors')
 

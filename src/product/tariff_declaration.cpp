@@ -268,8 +268,9 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         d.confirmedUtc=integer(*root.find("confirmed_utc"),"confirmed_utc",lastMs/1000);if(!d.confirmedUtc)bad("confirmed_utc","Explicit review confirmation required.",TariffProblemKind::Confirmation);
         auto &p=d.plan;const auto &plan=*root.find("plan");
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"});
-        p.declared=true;p.origin=TariffOrigin::UserDeclaredOffline;p.rounding=TariffRounding::FinalDisplayOnly;
-        choice(*plan.find("rounding"),"plan.rounding",{"final_display_only"});
+        p.declared=true;p.origin=TariffOrigin::UserDeclaredOffline;
+        const auto rounding=choice(*plan.find("rounding"),"plan.rounding",{finalDisplayRounding,meterHalfHourRounding});
+        p.rounding=rounding==meterHalfHourRounding?TariffRounding::MeterHalfHourKwhHalfEven2:TariffRounding::FinalDisplayOnly;
         for(const auto &binding:std::vector<std::pair<const char *,std::string *>>{{"key",&p.key},{"territory",&p.territory},{"supplier",&p.supplier},{"product",&p.product},{"currency",&p.currency}})
             *binding.second=label(*plan.find(binding.first),child("plan",binding.first));
         if(p.currency.size()!=3||p.currency.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ")!=std::string::npos)bad("plan.currency","Three uppercase letters required; no currency/FX inference.",TariffProblemKind::Currency);

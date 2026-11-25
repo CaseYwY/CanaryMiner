@@ -11,7 +11,7 @@ inline std::optional<i18n::ElectricityStatusMessageKey> electricityStatusSourceK
         case Status::Unsupported:return Key::Unsupported;case Status::MissingPrice:return Key::MissingPrice;
         case Status::Conflict:return Key::Conflict;case Status::NotYetKnown:return Key::NotYetKnown;
         case Status::ClockFault:return Key::ClockFault;case Status::Capacity:return Key::Capacity;
-        case Status::MeterBoundary:return std::nullopt; // register review uses its own CLI diagnostic
+        case Status::MeterBoundary: case Status::MeterRoundingBoundary:return std::nullopt; // register review uses its own CLI diagnostic
     }
     return std::nullopt;
 }

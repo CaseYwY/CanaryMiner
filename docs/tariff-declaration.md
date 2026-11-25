@@ -8,7 +8,7 @@ Requirements R-UI-007/008, R-TAR-001–006 and R-PRIV-002 remain partial. Settin
 
 - Arrows/Tab select fields. Enter opens a section/table or edits a value; Space toggles acknowledgement. Esc cancels an edit, returns to the parent, then offers review/discard/continue on dirty exit. Q/D/L/S inside editors are text; Ctrl+C stops. No browser/GUI runtime is added.
 - A appends a **blank** revision/calendar/dynamic/band row; X confirms removal from the draft. Changing a rule mode never clears an incompatible table automatically; validation fails until explicitly edited.
-- Empty monetary/quantity text is missing, not zero. Cycle/day fees, multiplier and opening amounts require explicit entries, even when zero/one. Canonical signed decimals allow at most 38 coefficient digits / 18 fractional places. No exponent, float storage or intermediate rounding. Clearing an optional minimum/final band/date chooses `null`, distinct from zero.
+- Empty monetary/quantity text is missing, not zero. Cycle/day fees, multiplier and opening amounts require explicit entries, even when zero/one. Canonical signed decimals allow at most 38 coefficient digits / 18 fractional places. The input format uses no exponents or binary floating point. Clearing an optional minimum/final band/date chooses `null`, distinct from zero.
 - Select UTC, a whole-minute fixed standard offset within ±18 hours, or an [explicit IANA zone](#use-named-tariff-and-reset-clocks) with the reviewed offline data. Rule/opening instants use **UTC milliseconds**; local confirmation uses seconds. Revision ends are exclusive; all-units upper thresholds are inclusive.
 - Field names match the schema. Hints explain enums, minute bounds, masks and units. Weekday bit 0 is Monday; month bit 0 is January. Dates use YYYY-MM-DD or null. Split overnight windows; explicit priorities resolve declared calendar events.
 - V/F2 shows before/after changes, the complete draft and exclusions. Enter/F2 saves only `tariff-declaration.json`. Errors preserve drafts; field-specific errors focus the relevant field. Cross-field failures identify the plan/opening contract. UI/runtime/manual-price/flat-energy drafts save independently.
@@ -23,13 +23,13 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds an explicit daily-fee allocation to that monthly cycle. All three use `final_display_only` rounding and the same basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds an explicit daily-fee allocation to that monthly cycle. The existing default is `final_display_only`. All three versions share the same basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent resets/annual true-up, other proration, threshold revisions, provider intermediate rounding and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent resets/annual true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -186,6 +186,14 @@ that change.
 Always supply readings at billing-cycle boundaries inside the review. The report uses exact
 differences and rejects an incomplete review before printing cycle amounts. The same historical
 cutoff, twelve-cycle limit and private archive replay apply.
+
+### Round cumulative readings for half-hour billing
+
+Select the `rounding` field under **Plan** in Settings and press Enter to switch between display-only rounding and half-hour meter rounding. In a tariff file, the latter is `"rounding": "meter_import_half_hour_kwh_half_even_2"`. The rule requires readings on every UTC half hour, including the opening, review endpoint and each cycle boundary. Rates must agree throughout a nonzero interval. The regular calendar and time-zone rules still select the applicable rate and daily fee.
+
+The review takes the difference between adjacent cumulative readings and rounds each interval's kWh to the nearest 0.01 before applying its rate. At a tie it chooses the even hundredth. For example, 0.015 and 0.025 each bill as 0.02 kWh. The opening and ending register quantities still use the exact differences. The report shows physical import and billed usage for the reviewed intervals, and the archive checks both on replay. [Octopus Energy's documented consumption rounding](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints) is a reference for the rule.
+
+Changing the rule during a cycle clears the accrued subtotal and requires a new reviewed value. It preserves the physical import. The option applies to cumulative whole-meter register files with no tiers. Average-watt files, Dashboard scenarios, and the durable fixture billing ledger require display-only rounding. Existing declarations keep their saved rule. Select display-only rounding and review the opening before using the declaration in a release that predates this option.
 
 ### Save and reopen a local meter review
 

@@ -35,14 +35,21 @@ ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) 
     }
     return cursor == end ? ElectricityStatus::Ok : ElectricityStatus::Unavailable;
 }
+constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
 ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_t end, int64_t decision,bool accrual=false) {
     if (!p.declared || !s.declared) return ElectricityStatus::Unavailable;
-    if (p.unsupportedRules || p.rounding != TariffRounding::FinalDisplayOnly) return ElectricityStatus::Unsupported;
+    const bool roundMeter = p.rounding == TariffRounding::MeterHalfHourKwhHalfEven2;
+    if (p.unsupportedRules || (!roundMeter && p.rounding != TariffRounding::FinalDisplayOnly) ||
+        (roundMeter && (s.evidence.basis != PowerBasis::WholeMeterImport || p.tiers != TierMode::None)))
+        return ElectricityStatus::Unsupported;
     if (!evidenceValid(s.evidence) || (p.origin != TariffOrigin::SyntheticFixture && p.origin != TariffOrigin::UserDeclaredOffline) || !textKey(p.key) || !textKey(p.territory) || !textKey(p.supplier) || !textKey(p.product) || p.currency.size() != 3 ||
         !std::all_of(p.currency.begin(),p.currency.end(),[](char c){return c >= 'A' && c <= 'Z';}) || s.planKey != p.key || !p.subtotalMultiplier || p.subtotalMultiplier->negative() ||
         (p.minimumCycleSubtotal && p.minimumCycleSubtotal->negative()) || s.importedKwh.numerator.negative()) return ElectricityStatus::Invalid;
     if (!instant(decision) || !instant(s.cycleBeginUtcMs) || !instant(s.cycleEndUtcMs) || s.cycleEndUtcMs <= s.cycleBeginUtcMs ||
         s.cycleEndUtcMs-s.cycleBeginUtcMs > 370*dayMs || s.throughUtcMs < s.cycleBeginUtcMs || end <= s.throughUtcMs || end > s.cycleEndUtcMs) return ElectricityStatus::Invalid;
+    if (roundMeter && (s.cycleBeginUtcMs % meterHalfHourMs || s.cycleEndUtcMs % meterHalfHourMs ||
+                       s.throughUtcMs % meterHalfHourMs || end % meterHalfHourMs))
+        return ElectricityStatus::MeterRoundingBoundary;
     if (s.throughUtcMs == s.cycleBeginUtcMs && (!s.importedKwh.numerator.zero() || !s.accruedSubtotal.numerator.zero())) return ElectricityStatus::Invalid;
     if (p.revisions.empty()) return ElectricityStatus::Unavailable;
     if (p.revisions.size() > 128) return ElectricityStatus::Capacity;
@@ -217,6 +224,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::ClockFault: return "regressed or inconsistent sample clocks";
         case ElectricityStatus::Capacity: return "bounded arithmetic/input/evaluation capacity exceeded";
         case ElectricityStatus::MeterBoundary: return "meter register needs a reading at an energy-rate boundary";
+        case ElectricityStatus::MeterRoundingBoundary: return "meter rounding needs readings and cycle boundaries on the UTC half hour";
     }
     return "unknown electricity status";
 }
@@ -258,6 +266,10 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
                                      DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
     result.planKey = p.key; result.territory = p.territory; result.supplier = p.supplier; result.product = p.product; result.origin = p.origin; result.clock = p.clock; result.decisionUtcMs = decision;
+    const bool roundMeter = p.rounding == TariffRounding::MeterHalfHourKwhHalfEven2;
+    if constexpr (!std::is_same_v<Trace, MeterImportTrace>) {
+        if (roundMeter) { result.status = ElectricityStatus::Unsupported; return result; }
+    }
     result.status = validatePlan(p,opening,end,decision,accrual);
     if (result.status != ElectricityStatus::Ok) return result;
     if (dailyFeeAllocation != DailyFeeAllocation::WholeDay &&
@@ -280,7 +292,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         }
     }
     auto state = opening; state.timeDatabaseVersion = result.timeDatabaseVersion;
-    ExactDecimal cost, quantity = state.importedKwh.numerator;
+    ExactDecimal cost, billedQuantity, quantity = state.importedKwh.numerator;
     if (opening.throughUtcMs == opening.cycleBeginUtcMs && !productAdd(cost,p.cycleCharge,number(wattMsPerKwh))) { result.status = ElectricityStatus::Capacity; return result; }
     size_t revision = 0, count = 0;
     std::optional<CivilDate> previousDate;
@@ -290,6 +302,10 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         previousDate = past.date;
     }
     for (const auto &i : trace.intervals) {
+        if (roundMeter && (i.beginUtcMs % meterHalfHourMs || i.endUtcMs - i.beginUtcMs != meterHalfHourMs)) {
+            result.status = ElectricityStatus::MeterRoundingBoundary;
+            return result;
+        }
         int64_t now = i.beginUtcMs;
         [[maybe_unused]] const TariffRevision *firstRevision = nullptr;
         [[maybe_unused]] ExactDecimal firstRate;
@@ -329,7 +345,23 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
                 result.status = ElectricityStatus::Capacity;
                 return result;
             }
-            if (!quantity.add(energy,&newQuantity) || !productAdd(cost,energy,rate)) { result.status = ElectricityStatus::Capacity; return result; }
+            if (!quantity.add(energy,&newQuantity)) { result.status = ElectricityStatus::Capacity; return result; }
+            if (roundMeter) {
+                // Keep the physical register exact. Round only the quantity rated for this complete interval.
+                std::string rounded;
+                ExactDecimal roundedKwh;
+                if (!energy.formatRatio(wattMsPerKwh, 2, &rounded) || !ExactDecimal::parse(rounded, &roundedKwh)) {
+                    result.status = ElectricityStatus::Capacity;
+                    return result;
+                }
+                const auto billed = electricityKwh(roundedKwh);
+                if (!billed || !accumulate(billedQuantity, billed->numerator)) {
+                    result.status = ElectricityStatus::Capacity;
+                    return result;
+                }
+                energy = billed->numerator;
+            }
+            if (!productAdd(cost,energy,rate)) { result.status = ElectricityStatus::Capacity; return result; }
             if (p.tiers == TierMode::Progressive) {
                 ExactDecimal before, after, delta;
                 if (!tierCost(r.bands,p.tiers,quantity,&before) || !tierCost(r.bands,p.tiers,newQuantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta)) { result.status = ElectricityStatus::Capacity; return result; }
@@ -350,6 +382,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     }
     ElectricityAmount charge;
     if (!cost.multiply(*p.subtotalMultiplier,&charge.numerator)) { result.status = ElectricityStatus::Capacity; return result; }
+    if (roundMeter) result.billedKwh = ElectricityAmount{billedQuantity};
     state.importedKwh.numerator = quantity; state.throughUtcMs = end;
     result.ending = state; result.charge = charge; result.cycleSettled = end == state.cycleEndUtcMs; result.status = ElectricityStatus::Ok;
     return result;
@@ -368,6 +401,7 @@ static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening
     ElectricityAmount total;
     if(!step.ending->accruedSubtotal.numerator.multiply(*p.subtotalMultiplier,&total.numerator)){result.status=ElectricityStatus::Capacity;return result;}
     result.ending=step.ending;result.provisionalChange=step.charge;result.provisionalTotal=total;
+    result.billedKwh=step.billedKwh;
     if(step.cycleSettled)result.settledTotal=total;
     else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value();
     return result;

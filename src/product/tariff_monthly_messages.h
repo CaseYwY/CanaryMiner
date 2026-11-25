@@ -18,7 +18,7 @@ inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonth
         "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.",
         "fees prorated",
         "Re-enter the accrued subtotal using the selected daily fee rule.",
-        "EXCLUDES demand/export/prepaid/independent resets/other proration/ordered taxes/provider rounding."
+        "EXCLUDES demand/export/prepaid/independent resets/other proration/ordered taxes/unsupported rounding."
     }};
     const auto index=static_cast<size_t>(key);
     if(index>=messages.size())return {};

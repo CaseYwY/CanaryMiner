@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Offline combined tariff and declared whole-meter opening",
-  "description": "64 KiB, 512 total rows. Structural schema only; the native decoder additionally checks canonical decimal capacity, chronological coverage, tier topology, fixed clock, publication and cycle/opening invariants. No runtime activation or measured billing/reset ledger.",
+  "description": "64 KiB, 512 total rows. Structural schema only; the native decoder additionally checks canonical decimal capacity, chronological coverage, tier topology, clock availability, publication and cycle/opening invariants. No runtime activation or measured billing/reset ledger.",
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -14,13 +14,47 @@
     "plan": {"$ref": "#/$defs/plan"},
     "opening": {"$ref": "#/$defs/opening"}
   },
-  "if": {"properties": {"schema_version": {"const": 2}}},
-  "then": {"properties": {"reset_policy": {"$ref": "#/$defs/monthlyReset"}}},
-  "else": {
-    "if": {"properties": {"schema_version": {"const": 3}}},
-    "then": {"properties": {"reset_policy": {"$ref": "#/$defs/proratedMonthlyReset"}}},
-    "else": {"properties": {"reset_policy": {"const": "explicit_cycle_only"}}}
+  "if": {"properties": {"schema_version": {"const": 4}}},
+  "then": {
+    "properties": {"reset_policy": {"oneOf": [
+      {"const": "explicit_cycle_only"}, {"$ref": "#/$defs/monthlyReset"}, {"$ref": "#/$defs/proratedMonthlyReset"}
+    ]}},
+    "anyOf": [
+      {"properties": {"plan": {"properties": {"clock": {"$ref": "#/$defs/namedClock"}}}}},
+      {"properties": {"reset_policy": {"type": "object", "required": ["clock"],
+        "properties": {"clock": {"$ref": "#/$defs/namedClock"}}}}}
+    ]
   },
+  "else": {
+    "properties": {
+      "plan": {"properties": {"clock": {"$ref": "#/$defs/clock"}}},
+      "reset_policy": {"properties": {"clock": {"$ref": "#/$defs/clock"}}}
+    },
+    "if": {"properties": {"schema_version": {"const": 2}}},
+    "then": {"properties": {"reset_policy": {"$ref": "#/$defs/monthlyReset"}}},
+    "else": {
+      "if": {"properties": {"schema_version": {"const": 3}}},
+      "then": {"properties": {"reset_policy": {"$ref": "#/$defs/proratedMonthlyReset"}}},
+      "else": {"properties": {"reset_policy": {"const": "explicit_cycle_only"}}}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"plan": {"properties": {"clock": {"$ref": "#/$defs/namedClock"}}}}},
+      "then": {"properties": {"opening": {"properties": {"time_database_version": {"const": "2026e"}}}}},
+      "else": {"properties": {"opening": {"properties": {"time_database_version": {"const": "explicit-fixed-clock"}}}}}
+    },
+    {
+      "if": {"properties": {"plan": {"properties": {"rounding": {"const": "meter_import_half_hour_kwh_half_even_2"}}}}},
+      "then": {"properties": {
+        "plan": {"properties": {"tiers": {"const": "none"}}},
+        "opening": {"properties": {
+          "cycle_begin_utc_ms": {"multipleOf": 1800000}, "cycle_end_utc_ms": {"multipleOf": 1800000},
+          "through_utc_ms": {"multipleOf": 1800000}
+        }}
+      }}
+    }
+  ],
   "$defs": {
     "label": {"type": "string", "pattern": "^[!-~](?:[ -~]{0,126}[!-~])?$"},
     "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,37})(\\.[0-9]{0,17}[1-9])?$"},
@@ -30,18 +64,25 @@
       "type": "object", "additionalProperties": false, "required": ["kind", "fixed_offset_seconds"],
       "properties": {"kind": {"enum": ["utc", "fixed_standard"]}, "fixed_offset_seconds": {"type": "integer", "minimum": -64800, "maximum": 64800}}
     },
+    "namedClock": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "zone", "time_database_version"],
+      "properties": {
+        "kind": {"const": "named_iana"}, "zone": {"$ref": "#/$defs/label"}, "time_database_version": {"const": "2026e"}
+      }
+    },
+    "clockChoice": {"oneOf": [{"$ref": "#/$defs/clock"}, {"$ref": "#/$defs/namedClock"}]},
     "monthlyReset": {
       "type": "object", "additionalProperties": false, "required": ["monthly_day", "clock"],
       "properties": {
         "monthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
-        "clock": {"$ref": "#/$defs/clock"}
+        "clock": {"$ref": "#/$defs/clockChoice"}
       }
     },
     "proratedMonthlyReset": {
       "type": "object", "additionalProperties": false, "required": ["monthly_day", "clock", "daily_fee_allocation"],
       "properties": {
         "monthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
-        "clock": {"$ref": "#/$defs/clock"},
+        "clock": {"$ref": "#/$defs/clockChoice"},
         "daily_fee_allocation": {"const": "prorate_by_cycle_minutes"}
       }
     },
@@ -50,8 +91,8 @@
       "required": ["key", "territory", "supplier", "product", "currency", "clock", "tiers", "rounding", "cycle_charge", "minimum_cycle_subtotal", "subtotal_multiplier", "revisions"],
       "properties": {
         "key": {"$ref": "#/$defs/label"}, "territory": {"$ref": "#/$defs/label"}, "supplier": {"$ref": "#/$defs/label"}, "product": {"$ref": "#/$defs/label"},
-        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "clock": {"$ref": "#/$defs/clock"},
-        "tiers": {"enum": ["none", "progressive", "all_units"]}, "rounding": {"const": "final_display_only"},
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"}, "clock": {"$ref": "#/$defs/clockChoice"},
+        "tiers": {"enum": ["none", "progressive", "all_units"]}, "rounding": {"enum": ["final_display_only", "meter_import_half_hour_kwh_half_even_2"]},
         "cycle_charge": {"$ref": "#/$defs/decimal"}, "minimum_cycle_subtotal": {"$ref": "#/$defs/optionalDecimal"}, "subtotal_multiplier": {"$ref": "#/$defs/decimal"},
         "revisions": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/revision"}}
       }
@@ -91,7 +132,7 @@
       "properties": {
         "key": {"$ref": "#/$defs/label"}, "scope": {"$ref": "#/$defs/label"}, "adapter": {"$ref": "#/$defs/label"}, "basis": {"const": "whole_meter_import"}, "origin": {"const": "declared_forecast"},
         "cycle_begin_utc_ms": {"$ref": "#/$defs/instant"}, "cycle_end_utc_ms": {"$ref": "#/$defs/instant"}, "through_utc_ms": {"$ref": "#/$defs/instant"},
-        "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"const": "explicit-fixed-clock"}
+        "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"enum": ["explicit-fixed-clock", "2026e"]}
       }
     }
   }

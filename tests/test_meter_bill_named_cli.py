@@ -1,6 +1,7 @@
 """Exercise the native meter-bill entry point and its installed, version-bound IANA input."""
 import copy
 import datetime as dt
+from decimal import Decimal
 import json
 from pathlib import Path
 import shutil
@@ -188,6 +189,18 @@ def main(cli, bundle):
                              {'monthly_day': 7, 'clock': st_johns})
         store(overlap_reset, interval(overlap, overlap_end))
         accept(review(overlap_end), f'Cycle 1 [{first_reset}, {next_reset}) UTC ms')
+
+        # UTC buckets remain continuous when a named civil day skips or repeats an hour.
+        for day, day_end, slots in [(spring, spring_end, 46), (fall, fall_end, 50)]:
+            rounded = plan(day, day, day_end, zone)
+            rounded['plan']['rounding'] = 'meter_import_half_hour_kwh_half_even_2'
+            rounded['plan']['revisions'][0]['charge_per_civil_day'] = '2'
+            points = [(day + i * HOUR // 2, format((10 + i * Decimal('0.015')).normalize(), 'f'))
+                      for i in range(slots + 1)]
+            store(rounded, register(points))
+            billed = slots * Decimal('0.02')
+            accept(review(day_end), f'Imported usage {slots * Decimal("0.015"):.6f} kWh',
+                   f'Billed usage {billed:.6f} kWh', f'Cycle estimate at closing {2 + billed:.6f} USD')
 
         # A skipped local date is not a legitimate monthly reset anchor.
         skipped = plan(utc('2011-11-30T10:00:00'), utc('2011-12-29T11:00:00'),

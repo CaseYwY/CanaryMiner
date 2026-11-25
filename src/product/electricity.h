@@ -9,7 +9,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for kWh and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -72,7 +72,7 @@ struct TariffRevision {
     ExactDecimal chargePerCivilDay;
 };
 enum class TariffOrigin { Unknown, SyntheticFixture, UserDeclaredOffline };
-enum class TariffRounding { Unsupported, FinalDisplayOnly };
+enum class TariffRounding { Unsupported, FinalDisplayOnly, MeterHalfHourKwhHalfEven2 };
 struct TariffPlan {
     bool declared = false;
     TariffOrigin origin = TariffOrigin::Unknown;
@@ -105,6 +105,7 @@ struct BillEstimate {
     int64_t beginUtcMs = 0, endUtcMs = 0;
     int64_t decisionUtcMs = 0;
     bool cycleSettled = false;
+    std::optional<ElectricityAmount> billedKwh;  // current trace only, when interval rounding is selected
 };
 // Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
 ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening);
@@ -121,6 +122,7 @@ struct BillAccrual {
     std::optional<BillOpening> ending;
     std::optional<ElectricityAmount> provisionalChange,provisionalTotal,settledTotal;
     bool settlementDependent=false; // future cycle quantity can change already accrued all-units/floor amounts
+    std::optional<ElectricityAmount> billedKwh;  // current trace only; ending.importedKwh retains physical usage
 };
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
                       int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},

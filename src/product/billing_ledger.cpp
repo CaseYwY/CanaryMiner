@@ -94,7 +94,8 @@ std::string stateText(const BillingSnapshot &s){return "["+n(static_cast<int64_t
     (s.source?",["+n(static_cast<int64_t>(s.source->checkpoint.sequence))+","+jsonQuote(s.source->checkpoint.digest)+","+n(s.source->queriedUtcMs)+"]":"")+"]";}
 BillingStatus validateBinding(const BillingBinding &b,const BillingLimits &limits,int64_t now){
     using S=BillingStatus;
-    if(b.evidence.origin!=PowerOrigin::SyntheticFixture||b.plan.origin!=TariffOrigin::SyntheticFixture)return S::Unsupported;
+    if(b.evidence.origin!=PowerOrigin::SyntheticFixture||b.plan.origin!=TariffOrigin::SyntheticFixture||
+       b.plan.rounding==TariffRounding::MeterHalfHourKwhHalfEven2)return S::Unsupported;
     if(!key(b.cycleKey)||b.cycleKey.rfind("fixture.",0)!=0||!key(b.evidence.scope)||!key(b.evidence.adapter)||!boundedPlan(b.plan)||!validLimits(limits)||
         !instant(now)||!instant(b.cycleBeginUtcMs)||b.cycleBeginUtcMs>now)return S::Invalid;
     if(validateTariffOpening(b.plan,initial(b))!=ElectricityStatus::Ok)return S::Calculation;

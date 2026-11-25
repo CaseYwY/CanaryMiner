@@ -8,6 +8,13 @@ std::string bytes(const std::filesystem::path &p){std::ifstream f(p,std::ios::bi
 int main(int argc,char **argv){
     const auto root=std::filesystem::path(makeScratchDir("billing-ledger"));auto b=binding();const auto file=root/"fixture.db";const auto now=T+2*hour;
     {BillingLedger absent;CHECK(absent.open(root/"missing"/"ledger.db",b,now)==BillingStatus::Storage&&!std::filesystem::exists(root/"missing"));}
+    {
+        auto rounded=b;
+        rounded.plan.rounding=TariffRounding::MeterHalfHourKwhHalfEven2;
+        BillingLedger unsupported;
+        CHECK(unsupported.open(root/"rounded.db",rounded,now,BillingOpen::CreateNew)==BillingStatus::Unsupported);
+        CHECK(!std::filesystem::exists(root/"rounded.db"));
+    }
     {auto real=b;real.evidence.origin=PowerOrigin::ObservedTelemetry;BillingLedger unsupported;CHECK(unsupported.open(root/"real.db",real,now,BillingOpen::CreateNew)==BillingStatus::Unsupported&&!std::filesystem::exists(root/"real.db"));}
     for(const auto *suffix:{"-wal","-shm","-journal"}){auto path=root/(std::string("orphan")+suffix+".db"),sidecar=path;sidecar+=suffix;
         {std::ofstream output(sidecar,std::ios::binary);output<<"fixture retained original";}
