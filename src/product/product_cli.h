@@ -136,7 +136,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "meter-bill") r.command = Command::MeterBill;
         else if (c == "market-hour") r.command = Command::MarketHour;
         else {
-            if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill, market-hour; or start with an option, e.g. --pool); rejected original omitted";
+            if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted";
             return false;
         }
         r.commandExplicit = true;
