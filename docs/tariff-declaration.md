@@ -23,7 +23,7 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
@@ -132,6 +132,39 @@ requires a reader that supports version 6 declarations.
 
 This offline rule covers the declared two-month formula. Supplier-specific rounding, proration
 and settlement require their own rules.
+
+### Apply a multiplier to part of the unit rate
+
+In a revision, select `base_rate_per_kwh` and press **C**. Enter the sum of the charges that use the
+factor under `component_multiplier.rate_per_kwh`. Keep the sum excluded from the factor in
+`base_rate_per_kwh` or the applicable calendar or dynamic row's `rate_per_kwh`.
+
+Set `component_multiplier.base_multiplier` for constant rates and the calendar fallback. Enter a
+`multiplier` in each calendar or dynamic row. For dynamic rates, set both fallback fields to zero.
+Factor zero excludes the multiplied part for that slot. The two price amounts can be signed.
+Use the revision and row publication times to record when the rates and factors were known.
+
+For supply at 2 per kWh and network charges at 3 per kWh, use this revision fragment.
+
+```json
+{
+  "base_rate_per_kwh": "3",
+  "component_multiplier": {"rate_per_kwh": "2", "base_multiplier": "1"}
+}
+```
+
+Use `rate_per_kwh` of `"3"` and `multiplier` of `"2"` in the peak calendar row. The off-peak
+unit rate is 5 and the peak rate is 7. Tier rates, fixed fees and any declared subtotal
+multiplier keep their usual treatment.
+
+Version 8 requires at least one revision with component multipliers. Other revisions
+can still declare ordinary unit rates. Use new plan and opening keys after changing a
+saved rule. For a mid-cycle opening, enter a subtotal priced with the revised rates.
+Changing the meter binding or opening time also requires re-entering the imported quantity.
+Review and save with **V** and **Enter**. Archives retain the declared amounts and factors.
+
+This rule covers the T24 fixture. Supplier rates need separate qualification. The Octopus
+published-rate import uses its own price inputs and requires a declaration without this rule.
 
 ### Apply a seasonal baseline allowance
 

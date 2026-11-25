@@ -71,6 +71,8 @@ def validate(value, schema, root, path='$'):
             problems.append('%s: too few items' % path)
         if 'maxItems' in schema and len(value) > schema['maxItems']:
             problems.append('%s: too many items' % path)
+        if 'contains' in schema and all(validate(item, schema['contains'], root, path) for item in value):
+            problems.append('%s: no matching array item' % path)
         if 'items' in schema:
             for i, item in enumerate(value):
                 problems += validate(item, schema['items'], root, '%s[%d]' % (path, i))
@@ -429,6 +431,20 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         fixed = {**revision, 'bands': [{**revision['bands'][0], 'through_kwh': '80'}, revision['bands'][1]]}
         self.assertTrue(validate({**example, 'plan': {**plan, 'revisions': [fixed]}}, schema, schema))
 
+    def test_component_multiplier_is_versioned_and_required_on_time_rows(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 8
+        row = example['plan']['revisions'][0]
+        self.assertTrue(validate(example, schema, schema))
+        row['component_multiplier'] = {'rate_per_kwh': '2', 'base_multiplier': '1'}
+        self.assertTrue(validate(example, schema, schema))
+        row['calendar'][0]['multiplier'] = '2'
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 1}, schema, schema))
+        row['calendar'][0]['multiplier'] = '-1'
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -454,7 +470,12 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         for name, definition in schema['$defs'].items():
             if definition.get('type') == 'object':
                 self.assertFalse(definition['additionalProperties'])
-                optional = {'daily_fee_allocation'} if name == 'annualReset' else set()
+                optional = {
+                    'annualReset': {'daily_fee_allocation'},
+                    'revision': {'component_multiplier'},
+                    'calendar': {'multiplier'},
+                    'dynamic': {'multiplier'},
+                }.get(name, set())
                 self.assertEqual(set(definition['required']), set(definition['properties']) - optional)
 
 

@@ -218,6 +218,104 @@ void annualCycles(const JsonValue &original) {
     CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
 }
 
+void componentMultipliers(JsonValue draft,const std::filesystem::path &target) {
+    auto &plan=member(draft,"plan");
+    set(plan,"tiers",R"("none")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    auto &row=member(plan,"revisions").items.front();
+    set(row,"base_rate_per_kwh",R"("3")");
+    set(row,"charge_per_civil_day",R"("0")");
+    set(row,"bands","[]");
+    set(member(row,"calendar").items.front(),"rate_per_kwh",R"("3")");
+
+    std::string reason;
+    auto store=TariffDeclarationStore(target);
+    JsonValue initial;
+    CHECK(store.load(&initial,&reason)&&store.save(draft,&reason));
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"plan");
+    enter(panel,"revisions");
+    panel.key('\r',{},T/1000);
+    enter(panel,"base_rate_per_kwh");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,24,ColorLevel::None).find("[C] Component multiplier")!=std::string::npos);
+    panel.key('c',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="8");
+    enter(panel,"component_multiplier");
+    enter(panel,"rate_per_kwh");type(panel,"2");
+    enter(panel,"base_multiplier");type(panel,"1");
+    panel.key(27,{},T/1000);
+    enter(panel,"calendar");
+    panel.key('a',{},T/1000);
+    CHECK(panel.draft.find("plan")->find("revisions")->items.front().find("calendar")->items.back().find("multiplier"));
+    panel.key('x',{},T/1000);
+    panel.key('\r',{},T/1000);
+    panel.key('\r',{},T/1000);
+    enter(panel,"multiplier");type(panel,"2");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,28,ColorLevel::None).find("Unit rate = unscaled part + multiplied part x factor")!=std::string::npos);
+    const auto save=[&](const JsonValue &candidate,std::string *error){return store.save(candidate,error);};
+    panel.key('\r',save,T/1000);
+    CHECK(panel.message.find("NEW plan.key")!=std::string::npos);
+    auto saved=panel.draft;
+    set(member(saved,"plan"),"key",R"("component-plan")");
+    CHECK(!store.save(saved,&reason)&&reason.find("NEW opening.key")!=std::string::npos);
+    set(member(saved,"opening"),"key",R"("component-opening")");
+    CHECK(store.save(saved,&reason)&&store.load(&initial,&reason));
+    CHECK(tariffJson(initial)==tariffJson(saved));
+
+    TariffDeclaration declaration;
+    CHECK(decodeTariffDeclaration(saved,&declaration)&&declaration.componentMultipliers);
+    CHECK(declaration.plan.revisions.front().baseRatePerKwh.text()=="5");
+    CHECK(declaration.plan.revisions.front().calendar.front().ratePerKwh.text()=="7");
+    const std::array<ExactDecimal,2> watts{dec("0"),dec("1000")};
+    checkComparison(compareTariffCycles(declaration,watts,1,T),"0.000000","128.000000","128.000000");
+
+    auto &opening=member(saved,"opening");
+    set(opening,"through_utc_ms",std::to_string(T+3600000));
+    set(opening,"imported_kwh",R"("1")");
+    set(opening,"accrued_subtotal",R"("5")");
+    panel.open(saved);
+    enter(panel,"plan");
+    enter(panel,"revisions");
+    panel.key('\r',{},T/1000);
+    enter(panel,"component_multiplier");
+    enter(panel,"rate_per_kwh");type(panel,"2.5");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text=="1");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    panel.open(saved);
+    enter(panel,"plan");
+    enter(panel,"cycle_charge");type(panel,"1");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text=="1");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    panel.open(saved);
+    enter(panel,"plan");
+    enter(panel,"rounding");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text=="1");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    panel.open(saved);
+    enter(panel,"opening");
+    enter(panel,"through_utc_ms");type(panel,std::to_string(T+7200000));
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    panel.open(saved);
+    enter(panel,"plan");
+    enter(panel,"revisions");
+    panel.key('\r',{},T/1000);
+    enter(panel,"base_rate_per_kwh");
+    panel.key(27,{},T/1000);
+    panel.key('c',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="1");
+    CHECK(!panel.draft.find("plan")->find("revisions")->items.front().find("calendar")->items.front().find("multiplier"));
+    auto missing=saved;
+    set(missing,"schema_version","7");
+    TariffProblem problem;
+    CHECK(!decodeTariffDeclaration(missing,&declaration,&problem));
+    CHECK(problem.path=="schema_version"&&problem.message=="Seasonal allowance requires version 7.");
+}
+
 void seasonalCycles(JsonValue draft,const std::filesystem::path &target) {
     constexpr int64_t begin=1713657600000, middle=1714521600000, end=1716249600000, next=1718928000000;
     auto &plan=member(draft,"plan");
@@ -678,6 +776,7 @@ int main(int argc,char **argv){
     // Load/save/CAS/version binding and failed loads across independent store instances.
     const auto root=std::filesystem::path(makeScratchDir("tariff-declaration")),file=root/"tariff-declaration.json";
     seasonalCycles(original,root/"seasonal-version-test.json");
+    componentMultipliers(original,root/"component-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));

@@ -9,9 +9,11 @@ namespace {
 constexpr uint64_t lastMs=253402300799999ULL;
 struct Invalid {TariffProblem problem;};
 [[noreturn]] void bad(const std::string &path,const std::string &message,TariffProblemKind kind,std::vector<std::string> choices={},std::optional<ElectricityStatus> status={}){throw Invalid{{path,message,kind,std::move(choices),status}};}
-void keys(const JsonValue &v,const std::string &path,std::initializer_list<const char *> names){
-    if(!v.isObject()||v.members.size()!=names.size())bad(path,"Missing/unknown fields; unsupported rules are never discarded.",TariffProblemKind::MissingFields);
-    for(const auto *name:names)if(!v.find(name))bad(path,"Missing/unknown fields; reopen the documented schema.",TariffProblemKind::SchemaFields);
+void keys(const JsonValue &v,const std::string &path,std::initializer_list<const char *> names,
+          std::initializer_list<const char *> additional={}){
+    if(!v.isObject()||v.members.size()!=names.size()+additional.size())bad(path,"Missing/unknown fields; unsupported rules are never discarded.",TariffProblemKind::MissingFields);
+    for(const auto fields:{names,additional})for(const auto *name:fields)
+        if(!v.find(name))bad(path,"Missing/unknown fields; reopen the documented schema.",TariffProblemKind::SchemaFields);
     std::set<std::string> seen;for(const auto &m:v.members)if(!seen.insert(m.first).second)bad(path,"Duplicate field.",TariffProblemKind::DuplicateField);
 }
 std::string label(const JsonValue &v,const std::string &path,bool empty=false){
@@ -28,6 +30,16 @@ ExactDecimal decimal(const JsonValue &v,const std::string &path){
     if(!v.isString()||!ExactDecimal::parse(v.text,&d)||d.text()!=v.text||d.scale()>18||d.digits()>38)
         bad(path,"Enter a canonical decimal string, <=38 digits / 18 decimals. Empty is missing; explicit zero is valid.",TariffProblemKind::Decimal);
     return d;
+}
+ExactDecimal componentRate(const ExactDecimal &unscaled,const ExactDecimal &scaled,const JsonValue &factor,
+                           const std::string &path,bool noFallback=false){
+    const auto multiplier=decimal(factor,path);
+    if(multiplier.negative()||(noFallback&&!multiplier.zero()))
+        bad(path,noFallback?"Use zero for the unused dynamic fallback.":"Enter a nonnegative multiplier.",TariffProblemKind::Unknown);
+    ExactDecimal adjusted;
+    if(!scaled.multiply(multiplier,&adjusted)||!unscaled.add(adjusted,&adjusted))
+        bad(path,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+    return adjusted;
 }
 std::string choice(const JsonValue &v,const std::string &path,std::initializer_list<const char *> allowed){
     const auto value=label(v,path);for(const auto *s:allowed)if(value==s)return value;
@@ -275,10 +287,15 @@ std::string tariffJson(const JsonValue &v){
     if(v.isObject()){std::string s="{";for(const auto &m:v.members){if(s!="{")s+=",";s+=jsonQuote(m.first)+":"+tariffJson(m.second);}return s+"}";}
     return "null";
 }
-JsonValue tariffRowTemplate(const std::string &name){
+JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier){
     if(name=="revisions")return literal(R"({"key":"","begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"time_mode":"constant","base_rate_per_kwh":"","charge_per_civil_day":"","calendar":[],"dynamic":[],"bands":[]})");
-    if(name=="calendar")return literal(R"({"key":"","begin_minute":0,"end_minute":1440,"weekday_mask":127,"month_mask":4095,"priority":0,"date":null,"published_utc_ms":0,"rate_per_kwh":""})");
-    if(name=="dynamic")return literal(R"({"begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"rate_per_kwh":""})");
+    if(name=="calendar"||name=="dynamic"){
+        auto row=literal(name=="calendar"?
+            R"({"key":"","begin_minute":0,"end_minute":1440,"weekday_mask":127,"month_mask":4095,"priority":0,"date":null,"published_utc_ms":0,"rate_per_kwh":""})":
+            R"({"begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"rate_per_kwh":""})");
+        if(componentMultiplier)row.members.emplace_back("multiplier",literal(R"("")"));
+        return row;
+    }
     if(name=="bands")return literal(R"({"through_kwh":null,"rate_per_kwh":""})");
     if(name=="seasons")return literal(R"({"start_month":0,"start_day":0,"kwh_per_day":""})");
     return {};
@@ -414,12 +431,16 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(allowance)
             keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening","seasonal_allowance"});
         else keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"});
-        const auto version=integer(*root.find("schema_version"),"schema_version",7);
+        const auto version=integer(*root.find("schema_version"),"schema_version",8);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
-        if((version==7)!=static_cast<bool>(allowance))
+        const bool allowsComponents=version==8;
+        if((version==7&&!allowance)||(version<7&&allowance))
             bad("schema_version","Seasonal allowance requires version 7.",TariffProblemKind::SchemaVersion);
         const auto &policy=*root.find("reset_policy");
-        const bool explicitCycle=version==1||((version==4||version==7)&&policy.isString());
+        const bool twoMonth=version==6||(allowsComponents&&policy.find("bimonthly_start_month"));
+        if(twoMonth&&allowance)
+            bad("reset_policy","Seasonal allowance cannot use the two-month average rule.",TariffProblemKind::Unknown);
+        const bool explicitCycle=version==1||((version==4||version>=7)&&policy.isString());
         if(explicitCycle)choice(policy,"reset_policy",{"explicit_cycle_only"});
         const auto &ack=*root.find("acknowledged");if(!ack.isBool()||!ack.boolean)bad("acknowledged","Acknowledge declared-model exclusions before saving.",TariffProblemKind::Acknowledgement);
         TariffDeclaration d;d.country=label(*root.find("country"),"country");d.sourceReference=label(*root.find("source_reference"),"source_reference");
@@ -443,15 +464,35 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         boundedArray(*plan.find("revisions"),"plan.revisions",16,total);
         for(const auto &row:plan.find("revisions")->items){
             const auto at="plan.revisions["+std::to_string(index++)+"]";TariffRevision r;
-            keys(row,at,{"key","begin_utc_ms","end_utc_ms","published_utc_ms","time_mode","base_rate_per_kwh","charge_per_civil_day","calendar","dynamic","bands"});
+            const auto *components=row.find("component_multiplier");
+            if(components&&!allowsComponents)
+                bad(at+".component_multiplier","Component multipliers require version 8.",TariffProblemKind::SchemaVersion);
+            using Fields=std::initializer_list<const char *>;
+            keys(row,at,{"key","begin_utc_ms","end_utc_ms","published_utc_ms","time_mode","base_rate_per_kwh","charge_per_civil_day","calendar","dynamic","bands"},
+                 components?Fields{"component_multiplier"}:Fields{});
+            const Fields multiplierField={"multiplier"};
+            const auto factorFields=components?multiplierField:Fields{};
             r.key=label(*row.find("key"),child(at,"key"));r.beginUtcMs=integer(*row.find("begin_utc_ms"),child(at,"begin_utc_ms"));r.endUtcMs=integer(*row.find("end_utc_ms"),child(at,"end_utc_ms"));r.publishedUtcMs=integer(*row.find("published_utc_ms"),child(at,"published_utc_ms"));
             const auto mode=choice(*row.find("time_mode"),child(at,"time_mode"),{"constant","calendar","dynamic"});r.timeMode=mode=="constant"?TimeRateMode::Constant:mode=="calendar"?TimeRateMode::Calendar:TimeRateMode::Dynamic;
             r.baseRatePerKwh=decimal(*row.find("base_rate_per_kwh"),child(at,"base_rate_per_kwh"));r.chargePerCivilDay=decimal(*row.find("charge_per_civil_day"),child(at,"charge_per_civil_day"));
+            ExactDecimal scaled;
+            if(components){
+                d.componentMultipliers=true;
+                const auto path=at+".component_multiplier";
+                keys(*components,path,{"rate_per_kwh","base_multiplier"});
+                scaled=decimal(*components->find("rate_per_kwh"),path+".rate_per_kwh");
+                r.baseRatePerKwh=componentRate(r.baseRatePerKwh,scaled,*components->find("base_multiplier"),
+                                               path+".base_multiplier",r.timeMode==TimeRateMode::Dynamic);
+            }
+            const auto unitRate=[&](const JsonValue &entry,const std::string &path){
+                const auto base=decimal(*entry.find("rate_per_kwh"),path+".rate_per_kwh");
+                return components?componentRate(base,scaled,*entry.find("multiplier"),path+".multiplier"):base;
+            };
             size_t n=0;
             boundedArray(*row.find("calendar"),child(at,"calendar"),32,total);
             for(const auto &c:row.find("calendar")->items){
                 const auto path=at+".calendar["+std::to_string(n++)+"]";CalendarRate rate;
-                keys(c,path,{"key","begin_minute","end_minute","weekday_mask","month_mask","priority","date","published_utc_ms","rate_per_kwh"});
+                keys(c,path,{"key","begin_minute","end_minute","weekday_mask","month_mask","priority","date","published_utc_ms","rate_per_kwh"},factorFields);
                 rate.key=label(*c.find("key"),child(path,"key"));rate.beginMinute=static_cast<unsigned>(integer(*c.find("begin_minute"),child(path,"begin_minute"),1440));rate.endMinute=static_cast<unsigned>(integer(*c.find("end_minute"),child(path,"end_minute"),1440));
                 rate.weekdayMask=static_cast<unsigned>(integer(*c.find("weekday_mask"),child(path,"weekday_mask"),127));rate.monthMask=static_cast<unsigned>(integer(*c.find("month_mask"),child(path,"month_mask"),4095));rate.priority=static_cast<unsigned>(integer(*c.find("priority"),child(path,"priority"),1000));
                 const auto &date=*c.find("date");if(!null(date)){
@@ -459,12 +500,12 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
                     if(s.size()!=10||s[4]!='-'||s[7]!='-'||s.substr(0,4).find_first_not_of("0123456789")!=std::string::npos||s.substr(5,2).find_first_not_of("0123456789")!=std::string::npos||s.substr(8).find_first_not_of("0123456789")!=std::string::npos)bad(child(path,"date"),"Use YYYY-MM-DD or clear for no exact-date condition.",TariffProblemKind::Date);
                     rate.date=CivilDate{std::stoi(s.substr(0,4)),static_cast<unsigned>(std::stoi(s.substr(5,2))),static_cast<unsigned>(std::stoi(s.substr(8,2)))};
                 }
-                rate.publishedUtcMs=integer(*c.find("published_utc_ms"),child(path,"published_utc_ms"));rate.ratePerKwh=decimal(*c.find("rate_per_kwh"),child(path,"rate_per_kwh"));r.calendar.push_back(std::move(rate));
+                rate.publishedUtcMs=integer(*c.find("published_utc_ms"),child(path,"published_utc_ms"));rate.ratePerKwh=unitRate(c,path);r.calendar.push_back(std::move(rate));
             }
             boundedArray(*row.find("dynamic"),child(at,"dynamic"),256,total);
             n=0;for(const auto &v:row.find("dynamic")->items){
-                const auto path=at+".dynamic["+std::to_string(n++)+"]";keys(v,path,{"begin_utc_ms","end_utc_ms","published_utc_ms","rate_per_kwh"});
-                r.dynamic.push_back({static_cast<int64_t>(integer(*v.find("begin_utc_ms"),child(path,"begin_utc_ms"))),static_cast<int64_t>(integer(*v.find("end_utc_ms"),child(path,"end_utc_ms"))),static_cast<int64_t>(integer(*v.find("published_utc_ms"),child(path,"published_utc_ms"))),decimal(*v.find("rate_per_kwh"),child(path,"rate_per_kwh"))});
+                const auto path=at+".dynamic["+std::to_string(n++)+"]";keys(v,path,{"begin_utc_ms","end_utc_ms","published_utc_ms","rate_per_kwh"},factorFields);
+                r.dynamic.push_back({static_cast<int64_t>(integer(*v.find("begin_utc_ms"),child(path,"begin_utc_ms"))),static_cast<int64_t>(integer(*v.find("end_utc_ms"),child(path,"end_utc_ms"))),static_cast<int64_t>(integer(*v.find("published_utc_ms"),child(path,"published_utc_ms"))),unitRate(v,path)});
             }
             boundedArray(*row.find("bands"),child(at,"bands"),32,total);
             n=0;for(const auto &v:row.find("bands")->items){
@@ -474,6 +515,8 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             }
             p.revisions.push_back(std::move(r));
         }
+        if(allowsComponents&&!d.componentMultipliers)
+            bad("schema_version","Version 8 requires a revision with a component multiplier.",TariffProblemKind::SchemaVersion);
         auto &s=d.opening;const auto &opening=*root.find("opening");
         keys(opening,"opening",{"key","scope","adapter","basis","origin","cycle_begin_utc_ms","cycle_end_utc_ms","through_utc_ms","imported_kwh","accrued_subtotal","time_database_version"});
         choice(*opening.find("basis"),"opening.basis",{"whole_meter_import"});choice(*opening.find("origin"),"opening.origin",{"declared_forecast"});
@@ -484,8 +527,8 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             {namedRate?tariffTzdbVersion:"explicit-fixed-clock"});
         s.cycleBeginUtcMs=integer(*opening.find("cycle_begin_utc_ms"),"opening.cycle_begin_utc_ms");s.cycleEndUtcMs=integer(*opening.find("cycle_end_utc_ms"),"opening.cycle_end_utc_ms");s.throughUtcMs=integer(*opening.find("through_utc_ms"),"opening.through_utc_ms");
         if(!explicitCycle){
-            const auto cadence = version == 6 ? TariffResetCadence::Bimonthly
-                : version == 5 || (version == 7 && policy.find("annual_month")) ? TariffResetCadence::Annual
+            const auto cadence = twoMonth ? TariffResetCadence::Bimonthly
+                : version == 5 || (version >= 7 && policy.find("annual_month")) ? TariffResetCadence::Annual
                 : TariffResetCadence::Monthly;
             d.resetSchedule=decodeResetSchedule(policy,version>=4,cadence);
             if(version<4&&(version==3)!=(d.dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes))
@@ -500,7 +543,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         auto quantity=electricityKwh(decimal(*opening.find("imported_kwh"),"opening.imported_kwh"));if(!quantity)bad("opening.imported_kwh","Nonnegative whole-meter quantity required.",TariffProblemKind::OpeningQuantity);s.importedKwh=*quantity;
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
-        if(version==6)normalizeBimonthlyTariff(p);
+        if(twoMonth)normalizeBimonthlyTariff(p);
         std::optional<SeasonalCycleTariff> adjusted;
         if(allowance){
             validateSeasonalBands(p);
