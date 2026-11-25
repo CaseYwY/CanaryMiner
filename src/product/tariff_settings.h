@@ -179,6 +179,7 @@ class TariffSettingsPanel {
     }
     bool readOnly(const std::string &s)const{
         if(s=="kind"&&named(node()))return true;
+        if(s=="rounding")return path()!="plan";
         if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return monthly();
         return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="daily_fee_allocation"||s=="basis"||s=="origin"||s=="time_database_version";
     }

@@ -30,6 +30,15 @@ void native(){
             const auto text=panel.render(1024,1000,ColorLevel::None);CHECK(text.find(std::string("> ")+field+": "+raw+(fixed?" [fixed]":"")+"\n")!=text.npos&&tariffJson(panel.active)==before&&tariffJson(panel.draft)==before&&!panel.dirty());}
         JsonValue array;array.type=JsonValue::Type::Array;array.items={value};TariffSettingsPanel panel;panel.open(array);CHECK(panel.render(1024,1000,ColorLevel::None).find("> row 0: "+raw+"\n")!=std::string::npos&&!panel.dirty());
     }
+    {
+        TariffSettingsPanel panel;
+        panel.open(tariffDeclarationTemplate());
+        panel.field=6; // plan
+        panel.key('\r',{},1800000000);
+        panel.field=7; // plan.rounding
+        const auto text=panel.render(1024,1000,ColorLevel::None);
+        CHECK(text.find("> rounding: \"final_display_only\"\n")!=text.npos&&!panel.dirty());
+    }
     JsonValue object,array;object.type=JsonValue::Type::Object;array.type=JsonValue::Type::Array;array.items.resize(2);
     for(const auto &value:{object,array}){const auto suffix=value.isObject()?"[Enter] fields":"[Enter] 2 rows";JsonValue root;root.type=JsonValue::Type::Object;root.members.emplace_back("synthetic_field",value);TariffSettingsPanel panel;panel.open(root);
         CHECK(panel.render(1024,1000,ColorLevel::None).find(std::string("> synthetic_field: ")+suffix+"\n")!=std::string::npos&&!panel.dirty());
