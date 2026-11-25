@@ -601,13 +601,20 @@ int main(int argc,char **argv){
     set(revision,"bands","[]");
     set(revision,"base_rate_per_kwh","\"100000000000\"");
     set(revision,"charge_per_civil_day","\"0\"");
-    panel.open(large);
-    panel.key('p',{},T/1000);
-    for(char c:std::string("100000000000000000\t200000000000000000\r"))panel.key(c,{},T/1000);
-    comparison=awaitComparison(panel);
-    CHECK(std::count(comparison.begin(),comparison.end(),'\n')==11&&comparison.back()!='\n');
-    CHECK(comparison.find("HYPOTHETICAL")<comparison.find("[Tab] Field"));
-    frame(panel,60,12);
+    // The cancellation scenario may still own its worker slot while it retires.
+    TariffSettingsPanel largePanel;
+    largePanel.open(large);
+    largePanel.key('p',{},T/1000);
+    for(char c:std::string("100000000000000000\t200000000000000000\r"))largePanel.key(c,{},T/1000);
+    const auto largeComparison=awaitComparison(largePanel);
+    CHECK(largeComparison.find("Remaining without mining:")!=std::string::npos);
+    CHECK(largeComparison.find("Remaining with mining:")!=std::string::npos);
+    CHECK(largeComparison.find("Difference (with - without):")!=std::string::npos);
+    CHECK(largeComparison.find("240000000000000000000000000.000000")!=std::string::npos);
+    CHECK(largeComparison.find("480000000000000000000000000.000000")!=std::string::npos);
+    CHECK(std::count(largeComparison.begin(),largeComparison.end(),'\n')==11&&largeComparison.back()!='\n');
+    CHECK(largeComparison.find("HYPOTHETICAL")<largeComparison.find("[Tab] Field"));
+    frame(largePanel,60,12);
     const std::atomic<bool> cancelled{true};
     CHECK(counterfactualBill(d.plan,d.opening,trace,trace,T+86400000,T,&cancelled).status==ElectricityStatus::Unavailable);
     panel.open(tariffDeclarationTemplate());
