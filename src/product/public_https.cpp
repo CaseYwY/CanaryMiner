@@ -65,6 +65,17 @@ bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
             else result = "https://api.kraken.com/0/public/OHLC?pair=USDTUSD&interval=1&since=" + std::to_string(r.fromUtc);
             break;
         }
+        case PublicFeed::MexcPearlHour:
+        case PublicFeed::CoinbaseUsdtHour:
+            if (r.fromUtc < 60 || r.toUtc > 253402300799LL || r.toUtc <= r.fromUtc ||
+                r.toUtc - r.fromUtc != 3600 || r.fromUtc % 60) return false;
+            if (r.feed == PublicFeed::MexcPearlHour)
+                result = "https://api.mexc.com/api/v3/klines?symbol=PEARLUSDT&interval=1m&limit=61&startTime=" +
+                    std::to_string(r.fromUtc * 1000) + "&endTime=" + std::to_string(r.toUtc * 1000 - 1);
+            else
+                result = "https://api.coinbase.com/api/v3/brokerage/market/products/USDT-USD/candles?granularity=ONE_MINUTE&limit=61&start=" +
+                    std::to_string(r.fromUtc) + "&end=" + std::to_string(r.toUtc);
+            break;
         default: return false;
     }
     *url = std::move(result);

@@ -1782,6 +1782,8 @@ add_executable(market_tickers_cli_fixture ${R}/tests/market_tickers_cli_fixture.
 target_link_libraries(market_tickers_cli_fixture PRIVATE canary_public_https)
 add_test(NAME market_tickers_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_market_tickers_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:market_tickers_cli_fixture> $<BOOL:${CANARY_ENABLE_PUBLIC_HTTPS}>)
 set_tests_properties(market_tickers_cli PROPERTIES TIMEOUT 45 SKIP_RETURN_CODE 77)
+add_test(NAME public_market_hour_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_public_market_hour_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:market_tickers_cli_fixture> $<BOOL:${CANARY_ENABLE_PUBLIC_HTTPS}>)
+set_tests_properties(public_market_hour_cli PROPERTIES TIMEOUT 45 SKIP_RETURN_CODE 77)
 add_executable(test_public_json_process ${R}/tests/test_public_json_process.cpp)
 target_link_libraries(test_public_json_process PRIVATE canary_public_https)
 if(NOT MSVC)

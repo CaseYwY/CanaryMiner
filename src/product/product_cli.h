@@ -93,6 +93,7 @@ struct CliParse {
     CliOverrides ov;
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     MeterBillOptions meterBill;
+    bool publicMarketHour = false;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
 };
@@ -158,7 +159,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
     }
     if (r.command == Command::MarketHour) {
         r.help = argc == i + 1 && (std::string_view(argv[i]) == "--help" || std::string_view(argv[i]) == "-h");
-        if (!r.help && !(argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0])) {
+        r.publicMarketHour = argc == i + 1 && std::string_view(argv[i]) == "--allow-public-candles";
+        if (!r.help && !r.publicMarketHour &&
+            !(argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0])) {
             if (error) *error = "market-hour: invalid options; use market-hour --help";
             return false;
         }
@@ -471,7 +474,7 @@ inline std::string productHelpText() {
         "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       canary-miner meter-bill        review a tariff and imported meter intervals; see meter-bill --help\n"
-        "       canary-miner market-hour      review an hour of local minute closes; see market-hour --help\n"
+        "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
         "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress manual and public references for this run\n"

@@ -105,3 +105,11 @@ suppression with exact original files, unchanged inert-child start count and a r
 Source-use and capability approval, native helper deployment/trust/auxiliary egress, qualified live averages/latest
 sources, archives, actual credit/reward collection, economic/forecast source wiring and production/physical qualification
 remain unfinished. P-06 and the affected requirements remain partial.
+
+### Check a public hour without mining
+
+Run `canary-miner market-hour --allow-public-candles` from a public-HTTPS-enabled installation. The permission applies to this invocation. Use the approved helper installed beside the miner in a protected directory. The helper requests one minute series per fixed market, MEXC `PEARLUSDT` and Coinbase `USDT-USD`, for the same 60-minute window. The exclusive end is a UTC minute boundary at least five seconds before the initial local time. Each request has a 15-second budget and a 64 KiB response-body limit. The command makes no retries. [MEXC candle format](https://www.mexc.com/api-docs/spot-v3/market-data-endpoints/klinecandlestick-data) · [Coinbase candle format](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product-candles)
+
+The report names each source, the UTC window, minute coverage, local receipt times and ages, and exact sums divided by 60. The USDT mean requires every Pearl minute. The USD mean additionally requires a valid FX close for each of those exact minutes. The report labels candle finality as unverified. A missing or malformed response gets a bounded reason, while an independent complete Pearl series can still supply the USDT mean.
+
+Exit code 0 indicates both means were available, 3 means a mean or the helper was unavailable, and 130 indicates a cancelled sample with confirmed helper cleanup. If cleanup is uncertain, the command exits with 3, withholds both means and admits no further request. The command leaves Settings, Dashboard polling and economic mode alone. Live provider response qualification and deployment acceptance remain open.

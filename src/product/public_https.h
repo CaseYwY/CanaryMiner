@@ -9,7 +9,10 @@
 
 namespace om {
 
-enum class PublicFeed { GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles };
+enum class PublicFeed {
+    GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles,
+    MexcPearlHour, CoinbaseUsdtHour
+};
 struct PublicJsonRequest {
     PublicFeed feed = PublicFeed::GatePearlTicker;
     int64_t fromUtc = 0, toUtc = 0;  // minute bounds for candles; zero for ticker requests
