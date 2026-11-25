@@ -14,7 +14,15 @@ int main() {
     CHECK(publicFeedUrl({PublicFeed::GatePearlCandles, 600, 600 + 900 * 60}, &url));
     CHECK(url.find("from=540&to=54600") != std::string::npos);
     CHECK(publicFeedUrl({PublicFeed::KrakenUsdtCandles, 600, 600 + 719 * 60}, &url));
+    CHECK(publicFeedUrl({PublicFeed::MexcPearlHour, 600, 4200}, &url));
+    CHECK(url == "https://api.mexc.com/api/v3/klines?symbol=PEARLUSDT&interval=1m&limit=61&startTime=600000&endTime=4199999");
+    CHECK(publicFeedUrl({PublicFeed::CoinbaseUsdtHour, 600, 4200}, &url));
+    CHECK(url == "https://api.coinbase.com/api/v3/brokerage/market/products/USDT-USD/candles?granularity=ONE_MINUTE&limit=61&start=600&end=4200");
     for (auto r : {PublicJsonRequest{static_cast<PublicFeed>(99)},
+                   PublicJsonRequest{PublicFeed::MexcPearlHour, 600, 4260},
+                   PublicJsonRequest{PublicFeed::CoinbaseUsdtHour, 601, 4201},
+                   PublicJsonRequest{PublicFeed::CoinbaseUsdtHour, 60, 60},
+                   PublicJsonRequest{PublicFeed::MexcPearlHour, INT64_MIN, INT64_MAX},
                    PublicJsonRequest{PublicFeed::GatePearlTicker, 60, 120},
                    PublicJsonRequest{PublicFeed::GatePearlCandles, 0, 60},
                    PublicJsonRequest{PublicFeed::GatePearlCandles, -60, 60},
