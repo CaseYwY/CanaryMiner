@@ -80,4 +80,34 @@ Settings keeps economic mode off for fresh installations and old preferences tha
 
 ## Candidate evidence
 
+### Version 3 clean installation
+
+The opt-in public HTTPS candidates use source revision `c0999a0e4ccb452fbe5072e25fbcf377e77303e1`.
+[PR #38](https://github.com/CaseYwY/CanaryMiner/pull/38)
+
+The archive in the disconnected Windows Server 2025 Standard Evaluation guest had SHA-256
+`be24cdd1befe17bbef97487057d9f879c1a1300ec598dc333710e6c20df85ce5`.
+
+The clean Windows installation re-read all 35 payload files and matched their sizes and SHA-256
+digests. The miner reported `public-https=opt-in`. The three installed workers and both public market
+commands refused invocation with no arguments. Through the installed Schannel pool worker, a protocol
+probe authorized and submitted synthetic work over TLS 1.2 and 1.3 to a local fixture. The guest used
+a temporary root and its signed revocation list. With a revoked certificate, both protocol versions
+reported verification failure before sending any Stratum application data. Each run removed the
+temporary root and revocation list from the guest.
+
+The Debian 13 guest booted from a fresh system image with loopback as its only network interface.
+For archive
+SHA-256 `7eedd06ed3096d408514237c7cdd0a74855f300bd2771f6c9846b84656034eb6`, it verified
+all 35 installed payloads, executable permissions for all four programs and their link-time shared
+libraries. The miner, three workers and both public market commands produced the same startup and
+refusal results.
+The installed Settings verified Hong Kong TLS migration and the default-off economic mode.
+The local pool cases verified strict refusal, explicitly consented plaintext fallback, refusal after
+a handshake error and rejection of an untrusted peer. The installed worker accepted a trusted
+local fixture over TLS 1.2 and 1.3.
+
+Live market data, a real pool session, GPU operation, donation TLS endpoint qualification and
+distribution approval remain open for this candidate.
+
 See [TLS installation layout](pool-tls-runtime-install.md), [runtime policy](pool-tls-runtime.md), [OpenSSL 3.5 notices](https://github.com/openssl/openssl/blob/openssl-3.5.9/LICENSE.txt), and [Microsoft supported Visual C++ Redistributable downloads](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist).
