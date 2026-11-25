@@ -4,6 +4,8 @@
 #include <string>
 
 namespace om {
+enum class DecimalTies { ToEven, AwayFromZero };
+
 class ExactDecimal {
    public:
     static constexpr unsigned maxDigits = 96, maxScale = 48;
@@ -21,6 +23,7 @@ class ExactDecimal {
     bool divideExact(uint32_t denominator, ExactDecimal *out) const;
     // Explicit display-only round-half-even, including nonterminating means; underlying sum stays exact.
     bool formatRatio(uint32_t denominator, unsigned places, std::string *out) const;
+    bool formatRatio(uint32_t denominator, unsigned places, DecimalTies ties, std::string *out) const;
     // Arbitrary bounded positive decimal denominator; division still occurs only at display time.
     bool formatRatio(const ExactDecimal &denominator, unsigned places, std::string *out) const;
    private:

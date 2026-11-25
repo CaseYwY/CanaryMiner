@@ -217,6 +217,15 @@ def main(cli, bundle):
         assert saved.returncode == 0 and not saved.stderr, saved
         assert 'Octopus Go public rate snapshot' in saved.stdout and '3 published price intervals' in saved.stdout
         assert f'Cycle estimate at closing {total:.6f} GBP' in saved.stdout, saved
+        invoice = root / 'go-charges.json'
+        write(invoice, {'schema_version': 1, 'scope': SCOPE, 'currency': 'GBP', 'decimal_places': 2,
+                        'rounding': 'half_even', 'cycles': [{'begin_utc_ms': BEGIN, 'end_utc_ms': END,
+                            'supply_charge': str(total.quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN))}]})
+        reconciled = review('--invoice', invoice.name, '--save-review', 'go-with-invoice.cmr')
+        assert reconciled.returncode == 0 and not reconciled.stderr, reconciled
+        assert 'Difference (calculated minus invoice) 0.00 GBP (match)' in reconciled.stdout
+        appended = run('--open-review', 'go.cmr', '--invoice', invoice.name)
+        assert appended.returncode == 0 and not appended.stderr and appended.stdout == reconciled.stdout, appended
         reject(review(cutoff=OBSERVED - 1), 'Octopus Go rates observed after the review cutoff')
 
         for gap_or_overlap in (-HALF_HOUR, HALF_HOUR):
@@ -231,10 +240,12 @@ def main(cli, bundle):
         reject(review(), 'Octopus Go energy rates must align to UTC half hours')
         write(rate_file, {**go_snapshot, 'tariff_code': f'E-1R-{GO_PRODUCT}-D'})
         reject(review(), 'invalid Octopus Go rate identity')
-        for path in (tariff, meter, rate_file):
+        for path in (tariff, meter, rate_file, invoice):
             path.unlink()
         restored = run('--open-review', 'go.cmr')
         assert restored.returncode == 0 and not restored.stderr and restored.stdout == saved.stdout, restored
+        restored = run('--open-review', 'go-with-invoice.cmr')
+        assert restored.returncode == 0 and not restored.stderr and restored.stdout == reconciled.stdout, restored
     print(f'Octopus Agile CLI: {SLOTS} half hours, 31 London days, exact signed prices, standing changes, and archive replay')
     print('Octopus Go CLI: multi-hour price intervals, clipped bounds, standing change, exact bill and archive replay')
 

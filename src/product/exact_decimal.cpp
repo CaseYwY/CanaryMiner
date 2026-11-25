@@ -115,6 +115,9 @@ bool ExactDecimal::divideExact(uint32_t denominator, ExactDecimal *out) const {
     return !remainder&&make(std::move(quotient),scale,negative_,out);
 }
 bool ExactDecimal::formatRatio(uint32_t denominator, unsigned places, std::string *out) const {
+    return formatRatio(denominator, places, DecimalTies::ToEven, out);
+}
+bool ExactDecimal::formatRatio(uint32_t denominator, unsigned places, DecimalTies ties, std::string *out) const {
     if (!out || !denominator || places > 24) return false;
     std::string digits = coefficient_;
     if (places > scale_) digits.append(places - scale_, '0');
@@ -134,7 +137,8 @@ bool ExactDecimal::formatRatio(uint32_t denominator, unsigned places, std::strin
         quotient.resize(first);
     }
     quotient = strip(quotient);
-    if (half > 0 || (!half && (quotient.back() - '0') % 2)) quotient = plus(quotient, "1");
+    if (half > 0 || (!half && (ties == DecimalTies::AwayFromZero || (quotient.back() - '0') % 2)))
+        quotient = plus(quotient, "1");
     const bool negative = negative_ && quotient != "0";
     if (places) {
         if (quotient.size() <= places) quotient.insert(0, places + 1 - quotient.size(), '0');
