@@ -66,7 +66,12 @@ inline const char *feePolicyBuildLabel() {
 #endif
 }
 
-inline std::string feeDestination() { return CANARY_FEE_DESTINATION; }
+inline std::string feeDestination() {
+    // A runtime pointer read keeps the declared address intact in native artifacts.
+    // GCC can otherwise duplicate a character in overlapping string-copy constants.
+    static const char *const volatile address = CANARY_FEE_DESTINATION;
+    return std::string(address);
+}
 inline bool feeDestinationConfigured() { return !feeDestination().empty(); }
 /** SHA-256 of the compiled destination (empty string when the build has none) - what documents may quote. */
 inline std::string feeDestinationDigest() { return feeDestinationConfigured() ? sha256Hex(feeDestination()) : std::string(); }
