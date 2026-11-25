@@ -157,6 +157,27 @@ local directory. Windows accepts native Unicode paths on local drives and reject
 prints no file paths or scope labels. Ctrl+C cancels the calculation. A stalled filesystem read can delay exit.
 Estimation from submitted data and qualified live collection remain separate acceptance steps.
 
+### Extend a saved meter review
+
+Use `canary-miner meter-bill --extend-review OLD.cmr --intervals NEW.json --save-review NEXT.cmr`.
+`NEW.json` supplies the complete prior meter coverage plus additional contiguous readings in the original format.
+The command reopens the old archive at its saved cutoff, verifies the exact results, and uses its retained
+tariff and supplier rate snapshot. Register continuity includes the absolute first reading. Octopus bundle
+observations must advance or stay at their original time. The current review cutoff cannot precede the saved one.
+
+Before publication the command checks historical readings and exact charges, including when the new cutoff would
+make additional tariff rules eligible. The same declared reset rule applies as readings enter later cycles. An open
+cycle's provisional charges can still change when more usage is measured. The original review keeps its original
+cutoff and invoice. Add `--invoice FILE` when the successor has a new supply-charge declaration covering its
+complete reviewed cycles.
+
+The v4 archive retains the previous archive's SHA-256, cutoff, and last reading time with a checksum of the earlier
+readings and exact amounts. Reopening recalculates the preserved meter prefix and the full new review using the
+retained data. It works when the previous file is unavailable. The previous archive digest identifies the input used at
+extension time. Keep that file if you want to audit its own invoice or check the archived link against the actual original.
+Publication creates a new archive name and preserves all inputs. Each command covers at most twelve cycles under the
+original tariff and rate window. A changed tariff or earlier reading needs a separate review.
+
 ### Review cumulative meter readings
 
 Use the same command with an interval file in schema version 2:

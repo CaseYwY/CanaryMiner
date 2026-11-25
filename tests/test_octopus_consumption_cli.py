@@ -135,6 +135,45 @@ def main(cli, bundle):
         restored = command(binary, 'meter-bill', '--open-review', archive)
         assert restored.returncode == 0 and restored.stdout == saved.stdout and not restored.stderr, restored
 
+        # The successor carries the original Octopus rate snapshot and compares the old quantities
+        # before applying those rates to the additional imported half hours.
+        write(tariff, decl)
+        write(rate_file, rates)
+        partial = {**original, 'end_utc_ms': BEGIN + 8 * HALF_HOUR,
+                   'consumption': original['consumption'][:8]}
+        write(consumption, partial)
+        seed = root / 'partial.cmr'
+        created = review(*options, '--save-review', seed.name)
+        assert created.returncode == 0 and 'Provisional cycle estimate' in created.stdout, created
+        seed_original = seed.read_bytes()
+        tariff.unlink()
+        rate_file.unlink()
+        out = root / 'continued.cmr'
+
+        def extend(bundle, *extra):
+            write(consumption, bundle)
+            return command(binary, 'meter-bill', '--extend-review', seed, '--intervals', consumption,
+                           '--save-review', out.name, '--as-of-utc-ms', str(observation), *extra)
+
+        bad_prefix = copy.deepcopy(original)
+        bad_prefix['consumption'][0]['consumption'] = 0.999
+        refuse(extend(bad_prefix), 'differ from the saved review prefix')
+        refuse(extend({**original, 'observed_utc_ms': observation - 1}), 'precedes the saved observation')
+        assert seed.read_bytes() == seed_original and not out.exists()
+        invoice_path = root / 'invoice.json'
+        write(invoice_path, {'schema_version': 1, 'scope': SCOPE, 'currency': 'GBP', 'decimal_places': 2,
+                             'rounding': 'half_even', 'cycles': [{'begin_utc_ms': BEGIN, 'end_utc_ms': END,
+                                 'supply_charge': str(total.quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN))}]})
+        continued = extend(original, '--invoice', invoice_path)
+        assert continued.returncode == 0 and not continued.stderr, continued
+        assert f'Cycle estimate at closing {total:.6f} GBP' in continued.stdout
+        assert 'Octopus Agile public rate snapshot' in continued.stdout and out.read_bytes().startswith(b'CANARY-METER-REVIEW-4\n')
+        assert '(match)' in continued.stdout
+        seed.unlink()
+        invoice_path.unlink()
+        consumption.unlink()
+        assert command(binary, 'meter-bill', '--open-review', out).stdout == continued.stdout
+
         # The two occurrences of 01:00 on the fall transition are separate elapsed half hours.
         fall_begin, fall_end = utc('2023-10-28T23:00:00'), utc('2023-10-30T00:00:00')
         fall_plan = plan(fall_begin, fall_begin, fall_end, named('Europe/London'))
