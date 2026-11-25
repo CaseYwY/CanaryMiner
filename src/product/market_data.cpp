@@ -1,5 +1,6 @@
 #include "market_data.h"
 #include "json_dom.h"
+#include "market_minute_window.h"
 #include <algorithm>
 #include <set>
 
@@ -203,32 +204,12 @@ MarketDataResult<MarketCandles> parseMarketCandles(const PublicJsonResponse &r, 
 }
 
 MarketWindow marketWindow(const MarketCandles &pearl, const MarketCandles *fx, uint64_t start, uint64_t end) {
-    MarketWindow result; result.startUtc = start; result.endUtc = end;
-    if (!start || start % 60 || end % 60 || end <= start || end - start > 719 * 60 || end > 253402300799ULL) return result;
-    result.expected = static_cast<unsigned>((end - start) / 60);
+    auto result = market_detail::minuteWindowBounds(start, end);
+    if (!result.expected) return result;
     if (pearl.observation.series != MarketSeries::GatePearlMainnetUsdtV1 || !validSeries(pearl) || end > pearl.observation.observedUtc) { result.status = MarketDataStatus::Identity; return result; }
     const bool fxEligible = fx && fx->observation.series == MarketSeries::KrakenUsdtUsdV1 && validSeries(*fx) && end <= fx->observation.observedUtc &&
         fx->observation.generation == pearl.observation.generation && fx->observation.origin == pearl.observation.origin;
-    ExactDecimal usdtSum, usdSum;
-    size_t p = 0, f = 0;
-    for (uint64_t t = start; t < end; t += 60) {
-        while (p < pearl.minutes.size() && pearl.minutes[p].startUtc < t) ++p;
-        while (fxEligible && f < fx->minutes.size() && fx->minutes[f].startUtc < t) ++f;
-        const auto *minute = p < pearl.minutes.size() && pearl.minutes[p].startUtc == t && pearl.minutes[p].closed ? &pearl.minutes[p] : nullptr;
-        if (!minute) continue;
-        ++result.pearlCovered;
-        if (!usdtSum.add(minute->close, &usdtSum)) { result.status = MarketDataStatus::Arithmetic; return result; }
-        if (fxEligible && f < fx->minutes.size() && fx->minutes[f].startUtc == t && fx->minutes[f].closed) {
-            ExactDecimal product;
-            if (!minute->close.multiply(fx->minutes[f].close, &product) || !usdSum.add(product, &usdSum)) { result.status = MarketDataStatus::Arithmetic; return result; }
-            ++result.fxCovered;
-        }
-    }
-    if (result.pearlCovered != result.expected) return result;
-    result.tokenUsdt = MarketExactMean{usdtSum, result.expected};
-    result.status = MarketDataStatus::Ok;
-    if (result.fxCovered == result.expected) result.tokenUsd = MarketExactMean{usdSum, result.expected};
-    return result;
+    return market_detail::accumulateMinuteWindow(result, pearl.minutes, fxEligible ? &fx->minutes : nullptr);
 }
 
 MarketLatest latestMarketReference(const MarketQuote *pearl, const MarketQuote *fx, uint64_t utc, uint64_t mono, MarketFreshnessPolicy policy) {

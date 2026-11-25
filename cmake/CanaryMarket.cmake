@@ -2,6 +2,7 @@
 add_library(canary_market STATIC
   "${CMAKE_SOURCE_DIR}/src/product/exact_decimal.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/market_data.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/market_hour.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/manual_market.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/market_owner.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/market_reference_runtime.cpp"
@@ -11,6 +12,9 @@ target_include_directories(canary_market PUBLIC "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(canary_market PUBLIC canary_public_https)
 find_package(Threads REQUIRED)
 target_link_libraries(canary_market PRIVATE Threads::Threads)
+if(WIN32)
+  target_link_libraries(canary_market PRIVATE shell32)
+endif()
 if(MSVC)
   target_compile_definitions(canary_market PRIVATE NOMINMAX)
   target_compile_options(canary_market PRIVATE /W3 /utf-8)

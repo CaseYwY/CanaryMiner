@@ -67,3 +67,18 @@ ctest --test-dir build/manual-market-check -R '^(manual_market|manual_market_ter
 Windows native tests and Linux/WSL host/PTY/sanitizer results are development evidence, not a new production CUDA or native Linux gaming qualification. Real source/candle/trust-egress/terms, persistent candle archive, reward/credit source, today's forecast, energy/net integration, all multilingual terminal support and full pinned release gates remain unfinished. No installed miner or production binary is replaced.
 
 The legacy compile-only `tools/build_natives.py` recipe now includes the two host-only projector/arithmetic objects without changing existing CUDA compile flags/seeds; `--only` still compiles just the kernel unit. Its fake-compiler recipe tests prove command construction/link inputs, **not** a successful real nvcc build, SASS identity or release qualification.
+
+## Review a complete historical hour
+
+Run `canary-miner market-hour --file FILE` to review local, user-declared closed minute prices. The command opens a regular JSON file of at most 64 KiB from a trusted local directory. It reports the half-open UTC hour, the declared source and observation age, coverage, and exact sums divided by minute counts. The report does not establish the freshness or authenticity of the source. It does not load or modify Settings or feed economic mode.
+
+| Field | Required value |
+| --- | --- |
+| `schema_version` | Integer `1`. |
+| `end_utc` | Exclusive hour end in Unix seconds. Must be a completed minute boundary. The first minute starts 3,600 seconds earlier. |
+| `pearl` | A series object with `series` set to `"gate-pearl-mainnet-usdt-v1"`, declaring Gate Pearl mainnet native PRL in USDT per PRL. All 60 minutes are required. |
+| `fx` | Optional series object with `series` set to `"kraken-usdt-usd-v1"`, declaring Kraken USD per USDT. Omit this field when no FX sample is available. |
+
+Each series object contains exactly `series`, `observed_utc`, and `minutes`. The declared observation is an integer Unix UTC second at or after `end_utc` and at or before the local clock. Each `minutes` entry has exactly three fields, for example `{"start_utc":1760000040,"closed":true,"close":"0.125"}`. Supply only settled minutes in the requested hour, ordered by increasing UTC start with no duplicates. Use canonical positive base-10 strings with at most 38 digits and 18 decimal places, without a sign, exponent, or redundant leading or trailing zeros.
+
+The USDT mean is the sum of the 60 PRL closes divided by 60. The USD mean averages the 60 products of each PRL close and the FX close from the **same minute**. A valid but incomplete FX series shows its coverage and leaves the USD mean unavailable. If exact USD arithmetic exceeds the calculation limit, the report still shows the exact USDT mean. Invalid input fails the review without a report. The Dashboard's manual point reference continues to display the historical mean as unavailable.
