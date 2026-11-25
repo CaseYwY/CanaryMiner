@@ -62,7 +62,7 @@ struct Reader {
     const size_t maxObjectMembers;
     size_t p = 0;
     std::string error;
-    Reader(const std::string &text, size_t memberLimit) : s(text), maxObjectMembers(memberLimit) {}
+    explicit Reader(const std::string &text, size_t memberLimit = 0) : s(text), maxObjectMembers(memberLimit) {}
 
     bool fail(const std::string &why) {
         if (error.empty()) error = why + " at byte " + std::to_string(p);
