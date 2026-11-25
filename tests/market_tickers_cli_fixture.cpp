@@ -73,6 +73,12 @@ int main(int argc, char **argv) {
         const bool pearl = feed == "4";
         // Index 60 adds an end-boundary row. The gap fixtures end at index 58.
         response.body = candleBody(pearl, from, ((!pearl && mode == "gap-fx") || (pearl && mode == "gap-pearl")) ? 58 : 60);
+        if (mode == "archive") {
+            response.body += std::string(33000, ' ') + "\r\n";
+            std::ofstream source(dir / (pearl ? "body-pearl" : "body-fx"), std::ios::binary);
+            source << response.body;
+            if (!source) return 4;
+        }
         if (!pearl && mode == "malformed") response.body = R"({"private-sentinel":"untrusted"})";
         if (!pearl && mode == "future") response.observedUtc += 3600;
         if (!pearl && mode == "stale") response.observedUtc -= 120;

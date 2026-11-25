@@ -34,11 +34,12 @@ inline bool readArchivePart(const std::string &bytes, size_t &offset, size_t lim
 enum class ReviewSave { Written, Unavailable, Stopped, Uncertain };
 
 // A synced sibling is published exclusively. The CLI requires a trusted local working directory.
-inline ReviewSave save(const std::string &name, std::string_view extension, const std::string &bytes,
-                       size_t maxBytes, const volatile sig_atomic_t *stop) {
+template<class Stopped>
+inline ReviewSave saveWhileActive(const std::string &name, std::string_view extension, const std::string &bytes,
+                                  size_t maxBytes, const Stopped &stopped) {
     if (!localExportName(name, extension) || bytes.size() > maxBytes)
         return ReviewSave::Unavailable;
-    if (stop && *stop) return ReviewSave::Stopped;
+    if (stopped()) return ReviewSave::Stopped;
     const auto path = localReviewPath(std::filesystem::path(name));
     if (!path) return ReviewSave::Unavailable;
 
@@ -53,11 +54,11 @@ inline ReviewSave save(const std::string &name, std::string_view extension, cons
               WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
               written == bytes.size() && FlushFileBuffers(file);
     if (!CloseHandle(file)) ok = false;
-    const bool stopped = stop && *stop;
-    if (ok && !stopped && MoveFileExW(temporary.c_str(), path->c_str(), MOVEFILE_WRITE_THROUGH))
+    const bool cancelled = stopped();
+    if (ok && !cancelled && MoveFileExW(temporary.c_str(), path->c_str(), MOVEFILE_WRITE_THROUGH))
         return ReviewSave::Written;
     if (!DeleteFileW(temporary.c_str())) return ReviewSave::Uncertain;
-    return stopped ? ReviewSave::Stopped : ReviewSave::Unavailable;
+    return cancelled ? ReviewSave::Stopped : ReviewSave::Unavailable;
 #else
     const auto temporary = name + ".tmp";
     const int directory = ::open(path->parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
@@ -69,7 +70,7 @@ inline ReviewSave save(const std::string &name, std::string_view extension, cons
     }
 
     size_t offset = 0;
-    while (offset < bytes.size() && !(stop && *stop)) {
+    while (offset < bytes.size() && !stopped()) {
         const auto written = ::write(file, bytes.data() + offset, bytes.size() - offset);
         if (written < 0 && errno == EINTR) continue;
         if (written <= 0) break;
@@ -77,16 +78,21 @@ inline ReviewSave save(const std::string &name, std::string_view extension, cons
     }
     const bool complete = offset == bytes.size() && fsync(file) == 0;
     const bool closed = ::close(file) == 0;
-    const bool stopped = stop && *stop;
-    const bool published = complete && closed && !stopped &&
+    const bool cancelled = stopped();
+    const bool published = complete && closed && !cancelled &&
                            ::linkat(directory, temporary.c_str(), directory, name.c_str(), 0) == 0;
     const bool removed = ::unlinkat(directory, temporary.c_str(), 0) == 0;
     const bool synced = !published || fsync(directory) == 0;
     ::close(directory);
     if (!removed || !synced) return ReviewSave::Uncertain;
     if (published) return ReviewSave::Written;
-    return stopped ? ReviewSave::Stopped : ReviewSave::Unavailable;
+    return cancelled ? ReviewSave::Stopped : ReviewSave::Unavailable;
 #endif
+}
+
+inline ReviewSave save(const std::string &name, std::string_view extension, const std::string &bytes,
+                       size_t maxBytes, const volatile sig_atomic_t *stop) {
+    return saveWhileActive(name, extension, bytes, maxBytes, [stop] { return stop && *stop; });
 }
 
 }  // namespace om::local_review_archive

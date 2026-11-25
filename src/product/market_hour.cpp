@@ -2,6 +2,7 @@
 #include "hash.h"
 #include "json_dom.h"
 #include "local_review_archive.h"
+#include "market_hour_capture.h"
 #include "market_hour_payload.h"
 
 #include <algorithm>
@@ -23,7 +24,10 @@ using market_detail::marketUtcLimit;
 constexpr size_t maxInputBytes = 64 * 1024;
 constexpr size_t maxReportBytes = 4 * 1024;
 constexpr size_t maxArchiveBytes = maxInputBytes + maxReportBytes + 256;
+constexpr size_t maxPublicArchiveBytes = 2 * market_detail::marketHourBodyBytes + maxReportBytes + 512;
+static_assert(maxPublicArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-MARKET-HOUR-REVIEW-1\n";
+constexpr std::string_view publicArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-2\n";
 constexpr char pearlSeriesId[] = "gate-pearl-mainnet-usdt-v1";
 constexpr char fxSeriesId[] = "kraken-usdt-usd-v1";
 constexpr char mexcSeriesId[] = "mexc-pearl-mainnet-usdt-v1";
@@ -167,6 +171,20 @@ void appendMean(std::string &report, const char *units, const MarketExactMean &m
               market_detail::exactHourMean(mean) + "\n";
 }
 
+void appendPublicCoverage(std::string &report, const char *label, const market_detail::HourSample &sample,
+                          uint64_t cutoff) {
+    report += label;
+    report += ": ";
+    if (sample.problem) {
+        report += sample.problem;
+    } else {
+        report += std::to_string(sample.minutes.size()) + "/60 elapsed minute buckets; observed UTC " +
+            std::to_string(sample.observedUtc) + " (receipt age " +
+            std::to_string(cutoff - sample.observedUtc) + " s)";
+    }
+    report += '\n';
+}
+
 const char *makeHourReport(const std::string &text, uint64_t now, std::string &report) {
     JsonValue root;
     uint64_t version = 0, end = 0;
@@ -248,6 +266,62 @@ bool decodeHourReview(const std::string &bytes, HourReviewOriginal &original) {
            bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) == 0;
 }
 
+bool readPublicHourReceipt(const std::string &bytes, size_t &offset, market_detail::PublicHourReceipt &receipt) {
+    using local_review_archive::readArchiveNumber;
+    int64_t sent = 0, observed = 0, received = 0;
+    if (!readArchiveNumber(bytes, offset, marketUtcLimit, sent) ||
+        !readArchiveNumber(bytes, offset, marketUtcLimit, observed) ||
+        !readArchiveNumber(bytes, offset, marketUtcLimit, received) ||
+        !local_review_archive::readArchivePart(bytes, offset, market_detail::marketHourBodyBytes, receipt.response.body))
+        return false;
+    receipt.sentUtc = static_cast<uint64_t>(sent);
+    receipt.receivedUtc = static_cast<uint64_t>(received);
+    receipt.response.status = PublicHttpsStatus::Ok;
+    receipt.response.httpStatus = 200;
+    receipt.response.observedUtc = static_cast<uint64_t>(observed);
+    return true;
+}
+
+bool decodePublicHourReview(const std::string &bytes, market_detail::PublicHourOriginal &original,
+                            std::string &savedReport) {
+    size_t offset = publicArchiveHeader.size();
+    int64_t initial = 0, end = 0;
+    if (!local_review_archive::readArchiveNumber(bytes, offset, marketUtcLimit, initial) ||
+        !local_review_archive::readArchiveNumber(bytes, offset, marketUtcLimit, end) ||
+        !readPublicHourReceipt(bytes, offset, original.pearl) || !readPublicHourReceipt(bytes, offset, original.fx) ||
+        !local_review_archive::readArchivePart(bytes, offset, maxReportBytes, savedReport) ||
+        bytes.size() - offset != 65 || bytes.back() != '\n' ||
+        bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
+        return false;
+    original.initialUtc = static_cast<uint64_t>(initial);
+    original.endUtc = static_cast<uint64_t>(end);
+    return original.endUtc == market_detail::publicHourEnd(original.initialUtc) &&
+           original.initialUtc <= original.pearl.sentUtc && original.pearl.receivedUtc <= original.fx.sentUtc;
+}
+
+const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::string &report) {
+    using namespace market_detail;
+    PublicHourOriginal original;
+    std::string savedReport;
+    if (!decodePublicHourReview(bytes, original, savedReport))
+        return "review archive unavailable or invalid";
+    if (original.fx.receivedUtc > clock) return "saved review cutoff is in the future";
+    const auto start = original.endUtc - marketHourSeconds;
+    HourSample pearl, fx;
+    if (decodePublicHourPayload(original.pearl.response, HourFeed::MexcPearl, start, original.endUtc,
+                                original.pearl.sentUtc, original.pearl.receivedUtc, pearl.minutes) != MarketDataStatus::Ok ||
+        decodePublicHourPayload(original.fx.response, HourFeed::CoinbaseFx, start, original.endUtc,
+                                original.fx.sentUtc, original.fx.receivedUtc, fx.minutes) != MarketDataStatus::Ok)
+        return "saved public hour response unavailable or invalid";
+    pearl.observedUtc = original.pearl.response.observedUtc;
+    fx.observedUtc = original.fx.response.observedUtc;
+    if (!renderPublicHour(original.endUtc, original.fx.receivedUtc, pearl, fx, report))
+        return "saved public hour requires complete aligned minute coverage and exact means";
+    report += publicHourCaptureTime(original.fx.receivedUtc);
+    if (savedReport != report) return "saved review report differs from the recalculated report";
+    return nullptr;
+}
+
 int reviewHour(const MarketHourOptions &options, const std::filesystem::path &path,
                const volatile sig_atomic_t *stop) {
     using local_review_archive::ReviewSave;
@@ -258,9 +332,13 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
 
     if (stopped()) return cancelled();
     HourReviewOriginal original;
+    std::string bytes;
+    bool publicArchive = false;
     if (reopening) {
-        std::string bytes;
-        if (!readLocalReviewInput(path, maxArchiveBytes, bytes) || !decodeHourReview(bytes, original))
+        if (!readLocalReviewInput(path, maxPublicArchiveBytes, bytes))
+            return refuse("review archive unavailable or invalid");
+        publicArchive = std::string_view(bytes).substr(0, publicArchiveHeader.size()) == publicArchiveHeader;
+        if (!publicArchive && (bytes.size() > maxArchiveBytes || !decodeHourReview(bytes, original)))
             return refuse("review archive unavailable or invalid");
     } else if (!readLocalReviewInput(path, maxInputBytes, original.input)) {
         return refuse("input file unavailable, oversized or unsuitable");
@@ -275,14 +353,18 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
     if (!reopening) original.cutoff = clock;
 
     std::string report;
-    if (const char *problem = makeHourReport(original.input, static_cast<uint64_t>(original.cutoff), report))
-        return refuse(problem);
-    if (saving || reopening) {
-        report += "Review UTC " + std::to_string(original.cutoff) + " (ages as of this review)\n";
+    if (publicArchive) {
+        if (const auto *problem = replayPublicHour(bytes, static_cast<uint64_t>(clock), report))
+            return stopped() ? cancelled() : refuse(problem);
+    } else {
+        if (const char *problem = makeHourReport(original.input, static_cast<uint64_t>(original.cutoff), report))
+            return refuse(problem);
+        if (saving || reopening)
+            report += "Review UTC " + std::to_string(original.cutoff) + " (ages as of this review)\n";
+        if (reopening && original.report != report)
+            return refuse("saved review report differs from the recalculated report");
     }
     if (stopped()) return cancelled();
-    if (reopening && original.report != report)
-        return refuse("saved review report differs from the recalculated report");
     if (saving) {
         if (report.size() > maxReportBytes) return refuse("review report exceeds archive bound");
         original.report = report;
@@ -300,6 +382,47 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
 }
 
 }  // namespace
+
+bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &fx,
+                                    std::string &report) {
+    const auto start = end - marketHourSeconds;
+    const auto window = calculateMarketHour(start, end, pearl.minutes, fx.minutes);
+    report = "One public candle sample; candle finality is unverified.\n";
+    report += "UTC seconds [" + std::to_string(start) + ", " + std::to_string(end) + "); window ended " +
+        std::to_string(cutoff - end) + " s ago\n";
+    appendPublicCoverage(report, "MEXC Pearl mainnet PRL/USDT", pearl, cutoff);
+    appendPublicCoverage(report, "Coinbase USDT/USD", fx, cutoff);
+    report += "Mean USDT per PRL (exact sum / minutes): ";
+    report += window.tokenUsdt ? exactHourMean(*window.tokenUsdt) :
+        window.status == MarketDataStatus::Arithmetic ? "N/A (exact arithmetic limit exceeded)" :
+        "N/A (requires all 60 PRL minutes)";
+    report += "\nMean USD per PRL (exact sum / minutes): ";
+    report += window.tokenUsd ? exactHourMean(*window.tokenUsd) :
+        window.tokenUsdt && fx.minutes.size() == marketHourMinutes ? "N/A (exact arithmetic limit exceeded)" :
+        "N/A (requires complete aligned PRL and FX coverage)";
+    report += '\n';
+    return window.tokenUsd.has_value();
+}
+
+local_review_archive::ReviewSave market_detail::savePublicHourReview(const std::string &name,
+                                                                    const PublicHourOriginal &original,
+                                                                    const std::string &report,
+                                                                    const std::function<bool()> &stopped) {
+    if (report.empty() || report.size() > maxReportBytes ||
+        original.pearl.response.body.empty() || original.pearl.response.body.size() > marketHourBodyBytes ||
+        original.fx.response.body.empty() || original.fx.response.body.size() > marketHourBodyBytes)
+        return local_review_archive::ReviewSave::Unavailable;
+    std::string body(publicArchiveHeader);
+    body += std::to_string(original.initialUtc) + '\n' + std::to_string(original.endUtc) + '\n';
+    for (const auto *receipt : {&original.pearl, &original.fx}) {
+        body += std::to_string(receipt->sentUtc) + '\n' + std::to_string(receipt->response.observedUtc) + '\n' +
+            std::to_string(receipt->receivedUtc) + '\n' + std::to_string(receipt->response.body.size()) + '\n' +
+            receipt->response.body;
+    }
+    body += std::to_string(report.size()) + '\n' + report;
+    return local_review_archive::saveWhileActive(name, marketReviewExtension, body + sha256Hex(body) + '\n',
+                                                maxPublicArchiveBytes, stopped);
+}
 
 int commandMarketHour(const MarketHourOptions &options, int argc, const char *const *argv,
                       const volatile sig_atomic_t *stop) {
@@ -331,7 +454,7 @@ int commandMarketHour(const MarketHourOptions &options, int argc, const char *co
         if (help) {
             std::printf("canary-miner market-hour --file FILE [--save-review NAME.cmh]\n"
                         "canary-miner market-hour --open-review FILE\n"
-                        "canary-miner market-hour --allow-public-candles\n"
+                        "canary-miner market-hour --allow-public-candles [--save-review NAME.cmh]\n"
                         "Request one hour from the installed HTTPS helper for MEXC Pearl/USDT and Coinbase USDT/USD.\n"
                         "Review an hour of user-declared UTC minute prices, offline.\n"
                         "Save a new archive in your trusted local folder. Open recalculates the original review.\n"
