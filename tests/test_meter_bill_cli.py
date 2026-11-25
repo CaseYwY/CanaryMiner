@@ -65,16 +65,17 @@ def main():
             tariff.write_text(json.dumps(plan), encoding='utf-8')
             intervals.write_text(json.dumps(meter), encoding='utf-8')
 
-        def review(*args):
-            return launch('--tariff', tariff if not args else args[0], '--intervals', intervals if len(args) < 2 else args[1])
+        def review(*args, as_of=None):
+            cutoff = ('--as-of-utc-ms', as_of) if as_of is not None else ()
+            return launch('--tariff', tariff if not args else args[0], '--intervals', intervals if len(args) < 2 else args[1], *cutoff)
 
-        def success():
-            result = review()
+        def success(as_of=None):
+            result = review(as_of=as_of)
             assert result.returncode == 0 and not result.stderr, f'Expected estimate in case {checks}'
             return result.stdout
 
-        def rejected(reason):
-            result = review()
+        def rejected(reason, as_of=None):
+            result = review(as_of=as_of)
             assert result.returncode == 3 and not result.stdout and reason in result.stderr, f'Refusal mismatch in case {checks}'
 
         rejected('saved tariff declaration')
@@ -113,6 +114,34 @@ def main():
         later_rate['plan']['revisions'].append(changed)
         store(later_rate)
         assert 'Provisional cycle estimate 7.480000 USD' in success()
+
+        cutoff = APRIL + NOON
+        replay = success(as_of=cutoff)
+        assert f'Review cutoff {cutoff} UTC ms' in replay
+        assert 'Provisional cycle estimate 7.480000 USD' in replay
+        assert success(as_of=cutoff) == replay
+        rejected('after the review cutoff', as_of=cutoff - 1)
+        rejected('review cutoff is in the future', as_of=253402300799999)
+        for invalid in ('0', '01', '+1', '1.0', '9x', '253402300800000'):
+            result = review(as_of=invalid)
+            assert result.returncode == 2 and not result.stdout
+        result = launch('--tariff', tariff, '--as-of-utc-ms', cutoff, '--as-of-utc-ms', cutoff)
+        assert result.returncode == 2 and not result.stdout
+        fullwidth_digits = '\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19'
+        fullwidth_cutoff = str(cutoff).translate(str.maketrans('0123456789', fullwidth_digits))
+        for flag, value in (('--as-of-utc-ms', fullwidth_cutoff), ('\uff0d\uff0das-of-utc-ms', cutoff)):
+            result = launch('--tariff', tariff, '--intervals', intervals, flag, value)
+            assert result.returncode in (2, 3) and not result.stdout
+
+        # Historical cutoff is separate from today's declaration confirmation. The
+        # affected cycle has readings, but its price was still unpublished at cutoff.
+        late_publication = copy.deepcopy(later_rate)
+        release_time = APRIL + 2 * NOON
+        late_publication['confirmed_utc'] = release_time // 1000
+        late_publication['plan']['revisions'][1]['published_utc_ms'] = release_time
+        store(late_publication)
+        rejected('rate published after decision instant', as_of=cutoff)
+        assert f'Review cutoff {release_time} UTC ms' in success(as_of=release_time)
 
         dynamic = copy.deepcopy(original)
         dynamic['plan']['revisions'][0].update(
@@ -186,6 +215,9 @@ def main():
         unicode_intervals.write_bytes(intervals.read_bytes())
         result = review(unicode_tariff, unicode_intervals)
         assert result.returncode == 0 and '4.840000 USD' in result.stdout
+        result = review(unicode_tariff, unicode_intervals, as_of=cutoff)
+        assert result.returncode == 0 and f'Review cutoff {cutoff} UTC ms' in result.stdout
+        assert '4.840000 USD' in result.stdout
         assert unicode_tariff.read_bytes() == tariff.read_bytes()
         assert unicode_intervals.read_bytes() == intervals.read_bytes()
         if os.name == 'posix':
