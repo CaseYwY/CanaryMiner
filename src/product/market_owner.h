@@ -61,6 +61,7 @@ struct MarketSnapshot {
 };
 using MarketFetch = std::function<PublicJsonResponse(const PublicJsonRequest &, const std::atomic<bool> &, PublicHttpsLimits)>;
 using MarketClock = std::function<std::pair<uint64_t, uint64_t>()>;  // monotonic milliseconds, UTC seconds
+std::pair<uint64_t, uint64_t> marketSystemClock();
 // Production fetch seam uses the P-06a owned process, not helper-side PublicJsonClient in the miner.
 MarketFetch marketProcessFetch(std::filesystem::path installedHelper);
 class MarketDataOwner {
@@ -78,6 +79,8 @@ class MarketDataOwner {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+std::vector<std::string> marketTickerLines(const MarketSnapshot &snapshot, const MarketFreshnessPolicy &policy,
+                                          uint64_t nowUtc, uint64_t nowMonoMs);
 // Native read-only projection. Kept separate from income/net rows; synthetic origins are conspicuously labelled.
 std::vector<std::string> marketSnapshotLines(const MarketSnapshot &snapshot, const MarketPollingPolicy &policy, uint64_t nowUtc, uint64_t nowMonoMs);
 PublicMarketView marketDashboardView(const MarketSnapshot &snapshot, const MarketPollingPolicy &policy, uint64_t nowUtc, uint64_t nowMonoMs);

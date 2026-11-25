@@ -43,7 +43,7 @@
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers };
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -135,6 +135,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "diagnostics") r.command = Command::Diagnostics;
         else if (c == "meter-bill") r.command = Command::MeterBill;
         else if (c == "market-hour") r.command = Command::MarketHour;
+        else if (c == "market-tickers") r.command = Command::MarketTickers;
         else {
             if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted";
             return false;
@@ -159,6 +160,16 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         r.help = argc == i + 1 && (std::string_view(argv[i]) == "--help" || std::string_view(argv[i]) == "-h");
         if (!r.help && !(argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0])) {
             if (error) *error = "market-hour: invalid options; use market-hour --help";
+            return false;
+        }
+        *out = std::move(r);
+        return true;
+    }
+    if (r.command == Command::MarketTickers) {
+        const auto option = argc == i + 1 ? std::string_view(argv[i]) : std::string_view();
+        r.help = option == "--help" || option == "-h";
+        if (!r.help && option != "--allow-public-tickers") {
+            if (error) *error = "market-tickers: use --allow-public-tickers for one sample or --help";
             return false;
         }
         *out = std::move(r);
@@ -461,6 +472,7 @@ inline std::string productHelpText() {
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       canary-miner meter-bill        review a tariff and imported meter intervals; see meter-bill --help\n"
         "       canary-miner market-hour      review an hour of local minute closes; see market-hour --help\n"
+        "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress manual and public references for this run\n"
         "       --allow-public-tickers        allow a saved public ticker request for this run in an opt-in build\n"

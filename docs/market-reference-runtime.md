@@ -75,6 +75,13 @@ CMake build and current release policy keep the HTTPS capability off.
 The installed-path test uses a synthetic helper beside an inert executable. Live provider requests, source-use
 approval and helper trust/deployment qualification require separate evidence.
 
+### Check public tickers without mining
+
+Run `canary-miner market-tickers --allow-public-tickers` from a build with public HTTPS enabled. The explicit flag permits one request each to the existing Gate Pearl mainnet ticker and Kraken USDT/USD ticker. The command exits after the sample. It leaves Dashboard and economic-mode settings untouched.
+
+The output shows the exact prices, source status and local observation times. USD per PRL requires fresh and closely timed observations from both sources. Providers do not supply a trade timestamp through these adapters. The command returns 0 for a complete fresh pair, 3 for an unavailable or incomplete sample, and 130 for cancellation with confirmed helper cleanup. If helper cleanup cannot be confirmed, the command stops sampling and withholds both quotes. It does not request candles or retry either provider. Use a protected installation with the approved helper beside the executable. The same public-source use and deployment requirements apply.
+
+
 The [Gate Spot REST contract](https://www.gate.com/docs/developers/apiv4/en/spot/#market-candlesticks) still lacks an
 unambiguous returned time anchor and consistent candle row definition. [Kraken Spot REST](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
 identifies the last row as provisional and leaves the other rows' timestamps unspecified as start or end.

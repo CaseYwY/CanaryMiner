@@ -21,12 +21,13 @@ bool sameTicket(const MarketFetchTicket &a, const MarketFetchTicket &b) {
     return a.generation == b.generation && a.serial == b.serial && a.request.feed == b.request.feed && a.request.fromUtc == b.request.fromUtc &&
         a.request.toUtc == b.request.toUtc && a.startedUtc == b.startedUtc && a.startedMonoMs == b.startedMonoMs;
 }
-std::pair<uint64_t,uint64_t> systemClock() {
+}  // namespace
+
+std::pair<uint64_t, uint64_t> marketSystemClock() {
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
     const auto utc = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     return {ms < 0 ? 0 : static_cast<uint64_t>(ms), utc < 0 ? 0 : static_cast<uint64_t>(utc)};
 }
-}  // namespace
 
 bool validMarketPollingPolicy(const MarketPollingPolicy &p) {
     return p.quoteRefreshMs >= 1000 && p.quoteRefreshMs <= 86400000 && p.candleRefreshMs >= 1000 && p.candleRefreshMs <= 86400000 &&
@@ -209,7 +210,7 @@ struct MarketDataOwner::Impl {
 };
 MarketDataOwner::MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy, MarketOrigin origin, bool fixture, MarketClock clock) : impl_(new Impl()) {
     impl_->fetch = std::move(fetch); impl_->policy = policy; impl_->origin = origin; impl_->fixture = fixture;
-    impl_->clock = clock ? std::move(clock) : MarketClock(systemClock);
+    impl_->clock = clock ? std::move(clock) : MarketClock(marketSystemClock);
 }
 MarketDataOwner::~MarketDataOwner() { stop(); }
 bool MarketDataOwner::start(uint64_t generation) {
@@ -250,16 +251,16 @@ std::shared_ptr<const MarketSnapshot> MarketDataOwner::snapshot() const {
     return s.masked?s.masked:s.emptyNativeFault;
 }
 
-std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const MarketPollingPolicy &policy, uint64_t utc, uint64_t ms) {
+std::vector<std::string> marketTickerLines(const MarketSnapshot &s, const MarketFreshnessPolicy &policy,
+                                          uint64_t utc, uint64_t ms) {
     std::vector<std::string> lines;
-    lines.push_back(std::string("Market references: ") + (s.helperFault ? "helper ownership fault" : s.clockFault ? "clock fault" : s.running ? "active" : "stopped") +
-        (s.origin == MarketOrigin::SyntheticFixture ? " | SYNTHETIC FIXTURE - NOT LIVE" : " | public provider observations"));
-    auto latest = latestMarketReference(s.pearlQuote ? &*s.pearlQuote : nullptr, s.fxQuote ? &*s.fxQuote : nullptr, utc, ms, policy.freshness);
+    auto latest = latestMarketReference(s.pearlQuote ? &*s.pearlQuote : nullptr, s.fxQuote ? &*s.fxQuote : nullptr, utc, ms, policy);
     if (!s.running || s.clockFault) { latest.tokenUsdt.reset(); latest.tokenUsd.reset(); latest.usdtUsd.reset(); }
     auto quoteLine = [&](const char *label, const std::optional<MarketQuote> &quote, const std::optional<ExactDecimal> &fresh) {
         lines.push_back(std::string(label) + ": " + (fresh ? fresh->text() : "N/A") + (quote && !fresh ? " | stale/invalid cached reference " + quote->last.text() : "") +
             (quote ? " | observed UTC " + std::to_string(quote->observation.observedUtc) + " | observation age " +
-                (ms >= quote->observation.receivedMonoMs ? std::to_string((ms - quote->observation.receivedMonoMs) / 1000) + "s" : "N/A") : " | no observation"));
+                (utc >= quote->observation.observedUtc && ms >= quote->observation.receivedMonoMs
+                     ? std::to_string(utc - quote->observation.observedUtc) + "s" : "N/A") : " | no observation"));
     };
     quoteLine("Latest PRL/USDT [Gate international PEARL_USDT; Pearl mainnet]", s.pearlQuote, latest.tokenUsdt);
     quoteLine("Latest USDT/USD [Kraken USDTZUSD]", s.fxQuote, latest.usdtUsd);
@@ -267,6 +268,13 @@ std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const Mark
         " | Kraken " + publicHttpsStatusName(s.health[2].transport) + "/" + marketDataStatusName(s.health[2].data));
     lines.push_back("Latest PRL/USD reference: " + (latest.tokenUsd ? latest.tokenUsd->text() : "N/A (missing/stale/skewed conversion)") +
         " | trade-event time NOT SUPPLIED; observation age is not trade age");
+    return lines;
+}
+
+std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const MarketPollingPolicy &policy, uint64_t utc, uint64_t ms) {
+    auto lines = marketTickerLines(s, policy.freshness, utc, ms);
+    lines.insert(lines.begin(), std::string("Market references: ") + (s.helperFault ? "helper ownership fault" : s.clockFault ? "clock fault" : s.running ? "active" : "stopped") +
+        (s.origin == MarketOrigin::SyntheticFixture ? " | SYNTHETIC FIXTURE - NOT LIVE" : " | public provider observations"));
     const unsigned expected = 60;
     MarketWindow window;
     if (s.running && !s.clockFault && s.pearlCandles && utc >= s.pearlCandles->observation.observedUtc && ms >= s.pearlCandles->observation.receivedMonoMs &&
