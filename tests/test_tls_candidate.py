@@ -1,4 +1,5 @@
 """Release candidate boundaries for both archive formats. No binary is executed."""
+import gzip
 import hashlib
 import importlib
 import io
@@ -7,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -189,6 +191,22 @@ class CandidateTests(unittest.TestCase):
                     zip_file.writestr(entry, b'replacement')
                 with self.assertRaises(ValueError):
                     CANDIDATE.load('windows', path)
+
+    def test_cli_refuses_bad_compressed_stream_without_traceback(self):
+        damaged = bytearray(gzip.compress(b'candidate archive', mtime=0))
+        damaged[10] = 0b111  # Invalid DEFLATE block type.
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / 'candidate.tar.gz'
+            archive.write_bytes(damaged)
+            result = subprocess.run(
+                [sys.executable, '-B', CANDIDATE.__file__, 'verify', '--platform', 'linux',
+                 '--archive', str(archive), '--sha256', hashlib.sha256(damaged).hexdigest()],
+                capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(result.stdout)
+            self.assertTrue(result.stderr.startswith('tls_candidate: verify refused'))
+            self.assertNotIn('Traceback', result.stderr)
+            self.assertNotIn(str(archive.parent), result.stderr)
 
     def test_too_large_expanded_tar_refused_before_parsing(self):
         archive = io.BytesIO()

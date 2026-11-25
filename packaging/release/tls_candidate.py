@@ -14,6 +14,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+import zlib
 
 from verify_artifacts import MAX_ARTIFACT_BYTES, verify_images
 
@@ -303,7 +304,8 @@ def main():
             else:
                 _, document, digest = load(args.platform, args.archive, args.sha256)
             print(json.dumps({'sha256': digest, **document}, sort_keys=True))
-    except (OSError, ValueError, EOFError, RuntimeError, tarfile.TarError, zipfile.BadZipFile) as error:
+    except (OSError, ValueError, EOFError, RuntimeError, tarfile.TarError, zipfile.BadZipFile,
+            zlib.error) as error:
         # Exception text may contain a build-machine path or untrusted archive member name.
         print(f'tls_candidate: {args.operation} refused ({type(error).__name__}).', file=sys.stderr)
         return 1
