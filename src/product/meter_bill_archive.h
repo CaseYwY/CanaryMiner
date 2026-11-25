@@ -9,7 +9,8 @@
 
 namespace om::meter_bill_detail {
 
-constexpr size_t maxMeterFileBytes = 1024 * 1024;
+constexpr size_t maxOrdinaryMeterFileBytes = 1024 * 1024;
+constexpr size_t maxMeterFileBytes = 1792 * 1024;  // Room for a leap year of half-hour readings.
 constexpr size_t maxExactResultsBytes = 32 * 1024;
 constexpr size_t maxOriginalArchiveBytes = tariffDeclarationMaxBytes + maxMeterFileBytes + maxExactResultsBytes + 256;
 constexpr size_t maxRatesArchiveBytes = maxOriginalArchiveBytes + maxOctopusRateFileBytes + 16;

@@ -4,7 +4,8 @@
 
 namespace om { namespace i18n {
 enum class TariffMonthlyMessageKey { Toggle, Derive, Enabled, Day, RetainAmounts, Derived, Review,
-    FeeToggle, FeeReview, FeeLabel, FeeOpeningRequired, ProratedExclusions, Count };
+    FeeToggle, FeeReview, FeeLabel, FeeOpeningRequired, ProratedExclusions,
+    AnnualToggle, AnnualEnabled, AnnualChanged, AnnualMonth, AnnualReview, Count };
 
 inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonthlyMessageKey key) {
     static constexpr std::array<std::string_view,static_cast<size_t>(TariffMonthlyMessageKey::Count)> messages = {{
@@ -18,7 +19,12 @@ inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonth
         "Daily fees use the civil-midnight rate, split by minutes in each billing cycle.",
         "fees prorated",
         "Re-enter the accrued subtotal using the selected daily fee rule.",
-        "EXCLUDES demand/export/prepaid/independent resets/other proration/ordered taxes/unsupported rounding."
+        "EXCLUDES demand/export/prepaid/independent resets/other proration/ordered taxes/unsupported rounding.",
+        "[Y] Annual reset",
+        "Enter the annual month and day. Derive dates with G and re-enter both opening amounts.",
+        "Annual policy removed. Review the cycle dates and re-enter both opening amounts.",
+        "Month 1-12 in the declared reset clock.",
+        "Annual reset at the selected date in the declared reset clock. Usage carries across months."
     }};
     const auto index=static_cast<size_t>(key);
     if(index>=messages.size())return {};

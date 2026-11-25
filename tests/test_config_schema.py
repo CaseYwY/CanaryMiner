@@ -361,6 +361,23 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
             self.assertTrue(validate({**named_reset, 'schema_version': 3 if fee else 2}, schema, schema))
             self.assertTrue(validate({**named_reset, 'reset_policy': {'monthly_day': 1}}, schema, schema))
 
+    def test_annual_reset_is_explicit_and_versioned(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        reset = {'annual_month': 2, 'annual_day': 29,
+                 'clock': {'kind': 'utc', 'fixed_offset_seconds': 0}}
+        annual = {**example, 'schema_version': 5, 'reset_policy': reset}
+        self.assertEqual(validate(annual, schema, schema), [])
+        for version in (1, 2, 3, 4):
+            self.assertTrue(validate({**annual, 'schema_version': version}, schema, schema))
+        for edits in ({'annual_month': 13}, {'annual_month': False}, {'annual_day': 0},
+                      {'monthly_day': 31}, {'daily_fee_allocation': 'whole_day'}):
+            self.assertTrue(validate({**annual, 'reset_policy': {**reset, **edits}}, schema, schema))
+        named = {'kind': 'named_iana', 'zone': 'Europe/London', 'time_database_version': '2026e'}
+        prorated = {**reset, 'clock': named, 'daily_fee_allocation': 'prorate_by_cycle_minutes'}
+        self.assertEqual(validate({**annual, 'reset_policy': prorated}, schema, schema), [])
+        self.assertTrue(validate({**annual, 'reset_policy': 'explicit_cycle_only'}, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -383,10 +400,11 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         bad = json.loads(json.dumps(example))
         bad['plan']['revisions'][0]['demand_charge'] = '0'
         self.assertTrue(validate(bad, schema, schema))
-        for definition in schema['$defs'].values():
+        for name, definition in schema['$defs'].items():
             if definition.get('type') == 'object':
                 self.assertFalse(definition['additionalProperties'])
-                self.assertEqual(set(definition['required']), set(definition['properties']))
+                optional = {'daily_fee_allocation'} if name == 'annualReset' else set()
+                self.assertEqual(set(definition['required']), set(definition['properties']) - optional)
 
 
 class DiagnosticSchemaTests(unittest.TestCase):

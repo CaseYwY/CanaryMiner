@@ -9,19 +9,20 @@ namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
 inline constexpr char finalDisplayRounding[] = "final_display_only";
 inline constexpr char meterHalfHourRounding[] = "meter_import_half_hour_kwh_half_even_2";
-struct TariffMonthlyReset {
+struct TariffResetSchedule {
     unsigned day=0;
     CivilClock clock;
     DailyFeeAllocation dailyFeeAllocation = DailyFeeAllocation::WholeDay;
+    unsigned annualMonth = 0;  // Zero repeats monthly. Otherwise reset once per year in this month.
 };
 struct TariffDeclaration {
     std::string country, sourceReference, openingKey;
     uint64_t confirmedUtc=0;
     TariffPlan plan;
     BillOpening opening;
-    std::optional<TariffMonthlyReset> monthlyReset;
+    std::optional<TariffResetSchedule> resetSchedule;
     DailyFeeAllocation dailyFeeAllocation() const {
-        return monthlyReset ? monthlyReset->dailyFeeAllocation : DailyFeeAllocation::WholeDay;
+        return resetSchedule ? resetSchedule->dailyFeeAllocation : DailyFeeAllocation::WholeDay;
     }
 };
 // Display-neutral rejection sites, not persisted identifiers, source qualification or permission.
@@ -42,7 +43,7 @@ struct TariffCycleComparison {
     bool splitsChargedDay = false;
     ElectricityAmount withoutMining, withMining, difference;
 };
-// The first cycle uses the saved opening. Subsequent complete cycles start at the declared monthly reset.
+// The first cycle uses the saved opening. Subsequent complete cycles start at the declared monthly or annual reset.
 std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d, unsigned cycles);
 TariffCycleComparison compareTariffCycles(const TariffDeclaration &d, const std::array<ExactDecimal, 2> &watts,
     unsigned cycles, int64_t decisionUtcMs, const std::atomic<bool> *cancel = nullptr);
@@ -63,6 +64,8 @@ std::string tariffJson(const JsonValue &value);
 // Transactional output; validates every key/type/rule and binds an explicit fixed clock.
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem=nullptr);
 // Checks the rule and through-time independently of unfinished rates and opening amounts.
+bool deriveTariffRecurringCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem=nullptr);
+// Monthly-only clients retain their original contract.
 bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem=nullptr);
 bool parseTariffDeclaration(const std::string &text,JsonValue *root,TariffProblem *problem=nullptr);
 // Path/value lines for explicit local review. Never log these: they contain private declarations.

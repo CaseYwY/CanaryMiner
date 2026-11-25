@@ -17,7 +17,8 @@ namespace om {
 namespace {
 
 using namespace meter_bill_detail;
-constexpr size_t maxMeterIntervals = 8192;
+constexpr size_t maxOrdinaryMeterIntervals = 8192;
+constexpr size_t maxAnnualMeterIntervals = 18432;
 
 using MeterSeries = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
 struct MeterReadings {
@@ -133,8 +134,12 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
                                const char *lateReadingError, MeterReadings &readings,
                                const std::function<bool()> &stopped) {
     const auto &opening = declaration.opening;
+    const bool annual = declaration.resetSchedule && declaration.resetSchedule->annualMonth;
+    const auto byteLimit = annual ? maxMeterFileBytes : maxOrdinaryMeterFileBytes;
+    const auto intervalLimit = annual ? maxAnnualMeterIntervals : maxOrdinaryMeterIntervals;
+    if (text.size() > byteLimit) return "interval file unavailable, oversized or not a regular file";
     JsonValue root;
-    if (!parseJsonStrict(text, &root, nullptr, {maxMeterFileBytes, 5}) || !root.isObject())
+    if (!parseJsonStrict(text, &root, nullptr, {byteLimit, 5}) || !root.isObject())
         return "invalid interval document";
     const auto *schema = root.find("schema_version");
     const auto *scope = root.find("scope");
@@ -145,7 +150,7 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     const auto *rows = root.find(version == 1 ? "intervals" : version == 2 ? "register_readings" : "consumption");
     if (!rows || !rows->isArray()) return "invalid interval document";
     const auto size = rows->items.size();
-    if (version == 2 ? size < 2 || size > maxMeterIntervals + 1 : size < 1 || size > maxMeterIntervals)
+    if (version == 2 ? size < 2 || size > intervalLimit + 1 : size < 1 || size > intervalLimit)
         return "invalid interval document";
     if (scope->text != opening.evidence.scope) return "meter scope differs from the saved opening";
     readings.version = version;
@@ -277,7 +282,14 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return "saved tariff declaration unavailable or invalid";
     const auto *schema = root.find("schema_version");
     uint64_t schemaVersion = 0;
-    const bool namedTariff = schema && schema->asUint64(&schemaVersion) && schemaVersion == 4;
+    const auto usesNamedClock = [](const JsonValue *part) {
+        const auto *clock = part ? part->find("clock") : nullptr;
+        const auto *kind = clock ? clock->find("kind") : nullptr;
+        return kind && kind->isString() && kind->text == "named_iana";
+    };
+    const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
+        (schemaVersion == 4 || (schemaVersion == 5 &&
+         (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
     if (!decodeTariffDeclaration(root, &declaration)) return "saved tariff declaration unavailable or invalid";

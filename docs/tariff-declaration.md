@@ -23,25 +23,25 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds an explicit daily-fee allocation to that monthly cycle. The existing default is `final_display_only`. All three versions share the same basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks, and version 5 supports an annual cycle. The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent resets/annual true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, separate resets within one plan and annual true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
-The combined tariff editor supports independently selected IANA rate and monthly reset clocks
+The combined tariff editor supports independently selected IANA rate and recurring reset clocks
 in an opt-in installation with the verified 2026e database. Select the Clock object under Plan
-or Monthly reset and press **Z**. Enter the IANA zone in the Zone field and review the draft.
+or the recurring reset policy and press **Z**. Enter the IANA zone in the Zone field and review the draft.
 Changing the rate clock in a cycle requires re-entering the accrued opening subtotal.
 Changing the reset clock requires deriving the cycle again with **G** and reviewing its opening.
 Press **Z** again to select UTC. The rate clock controls calendar prices and daily fees.
-The reset clock controls monthly boundaries.
+The reset clock controls monthly or annual boundaries.
 
-A declaration with at least one named clock uses schema version 4. The named clock object is:
+With a named clock, an explicit or monthly cycle uses version 4. An annual cycle uses version 5. Both accept this clock object.
 
 ```json
 {"kind":"named_iana","zone":"America/New_York","time_database_version":"2026e"}
@@ -49,8 +49,7 @@ A declaration with at least one named clock uses schema version 4. The named clo
 
 The opening time database version matches the rate clock. Use **2026e** for a named rate
 clock and **explicit-fixed-clock** for UTC or a fixed-offset rate clock. The reset clock
-keeps its own version. With named rate clocks, monthly or explicit cycle dates are supported.
-Monthly reset dates use the first valid instant of the selected local date. A completely
+keeps its own version. Recurring reset dates use the first valid instant of the selected local date. A completely
 skipped date blocks derivation. The older UTC and fixed-offset declaration schemas remain readable.
 
 Calendar prices follow the chosen zone across transitions. A repeated wall-clock hour prices
@@ -82,9 +81,27 @@ Existing declarations retain their explicit dates. Press **M** on the monthly po
 dates, then review any edits before saving. The monthly rule derives dates in the draft and validates the saved
 opening against them. It does not advance with elapsed time or reset a bill, readings or accrued amounts.
 
-### Prorate a daily fee across the monthly reset
+### Set an annual whole-meter cycle
 
-With the monthly rule selected on `reset_policy`, press **F** to toggle the daily-fee rule. Review with **V** and save with **Enter**. Enabling it uses schema version 3 for fixed clocks or keeps schema version 4 for a named clock. It stores `"daily_fee_allocation": "prorate_by_cycle_minutes"` inside `reset_policy`. Changing the rule requires new plan and opening keys. If the opening starts after the reset, the editor clears its draft accrued subtotal. Re-enter the amount using the selected fee rule before saving. Deriving a changed end for a prorated mid-cycle opening also clears the subtotal because it may include a share calculated from the previous end.
+Select `reset_policy` and press **Y**. Enter a month from 1 to 12, a day from 1 to 31 and a reset clock. Use **G** to derive the dates, then enter both opening amounts for that annual period. Review the plan and opening keys before saving. The editor clears those amounts when the schedule changes to or from annual.
+
+Version 5 stores this annual policy. For a February 29 reset, the boundary is February 28 in a non-leap year. The reset clock can be UTC, fixed standard time or a reviewed IANA clock. Each period starts at the first valid instant of the chosen local date. A skipped local date makes that cycle unavailable.
+
+```json
+{
+  "annual_month": 2,
+  "annual_day": 29,
+  "clock": {"kind": "utc", "fixed_offset_seconds": 0}
+}
+```
+
+Usage accumulates from the annual opening across months and rate revisions. The shared tier register resets at the next annual boundary. The cycle charge and any minimum apply once per annual cycle. For month-by-month review, supply readings through the desired cutoff to obtain a provisional annual estimate. When an interval crosses the year boundary, a cumulative register file needs a reading exactly there. A version 5 review requires a version 5-capable reader. This policy defines one annual billing and tier cycle. Monthly invoice settlement coexisting with a separate annual true-up needs its own supplier rules.
+
+<a id="prorate-a-daily-fee-across-the-monthly-reset"></a>
+
+### Prorate a daily fee across a recurring reset
+
+With a monthly or annual rule selected on `reset_policy`, press **F** to toggle the daily-fee rule. Review with **V** and save with **Enter**. For a monthly rule, enabling it uses version 3 for fixed clocks or keeps version 4 for a named clock. An annual rule stays on version 5. It stores `"daily_fee_allocation": "prorate_by_cycle_minutes"` inside `reset_policy`. Changing the rule requires new plan and opening keys. If the opening starts after the reset, the editor clears its draft accrued subtotal. Re-enter the amount using the selected fee rule before saving. Deriving a changed end for a prorated mid-cycle opening also clears the subtotal because it may include a share calculated from the previous end.
 
 The fee for a tariff day comes from the rate revision effective at the tariff clock's midnight. Each billing cycle receives the fee times its overlapping minutes divided by the tariff day's actual minutes. For example, a 1.44 daily fee split at 18:30 in the tariff clock contributes 1.11 to the closing cycle and 0.33 to the new cycle. A revision at 18:30 can change the energy rate that minute. Its daily fee starts on the next tariff day. Each cycle books its share once, on first covered use or zero-usage coverage of that day. When the calculation first books a share, it requires a midnight revision published by the review cutoff. A declared mid-day opening may already include that share.
 
@@ -97,7 +114,7 @@ for the **without mining** and **with mining** scenarios. Use **Tab** to change 
 The calculation uses the saved plan and opening, including any declared accrued usage. Each entered watt value
 applies to the full displayed UTC interval from the opening's through-time to the selected end.
 
-For a saved monthly reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
+For a saved monthly or annual reset rule, use **Left/Right** to select 1–12 cycles. The first selection is the remainder of
 the saved cycle. Each additional cycle runs from one declared reset to the next. The same entered watts apply
 through the displayed end. Later cycles start with zero use and zero accrued subtotal, and each cycle applies its
 own fees, tier allowance and minimum. Charges are added exactly before display rounding. A declaration with
@@ -138,9 +155,9 @@ whole-meter import intervals. Each interval uses UTC milliseconds and a canonica
 ```
 
 The first reading starts at the saved opening's through-time. The calculation applies the recorded average watts
-uniformly within each interval. This convention matters when an interval spans a tariff change or monthly reset.
+uniformly within each interval. This convention matters when an interval spans a tariff change or cycle reset.
 The output lists reviewed UTC coverage, imported kWh, the charge change from those intervals, and the estimate for
-each touched cycle. A cycle that ends before the next reset has a provisional estimate. Subsequent monthly cycles start
+each touched cycle. A cycle that ends before the next reset has a provisional estimate. Subsequent declared cycles start
 with fresh allowances and fees from the saved rule. An interval that ends exactly on a reset closes the preceding cycle.
 
 Add `--as-of-utc-ms MS` with a positive ASCII decimal UTC millisecond timestamp to replay a historical review.
@@ -150,9 +167,9 @@ invalid. The saved declaration still supplies
 the opening values, so the cutoff describes rate publication and reading coverage, and local confirmation can be later.
 Omit the option to use the current UTC time.
 
-The reader accepts up to 1 MiB, 8,192 intervals and twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
+Regular meter files for an annual policy can contain up to 1.75 MiB and 18,432 intervals. Other policies retain 1 MiB and 8,192 intervals. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
 unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
-additional cycle that starts within a charged tariff day requires the version 3 [daily-fee rule](#prorate-a-daily-fee-across-the-monthly-reset). Use regular files in a trusted
+additional cycle that starts within a charged tariff day requires the version 3 [daily-fee rule](#prorate-a-daily-fee-across-a-recurring-reset). Use regular files in a trusted
 local directory. Windows accepts native Unicode paths on local drives and rejects redirected directories. The command
 prints no file paths or scope labels. Ctrl+C cancels the calculation. A stalled filesystem read can delay exit.
 Estimation from submitted data and qualified live collection remain separate acceptance steps.
@@ -193,7 +210,7 @@ Use the same command with an interval file in schema version 2:
 }
 ```
 
-Provide 2–8,193 strictly ordered timestamps from one whole-meter import register. The first timestamp
+Provide 2–8,193 strictly ordered timestamps from one whole-meter import register, or up to 18,433 for an annual policy. The first timestamp
 must match the saved opening's through-time. It anchors subsequent differences. The saved opening
 supplies the cycle's accrued kWh and subtotal separately. Values are canonical, nonnegative decimal
 strings in kWh, with up to 38 digits and 18 decimal places. A repeated register value records zero import.

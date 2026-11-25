@@ -447,6 +447,55 @@ def main():
             send(b'q')
 
         session([cli, 'settings', '--config', str(config)], reopen_explicit)
+
+        annual_state = root / 'annual-cycle'
+        annual_state.mkdir()
+        annual_config = root / 'annual-settings.json'
+        annual_config.write_text(json.dumps({'schema_version': 1, 'state_dir': str(annual_state)}))
+        annual_file = annual_state / 'tariff-declaration.json'
+        annual = json.loads(horizon_original)
+        annual.update(schema_version=1, reset_policy='explicit_cycle_only')
+        annual['plan']['revisions'][0].update(
+            begin_utc_ms=1709164800000, end_utc_ms=1772236800000, published_utc_ms=1700000000000)
+        annual['opening'].update(cycle_begin_utc_ms=1709164800000, cycle_end_utc_ms=1740700800000,
+                                 through_utc_ms=1709164800000, imported_kwh='0', accrued_subtotal='0')
+        annual_original = json.dumps(annual).encode()
+        annual_file.write_bytes(annual_original)
+
+        def save_annual(send, until, open_tariff):
+            nonlocal checks
+            down, up = b'\x1b[B', b'\x1b[A'
+            until(b'CanaryMiner / Settings')
+            open_tariff()
+            send(down * 5)
+            until(b'[Y] Annual reset', True)
+            send(b'y')
+            until(b'Enter the annual month and day', True)
+            send(b'\r\r2\r' + down + b'\r29\r')
+            send(b'\x1b')
+            until(b'> reset_policy:', True)
+            send(b'g')
+            until(b'Draft cycle dates derived', True)
+            send(down * 3 + b'\r0\r' + down + b'\r0\r\x1b')
+            until(b'> opening:', True)
+            send(up + b'\r\rnew-annual-plan\r\x1b')
+            until(b'> plan:', True)
+            send(down + b'\r\rnew-annual-opening\rv')
+            until(b'Usage carries across months.', True)
+            assert annual_file.read_bytes() == annual_original
+            send(b'\r')
+            until(b'Saved offline declaration + opening ONLY', True)
+            saved = json.loads(annual_file.read_bytes())
+            assert saved['schema_version'] == 5
+            assert saved['reset_policy'] == {
+                'annual_month': 2, 'annual_day': 29, 'clock': {'kind': 'utc', 'fixed_offset_seconds': 0}}
+            assert saved['opening'] == {**annual['opening'], 'key': 'new-annual-opening'}
+            assert saved['plan'] == {**annual['plan'], 'key': 'new-annual-plan'}
+            checks += 5
+            send(b'q')
+
+        session([cli, 'settings', '--config', str(annual_config)], save_annual)
+
         rounding_state = root / 'interval-rounding'
         rounding_state.mkdir()
         rounding_config = root / 'interval-rounding.json'
@@ -533,7 +582,7 @@ def main():
                 send(b'q')
 
             session([cli, 'settings', '--config', str(config)], reopen_named)
-    print(f'tariff declaration PTY: {checks} checks; author/review/save/comparison/conflict/active-session/stop/monthly policy passed')
+    print(f'tariff declaration PTY: {checks} checks; author/review/save/comparison/conflict/active-session/stop/monthly and annual policies passed')
 
 
 if __name__ == '__main__':
