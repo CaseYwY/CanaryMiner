@@ -36,7 +36,7 @@ inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonth
         "Enter the monthly value for this two-month rule.",
         "[A] Seasonal allowance",
         "Enter the publication time and add seasonal start dates in calendar order.",
-        "The allowance sums each tariff day's quota for the full cycle. Clear both band bounds.",
+        "The allowance sums each tariff day's quota for the full cycle. Clear both band bounds. Use new plan and opening keys when changing a saved rule.",
         "Choose either the two-month rule or seasonal allowance.",
         "The allowance changed. Re-enter the accrued subtotal.",
         "Clear both bounds. The first band's limit comes from the seasonal allowance.",

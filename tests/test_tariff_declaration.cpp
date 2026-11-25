@@ -218,7 +218,7 @@ void annualCycles(const JsonValue &original) {
     CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
 }
 
-void seasonalCycles(JsonValue draft) {
+void seasonalCycles(JsonValue draft,const std::filesystem::path &target) {
     constexpr int64_t begin=1713657600000, middle=1714521600000, end=1716249600000, next=1718928000000;
     auto &plan=member(draft,"plan");
     auto &revision=member(plan,"revisions").items.front();
@@ -344,6 +344,21 @@ void seasonalCycles(JsonValue draft) {
     panel.key('a',{},T/1000);
     CHECK(!panel.draft.find("seasonal_allowance"));
     CHECK(panel.draft.find("schema_version")->text=="2");
+
+    TariffDeclarationStore store(target);
+    JsonValue loaded;
+    std::string message;
+    CHECK(store.load(&loaded,&message)&&store.save(saved,&message));
+    auto revised=saved;
+    auto &seasons=member(member(revised,"seasonal_allowance"),"seasons");
+    set(seasons.items.front(),"kwh_per_day",R"("2.5")");
+    CHECK(!store.save(revised,&message)&&message.find("NEW plan.key")!=std::string::npos);
+    CHECK(store.load(&loaded,&message)&&tariffJson(loaded)==tariffJson(saved));
+    set(member(revised,"plan"),"key",R"("revised-seasonal-plan")");
+    CHECK(!store.save(revised,&message)&&message.find("NEW opening.key")!=std::string::npos);
+    set(member(revised,"opening"),"key",R"("revised-seasonal-opening")");
+    CHECK(store.save(revised,&message));
+    CHECK(store.load(&loaded,&message)&&tariffJson(loaded)==tariffJson(revised));
 }
 
 void bimonthlyCycles(JsonValue draft) {
@@ -615,7 +630,6 @@ int main(int argc,char **argv){
     monthlyCycles(original);
     annualCycles(original);
     bimonthlyCycles(original);
-    seasonalCycles(original);
     CHECK(d.plan.tiers==TierMode::Progressive&&d.plan.revisions[0].timeMode==TimeRateMode::Calendar&&d.opening.evidence.origin==PowerOrigin::DeclaredForecast);
     CHECK(d.opening.planKey==d.plan.key&&d.sourceReference.find("SYNTHETIC")!=std::string::npos);
     PowerTrace trace{d.opening.evidence,{{static_cast<int64_t>(T),static_cast<int64_t>(T+86400000),dec("1000")}}};
@@ -663,6 +677,7 @@ int main(int argc,char **argv){
     CHECK(evaluateBill(d.plan,d.opening,trace,T+86400000,T).charge->format(2,&text)&&text=="12.54");
     // Load/save/CAS/version binding and failed loads across independent store instances.
     const auto root=std::filesystem::path(makeScratchDir("tariff-declaration")),file=root/"tariff-declaration.json";
+    seasonalCycles(original,root/"seasonal-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));

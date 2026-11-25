@@ -163,8 +163,9 @@ An open-cycle review uses the same allowance when the rule was published by the 
 The meter accumulates through season boundaries and resets only at its declared billing boundary.
 A zero allowance prices all import at the excess rate.
 
-The rule supports explicit, monthly or annual cycles and display-only rounding. Review and save
-with **V** and **Enter**. For a mid-cycle opening, enter the import to date and the accrued subtotal
+The rule supports explicit, monthly or annual cycles and display-only rounding. Use new plan and
+opening keys when changing a saved rule, then review and save with **V** and **Enter**. For a
+mid-cycle opening, enter the import to date and the accrued subtotal
 priced using this cycle's allowance. Changing the allowance, rate clock or cycle end clears the draft
 subtotal for a mid-cycle opening. Changing the start or through-time also clears the opening import.
 Meter-review archives retain the source schedule and exact allowance for each cycle.
