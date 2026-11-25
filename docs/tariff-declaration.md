@@ -104,6 +104,13 @@ The output lists reviewed UTC coverage, imported kWh, the charge change from tho
 each touched cycle. A cycle that ends before the next reset has a provisional estimate. Subsequent monthly cycles start
 with fresh allowances and fees from the saved rule. An interval that ends exactly on a reset closes the preceding cycle.
 
+Add `--as-of-utc-ms MS` with a positive ASCII decimal UTC millisecond timestamp to replay a historical review.
+The cutoff appears in the report. Every supplied interval must end at or before the cutoff. A rate published later cannot affect the estimate.
+If such a rate is needed, the entire review is refused. Reset-day fee checks use the same cutoff. A future cutoff is
+invalid. The saved declaration still supplies
+the opening values, so the cutoff describes rate publication and reading coverage, and local confirmation can be later.
+Omit the option to use the current UTC time.
+
 The reader accepts up to 1 MiB, 8,192 intervals and twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
 unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
 additional cycle that starts within a charged tariff day requires an allocation rule. Use regular files in a trusted
