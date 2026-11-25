@@ -7,6 +7,24 @@ using namespace om;
 namespace {
 using Key=i18n::TariffPanelMessageKey;
 const std::array<std::string,27> english={{"Terminal too short.","Resize to 12+ rows.","[Ctrl+C] Stop [Esc] Back","[Enter] Apply draft [Esc] Cancel edit [Ctrl+C] Stop","[Enter/F2] Save declaration [Arrows] Scroll [Esc] Edit [Q] Stop","[Arrows/Tab] Field [Enter] Open/edit [A] Add row [X] Remove row [V/F2] Review [Esc] Back [Q] Stop","OFFLINE DECLARATION / whole-meter scenario; no automatic reset or runtime activation.","Q/D/L/S are text here; Ctrl+C stops.","Unsaved tariff declaration","[Enter] Review [D] Discard [Esc] Continue editing","[Enter] Remove from draft [Esc] Cancel","Saved declaration is preserved until reviewed Save.","Empty table: [A] Add a blank row","Combined tariff / declared opening"," *","[Enter] fields"," [fixed]","Review tariff-declaration.json ONLY","Saved declaration does NOT activate the runtime energy owner or an optimizer.","Whole-meter DECLARED FORECAST opening; source reference is an unverified local claim.","Reset: explicit single cycle only, <=370 elapsed days. Rates do not reset shared tiers.","EXCLUDES demand/export/prepaid/independent resets/proration/ordered taxes/unsupported rounding.","No missing household usage, future prices or unobserved load is filled with zero.","Minimum/all-units need full remaining cycle. USD conversion is not inferred.","Changes (old -> draft); unchanged fields follow:","No value changes.","Save stamps local confirmation time only; not supplier approval or freshness renewal."}};
+const std::array<std::string_view,16> roundingExclusions={{
+    u8"unsupported rounding",
+    u8"\u4e0d\u652f\u6301\u7684\u820d\u5165\u89c4\u5219",
+    u8"\u4e0d\u652f\u63f4\u7684\u6368\u5165\u898f\u5247",
+    u8"reglas de redondeo no admitidas",
+    u8"regras de arredondamento n\u00e3o suportadas",
+    u8"r\u00e8gles d'arrondi non prises en charge",
+    u8"nicht unterst\u00fctzte Rundungsregeln",
+    u8"\u043d\u0435\u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u043c\u044b\u0435 \u043f\u0440\u0430\u0432\u0438\u043b\u0430 \u043e\u043a\u0440\u0443\u0433\u043b\u0435\u043d\u0438\u044f",
+    u8"\u672a\u5bfe\u5fdc\u306e\u4e38\u3081\u898f\u5247",
+    u8"\uc9c0\uc6d0\ub418\uc9c0 \uc54a\ub294 \ubc18\uc62c\ub9bc \uaddc\uce59",
+    u8"\u0642\u0648\u0627\u0639\u062f \u0627\u0644\u062a\u0642\u0631\u064a\u0628 \u063a\u064a\u0631 \u0627\u0644\u0645\u062f\u0639\u0648\u0645\u0629",
+    u8"\u0905\u0938\u092e\u0930\u094d\u0925\u093f\u0924 \u092a\u0942\u0930\u094d\u0923\u093e\u0902\u0915\u0928 \u0928\u093f\u092f\u092e",
+    u8"\u0985\u09b8\u09ae\u09b0\u09cd\u09a5\u09bf\u09a4 \u09b0\u09be\u0989\u09a8\u09cd\u09a1\u09bf\u0982 \u09a8\u09bf\u09af\u09bc\u09ae",
+    u8"aturan pembulatan yang tidak didukung",
+    u8"desteklenmeyen yuvarlama kurallar\u0131",
+    u8"quy t\u1eafc l\u00e0m tr\u00f2n ch\u01b0a h\u1ed7 tr\u1ee3"
+}};
 std::string unisolate(std::string text){for(const auto *mark:{u8"\u2066",u8"\u2067",u8"\u2068",u8"\u2069"})for(auto at=text.find(mark);at!=text.npos;at=text.find(mark))text.erase(at,3);return text;}
 std::string unpaint(const std::string &text){std::string result;for(std::size_t i=0;i<text.size();){if(text[i]!='\x1b'){result+=text[i++];continue;}
     CHECK(i+1<text.size()&&text[i+1]=='[');i+=2;while(i<text.size()&&((text[i]>='0'&&text[i]<='9')||text[i]==';'))++i;CHECK(i<text.size()&&text[i]=='m');if(i<text.size())++i;}return result;}
@@ -19,6 +37,7 @@ void catalog(){
         for(std::size_t key=0;key<27;++key){const auto message=i18n::tariffPanelMessage(pack.id,static_cast<Key>(key));std::vector<std::string_view> parameters;
             CHECK(!message.text.empty()&&!message.fallback&&message.locale==pack.id&&message.review==pack.review&&message.rtl==pack.rtl&&i18n::validTemplateTranslation(english[key],message.text));
             CHECK(i18n::templateParameters(message.text,&parameters)&&parameters.empty());
+            if(static_cast<Key>(key)==Key::Excludes)CHECK(message.text.find(roundingExclusions[p])!=message.text.npos);
             if(key==16)CHECK(message.text.substr(0,2)==" ["&&message.text.back()==']'); // human annotation, not a keyboard key
             else CHECK(keys(english[key])==keys(message.text));
             for(const auto *token:{"12","Ctrl+C","OFFLINE DECLARATION","Q/D/L/S","tariff-declaration.json","ONLY","NOT","DECLARED FORECAST","<=370","EXCLUDES","USD","->"})if(english[key].find(token)!=english[key].npos)CHECK(message.text.find(token)!=message.text.npos);}}
