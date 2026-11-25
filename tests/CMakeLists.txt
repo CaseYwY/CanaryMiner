@@ -65,6 +65,8 @@ add_test(NAME meter_bill_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_me
 set_tests_properties(meter_bill_cli PROPERTIES TIMEOUT 45)
 add_test(NAME meter_bill_archive_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_bill_archive_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
 add_test(NAME meter_invoice_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_invoice_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
+add_test(NAME annual_invoice_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_annual_invoice_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
+set_tests_properties(annual_invoice_cli PROPERTIES TIMEOUT 60)
 set_tests_properties(meter_bill_archive_cli PROPERTIES TIMEOUT 60)
 add_test(NAME meter_review_extension_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_meter_review_extension_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host>)
 set_tests_properties(meter_review_extension_cli PROPERTIES TIMEOUT 60)
