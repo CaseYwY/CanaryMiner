@@ -64,6 +64,20 @@ void comparisonHorizon(JsonValue saved){
     CHECK(panel.render(60,12,ColorLevel::None).find(std::to_string(april))!=std::string::npos);
     for(char c:std::string("0\t1000\r"))panel.key(c,{},T/1000);
     CHECK(awaitComparison(panel).find("163.680000 USD")!=std::string::npos);
+
+    auto large=saved;
+    set(large,"schema_version","3");
+    member(large,"reset_policy").members.emplace_back("daily_fee_allocation",json("\"prorate_by_cycle_minutes\""));
+    auto &largeRate=member(member(large,"plan"),"revisions").items.front();
+    set(largeRate,"base_rate_per_kwh","\"123456789012345678901234567890\"");
+    TariffSettingsPanel narrowPanel;
+    narrowPanel.open(large);
+    narrowPanel.key('p',{},T/1000);
+    for(char c:std::string("1000\t4000\r"))narrowPanel.key(c,{},T/1000);
+    const auto narrowResult=awaitComparison(narrowPanel);
+    CHECK(narrowResult.find("Difference (with - without)")!=std::string::npos);
+    CHECK(narrowResult.find("[Esc] Back [Q] Stop")!=std::string::npos);
+    frame(narrowPanel,60,12);
     frame(panel,60,12);
     panel.key(kKeyRight,{},T/1000);
     CHECK(panel.render(60,12,ColorLevel::None).find("163.680000 USD")==std::string::npos);
