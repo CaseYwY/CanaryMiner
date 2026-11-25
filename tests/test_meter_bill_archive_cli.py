@@ -174,6 +174,32 @@ def main(cli):
         assert frames(large_bytes)[1][1] == meter_path.read_bytes()
         reopen_large = run('--open-review', 'largest.cmr')
         assert (reopen_large.returncode, reopen_large.stderr, reopen_large.stdout) == (0, '', last.stdout)
+        offset = 60000
+        boundary = END - offset
+        plan['schema_version'] = 3
+        plan['reset_policy'].update(clock={'kind': 'fixed_standard', 'fixed_offset_seconds': 60},
+                                    daily_fee_allocation='prorate_by_cycle_minutes')
+        plan['plan'].update(cycle_charge='0', subtotal_multiplier='1')
+        plan['plan']['revisions'][0].update(begin_utc_ms=begin-offset, charge_per_civil_day='0.01')
+        plan['opening'].update(cycle_begin_utc_ms=begin-offset, cycle_end_utc_ms=boundary,
+                               through_utc_ms=END-24*HOUR)
+        meter['intervals'] = [{'begin_utc_ms': END-24*HOUR, 'end_utc_ms': END,
+                              'average_watts': '0'}]
+        tariff_path.write_text(json.dumps(plan), encoding='utf-8')
+        meter_path.write_text(json.dumps(meter), encoding='utf-8')
+        prorated = save('minute.cmr')
+        assert prorated.returncode == 0 and not prorated.stderr, prorated
+        minute = root / 'minute.cmr'
+        minute_bytes = minute.read_bytes()
+        _, minute_parts = frames(minute_bytes)
+        exact = [json.loads(row) for row in minute_parts[2].splitlines()]
+        # 0.01 * 3,600,000,000 / 1,440 times 1,439 and 1 respectively.
+        assert [row[7] for row in exact] == ['35975000', '25000'], exact
+        tariff_path.unlink()
+        meter_path.unlink()
+        replay = run('--open-review', minute.name)
+        assert (replay.returncode, replay.stderr, replay.stdout) == (0, '', prorated.stdout)
+        assert minute.read_bytes() == minute_bytes
     print('meter-bill archive: exact originals, deterministic replay, corruption refusal, sizes and concurrent no-overwrite')
 
 

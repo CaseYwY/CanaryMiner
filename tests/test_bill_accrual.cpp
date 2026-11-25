@@ -15,8 +15,43 @@ void compare(const TariffPlan &plan,const BillOpening &opening,const PowerTrace 
     }
     CHECK(sum.compare(full.charge->numerator)==0&&state.accruedSubtotal.numerator.compare(full.ending->accruedSubtotal.numerator)==0&&state.importedKwh.numerator.compare(full.ending->importedKwh.numerator)==0);
 }
+
+void proratedCycleFee(){
+    const auto rule=DailyFeeAllocation::ProrateByCycleMinutes;
+    constexpr auto boundary=T+18*hour+hour/2;
+    constexpr auto firstAfterReset=boundary+1;
+    auto p=plan(T,T+2*day);
+    auto &initial=p.revisions.front();
+    initial.endUtcMs=boundary;
+    initial.chargePerCivilDay=d("1.44");
+    auto later=initial;
+    later.key="fixture.revision.2";
+    later.beginUtcMs=boundary;
+    later.endUtcMs=T+2*day;
+    later.chargePerCivilDay=d("9.99");
+    p.revisions.push_back(later);
+
+    const auto close=opening(T,boundary);
+    const auto first=accrueBill(p,close,load("0",T,T+1),T+1,T+1,{},rule);
+    CHECK(first.ending&&first.provisionalTotal&&display(*first.provisionalTotal)=="1.110000");
+    if(!first.ending)return;
+    const auto settled=accrueBill(p,*first.ending,load("0",T+1,boundary),boundary,boundary,{},rule);
+    CHECK(settled.settledTotal&&display(*settled.settledTotal)=="1.110000");
+    CHECK(settled.provisionalChange&&settled.provisionalChange->numerator.zero());
+
+    const auto next=opening(boundary,T+2*day);
+    const auto slice=load("0",boundary,firstAfterReset);
+    const auto after=accrueBill(p,next,slice,firstAfterReset,firstAfterReset,{},rule);
+    CHECK(after.provisionalTotal&&display(*after.provisionalTotal)=="0.330000");
+    p.revisions.front().publishedUtcMs=firstAfterReset+1;
+    CHECK(accrueBill(p,next,slice,firstAfterReset,firstAfterReset,{},rule).status==ElectricityStatus::NotYetKnown);
+    p.revisions.erase(p.revisions.begin());
+    const auto missing=accrueBill(p,next,slice,firstAfterReset,firstAfterReset,{},rule);
+    CHECK(missing.status==ElectricityStatus::Unavailable&&!missing.ending&&!missing.provisionalTotal);
+}
 }
 int main(int argc,char **argv){
+    proratedCycleFee();
     auto p=plan(T,T+2*hour);auto s=opening(T,T+2*hour);
     const PowerTrace cancellable{s.evidence,{{T,T+hour/2,d("1000")},{T+hour/2,T+hour,d("2000")},
                                            {T+hour,T+2*hour,d("3000")}}};

@@ -313,6 +313,20 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                 target[path[-1]] = value
                 self.assertTrue(validate(bad, schema, schema))
 
+    def test_cycle_day_fee_allocation_pairs_only_with_v3(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example.update(schema_version=3, reset_policy={
+            'monthly_day': 31, 'clock': {'kind': 'fixed_standard', 'fixed_offset_seconds': -12600},
+            'daily_fee_allocation': 'prorate_by_cycle_minutes',
+        })
+        self.assertEqual(validate(example, schema, schema), [])
+        for value in (None, 'whole_day', True, 0):
+            bad = {**example, 'reset_policy': {**example['reset_policy'], 'daily_fee_allocation': value}}
+            self.assertTrue(validate(bad, schema, schema))
+        for version in (1, 2):
+            self.assertTrue(validate({**example, 'schema_version': version}, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')

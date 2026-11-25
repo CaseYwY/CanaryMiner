@@ -4,7 +4,7 @@
 
 namespace om {
 namespace {
-constexpr int64_t lastUtcMs = 253402300799999LL, dayMs = 86400000;
+constexpr int64_t lastUtcMs = 253402300799999LL, minuteMs = 60000, dayMs = 1440 * minuteMs;
 constexpr size_t maxTrace = 100000, maxCuts = 200000;
 bool instant(int64_t t) { return t >= 0 && t <= lastUtcMs; }
 ExactDecimal number(int64_t n) { ExactDecimal value; ExactDecimal::parse(std::to_string(n),&value); return value; }
@@ -138,6 +138,33 @@ ElectricityStatus timeRate(const TariffPlan &p, const TariffRevision &r, int64_t
     }
     return ElectricityStatus::Ok;
 }
+ElectricityStatus addDailyFee(const TariffPlan &plan, const BillOpening &opening, const TariffRevision &first,
+                              int64_t now, int64_t decision, DailyFeeAllocation allocation, ExactDecimal &cost) {
+    if (allocation == DailyFeeAllocation::WholeDay)
+        return productAdd(cost,first.chargePerCivilDay,number(wattMsPerKwh)) ?
+            ElectricityStatus::Ok : ElectricityStatus::Capacity;
+
+    constexpr int64_t minutesPerDay = dayMs / minuteMs;
+    static_assert(wattMsPerKwh % minutesPerDay == 0, "A civil-day minute must have an exact amount numerator");
+    const auto day = civilDayAt(plan.clock,now);
+    if (day.status != CivilStatus::Ok) return ElectricityStatus::Unavailable;
+    const auto begin = (std::max)(opening.cycleBeginUtcMs,day.beginUtcMs);
+    const auto end = (std::min)(opening.cycleEndUtcMs,day.endUtcMs);
+    const auto duration = end-begin;
+    if (day.endUtcMs-day.beginUtcMs != dayMs || duration <= 0 || duration % minuteMs)
+        return ElectricityStatus::Unsupported;
+
+    // Both sides of a reset must use the same fee, even if a different revision governs energy at the reset.
+    const auto rate = std::find_if(plan.revisions.begin(),plan.revisions.end(),[&](const TariffRevision &revision) {
+        return revision.beginUtcMs <= day.beginUtcMs && day.beginUtcMs < revision.endUtcMs;
+    });
+    if (rate == plan.revisions.end()) return ElectricityStatus::Unavailable;
+    if (rate->publishedUtcMs > decision) return ElectricityStatus::NotYetKnown;
+    const auto numerator = (wattMsPerKwh / minutesPerDay) * (duration / minuteMs);
+    return productAdd(cost,rate->chargePerCivilDay,number(numerator)) ?
+        ElectricityStatus::Ok : ElectricityStatus::Capacity;
+}
+
 }  // namespace
 
 const char *electricityStatusName(ElectricityStatus s) {
@@ -188,11 +215,19 @@ ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
 static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t decision,bool accrual,
-                                     const std::atomic<bool> *cancel=nullptr, const std::function<bool()> &stop={}) {
+                                     const std::atomic<bool> *cancel=nullptr, const std::function<bool()> &stop={},
+                                     DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay) {
     BillEstimate result; result.currency = p.currency; result.evidence = trace.evidence; result.beginUtcMs = opening.throughUtcMs; result.endUtcMs = end;
     result.planKey = p.key; result.territory = p.territory; result.supplier = p.supplier; result.product = p.product; result.origin = p.origin; result.clock = p.clock; result.decisionUtcMs = decision;
     result.status = validatePlan(p,opening,end,decision,accrual);
     if (result.status != ElectricityStatus::Ok) return result;
+    if (dailyFeeAllocation != DailyFeeAllocation::WholeDay &&
+        (dailyFeeAllocation != DailyFeeAllocation::ProrateByCycleMinutes ||
+         (p.clock.kind != CivilClockKind::Utc && p.clock.kind != CivilClockKind::FixedStandardOffset) ||
+         opening.cycleBeginUtcMs % minuteMs || opening.cycleEndUtcMs % minuteMs)) {
+        result.status = ElectricityStatus::Unsupported;
+        return result;
+    }
     result.timeDatabaseVersion = civilAt(p.clock,opening.throughUtcMs).databaseVersion;
     result.status = validateTrace(trace,opening.throughUtcMs,end);
     if (result.status != ElectricityStatus::Ok) return result;
@@ -234,7 +269,8 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
             if (next <= now) { result.status = ElectricityStatus::Invalid; return result; }
             if (!previousDate || !sameCivilDate(*previousDate,stamp.date)) {
                 if (previousDate && civilSerialDay(stamp.date) < civilSerialDay(*previousDate)) { result.status = ElectricityStatus::Unsupported; return result; }
-                if (!productAdd(cost,r.chargePerCivilDay,number(wattMsPerKwh))) { result.status = ElectricityStatus::Capacity; return result; }
+                result.status = addDailyFee(p,opening,r,now,decision,dailyFeeAllocation,cost);
+                if (result.status != ElectricityStatus::Ok) return result;
                 previousDate = stamp.date;
             }
             ExactDecimal energy, newQuantity;
@@ -267,11 +303,11 @@ BillEstimate evaluateBill(const TariffPlan &p,const BillOpening &opening,const P
     return evaluateBillImpl(p,opening,trace,end,decision,false);
 }
 BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const PowerTrace &trace,int64_t end,int64_t observed,
-                      const std::function<bool()> &stop) {
+                      const std::function<bool()> &stop, DailyFeeAllocation dailyFeeAllocation) {
     BillAccrual result;
     if(stop&&stop())return result;
     if(end>observed){result.status=ElectricityStatus::NotYetKnown;return result;}
-    const auto step=evaluateBillImpl(p,opening,trace,end,observed,true,nullptr,stop);result.status=step.status;
+    const auto step=evaluateBillImpl(p,opening,trace,end,observed,true,nullptr,stop,dailyFeeAllocation);result.status=step.status;
     if(step.status!=ElectricityStatus::Ok)return result;
     ElectricityAmount total;
     if(!step.ending->accruedSubtotal.numerator.multiply(*p.subtotalMultiplier,&total.numerator)){result.status=ElectricityStatus::Capacity;return result;}
@@ -281,17 +317,17 @@ BillAccrual accrueBill(const TariffPlan &p,const BillOpening &opening,const Powe
     return result;
 }
 CounterfactualBill counterfactualBill(const TariffPlan &p, const BillOpening &opening, const PowerTrace &base, const PowerTrace &with, int64_t end, int64_t decision,
-                                     const std::atomic<bool> *cancel) {
+                                     const std::atomic<bool> *cancel, DailyFeeAllocation dailyFeeAllocation) {
     if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     const auto &a = base.evidence, &b = with.evidence;
     if (!evidenceValid(a) || !evidenceValid(b) || a.basis != PowerBasis::WholeMeterImport || b.basis != a.basis || a.origin != b.origin || a.scope != b.scope || a.adapter != b.adapter)
         return {ElectricityStatus::Invalid, {}, {}, {}};
     // Reject truncated shared-meter scenarios even if this plan happens to have no discontinuous components.
     if (end != opening.cycleEndUtcMs) return {ElectricityStatus::Unsupported, {}, {}, {}};
-    auto withoutMining = evaluateBillImpl(p,opening,base,end,decision,false,cancel);
+    auto withoutMining = evaluateBillImpl(p,opening,base,end,decision,false,cancel,{},dailyFeeAllocation);
     if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     if (withoutMining.status != ElectricityStatus::Ok) return {withoutMining.status, std::move(withoutMining), {}, {}};
-    auto withMining = evaluateBillImpl(p,opening,with,end,decision,false,cancel);
+    auto withMining = evaluateBillImpl(p,opening,with,end,decision,false,cancel,{},dailyFeeAllocation);
     if (cancel && cancel->load(std::memory_order_relaxed)) return {};
     if (withMining.status != ElectricityStatus::Ok) return {withMining.status, std::move(withoutMining), std::move(withMining), {}};
     ElectricityAmount delta;

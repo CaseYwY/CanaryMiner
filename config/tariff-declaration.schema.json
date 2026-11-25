@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Offline combined tariff and declared whole-meter opening v1",
+  "title": "Offline combined tariff and declared whole-meter opening",
   "description": "64 KiB, 512 total rows. Structural schema only; the native decoder additionally checks canonical decimal capacity, chronological coverage, tier topology, fixed clock, publication and cycle/opening invariants. No runtime activation or measured billing/reset ledger.",
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -16,7 +16,11 @@
   },
   "if": {"properties": {"schema_version": {"const": 2}}},
   "then": {"properties": {"reset_policy": {"$ref": "#/$defs/monthlyReset"}}},
-  "else": {"properties": {"reset_policy": {"const": "explicit_cycle_only"}}},
+  "else": {
+    "if": {"properties": {"schema_version": {"const": 3}}},
+    "then": {"properties": {"reset_policy": {"$ref": "#/$defs/proratedMonthlyReset"}}},
+    "else": {"properties": {"reset_policy": {"const": "explicit_cycle_only"}}}
+  },
   "$defs": {
     "label": {"type": "string", "pattern": "^[!-~](?:[ -~]{0,126}[!-~])?$"},
     "decimal": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,37})(\\.[0-9]{0,17}[1-9])?$"},
@@ -31,6 +35,14 @@
       "properties": {
         "monthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
         "clock": {"$ref": "#/$defs/clock"}
+      }
+    },
+    "proratedMonthlyReset": {
+      "type": "object", "additionalProperties": false, "required": ["monthly_day", "clock", "daily_fee_allocation"],
+      "properties": {
+        "monthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
+        "clock": {"$ref": "#/$defs/clock"},
+        "daily_fee_allocation": {"const": "prorate_by_cycle_minutes"}
       }
     },
     "plan": {

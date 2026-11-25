@@ -85,6 +85,7 @@ class TariffSettingsPanel {
         }else if(key=='v'||key=='V'||key==kKeyF2)beginReview();
         else if(key=='p'||key=='P')comparison_.open(active);
         else if((key=='m'||key=='M')&&onCyclePolicy())toggleCyclePolicy();
+        else if((key=='f'||key=='F')&&onCyclePolicy()&&monthly())toggleDailyFeeAllocation();
         else if((key=='g'||key=='G')&&monthly())deriveCycle();
         else if(key==kKeyDown||key=='\t'){const auto n=count();if(n)field=(field+1)%n;}
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
@@ -111,7 +112,10 @@ class TariffSettingsPanel {
         std::string shortcuts;
         if(page==TariffSettingsPage::Browse){
             using Key=i18n::TariffMonthlyMessageKey;
-            if(onCyclePolicy())shortcuts+=i18n::tariffMonthlyEnglish(Key::Toggle)+" ";
+            if(onCyclePolicy()){
+                shortcuts+=i18n::tariffMonthlyEnglish(Key::Toggle)+" ";
+                if(monthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::FeeToggle)+" ";
+            }
             if(monthly())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
             shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
         }
@@ -161,7 +165,7 @@ class TariffSettingsPanel {
     bool onCyclePolicy()const{return route.empty()&&selectedName()=="reset_policy";}
     bool readOnly(const std::string &s)const{
         if(s=="cycle_begin_utc_ms"||s=="cycle_end_utc_ms")return monthly();
-        return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";
+        return s=="schema_version"||s=="confirmed_utc"||s=="reset_policy"||s=="daily_fee_allocation"||s=="rounding"||s=="basis"||s=="origin"||s=="time_database_version";
     }
     static JsonValue *member(JsonValue &object,const std::string &name){
         for(auto &m:object.members)if(m.first==name)return &m.second;
@@ -175,11 +179,13 @@ class TariffSettingsPanel {
         const auto *clock=plan?plan->find("clock"):nullptr;
         if(!schema||!policy||!clock)return;
         if(monthly()){
+            const bool hadAllocation=policy->find("daily_fee_allocation")!=nullptr;
             *policy=JsonValue{};
             policy->type=JsonValue::Type::String;
             policy->text="explicit_cycle_only";
             schema->text="1";
-            message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
+            if(hadAllocation)reviewChangedDailyFeeRule();
+            else message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
             return;
         }
         JsonValue day;
@@ -190,6 +196,35 @@ class TariffSettingsPanel {
         policy->members={{"monthly_day",std::move(day)},{"clock",*clock}};
         schema->text="2";
         message=i18n::tariffMonthlyEnglish(Key::Enabled);
+    }
+    void toggleDailyFeeAllocation(){
+        auto *schema=member(draft,"schema_version");
+        auto *policy=selected();
+        if(!schema||!policy||!policy->isObject())return;
+        const auto allocation=std::find_if(policy->members.begin(),policy->members.end(),[](const auto &entry){
+            return entry.first=="daily_fee_allocation";
+        });
+        if(allocation==policy->members.end()){
+            JsonValue value;
+            value.type=JsonValue::Type::String;
+            value.text="prorate_by_cycle_minutes";
+            policy->members.emplace_back("daily_fee_allocation",std::move(value));
+            schema->text="3";
+        }else{
+            policy->members.erase(allocation);
+            schema->text="2";
+        }
+        reviewChangedDailyFeeRule();
+    }
+    void reviewChangedDailyFeeRule(){
+        auto *opening=member(draft,"opening");
+        const auto *begin=opening?opening->find("cycle_begin_utc_ms"):nullptr;
+        const auto *through=opening?opening->find("through_utc_ms"):nullptr;
+        auto *subtotal=opening?member(*opening,"accrued_subtotal"):nullptr;
+        if(begin&&through&&subtotal&&begin->text!=through->text){
+            subtotal->text.clear();
+            message=i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeOpeningRequired);
+        }else message=i18n::tariffNoticeEnglish(i18n::TariffNoticeMessageKey::DraftOnly);
     }
     void deriveCycle(){
         using Key=i18n::TariffMonthlyMessageKey;
@@ -261,10 +296,14 @@ class TariffSettingsPanel {
     }
     void beginReview(){
         using PanelKey=i18n::TariffPanelMessageKey;
+        using MonthlyKey=i18n::TariffMonthlyMessageKey;
+        const bool prorated=monthly()&&draft.find("reset_policy")->find("daily_fee_allocation");
         review={i18n::tariffPanelEnglish(PanelKey::ReviewHeading),i18n::tariffPanelEnglish(PanelKey::NoActivation),
             i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),monthly()?i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::Review):i18n::tariffPanelEnglish(PanelKey::ResetLimit),
-            i18n::tariffPanelEnglish(PanelKey::Excludes),i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
+            prorated?i18n::tariffMonthlyEnglish(MonthlyKey::ProratedExclusions):i18n::tariffPanelEnglish(PanelKey::Excludes),
+            i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
+        if(prorated)review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::FeeReview));
         const auto diff=reviewLines(active,draft);review.insert(review.end(),diff.begin(),diff.end());
         if(diff.empty())review.push_back(i18n::tariffPanelEnglish(PanelKey::NoChanges));
         const auto complete=reviewLines({},draft);review.insert(review.end(),complete.begin(),complete.end());

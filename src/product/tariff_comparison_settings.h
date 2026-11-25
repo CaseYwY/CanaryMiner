@@ -6,6 +6,7 @@
 #include <thread>
 #include "dashboard.h"
 #include "tariff_declaration.h"
+#include "tariff_monthly_messages.h"
 #include "tariff_comparison_messages.h"
 
 namespace om {
@@ -85,9 +86,12 @@ class TariffComparisonSettings {
         };
         add(end_ ? tariffComparisonEnglish(Key::Span, {{"begin", std::to_string(o.throughUtcMs)}, {"end", std::to_string(*end_)}})
                  : tariffComparisonEnglish(Key::EndUnavailable));
-        add(declaration_->monthlyReset
+        auto cycleLabel=declaration_->monthlyReset
             ? tariffComparisonEnglish(Key::Cycles, {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
-            : tariffComparisonEnglish(Key::Instruction));
+            : tariffComparisonEnglish(Key::Instruction);
+        if(declaration_->dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes)
+            cycleLabel+=" | "+i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeLabel);
+        add(cycleLabel);
         add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(Key::WithoutWatts, {{"watts", input_[0]}}));
         add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithWatts, {{"watts", input_[1]}}));
         if (pending()) add(tariffComparisonEnglish(Key::Pending));

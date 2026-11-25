@@ -111,6 +111,8 @@ BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, co
                           int64_t endUtcMs, int64_t decisionUtcMs);
 // Exact contiguous-prefix arithmetic. Provisional totals are NOT a payable utility bill or an incremental mining cost.
 // All-units reprices the accumulated register; minimum-cycle floors apply only at the explicit cycle end.
+// The opt-in rule splits the fee selected at civil midnight by each cycle's share of that day.
+enum class DailyFeeAllocation { WholeDay, ProrateByCycleMinutes };
 struct BillAccrual {
     ElectricityStatus status=ElectricityStatus::Unavailable;
     std::optional<BillOpening> ending;
@@ -118,7 +120,8 @@ struct BillAccrual {
     bool settlementDependent=false; // future cycle quantity can change already accrued all-units/floor amounts
 };
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
-                      int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={});
+                      int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},
+                      DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay);
 struct CounterfactualBill {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     BillEstimate withoutMining, withMining;
@@ -128,5 +131,6 @@ struct CounterfactualBill {
 CounterfactualBill counterfactualBill(const TariffPlan &plan, const BillOpening &opening,
                                     const PowerTrace &withoutMining, const PowerTrace &withMining,
                                     int64_t endUtcMs, int64_t decisionUtcMs,
-                                    const std::atomic<bool> *cancel = nullptr);
+                                    const std::atomic<bool> *cancel = nullptr,
+                                    DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay);
 }  // namespace om
