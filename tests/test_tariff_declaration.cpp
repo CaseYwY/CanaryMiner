@@ -492,6 +492,63 @@ int main(int argc,char **argv){
         panel.key(27,{},T/1000);panel.key('m',{},T/1000);
         enter(panel,"plan");panel.field=5;panel.key('z',{},T/1000);
         CHECK(!panel.dirty()&&panel.draft.find("opening")->find("time_database_version")->text=="explicit-fixed-clock");
+
+        // New York has shifted to daylight time by this cycle's end, while its March opening still matches UTC-05.
+        auto accrued=original;
+        constexpr int64_t marchStart=1709269200000, aprilStart=1711944000000,
+            oldEnd=aprilStart+3600000, through=aprilStart-3600000;
+        set(accrued,"schema_version","3");
+        set(accrued,"reset_policy",R"({"monthly_day":1,"clock":{"kind":"fixed_standard","fixed_offset_seconds":-18000},"daily_fee_allocation":"prorate_by_cycle_minutes"})");
+        auto &opening=member(accrued,"opening");
+        set(opening,"cycle_begin_utc_ms",std::to_string(marchStart));
+        set(opening,"cycle_end_utc_ms",std::to_string(oldEnd));
+        set(opening,"through_utc_ms",std::to_string(through));
+        set(opening,"imported_kwh","\"2\"");
+        set(opening,"accrued_subtotal","\"744\"");
+        auto &price=member(accrued,"plan");
+        set(price,"tiers","\"none\"");
+        set(price,"cycle_charge","\"0\"");
+        set(price,"subtotal_multiplier","\"1\"");
+        auto &rate=member(price,"revisions").items.front();
+        set(rate,"begin_utc_ms",std::to_string(marchStart-5*3600000));
+        set(rate,"end_utc_ms",std::to_string(oldEnd));
+        set(rate,"published_utc_ms",std::to_string(marchStart));
+        set(rate,"time_mode","\"constant\"");
+        set(rate,"calendar","[]");
+        set(rate,"bands","[]");
+        set(rate,"base_rate_per_kwh","\"0\"");
+        set(rate,"charge_per_civil_day","\"24\"");
+        const auto prefixTotal=[&]() {
+            auto cycleOpening=validated.opening;
+            cycleOpening.throughUtcMs=marchStart;
+            cycleOpening.importedKwh={};
+            cycleOpening.accruedSubtotal={};
+            const auto priced=accrueBill(validated.plan,cycleOpening,
+                {cycleOpening.evidence,{{marchStart,through,{}}}},through,T,{},validated.dailyFeeAllocation());
+            std::string amount;
+            CHECK(priced.status==ElectricityStatus::Ok&&priced.provisionalTotal&&priced.provisionalTotal->format(6,&amount));
+            return amount;
+        };
+        CHECK(decodeTariffDeclaration(accrued,&validated));
+        CHECK(prefixTotal()=="744.000000");
+        panel.open(accrued);
+        enter(panel,"reset_policy");panel.field=1;panel.key('z',{},T/1000);
+        enter(panel,"clock");enter(panel,"zone");type(panel,"America/New_York");
+        panel.key('g',{},T/1000);
+        const auto *changed=panel.draft.find("opening");
+        CHECK(changed->find("cycle_begin_utc_ms")->text==std::to_string(marchStart));
+        CHECK(changed->find("cycle_end_utc_ms")->text==std::to_string(aprilStart));
+        CHECK(changed->find("imported_kwh")->text=="2"&&changed->find("accrued_subtotal")->text.empty());
+        CHECK(panel.message.find("Re-enter the subtotal")!=std::string::npos);
+        CHECK(!decodeTariffDeclaration(panel.draft,&validated));
+        panel.key('\r',{},T/1000);
+        type(panel,"743");
+        CHECK(decodeTariffDeclaration(panel.draft,&validated));
+        CHECK(prefixTotal()=="743.000000");
+        auto settled=accrueBill(validated.plan,validated.opening,
+            {validated.opening.evidence,{{through,aprilStart,{}}}},aprilStart,T,{},validated.dailyFeeAllocation());
+        std::string total;
+        CHECK(settled.status==ElectricityStatus::Ok&&settled.settledTotal&&settled.settledTotal->format(6,&total)&&total=="743.000000");
     }
     return finishTests("tariff declaration");
 }

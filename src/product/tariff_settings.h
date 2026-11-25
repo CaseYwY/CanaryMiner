@@ -296,8 +296,15 @@ class TariffSettingsPanel {
             return;
         }
         auto endText=std::to_string(bounds.endUtcMs);
+        const auto *policy=draft.find("reset_policy");
+        const bool proratedEndChanged=end->text!=endText&&policy->find("daily_fee_allocation");
         begin->text=std::move(beginText);
         end->text=std::move(endText);
+        if(proratedEndChanged&&clearMidcycleSubtotal()){
+            focus("opening.accrued_subtotal");
+            message="Cycle end changed. Re-enter the subtotal with the new daily-fee allocation.";
+            return;
+        }
         focus("opening.cycle_begin_utc_ms");
         message=i18n::tariffMonthlyEnglish(Key::Derived);
     }

@@ -69,7 +69,7 @@ default timezone is selected. See [local build and installation](electricity-cor
 Select `reset_policy` and press **M** to choose the monthly policy. Open the policy with **Enter** and enter a day
 from 1 to 31. The draft starts with the rate clock as a suggested value. Review the reset clock and edit it if your
 billing cycle uses a different clock. The saved reset clock is independent of the rate clock.
-Each month starts the cycle at 00:00 on the chosen day. Short months use their last day and the original day applies
+Each month starts the cycle at the first valid local instant on the chosen day, usually 00:00. Short months use their last day and the original day applies
 again the following month.
 
 Enter the opening's through-time in UTC milliseconds, then press **G** to derive the dates of the cycle containing
@@ -84,7 +84,7 @@ opening against them. It does not advance with elapsed time or reset a bill, rea
 
 ### Prorate a daily fee across the monthly reset
 
-With the monthly rule selected on `reset_policy`, press **F** to toggle the daily-fee rule. Review with **V** and save with **Enter**. Enabling it uses schema version 3 and stores `"daily_fee_allocation": "prorate_by_cycle_minutes"` inside `reset_policy`. Changing the rule requires new plan and opening keys. If the opening starts after the reset, the editor clears its draft accrued subtotal. Re-enter the amount using the selected fee rule before saving.
+With the monthly rule selected on `reset_policy`, press **F** to toggle the daily-fee rule. Review with **V** and save with **Enter**. Enabling it uses schema version 3 for fixed clocks or keeps schema version 4 for a named clock. It stores `"daily_fee_allocation": "prorate_by_cycle_minutes"` inside `reset_policy`. Changing the rule requires new plan and opening keys. If the opening starts after the reset, the editor clears its draft accrued subtotal. Re-enter the amount using the selected fee rule before saving. Deriving a changed end for a prorated mid-cycle opening also clears the subtotal because it may include a share calculated from the previous end.
 
 The fee for a tariff day comes from the rate revision effective at the tariff clock's midnight. Each billing cycle receives the fee times its overlapping minutes divided by the tariff day's actual minutes. For example, a 1.44 daily fee split at 18:30 in the tariff clock contributes 1.11 to the closing cycle and 0.33 to the new cycle. A revision at 18:30 can change the energy rate that minute. Its daily fee starts on the next tariff day. Each cycle books its share once, on first covered use or zero-usage coverage of that day. When the calculation first books a share, it requires a midnight revision published by the review cutoff. A declared mid-day opening may already include that share.
 
