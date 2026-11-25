@@ -9,9 +9,9 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary };
 const char *electricityStatusName(ElectricityStatus status);
-// Exact amount = numerator / 3,600,000,000. Used for kWh and currency without intermediate rounding.
+// Exact amount = numerator / 3,600,000,000. Used for quantities and currency without intermediate rounding.
 struct ElectricityAmount {
     ExactDecimal numerator;
     bool format(unsigned places, std::string *out) const { return numerator.formatRatio(wattMsPerKwh,places,out); }
@@ -73,6 +73,15 @@ struct TariffRevision {
 };
 enum class TariffOrigin { Unknown, SyntheticFixture, UserDeclaredOffline };
 enum class TariffRounding { Unsupported, FinalDisplayOnly, MeterHalfHourKwhHalfEven2 };
+struct DemandChargeRule {
+    unsigned windowMinutes = 0;
+    unsigned offsetMinutes = 0;  // UTC phase from the Unix epoch, less than one window
+    int64_t publishedUtcMs = 0;
+    ExactDecimal ratePerKw;
+    bool charge(const ElectricityAmount &peak, ElectricityAmount *out) const {
+        return peak.numerator.multiply(ratePerKw, &out->numerator);
+    }
+};
 struct TariffPlan {
     bool declared = false;
     TariffOrigin origin = TariffOrigin::Unknown;
@@ -85,14 +94,16 @@ struct TariffPlan {
     ExactDecimal cycleCharge;
     std::optional<ExactDecimal> minimumCycleSubtotal;
     std::optional<ExactDecimal> subtotalMultiplier;  // explicit single multiplier on entire subtotal, no inferred tax order
-    uint32_t unsupportedRules = 0;             // any demand/export/prepaid/other unmodelled rule rejects evaluation
+    uint32_t unsupportedRules = 0;             // any unmodelled rule rejects evaluation
+    std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter kW windows
 };
 struct BillOpening {
     bool declared = false;
     std::string planKey, timeDatabaseVersion;  // after cycle start, bind the data version used by the existing state
     PowerEvidence evidence;  // an opening quantity cannot be reused for a different meter/basis/source
     int64_t cycleBeginUtcMs = 0, cycleEndUtcMs = 0, throughUtcMs = 0;
-    ElectricityAmount importedKwh, accruedSubtotal;
+    ElectricityAmount importedKwh, accruedSubtotal;  // pre-multiplier subtotal includes the established demand charge
+    std::optional<ElectricityAmount> peakDemandKw;
 };
 struct BillEstimate {
     ElectricityStatus status = ElectricityStatus::Unavailable;

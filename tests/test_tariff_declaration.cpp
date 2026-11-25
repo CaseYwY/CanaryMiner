@@ -329,6 +329,73 @@ void componentMultipliers(JsonValue draft,const std::filesystem::path &target) {
     CHECK(problem.path=="schema_version"&&problem.message=="Seasonal allowance requires version 7.");
 }
 
+void demandWindows(JsonValue draft,const std::filesystem::path &target) {
+    const auto middle=T+15*60000,close=middle+15*60000;
+    auto &plan=member(draft,"plan");
+    set(plan,"tiers",R"("none")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    auto &row=member(plan,"revisions").items.front();
+    set(row,"end_utc_ms",std::to_string(close));
+    set(row,"time_mode",R"("constant")");
+    set(row,"base_rate_per_kwh",R"("0")");
+    set(row,"charge_per_civil_day",R"("0")");
+    set(row,"calendar","[]");
+    set(row,"bands","[]");
+    set(member(draft,"opening"),"cycle_end_utc_ms",std::to_string(close));
+
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"reset_policy");
+    CHECK(panel.render(120,26,ColorLevel::None).find("[D] Demand charge")!=std::string::npos);
+    panel.key('d',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="9");
+    enter(panel,"demand_charge");
+    enter(panel,"window_minutes");type(panel,"15");
+    enter(panel,"rate_per_kw");type(panel,"5");
+    panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"peak_demand_kw");type(panel,"0");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,27,ColorLevel::None).find("The opening subtotal excludes it")!=std::string::npos);
+
+    auto store=TariffDeclarationStore(target);
+    std::string reason;
+    JsonValue saved;
+    CHECK(store.load(&saved,&reason));
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    CHECK(store.load(&saved,&reason)&&saved.find("schema_version")->text=="9");
+    TariffDeclaration decoded;
+    CHECK(decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharge);
+    checkComparison(compareTariffCycles(decoded,{dec("0"),dec("4000")},1,T),"0.000000","20.000000","20.000000");
+
+    auto changed=saved;
+    set(member(changed,"demand_charge"),"rate_per_kw",R"("6")");
+    CHECK(!store.save(changed,&reason)&&reason.find("NEW plan.key")!=std::string::npos);
+    set(member(changed,"plan"),"key",R"("new-demand-plan")");
+    CHECK(!store.save(changed,&reason)&&reason.find("NEW opening.key")!=std::string::npos);
+    set(member(changed,"opening"),"key",R"("new-demand-opening")");
+    CHECK(store.save(changed,&reason));
+
+    auto &opening=member(saved,"opening");
+    set(opening,"through_utc_ms",std::to_string(middle));
+    set(opening,"imported_kwh",R"("2.5")");
+    set(opening,"accrued_subtotal",R"("1")");
+    set(opening,"peak_demand_kw",R"("10")");
+    CHECK(decodeTariffDeclaration(saved,&decoded)&&decoded.opening.accruedSubtotal.numerator.text()=="183600000000");
+    checkComparison(compareTariffCycles(decoded,{dec("8000"),dec("12000")},1,T),"0.000000","10.000000","10.000000");
+    panel.open(saved);
+    enter(panel,"demand_charge");
+    enter(panel,"window_minutes");type(panel,"5");
+    const auto &after=*panel.draft.find("opening");
+    CHECK(after.find("imported_kwh")->text=="2.5"&&after.find("accrued_subtotal")->text=="1");
+    CHECK(after.find("peak_demand_kw")->text.empty());
+    panel.key(27,{},T/1000);
+    panel.key('d',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="1"&&!panel.draft.find("demand_charge"));
+    CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
+}
+
 void seasonalCycles(JsonValue draft,const std::filesystem::path &target) {
     constexpr int64_t begin=1713657600000, middle=1714521600000, end=1716249600000, next=1718928000000;
     auto &plan=member(draft,"plan");
@@ -790,6 +857,7 @@ int main(int argc,char **argv){
     const auto root=std::filesystem::path(makeScratchDir("tariff-declaration")),file=root/"tariff-declaration.json";
     seasonalCycles(original,root/"seasonal-version-test.json");
     componentMultipliers(original,root/"component-version-test.json");
+    demandWindows(original,root/"demand-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));

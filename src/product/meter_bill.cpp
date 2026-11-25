@@ -135,8 +135,9 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
                                const std::function<bool()> &stopped) {
     const auto &opening = declaration.opening;
     const bool annual = declaration.resetSchedule && declaration.resetSchedule->annualMonth;
-    const auto byteLimit = annual ? maxMeterFileBytes : maxOrdinaryMeterFileBytes;
-    const auto intervalLimit = annual ? maxAnnualMeterIntervals : maxOrdinaryMeterIntervals;
+    const bool extended = annual || declaration.plan.demandCharge.has_value();
+    const auto byteLimit = extended ? maxMeterFileBytes : maxOrdinaryMeterFileBytes;
+    const auto intervalLimit = extended ? maxAnnualMeterIntervals : maxOrdinaryMeterIntervals;
     if (text.size() > byteLimit) return "interval file unavailable, oversized or not a regular file";
     JsonValue root;
     if (!parseJsonStrict(text, &root, nullptr, {byteLimit, 5}) || !root.isObject())
@@ -197,6 +198,15 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         }
     }
     if (seasonal) report += "  Seasonal allowance for cycle " + seasonal->allowanceKwh.text() + " kWh\n";
+    ElectricityAmount demandSubtotal;
+    if (const auto &demand=declaration.plan.demandCharge) {
+        std::string peak, amount;
+        if (!accrual.ending->peakDemandKw->format(6,&peak) ||
+            !demand->charge(*accrual.ending->peakDemandKw,&demandSubtotal) ||
+            !demandSubtotal.format(6,&amount)) return false;
+        report += "  Peak demand " + peak + " kW over " + std::to_string(demand->windowMinutes) + " minute windows\n";
+        report += "  Demand charge before subtotal multiplier " + amount + " " + currency + "\n";
+    }
     if (accrual.billedKwh) {
         std::string billed;
         if (!accrual.billedKwh->format(6, &billed)) return false;
@@ -218,6 +228,8 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
               (accrual.settlementDependent ? ",true" : ",false");
     if (accrual.billedKwh) exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
     if (seasonal) exact += "," + jsonQuote(seasonal->allowanceKwh.text());
+    if (ending.peakDemandKw)
+        exact += "," + jsonQuote(ending.peakDemandKw->numerator.text()) + "," + jsonQuote(demandSubtotal.numerator.text());
     exact += "]\n";
     return true;
 }
@@ -305,7 +317,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 8 &&
+        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 9 &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
@@ -437,6 +449,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Also accepts local Octopus electricity import bundles in schema version 3.\n"
                   "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
                   "Half-hour rounding requires a reading for every UTC half hour.\n"
+                  "Demand requires complete aligned windows. Add a register reading wherever a demand boundary splits nonzero import.\n"
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Use --invoice to compare supply charges or reconcile interim charges against a complete annual estimate.\n"

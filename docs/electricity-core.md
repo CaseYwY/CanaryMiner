@@ -48,6 +48,7 @@ subtotal = opening accrued subtotal
          + fee per newly entered civil day
          + sum(held watts * elapsed ms * time rate) / denominator
          + shared-register tier adjustments
+         + (new peak kW - opening peak kW) * declared demand rate
 settled subtotal = max(subtotal, explicit minimum)   # only at cycle end, if selected
 interval charge = (settled subtotal - opening accrued subtotal) * explicit subtotal multiplier
 ```
@@ -59,7 +60,13 @@ interval charge = (settled subtotal - opening accrued subtotal) * explicit subto
 - Simple cycle/day charges, one explicit entire-subtotal multiplier and an optional final cycle minimum are supported. No inferred tax name, inclusion flag or order is supplied. The cycle/day fee convention is part of this declared model, not a universal utility rule. A backward calendar-date traversal is unsupported rather than double-charging days.
 - Evaluations split at trace endpoints, revisions, dynamic records, civil midnights, DST transitions and both occurrences of applicable wall boundaries. Minimum/all-units need the full remainder of the cycle, not a short horizon that assumes cheap allowance remains free.
 
-All flags for unknown rule families reject evaluation. **Not implemented:** demand/capacity/ratchets/reactive power, prepaid purchase/inventory/debt, import/export netting or lost export credits, restricted credits, independent annual/purchase/reset ledgers, seasonal allowance outside the offline declaration adapter, provisional/annual true-up, all-units monthly-average normalization in the pure core, tier reallocation/threshold revisions, other supplier-specific intermediate rounding, ordered/selective taxes/multipliers, contracted eligibility or persistent beyond-cycle consequences. These need separate declared adapters/state, not zero-valued placeholders. Choosing a simpler energy-only scenario must be explicit and visibly exclude the omitted rules.
+An optional [demand rule](tariff-declaration.md#charge-for-maximum-average-demand) uses the maximum
+of complete aligned average-kW windows over the whole meter. The internal opening subtotal
+includes the charge on the recorded peak. The tariff document supplies that peak and the
+subtotal before demand separately. The calculation uses physical energy even with an energy
+quantity rounding rule. Demand state resets at the same declared cycle boundary.
+
+All flags for unknown rule families reject evaluation. **Not implemented:** contracted capacity, demand ratchets and apparent/reactive power, prepaid purchase/inventory/debt, import/export netting or lost export credits, restricted credits, independent annual/purchase/reset ledgers, seasonal allowance outside the offline declaration adapter, provisional/annual true-up, all-units monthly-average normalization in the pure core, tier reallocation/threshold revisions, other supplier-specific intermediate rounding, ordered/selective taxes/multipliers, contracted eligibility or persistent beyond-cycle consequences. These need separate declared adapters/state, not zero-valued placeholders. Choosing a simpler energy-only scenario must be explicit and visibly exclude the omitted rules.
 
 A declared [half-hour meter rounding rule](tariff-declaration.md#round-cumulative-readings-for-half-hour-billing) rounds each complete UTC half-hour quantity before applying its signed energy rate. `BillOpening.importedKwh` retains the exact physical quantity. Successful meter accrual reports the billed quantity for the current trace separately. Fees and the subtotal retain their documented exact arithmetic. Tiered plans and power traces cannot use this rule.
 
@@ -100,7 +107,7 @@ Executed development evidence (2026-10-28):
 
 Test sources include civil serial-day round trips through 2400, UTC/fixed clocks, missing/wrong-version data, named folds/gaps, 23/25h New York days, half-hour Lord Howe days, Apia's skipped date and the 2026e Winnipeg rule. Electricity cases cover exact irregular sample integration, missing/zero/gaps/clocks, fixed-fee cancellation, progressive/all-units jumps and late settlement, shared tiers, signed rates, dynamic gaps/overlaps/causality, event priority, effective revisions without resets, minimums, whole-subtotal multiplier, same-day resume/purity and unsupported/input/capacity failures. Named tests also bill both repeated hours and no nonexistent spring hour. Scope/source/basis and continued time-database mismatches cannot reuse opening ledgers; future observed telemetry cannot masquerade as a decision-time forecast.
 
-Research specifications T01–T04, T10–T12, T17, T25 and supported portions/variants of T05, T13–T16, T23, T33–T34 are covered by the core. The offline declarations cover T06 ([seasonal allowance](tariff-declaration.md#apply-a-seasonal-baseline-allowance)), T09 ([two-month tariff](tariff-declaration.md#price-a-two-month-cycle-from-monthly-bands)) and T24 ([component multipliers](tariff-declaration.md#apply-a-multiplier-to-part-of-the-unit-rate)). T07–T08, T18–T22, T26–T32 and broader state/source-specific variants still need coverage. Supplier worked examples require separate qualification.
+Research specifications T01–T04, T10–T12, T17, T25 and supported portions/variants of T05, T13–T16, T23, T33–T34 are covered by the core. The offline declarations cover T06 ([seasonal allowance](tariff-declaration.md#apply-a-seasonal-baseline-allowance)), T09 ([two-month tariff](tariff-declaration.md#price-a-two-month-cycle-from-monthly-bands)) and T24 ([component multipliers](tariff-declaration.md#apply-a-multiplier-to-part-of-the-unit-rate)). The [maximum-demand rule](tariff-declaration.md#charge-for-maximum-average-demand) covers T18–T20. T07–T08, T21–T22, T26–T32 and broader state/source-specific variants still need coverage. Supplier worked examples require separate qualification.
 
 ### Development dependency provenance (not production approval)
 
