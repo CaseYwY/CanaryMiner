@@ -29,7 +29,7 @@ The decoder calls `validateTariffOpening`, not a fake zero-power bill. This prov
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, separate resets within one plan and annual true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families remain explicit: demand/capacity/ratchets, export/netting/opportunity, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -95,7 +95,7 @@ Version 5 stores this annual policy. For a February 29 reset, the boundary is Fe
 }
 ```
 
-Usage accumulates from the annual opening across months and rate revisions. The shared tier register resets at the next annual boundary. The cycle charge and any minimum apply once per annual cycle. For month-by-month review, supply readings through the desired cutoff to obtain a provisional annual estimate. When an interval crosses the year boundary, a cumulative register file needs a reading exactly there. A version 5 review requires a version 5-capable reader. This policy defines one annual billing and tier cycle. Monthly invoice settlement coexisting with a separate annual true-up needs its own supplier rules.
+Usage accumulates from the annual opening across months and rate revisions. The shared tier register resets at the next annual boundary. The cycle charge and any minimum apply once per annual cycle. For month-by-month review, supply readings through the desired cutoff to obtain a provisional annual estimate. When an interval crosses the year boundary, a cumulative register file needs a reading exactly there. A version 5 review requires a version 5-capable reader. This policy defines one annual billing and tier cycle. Use the [annual invoice comparison](#reconcile-interim-supply-charges-at-annual-close) to reconcile locally declared interim charges. Automatic invoicing and supplier-specific settlement need their own rules.
 
 <a id="prorate-a-daily-fee-across-the-monthly-reset"></a>
 
@@ -349,6 +349,35 @@ A version 3 archive keeps the exact invoice input and comparison along with the 
 recalculates both at the original meter cutoff. To compare an older archive that contains only a meter review,
 supply the invoice separately. This comparison is read-only and uses the archive's original meter cutoff. The
 supplied charges remain a local declaration, independent of the historical cutoff for meter and price data.
+
+### Reconcile interim supply charges at annual close
+
+Pass invoice schema version 2 to `meter-bill --invoice FILE` with a reviewed annual reset policy. Cover every selected annual cycle from the zero opening through its exact close. Use the same meter scope and currency as the tariff declaration. List interim electricity supply charges in order, with exact adjoining UTC bounds that cover the year. A period with no posted charge needs an explicit zero. The dates describe the supplied statements. They do not reset the annual tier or dictate a billing cadence.
+
+Each amount carries the chosen invoice precision and can be signed. Use only the interim charges that count toward this year's supply settlement. Exclude payments, deposits, unrelated services and any annual adjustment already represented in `true_up_charge`. Set `true_up_charge` to `null` to calculate an estimate without a stated adjustment.
+
+```json
+{
+  "schema_version": 2,
+  "scope": "synthetic-whole-meter-scenario",
+  "currency": "USD",
+  "decimal_places": 2,
+  "rounding": "half_even",
+  "cycles": [{
+    "begin_utc_ms": 1704067200000,
+    "end_utc_ms": 1735689600000,
+    "interim_supply_charges": [
+      {"begin_utc_ms": 1704067200000, "end_utc_ms": 1719792000000, "supply_charge": "60.00"},
+      {"begin_utc_ms": 1719792000000, "end_utc_ms": 1735689600000, "supply_charge": "60.00"}
+    ],
+    "true_up_charge": "20.00"
+  }]
+}
+```
+
+The calculation rounds the annual estimate once at the invoice precision, sums the stated interim charges exactly, then subtracts that sum. For an annual estimate of 140.00 and interim charges totaling 120.00, the estimated adjustment is 20.00. A negative amount represents an estimated credit. When a stated adjustment is present, the report shows the signed difference. Incomplete cycles, gaps and overlapping statements withhold the comparison.
+
+The invoice file limit stays at 16 KiB. `--save-review` retains the exact statement and per-period results in the private archive. `--open-review` rechecks the annual estimate and reconciliation without the original files. Earlier readers require an update to open archives containing version 2 invoice data. When extending a review, the previous archive retains its reconciliation. In an extension with a new reconciliation, every reviewed annual cycle must be complete and appear in the supplied statement.
 
 ### Save and reopen a local meter review
 

@@ -343,7 +343,8 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
     if (!original.invoice.empty()) {
         if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice.emplace()))
             return problem;
-        review.report += "Invoice comparison uses " + std::to_string(invoice->places) + " decimal places with ties ";
+        review.report += invoice->annual ? "Annual reconciliation uses " : "Invoice comparison uses ";
+        review.report += std::to_string(invoice->places) + " decimal places with ties ";
         review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
     }
     return std::visit([&](const auto &series) {
@@ -419,7 +420,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Half-hour rounding requires a reading for every UTC half hour.\n"
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
-                  "Use --invoice to compare declared supply charges for complete billing cycles.\n"
+                  "Use --invoice to compare supply charges or reconcile interim charges against a complete annual estimate.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.\n"
                   "Extend verifies the saved review and requires the complete interval history with additional readings.");
