@@ -121,7 +121,7 @@ own fees, tier allowance and minimum. Charges are added exactly before display r
 explicit cycle dates still has one horizon.
 
 Every selected cycle needs complete rates known at the original comparison time. A missing rate in any selected
-cycle withholds all three amounts. The first cycle uses the saved opening's daily-fee rule. A version 2 comparison reports the first later cycle that splits a charged tariff day. Version 3 applies the declared allocation to each cycle. Selecting a horizon applies only to the estimate.
+cycle withholds all three amounts. The first cycle uses the saved opening's daily-fee rule. Without allocation, the comparison reports the first later cycle that splits a charged tariff day. With the declared allocation, it splits the daily fee across the affected cycles. Selecting a horizon applies only to the estimate.
 
 The amounts are the hypothetical remaining charges for both scenarios and their difference, in the plan currency.
 The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
@@ -169,7 +169,7 @@ Omit the option to use the current UTC time.
 
 Regular meter files for an annual policy can contain up to 1.75 MiB and 18,432 intervals. Other policies retain 1 MiB and 8,192 intervals. A review can cover up to twelve cycles. Coverage gaps, overlap, wrong scope, future readings,
 unknown rates and unsupported reset rules withhold all amounts, including earlier cycles in the same review. An
-additional cycle that starts within a charged tariff day requires the version 3 [daily-fee rule](#prorate-a-daily-fee-across-a-recurring-reset). Use regular files in a trusted
+additional cycle that starts within a charged tariff day requires the declared [daily-fee rule](#prorate-a-daily-fee-across-a-recurring-reset). Use regular files in a trusted
 local directory. Windows accepts native Unicode paths on local drives and rejects redirected directories. The command
 prints no file paths or scope labels. Ctrl+C cancels the calculation. A stalled filesystem read can delay exit.
 Estimation from submitted data and qualified live collection remain separate acceptance steps.
