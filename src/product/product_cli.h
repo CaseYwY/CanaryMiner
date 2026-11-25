@@ -40,10 +40,11 @@
 #include "language_preferences.h"
 #include "market_hour.h"
 #include "meter_bill.h"
+#include "energy_periods_cli.h"
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods };
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -94,6 +95,7 @@ struct CliParse {
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     MeterBillOptions meterBill;
     MarketHourOptions marketHour;
+    EnergyPeriodsOptions energyPeriods;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
 };
@@ -137,6 +139,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "meter-bill") r.command = Command::MeterBill;
         else if (c == "market-hour") r.command = Command::MarketHour;
         else if (c == "market-tickers") r.command = Command::MarketTickers;
+        else if (c == "energy-periods") r.command = Command::EnergyPeriods;
         else {
             if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted";
             return false;
@@ -154,6 +157,15 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             return false;
         }
         r.help = r.meterBill.help;
+        *out = std::move(r);
+        return true;
+    }
+    if (r.command == Command::EnergyPeriods) {
+        if (!parseEnergyPeriodsCli(argc, argv, i, r.energyPeriods)) {
+            if (error) *error = "energy-periods: invalid options; use energy-periods --help";
+            return false;
+        }
+        r.help = r.energyPeriods.help;
         *out = std::move(r);
         return true;
     }
@@ -472,6 +484,7 @@ inline std::string productHelpText() {
         "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       canary-miner meter-bill        review a tariff and imported meter intervals; see meter-bill --help\n"
+        "       canary-miner energy-periods   review local GPU-board energy by month; see energy-periods --help\n"
         "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
         "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
         "       --no-history                  disable local accepted-share history for this run\n"

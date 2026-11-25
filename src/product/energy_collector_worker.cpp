@@ -3,6 +3,7 @@ int main(int argc,char **argv){
     using namespace om;
     try{
         std::string wire;if(!readLocalTaskInput(argc,argv,&wire))return 2;
+        if (wire.rfind(energyPeriodsRequestHeader, 0) == 0) return serveEnergyPeriods(wire);
         EnergyCollectorLeaseRequest lease;if(decodeEnergyCollectorLeaseRequest(wire,&lease))return serveEnergyCollectorLease(lease);
         EnergyCollectorGuardRequest guard;if(!decodeEnergyCollectorGuardRequest(wire,&guard))return 2;
         const auto reply=executeEnergyCollectorGuard(guard);wire.clear();

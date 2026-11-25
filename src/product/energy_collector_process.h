@@ -2,6 +2,15 @@
 #pragma once
 #include "energy_authorization.h"
 namespace om {
+inline std::filesystem::path energyCollectorLeasePath(std::filesystem::path authorizationFile) {
+    return authorizationFile += ".collector.lock";
+}
+inline std::filesystem::path energyHistoryActivityPath(std::filesystem::path authorizationFile) {
+    return authorizationFile += ".history-activity.lock";
+}
+inline std::filesystem::path energyCollectorOperationPath(std::filesystem::path authorizationFile) {
+    return authorizationFile += ".collector-operation.lock";
+}
 struct EnergyCollectorLeaseRequest {uint64_t parentPid=0;EnergyAuthorizationRequest provision;};
 struct EnergyCollectorLeaseReply {EnergyAuthorizationReply provision;std::string epoch;};
 struct EnergyCollectorGuardRequest {uint64_t parentPid=0;EnergyCollectorFence fence;EnergyHistoryRequest history;};

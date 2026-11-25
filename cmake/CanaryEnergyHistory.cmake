@@ -13,6 +13,7 @@ add_library(canary_energy_history STATIC
   "${CMAKE_SOURCE_DIR}/src/product/energy_authorization_owner.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_collector_process.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_leased_capture.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/energy_periods_cli.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_runtime.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_runtime_paths.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_history_owner.cpp")

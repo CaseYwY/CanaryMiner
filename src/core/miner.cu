@@ -56,6 +56,11 @@ bool pearlCudaShapeExperimentCompiled() noexcept; }
 static volatile sig_atomic_t g_stop = 0;
 static volatile sig_atomic_t g_closeRequested = 0;  // console close/logoff/shutdown: the drain is skipped
 static void onSignal(int) { g_stop = 1; }
+#if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
+static_assert(std::atomic<bool>::is_always_lock_free, "The energy CLI signal flag must be lock-free");
+static std::atomic<bool> g_energyPeriodsStopped{false};
+static void stopEnergyPeriods(int) { g_energyPeriodsStopped.store(true, std::memory_order_relaxed); }
+#endif
 
 #if defined(_WIN32)
 static HANDLE g_shutdownDone = nullptr;  // signalled after the shutdown record and state are written
@@ -137,6 +142,23 @@ int main(int argc, char **argv) {
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
         return commandMeterBill(cli.meterBill, argc, argv, &g_stop);
+    }
+    if (cli.command == Command::EnergyPeriods) {
+        if (cli.help) {
+            std::puts(energyPeriodsHelp);
+            return kExitOk;
+        }
+#if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
+        signal(SIGINT, stopEnergyPeriods);
+        signal(SIGTERM, stopEnergyPeriods);
+#if defined(SIGBREAK)
+        signal(SIGBREAK, stopEnergyPeriods);
+#endif
+        return commandEnergyPeriods(cli.energyPeriods, argc, argv, g_energyPeriodsStopped);
+#else
+        std::fputs("energy-periods: the energy runtime is unavailable in this build\n", stderr);
+        return kExitConfig;
+#endif
     }
     if (cli.command == Command::MarketHour) {
         signal(SIGINT, onSignal);

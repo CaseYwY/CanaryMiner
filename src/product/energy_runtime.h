@@ -15,6 +15,7 @@ using EnergyRuntimeFactory=std::function<std::unique_ptr<EnergyRuntime>(bool min
 std::unique_ptr<EnergyRuntime> makeEnergyRuntime(std::filesystem::path authorizationHelper,std::filesystem::path collectorHelper,
     std::filesystem::path authorizationFile,bool mining,bool cliNoEnergy,unsigned timeoutMs=10000,EnergyHistoryClock clock={});
 // OS module path, never argv[0], PATH, environment or a configurable executable. No filesystem probes.
+inline constexpr char energyAuthorizationName[] = "energy-persistence.json";
 struct EnergyRuntimePaths {std::filesystem::path authorizationHelper,collectorHelper,authorizationFile;};
 std::filesystem::path energyRuntimeExecutable();
 std::optional<EnergyRuntimePaths> energyRuntimePaths(const std::filesystem::path &executable,const std::filesystem::path &absoluteStateDir);
