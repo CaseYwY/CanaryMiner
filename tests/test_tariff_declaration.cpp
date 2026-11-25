@@ -218,6 +218,134 @@ void annualCycles(const JsonValue &original) {
     CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
 }
 
+void seasonalCycles(JsonValue draft) {
+    constexpr int64_t begin=1713657600000, middle=1714521600000, end=1716249600000, next=1718928000000;
+    auto &plan=member(draft,"plan");
+    auto &revision=member(plan,"revisions").items.front();
+    set(plan,"tiers",R"("progressive")");
+    set(plan,"cycle_charge",R"("0")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    set(revision,"time_mode",R"("constant")");
+    set(revision,"calendar","[]");
+    set(revision,"base_rate_per_kwh",R"("0")");
+    set(revision,"charge_per_civil_day",R"("0")");
+    set(revision,"begin_utc_ms",std::to_string(begin));
+    set(revision,"end_utc_ms",std::to_string(next));
+    set(revision,"published_utc_ms",std::to_string(begin));
+    set(revision,"bands",R"([{"through_kwh":null,"rate_per_kwh":"1"},{"through_kwh":null,"rate_per_kwh":"2"}])");
+    auto &opening=member(draft,"opening");
+    set(opening,"cycle_begin_utc_ms",std::to_string(begin));
+    set(opening,"through_utc_ms",std::to_string(begin));
+    set(opening,"cycle_end_utc_ms",std::to_string(end));
+    set(opening,"imported_kwh",R"("0")");
+    set(opening,"accrued_subtotal",R"("0")");
+    set(draft,"schema_version","2");
+    set(draft,"reset_policy",R"({"monthly_day":21,"clock":{"kind":"utc","fixed_offset_seconds":0}})");
+
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"reset_policy");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,24,ColorLevel::None).find("[A] Seasonal allowance")!=std::string::npos);
+    panel.key('a',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="7");
+    enter(panel,"seasonal_allowance");
+    enter(panel,"published_utc_ms");
+    type(panel,std::to_string(begin-1000));
+    enter(panel,"seasons");
+    for(const auto &date:std::array<std::array<const char *,3>,2>{{{{"1","1","2"}},{{"5","1","3"}}}}){
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        enter(panel,"start_month");type(panel,date[0]);
+        enter(panel,"start_day");type(panel,date[1]);
+        enter(panel,"kwh_per_day");type(panel,date[2]);
+        panel.key(27,{},T/1000);
+    }
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,28,ColorLevel::None).find("full cycle. Clear both band bounds")!=std::string::npos);
+    JsonValue saved;
+    panel.key('\r',[&](const JsonValue &candidate,std::string *){
+        saved=candidate;
+        return true;
+    },T/1000);
+    CHECK(saved.find("schema_version")&&saved.find("schema_version")->text=="7");
+    CHECK(saved.find("seasonal_allowance")->find("seasons")->items.size()==2);
+    CHECK(saved.find("plan")->find("revisions")->items.front().find("bands")->items.front().find("through_kwh")->type==JsonValue::Type::Null);
+    TariffDeclaration decoded;
+    TariffProblem problem;
+    CHECK(decodeTariffDeclaration(saved,&decoded,&problem));
+    std::optional<SeasonalCycleTariff> effective;
+    CHECK(seasonalTariffForCycle(decoded,decoded.opening,T,effective)==ElectricityStatus::Ok);
+    CHECK(effective&&effective->allowanceKwh.text()=="80");
+    CHECK(seasonalTariffForCycle(decoded,decoded.opening,begin-1001,effective)==ElectricityStatus::NotYetKnown);
+    CHECK(!effective);
+    const std::array<ExactDecimal,2> watts{dec("100"),dec("200")};
+    checkComparison(compareTariffCycles(decoded,watts,1,T),"72.000000","208.000000","136.000000");
+    checkComparison(compareTariffCycles(decoded,watts,2,T),"146.400000","412.600000","266.200000");
+
+    auto mid=saved;
+    auto &midOpening=member(mid,"opening");
+    set(midOpening,"through_utc_ms",std::to_string(middle));
+    set(midOpening,"imported_kwh",R"("60")");
+    set(midOpening,"accrued_subtotal",R"("60")");
+    panel.open(mid);
+    enter(panel,"seasonal_allowance");
+    enter(panel,"seasons");
+    panel.key('\r',{},T/1000);
+    enter(panel,"kwh_per_day");type(panel,"1.5");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text=="60");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    CHECK(!decodeTariffDeclaration(panel.draft,&decoded,&problem));
+    CHECK(panel.message.find("Re-enter the accrued subtotal")!=std::string::npos);
+
+    auto explicitMid=mid;
+    set(explicitMid,"reset_policy",R"("explicit_cycle_only")");
+    auto &explicitOpening=member(explicitMid,"opening");
+    set(explicitOpening,"imported_kwh",R"("90")");
+    set(explicitOpening,"accrued_subtotal",R"("100")");
+    CHECK(decodeTariffDeclaration(explicitMid,&decoded,&problem));
+    panel.open(explicitMid);
+    enter(panel,"opening");
+    enter(panel,"cycle_end_utc_ms");type(panel,std::to_string(end-10*86400000LL));
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text=="90");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    CHECK(!decodeTariffDeclaration(panel.draft,&decoded,&problem));
+    enter(panel,"accrued_subtotal");type(panel,"130");
+    CHECK(decodeTariffDeclaration(panel.draft,&decoded,&problem));
+    CHECK(seasonalTariffForCycle(decoded,decoded.opening,T,effective)==ElectricityStatus::Ok);
+    CHECK(effective&&effective->allowanceKwh.text()=="50");
+
+    panel.open(explicitMid);
+    enter(panel,"opening");
+    enter(panel,"cycle_begin_utc_ms");type(panel,std::to_string(begin-86400000LL));
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+    panel.open(explicitMid);
+    enter(panel,"opening");
+    enter(panel,"through_utc_ms");type(panel,std::to_string(middle+86400000LL));
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text.empty());
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+
+    auto fixed=explicitMid;
+    set(member(member(fixed,"plan"),"clock"),"kind",R"("fixed_standard")");
+    CHECK(decodeTariffDeclaration(fixed,&decoded,&problem));
+    panel.open(fixed);
+    enter(panel,"plan");
+    enter(panel,"clock");
+    enter(panel,"fixed_offset_seconds");type(panel,"3600");
+    CHECK(panel.draft.find("opening")->find("imported_kwh")->text=="90");
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text.empty());
+
+    panel.open(saved);
+    enter(panel,"reset_policy");
+    panel.key(27,{},T/1000);
+    panel.key('b',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="7");
+    panel.key('a',{},T/1000);
+    CHECK(!panel.draft.find("seasonal_allowance"));
+    CHECK(panel.draft.find("schema_version")->text=="2");
+}
+
 void bimonthlyCycles(JsonValue draft) {
     constexpr int64_t jan2024=1704067200000, mar2024=1709251200000, may2024=1714521600000;
     constexpr int64_t dec2023=1703980800000, leap2024=1709164800000, april2024=1714435200000;
@@ -487,6 +615,7 @@ int main(int argc,char **argv){
     monthlyCycles(original);
     annualCycles(original);
     bimonthlyCycles(original);
+    seasonalCycles(original);
     CHECK(d.plan.tiers==TierMode::Progressive&&d.plan.revisions[0].timeMode==TimeRateMode::Calendar&&d.opening.evidence.origin==PowerOrigin::DeclaredForecast);
     CHECK(d.opening.planKey==d.plan.key&&d.sourceReference.find("SYNTHETIC")!=std::string::npos);
     PowerTrace trace{d.opening.evidence,{{static_cast<int64_t>(T),static_cast<int64_t>(T+86400000),dec("1000")}}};

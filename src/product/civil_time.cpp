@@ -221,6 +221,19 @@ CivilDay civilDay(const CivilClock &clock, CivilDate day) {
     result.status = CivilStatus::Ok; return result;
 }
 CivilDay civilDayAt(const CivilClock &clock, int64_t ms) { const auto local = civilAt(clock,ms); if (local.status != CivilStatus::Ok) { CivilDay d; d.status = local.status; return d; } return civilDay(clock,local.date); }
+bool civilDayIsContiguous(const CivilClock &clock,const CivilDay &day) {
+    if(day.status!=CivilStatus::Ok||day.endUtcMs<=day.beginUtcMs)return false;
+    if(clock.kind!=CivilClockKind::NamedIana)return true;
+    // A date cannot return two UTC days after its first end with the civil API's +/-24 hour offset bound.
+    const auto limit=day.endUtcMs+2*kDay;
+    for(auto at=civilNextTransition(clock,day.beginUtcMs);at&&*at<limit;at=civilNextTransition(clock,*at)){
+        const auto after=civilAt(clock,*at);
+        if(after.status!=CivilStatus::Ok)return false;
+        const bool sameDate=sameCivilDate(after.date,day.date);
+        if(sameDate!=(*at<day.endUtcMs))return false;
+    }
+    return true;
+}
 std::optional<int64_t> civilNextTransition(const CivilClock &clock, int64_t ms) {
     if (!validClock(clock) || !instant(ms) || clock.kind != CivilClockKind::NamedIana) return std::nullopt;
 #if defined(CANARY_NAMED_TZDB)

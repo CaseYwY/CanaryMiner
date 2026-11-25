@@ -112,6 +112,49 @@ TariffResetSchedule decodeResetSchedule(const JsonValue &policy, bool allowNamed
             allocation ? DailyFeeAllocation::ProrateByCycleMinutes : DailyFeeAllocation::WholeDay, month, startMonth};
 }
 
+unsigned seasonalDateKey(unsigned month,unsigned day) {
+    return month * 32 + day;
+}
+
+SeasonalAllowance decodeSeasonalAllowance(const JsonValue &value,int64_t confirmedUtcMs) {
+    keys(value,"seasonal_allowance",{"published_utc_ms","seasons"});
+    SeasonalAllowance result;
+    constexpr char publication[]="seasonal_allowance.published_utc_ms";
+    result.publishedUtcMs=static_cast<int64_t>(integer(*value.find("published_utc_ms"),publication));
+    if(result.publishedUtcMs>confirmedUtcMs)
+        bad(publication,"Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);
+    const auto &seasons=*value.find("seasons");
+    if(!seasons.isArray()||seasons.items.empty()||seasons.items.size()>16)
+        bad("seasonal_allowance.seasons","Provide 1 to 16 seasonal start dates.",TariffProblemKind::Unknown);
+    unsigned previous=0;
+    for(size_t i=0;i<seasons.items.size();++i){
+        const auto path="seasonal_allowance.seasons["+std::to_string(i)+"]";
+        const auto &row=seasons.items[i];
+        keys(row,path,{"start_month","start_day","kwh_per_day"});
+        const auto month=static_cast<unsigned>(integer(*row.find("start_month"),child(path,"start_month"),12));
+        const auto day=static_cast<unsigned>(integer(*row.find("start_day"),child(path,"start_day"),31));
+        if(!validCivilDate({2023,month,day}))
+            bad(child(path,"start_day"),"Use a date that occurs in every year.",TariffProblemKind::Date);
+        const auto key=seasonalDateKey(month,day);
+        if(key<=previous)bad(path,"List the seasonal start dates in strictly increasing order.",TariffProblemKind::Unknown);
+        const auto amountPath=child(path,"kwh_per_day");
+        auto amount=decimal(*row.find("kwh_per_day"),amountPath);
+        if(amount.negative())bad(amountPath,"Daily allowance must be nonnegative.",TariffProblemKind::OpeningQuantity);
+        result.seasons.push_back({month,day,std::move(amount)});
+        previous=key;
+    }
+    return result;
+}
+
+void validateSeasonalBands(const TariffPlan &plan) {
+    if(plan.tiers!=TierMode::Progressive||plan.rounding!=TariffRounding::FinalDisplayOnly||
+       std::any_of(plan.revisions.begin(),plan.revisions.end(),[](const TariffRevision &revision){
+           return revision.bands.size()!=2||revision.bands.front().throughKwh||revision.bands.back().throughKwh;
+       }))
+        bad("plan","Seasonal allowance requires two progressive bands with empty bounds and display-only rounding.",
+            TariffProblemKind::ModelStatus,{},ElectricityStatus::Unsupported);
+}
+
 void normalizeBimonthlyTariff(TariffPlan &plan) {
     if (plan.tiers != TierMode::AllUnits || plan.rounding != TariffRounding::FinalDisplayOnly ||
         plan.revisions.size() != 1 || plan.revisions.front().timeMode != TimeRateMode::Constant ||
@@ -237,6 +280,7 @@ JsonValue tariffRowTemplate(const std::string &name){
     if(name=="calendar")return literal(R"({"key":"","begin_minute":0,"end_minute":1440,"weekday_mask":127,"month_mask":4095,"priority":0,"date":null,"published_utc_ms":0,"rate_per_kwh":""})");
     if(name=="dynamic")return literal(R"({"begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"rate_per_kwh":""})");
     if(name=="bands")return literal(R"({"through_kwh":null,"rate_per_kwh":""})");
+    if(name=="seasons")return literal(R"({"start_month":0,"start_day":0,"kwh_per_day":""})");
     return {};
 }
 JsonValue tariffDeclarationTemplate(){
@@ -260,6 +304,47 @@ bool deriveTariffRecurringCycle(const JsonValue &policy,const JsonValue &through
 }
 bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
     return deriveCycle(policy,through,bounds,problem,TariffResetCadence::Monthly);
+}
+
+ElectricityStatus seasonalTariffForCycle(const TariffDeclaration &d,const BillOpening &opening,int64_t decision,
+                                         std::optional<SeasonalCycleTariff> &adjusted){
+    adjusted.reset();
+    if(!d.seasonalAllowance)return ElectricityStatus::Ok;
+    const auto &rule=*d.seasonalAllowance;
+    if(rule.publishedUtcMs>decision)return ElectricityStatus::NotYetKnown;
+    if(rule.seasons.empty()||opening.cycleBeginUtcMs>=opening.cycleEndUtcMs)return ElectricityStatus::Invalid;
+    auto cursor=opening.cycleBeginUtcMs;
+    auto day=civilDayAt(d.plan.clock,cursor);
+    const auto closing=civilAt(d.plan.clock,opening.cycleEndUtcMs);
+    if(closing.status!=CivilStatus::Ok)return ElectricityStatus::SeasonalDayBoundary;
+    ExactDecimal allowance;
+    for(unsigned days=0;cursor<opening.cycleEndUtcMs;++days){
+        if(days>=370)return ElectricityStatus::Capacity;
+        if(day.beginUtcMs!=cursor||day.endUtcMs>opening.cycleEndUtcMs||!civilDayIsContiguous(d.plan.clock,day))
+            return ElectricityStatus::SeasonalDayBoundary;
+        const auto key=seasonalDateKey(day.date.month,day.date.day);
+        const auto selected=std::upper_bound(rule.seasons.begin(),rule.seasons.end(),key,
+            [](unsigned dayKey,const SeasonalAllowanceRate &season){
+                return dayKey<seasonalDateKey(season.startMonth,season.startDay);
+            });
+        const auto &season=selected==rule.seasons.begin()?rule.seasons.back():*(selected-1);
+        if(!allowance.add(season.kwhPerDay,&allowance))return ElectricityStatus::Capacity;
+        cursor=day.endUtcMs;
+        const auto next=civilAddDays(day.date,1);
+        if(!next)return ElectricityStatus::SeasonalDayBoundary;
+        if(cursor==opening.cycleEndUtcMs){
+            // A skipped final civil date can share its resolved UTC boundary with the following day.
+            if(!sameCivilDate(*next,closing.date))return ElectricityStatus::SeasonalDayBoundary;
+        }else day=civilDay(d.plan.clock,*next);
+    }
+    SeasonalCycleTariff result{d.plan,allowance};
+    for(auto &revision:result.plan.revisions){
+        if(revision.bands.size()!=2)return ElectricityStatus::Invalid;
+        if(allowance.zero())revision.bands.erase(revision.bands.begin());
+        else revision.bands.front().throughKwh=allowance;
+    }
+    adjusted=std::move(result);
+    return ElectricityStatus::Ok;
 }
 
 std::optional<int64_t> tariffComparisonEnd(const TariffDeclaration &d,unsigned cycles){
@@ -305,7 +390,10 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::
         }
         const PowerTrace base{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[0]}}};
         const PowerTrace with{opening.evidence,{{opening.throughUtcMs,window.endUtcMs,watts[1]}}};
-        const auto step=counterfactualBill(d.plan,opening,base,with,window.endUtcMs,decision,cancel,d.dailyFeeAllocation());
+        std::optional<SeasonalCycleTariff> adjusted;
+        const auto status=seasonalTariffForCycle(d,opening,decision,adjusted);
+        if(status!=ElectricityStatus::Ok)return {status,cycle,false,{},{},{}};
+        const auto step=counterfactualBill(adjusted?adjusted->plan:d.plan,opening,base,with,window.endUtcMs,decision,cancel,d.dailyFeeAllocation());
         if(step.status!=ElectricityStatus::Ok)return {step.status,cycle,false,{},{},{}};
         auto &baseTotal=result.withoutMining.numerator;
         auto &withTotal=result.withMining.numerator;
@@ -322,15 +410,22 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
     try{
         if(!out)bad("","No declaration output.",TariffProblemKind::NoOutput);
         if(tariffJson(root).size()>tariffDeclarationMaxBytes)bad("","Declaration exceeds 64 KiB.",TariffProblemKind::Oversized);
-        keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"});
-        const auto version=integer(*root.find("schema_version"),"schema_version",6);
+        const auto *allowance=root.find("seasonal_allowance");
+        if(allowance)
+            keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening","seasonal_allowance"});
+        else keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"});
+        const auto version=integer(*root.find("schema_version"),"schema_version",7);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
+        if((version==7)!=static_cast<bool>(allowance))
+            bad("schema_version","Seasonal allowance requires version 7.",TariffProblemKind::SchemaVersion);
         const auto &policy=*root.find("reset_policy");
-        const bool explicitCycle=version==1||(version==4&&policy.isString());
+        const bool explicitCycle=version==1||((version==4||version==7)&&policy.isString());
         if(explicitCycle)choice(policy,"reset_policy",{"explicit_cycle_only"});
         const auto &ack=*root.find("acknowledged");if(!ack.isBool()||!ack.boolean)bad("acknowledged","Acknowledge declared-model exclusions before saving.",TariffProblemKind::Acknowledgement);
         TariffDeclaration d;d.country=label(*root.find("country"),"country");d.sourceReference=label(*root.find("source_reference"),"source_reference");
         d.confirmedUtc=integer(*root.find("confirmed_utc"),"confirmed_utc",lastMs/1000);if(!d.confirmedUtc)bad("confirmed_utc","Explicit review confirmation required.",TariffProblemKind::Confirmation);
+        const auto confirmedMs=static_cast<int64_t>(d.confirmedUtc*1000);
+        if(allowance)d.seasonalAllowance=decodeSeasonalAllowance(*allowance,confirmedMs);
         auto &p=d.plan;const auto &plan=*root.find("plan");
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"});
         p.declared=true;p.origin=TariffOrigin::UserDeclaredOffline;
@@ -344,7 +439,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         p.cycleCharge=decimal(*plan.find("cycle_charge"),"plan.cycle_charge");
         if(!null(*plan.find("minimum_cycle_subtotal")))p.minimumCycleSubtotal=decimal(*plan.find("minimum_cycle_subtotal"),"plan.minimum_cycle_subtotal");
         p.subtotalMultiplier=decimal(*plan.find("subtotal_multiplier"),"plan.subtotal_multiplier");
-        size_t total=0,index=0;
+        size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0,index=0;
         boundedArray(*plan.find("revisions"),"plan.revisions",16,total);
         for(const auto &row:plan.find("revisions")->items){
             const auto at="plan.revisions["+std::to_string(index++)+"]";TariffRevision r;
@@ -390,7 +485,8 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         s.cycleBeginUtcMs=integer(*opening.find("cycle_begin_utc_ms"),"opening.cycle_begin_utc_ms");s.cycleEndUtcMs=integer(*opening.find("cycle_end_utc_ms"),"opening.cycle_end_utc_ms");s.throughUtcMs=integer(*opening.find("through_utc_ms"),"opening.through_utc_ms");
         if(!explicitCycle){
             const auto cadence = version == 6 ? TariffResetCadence::Bimonthly
-                : version == 5 ? TariffResetCadence::Annual : TariffResetCadence::Monthly;
+                : version == 5 || (version == 7 && policy.find("annual_month")) ? TariffResetCadence::Annual
+                : TariffResetCadence::Monthly;
             d.resetSchedule=decodeResetSchedule(policy,version>=4,cadence);
             if(version<4&&(version==3)!=(d.dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes))
                 bad("reset_policy.daily_fee_allocation","The chosen daily fee rule must match the schema version.",TariffProblemKind::Unknown);
@@ -405,7 +501,14 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         if(version==6)normalizeBimonthlyTariff(p);
-        const auto status=validateTariffOpening(p,s);if(status!=ElectricityStatus::Ok)bad("plan/opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
+        std::optional<SeasonalCycleTariff> adjusted;
+        if(allowance){
+            validateSeasonalBands(p);
+            const auto status=seasonalTariffForCycle(d,s,confirmedMs,adjusted);
+            if(status!=ElectricityStatus::Ok)
+                bad("opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
+        }
+        const auto status=validateTariffOpening(adjusted?adjusted->plan:p,s);if(status!=ElectricityStatus::Ok)bad("plan/opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
         // This store is an offline declaration, so publication is a local claim bounded by confirmation, not certification.
         for(const auto &r:p.revisions){
             if(r.publishedUtcMs>static_cast<int64_t>(d.confirmedUtc*1000))bad("plan.revisions","Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);

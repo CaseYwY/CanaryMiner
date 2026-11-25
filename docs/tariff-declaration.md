@@ -23,7 +23,7 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
@@ -42,7 +42,7 @@ Press **Z** again to select UTC. The rate clock controls calendar prices and dai
 The reset clock controls monthly, annual or two-month boundaries.
 
 With a named clock, an explicit or monthly cycle uses version 4. An annual cycle uses version 5
-and a two-month cycle uses version 6. All three accept this clock object.
+and a two-month cycle uses version 6. Version 7 also accepts this clock object.
 
 ```json
 {"kind":"named_iana","zone":"America/New_York","time_database_version":"2026e"}
@@ -132,6 +132,43 @@ requires a reader that supports version 6 declarations.
 
 This offline rule covers the declared two-month formula. Supplier-specific rounding, proration
 and settlement require their own rules.
+
+### Apply a seasonal baseline allowance
+
+Select `reset_policy` and press **A** to add the seasonal rule. Open `seasonal_allowance`, enter
+the publication time in UTC milliseconds, and use **A** inside `seasons` to add each
+start date and its daily allowance. List dates in calendar order. Each date starts a new daily
+allowance, and the last season carries across New Year until the next start date.
+
+Version 7 stores the seasonal rule. This example switches from 2 to 3 kWh per day on May 1.
+
+```json
+{
+  "published_utc_ms": 1713657599000,
+  "seasons": [
+    {"start_month": 1, "start_day": 1, "kwh_per_day": "2"},
+    {"start_month": 5, "start_day": 1, "kwh_per_day": "3"}
+  ]
+}
+```
+
+Use two progressive bands in each rate revision and clear both `through_kwh` fields. The program
+sets the first band's limit to the total allowance for the complete cycle. The second band applies
+to the excess. The rate clock determines which local days are in each season. A 23-hour or 25-hour
+day counts once. A cycle must cover complete tariff days, and a skipped date blocks pricing.
+
+A cycle running from April 21 to May 21 uses ten days at 2 kWh and twenty days at 3 kWh, giving
+80 kWh for the whole cycle. With rates of 1 and 2 per kWh, 100 kWh costs 120 before other charges.
+An open-cycle review uses the same allowance when the rule was published by the review cutoff.
+The meter accumulates through season boundaries and resets only at its declared billing boundary.
+A zero allowance prices all import at the excess rate.
+
+The rule supports explicit, monthly or annual cycles and display-only rounding. Review and save
+with **V** and **Enter**. For a mid-cycle opening, enter the import to date and the accrued subtotal
+priced using this cycle's allowance. Changing the allowance, rate clock or cycle end clears the draft
+subtotal for a mid-cycle opening. Changing the start or through-time also clears the opening import.
+Meter-review archives retain the source schedule and exact allowance for each cycle.
+Supplier-specific allocation and automatic settlement require their own rules.
 
 <a id="prorate-a-daily-fee-across-the-monthly-reset"></a>
 

@@ -121,26 +121,14 @@ bool sameMeterRates(const ExactDecimal &firstRate, const TariffRevision &first,
     return std::equal(first.bands.begin(),first.bands.end(),current.bands.begin(),
         [](const TariffBand &a,const TariffBand &b){return a.ratePerKwh.compare(b.ratePerKwh) == 0;});
 }
-bool contiguousTariffDay(const CivilClock &clock,const CivilDay &day,int64_t now){
-    if(now<day.beginUtcMs||now>=day.endUtcMs)return false;
-    if(clock.kind!=CivilClockKind::NamedIana)return true;
-    // A date cannot return two UTC days after its first end with the civil API's +/-24 hour offset bound.
-    const auto limit=day.endUtcMs+2*dayMs;
-    for(auto at=civilNextTransition(clock,day.beginUtcMs);at&&*at<limit;at=civilNextTransition(clock,*at)){
-        const auto after=civilAt(clock,*at);
-        if(after.status!=CivilStatus::Ok)return false;
-        const bool sameDate=sameCivilDate(after.date,day.date);
-        if(sameDate!=(*at<day.endUtcMs))return false;
-    }
-    return true;
-}
 void cut(int64_t candidate, int64_t now, int64_t &next) { if (candidate > now && candidate < next) next = candidate; }
 ElectricityStatus timeRate(const TariffPlan &p, const TariffRevision &r, int64_t now, int64_t decision, ExactDecimal &rate, int64_t &next, CivilStamp &stamp) {
     if (r.publishedUtcMs > decision) return ElectricityStatus::NotYetKnown;
     stamp = civilAt(p.clock,now);
     const auto day = civilDayAt(p.clock,now);
     if (stamp.status != CivilStatus::Ok || day.status != CivilStatus::Ok) return ElectricityStatus::Unavailable;
-    if (!contiguousTariffDay(p.clock,day,now)) return ElectricityStatus::Unsupported;
+    if (now < day.beginUtcMs || now >= day.endUtcMs || !civilDayIsContiguous(p.clock,day))
+        return ElectricityStatus::Unsupported;
     cut(day.endUtcMs,now,next);
     if (const auto transition = civilNextTransition(p.clock,now)) cut(*transition,now,next);
     rate = r.baseRatePerKwh;
@@ -225,6 +213,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::Capacity: return "bounded arithmetic/input/evaluation capacity exceeded";
         case ElectricityStatus::MeterBoundary: return "meter register needs a reading at an energy-rate boundary";
         case ElectricityStatus::MeterRoundingBoundary: return "meter rounding needs readings and cycle boundaries on the UTC half hour";
+        case ElectricityStatus::SeasonalDayBoundary: return "seasonal allowance requires complete tariff civil days without skipped or disjoint dates";
     }
     return "unknown electricity status";
 }

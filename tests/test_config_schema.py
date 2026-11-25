@@ -402,6 +402,33 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
             bad = {**plan, 'revisions': [{**revision, **change}]}
             self.assertTrue(validate({**example, 'plan': bad}, schema, schema))
 
+    def test_v7_seasonal_allowance_uses_two_derived_progressive_bands(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 7
+        rule = {'published_utc_ms': 1800000000000,
+                'seasons': [{'start_month': 1, 'start_day': 1, 'kwh_per_day': '2'}]}
+        example['seasonal_allowance'] = rule
+        plan = example['plan']
+        revision = plan['revisions'][0]
+        for band in revision['bands']:
+            band['through_kwh'] = None
+        self.assertEqual(validate(example, schema, schema), [])
+        for policy in ({'monthly_day': 1, 'clock': plan['clock']},
+                       {'annual_month': 2, 'annual_day': 28, 'clock': plan['clock']}):
+            self.assertEqual(validate({**example, 'reset_policy': policy}, schema, schema), [])
+        for version in range(1, 7):
+            self.assertTrue(validate({**example, 'schema_version': version}, schema, schema))
+        missing = {key: value for key, value in example.items() if key != 'seasonal_allowance'}
+        self.assertTrue(validate(missing, schema, schema))
+        for bad_rule in ({**rule, 'seasons': []},
+                         {**rule, 'seasons': [{'start_month': 1, 'start_day': 1, 'kwh_per_day': '-1'}]}):
+            self.assertTrue(validate({**example, 'seasonal_allowance': bad_rule}, schema, schema))
+        for edits in ({'tiers': 'all_units'}, {'rounding': 'meter_import_half_hour_kwh_half_even_2'}):
+            self.assertTrue(validate({**example, 'plan': {**plan, **edits}}, schema, schema))
+        fixed = {**revision, 'bands': [{**revision['bands'][0], 'through_kwh': '80'}, revision['bands'][1]]}
+        self.assertTrue(validate({**example, 'plan': {**plan, 'revisions': [fixed]}}, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
