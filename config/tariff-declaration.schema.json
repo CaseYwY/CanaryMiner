@@ -5,16 +5,17 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5, 6], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
     "confirmed_utc": {"type": "integer", "minimum": 1, "maximum": 253402300799},
     "reset_policy": {},
     "plan": {"$ref": "#/$defs/plan"},
-    "opening": {"$ref": "#/$defs/opening"}
+    "opening": {"$ref": "#/$defs/opening"},
+    "seasonal_allowance": {"$ref": "#/$defs/seasonalAllowance"}
   },
-  "if": {"properties": {"schema_version": {"enum": [4, 5, 6]}}},
+  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7]}}},
   "then": {
     "if": {"properties": {"schema_version": {"const": 4}}},
     "then": {
@@ -30,16 +31,32 @@
     "else": {
       "if": {"properties": {"schema_version": {"const": 5}}},
       "then": {"properties": {"reset_policy": {"$ref": "#/$defs/annualReset"}}},
-      "else": {"properties": {
-        "reset_policy": {"$ref": "#/$defs/bimonthlyReset"},
-        "plan": {"properties": {
-          "tiers": {"const": "all_units"}, "rounding": {"const": "final_display_only"},
-          "revisions": {"maxItems": 1, "items": {"properties": {
-            "time_mode": {"const": "constant"}, "charge_per_civil_day": {"const": "0"},
-            "calendar": {"maxItems": 0}, "dynamic": {"maxItems": 0}, "bands": {"minItems": 1}
-          }}}
+      "else": {
+        "if": {"properties": {"schema_version": {"const": 6}}},
+        "then": {"properties": {
+          "reset_policy": {"$ref": "#/$defs/bimonthlyReset"},
+          "plan": {"properties": {
+            "tiers": {"const": "all_units"}, "rounding": {"const": "final_display_only"},
+            "revisions": {"maxItems": 1, "items": {"properties": {
+              "time_mode": {"const": "constant"}, "charge_per_civil_day": {"const": "0"},
+              "calendar": {"maxItems": 0}, "dynamic": {"maxItems": 0}, "bands": {"minItems": 1}
+            }}}
+          }}
+        }},
+        "else": {"properties": {
+          "reset_policy": {"oneOf": [
+            {"const": "explicit_cycle_only"}, {"$ref": "#/$defs/monthlyReset"},
+            {"$ref": "#/$defs/proratedMonthlyReset"}, {"$ref": "#/$defs/annualReset"}
+          ]},
+          "plan": {"properties": {
+            "tiers": {"const": "progressive"}, "rounding": {"const": "final_display_only"},
+            "revisions": {"items": {"properties": {
+              "bands": {"minItems": 2, "maxItems": 2,
+                "items": {"properties": {"through_kwh": {"type": "null"}}}}
+            }}}
+          }}
         }}
-      }}
+      }
     }
   },
   "else": {
@@ -56,6 +73,11 @@
     }
   },
   "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": 7}}},
+      "then": {"required": ["seasonal_allowance"]},
+      "else": {"not": {"required": ["seasonal_allowance"]}}
+    },
     {
       "if": {"properties": {"plan": {"properties": {"clock": {"$ref": "#/$defs/namedClock"}}}}},
       "then": {"properties": {"opening": {"properties": {"time_database_version": {"const": "2026e"}}}}},
@@ -109,6 +131,21 @@
         "bimonthly_start_month": {"type": "integer", "enum": [1, 2]},
         "bimonthly_day": {"type": "integer", "minimum": 1, "maximum": 31},
         "clock": {"$ref": "#/$defs/clockChoice"}
+      }
+    },
+    "seasonalAllowance": {
+      "type": "object", "additionalProperties": false, "required": ["published_utc_ms", "seasons"],
+      "properties": {
+        "published_utc_ms": {"$ref": "#/$defs/instant"},
+        "seasons": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/season"}}
+      }
+    },
+    "season": {
+      "type": "object", "additionalProperties": false, "required": ["start_month", "start_day", "kwh_per_day"],
+      "properties": {
+        "start_month": {"type": "integer", "minimum": 1, "maximum": 12},
+        "start_day": {"type": "integer", "minimum": 1, "maximum": 31},
+        "kwh_per_day": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]}
       }
     },
     "annualReset": {

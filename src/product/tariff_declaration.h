@@ -17,12 +17,21 @@ struct TariffResetSchedule {
     unsigned annualMonth = 0;  // Nonzero schedules one reset per year.
     unsigned bimonthlyStartMonth = 0;  // 1 for odd months, 2 for even months.
 };
+struct SeasonalAllowanceRate {
+    unsigned startMonth=0, startDay=0;
+    ExactDecimal kwhPerDay;
+};
+struct SeasonalAllowance {
+    int64_t publishedUtcMs=0;
+    std::vector<SeasonalAllowanceRate> seasons;
+};
 struct TariffDeclaration {
     std::string country, sourceReference, openingKey;
     uint64_t confirmedUtc=0;
     TariffPlan plan;
     BillOpening opening;
     std::optional<TariffResetSchedule> resetSchedule;
+    std::optional<SeasonalAllowance> seasonalAllowance;
     DailyFeeAllocation dailyFeeAllocation() const {
         return resetSchedule ? resetSchedule->dailyFeeAllocation : DailyFeeAllocation::WholeDay;
     }
@@ -38,6 +47,13 @@ struct TariffProblem {
 struct TariffCycleBounds {
     int64_t beginUtcMs=0,endUtcMs=0;
 };
+struct SeasonalCycleTariff {
+    TariffPlan plan;
+    ExactDecimal allowanceKwh;
+};
+// No adjusted plan is needed for an ordinary declaration.
+ElectricityStatus seasonalTariffForCycle(const TariffDeclaration &d,const BillOpening &opening,int64_t decisionUtcMs,
+                                         std::optional<SeasonalCycleTariff> &adjusted);
 constexpr unsigned maxTariffComparisonCycles = 12;
 struct TariffCycleComparison {
     ElectricityStatus status = ElectricityStatus::Unavailable;

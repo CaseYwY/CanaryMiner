@@ -53,5 +53,7 @@ CivilStamp civilAt(const CivilClock &clock, int64_t utcMs);
 CivilResolved civilResolve(const CivilClock &clock, CivilDate date, uint32_t millisecondOfDay, CivilChoose choose = CivilChoose::Reject);
 CivilDay civilDay(const CivilClock &clock, CivilDate date);
 CivilDay civilDayAt(const CivilClock &clock, int64_t utcMs);
+// Reject a local date that leaves or returns outside its first continuous UTC range.
+bool civilDayIsContiguous(const CivilClock &clock, const CivilDay &day);
 std::optional<int64_t> civilNextTransition(const CivilClock &clock, int64_t utcMs);
 }  // namespace om

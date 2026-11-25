@@ -18,7 +18,12 @@ class TariffDeclarationStore {
         if(!decodeTariffDeclaration(value,&declaration,&problem))return fail(error,problem.path+": "+problem.message);
         if(existed_){
             const auto *oldPlan=baseline_.find("plan"),*newPlan=value.find("plan");
-            const auto identity=[](const JsonValue &v){return tariffJson(*v.find("plan"))+tariffJson(*v.find("country"))+tariffJson(*v.find("source_reference"))+tariffJson(*v.find("reset_policy"));};
+            const auto identity=[](const JsonValue &v){
+                const auto *allowance=v.find("seasonal_allowance");
+                return tariffJson(*v.find("plan"))+tariffJson(*v.find("country"))+
+                    tariffJson(*v.find("source_reference"))+tariffJson(*v.find("reset_policy"))+
+                    (allowance?tariffJson(*allowance):std::string{});
+            };
             if(oldPlan->find("key")->text==newPlan->find("key")->text&&identity(baseline_)!=identity(value))
                 return fail(error,"Declaration changed: choose a NEW plan.key. Rules/identity/source/clock cannot reuse the loaded version.");
             if(baseline_.find("opening")->find("key")->text==value.find("opening")->find("key")->text&&

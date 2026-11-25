@@ -172,7 +172,8 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
 }
 
 bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration &declaration,
-                  const BillOpening &opening, const BillAccrual &accrual, std::string &exact) {
+                  const BillOpening &opening, const BillAccrual &accrual, std::string &exact,
+                  const std::optional<SeasonalCycleTariff> &seasonal) {
     ElectricityAmount usage;
     std::string usageText, change, total;
     if (!accrual.ending->importedKwh.numerator.subtract(opening.importedKwh.numerator, &usage.numerator) ||
@@ -195,6 +196,7 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             report += "  Monthly-average usage at closing " + averageText + " kWh\n";
         }
     }
+    if (seasonal) report += "  Seasonal allowance for cycle " + seasonal->allowanceKwh.text() + " kWh\n";
     if (accrual.billedKwh) {
         std::string billed;
         if (!accrual.billedKwh->format(6, &billed)) return false;
@@ -215,6 +217,7 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
               "," + (accrual.settledTotal ? jsonQuote(accrual.settledTotal->numerator.text()) : "null") +
               (accrual.settlementDependent ? ",true" : ",false");
     if (accrual.billedKwh) exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
+    if (seasonal) exact += "," + jsonQuote(seasonal->allowanceKwh.text());
     exact += "]\n";
     return true;
 }
@@ -246,16 +249,20 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
             cursor = end;
             if (cursor == reading.endUtcMs) ++next;
         }
+        std::optional<SeasonalCycleTariff> seasonal;
+        const auto status = seasonalTariffForCycle(declaration, opening, cutoff, seasonal);
+        if (status != ElectricityStatus::Ok) return electricityStatusName(status);
+        const auto &plan = seasonal ? seasonal->plan : declaration.plan;
         BillAccrual accrual;
         const auto allocation = declaration.dailyFeeAllocation();
         if constexpr (isRegister)
-            accrual = accrueMeterImport(declaration.plan, opening, slice, cursor, cutoff, stopped, allocation);
+            accrual = accrueMeterImport(plan, opening, slice, cursor, cutoff, stopped, allocation);
         else
-            accrual = accrueBill(declaration.plan, opening, slice, cursor, cutoff, stopped, allocation);
+            accrual = accrueBill(plan, opening, slice, cursor, cutoff, stopped, allocation);
         if (stopped()) return "review cancelled";
         if (accrual.status != ElectricityStatus::Ok) return electricityStatusName(accrual.status);
         const auto exactStart = exactResults.size();
-        if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults))
+        if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults, seasonal))
             return "amount exceeds the display range";
         if (meterOnlyExact) meterOnlyExact->append(exactResults, exactStart);
         if (invoice) {
@@ -298,7 +305,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || ((schemaVersion == 5 || schemaVersion == 6) &&
+        (schemaVersion == 4 || ((schemaVersion == 5 || schemaVersion == 6 || schemaVersion == 7) &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";

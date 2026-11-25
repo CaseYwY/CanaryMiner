@@ -6,7 +6,9 @@ namespace om { namespace i18n {
 enum class TariffMonthlyMessageKey { Toggle, Derive, Enabled, Day, RetainAmounts, Derived, Review,
     FeeToggle, FeeReview, FeeLabel, FeeOpeningRequired, ProratedExclusions,
     AnnualToggle, AnnualEnabled, AnnualChanged, AnnualMonth, AnnualReview,
-    BimonthlyToggle, BimonthlyEnabled, BimonthlyChanged, BimonthlyMonth, BimonthlyReview, MonthlyAmount, Count };
+    BimonthlyToggle, BimonthlyEnabled, BimonthlyChanged, BimonthlyMonth, BimonthlyReview, MonthlyAmount,
+    SeasonalToggle, SeasonalEnabled, SeasonalReview, SeasonalConflict, SeasonalOpening, SeasonalBand,
+    SeasonalOpeningPoint, Count };
 
 inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonthlyMessageKey key) {
     static constexpr std::array<std::string_view,static_cast<size_t>(TariffMonthlyMessageKey::Count)> messages = {{
@@ -31,7 +33,14 @@ inline LocalizedMessage tariffMonthlyMessage(std::string_view locale,TariffMonth
         "Two-month policy removed. Review the dates, tariff amounts and opening.",
         "Enter 1 for odd start months or 2 for even start months.",
         "Two-month bill uses twice the monthly charge at the cycle's monthly-average usage.",
-        "Enter the monthly value for this two-month rule."
+        "Enter the monthly value for this two-month rule.",
+        "[A] Seasonal allowance",
+        "Enter the publication time and add seasonal start dates in calendar order.",
+        "The allowance sums each tariff day's quota for the full cycle. Clear both band bounds. Use new plan and opening keys when changing a saved rule.",
+        "Choose either the two-month rule or seasonal allowance.",
+        "The allowance changed. Re-enter the accrued subtotal.",
+        "Clear both bounds. The first band's limit comes from the seasonal allowance.",
+        "The opening changed. Re-enter the import and accrued subtotal."
     }};
     const auto index=static_cast<size_t>(key);
     if(index>=messages.size())return {};
