@@ -142,8 +142,9 @@ An optional `--dns-server IP` applies only when sampling. Its value is omitted f
 
 Use a new `.cmt` filename in a trusted local working directory. Save preserves any existing archive. Open works
 offline on either build profile. It checks the checksum, validates the saved times, and recomputes the report
-using the original cutoff. The archive stays saved if the terminal output later fails. The checksum detects
-corruption. It provides no signature or proof of a provider's
+using the original cutoff. The command checks for cancellation before the final publication step.
+Once published, the archive stays saved through terminal output errors. The checksum detects corruption.
+It provides no signature or proof of a provider's
 trade time. The command runs independently of Dashboard consent and economic-mode settings.
 
 ### Review saved ticker payloads

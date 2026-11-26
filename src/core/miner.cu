@@ -274,7 +274,8 @@ int main(int argc, char **argv) {
         signal(SIGBREAK, onSignal);
 #endif
 #if defined(SIGPIPE)
-        signal(SIGPIPE, SIG_IGN);
+        if (cli.marketTicker.saveFlag || cli.marketTicker.action == MarketTickerAction::OpenReview)
+            signal(SIGPIPE, SIG_IGN);
 #endif
         if (cli.marketTicker.action != MarketTickerAction::PublicSample)
             return commandTickerFile(cli.marketTicker.action, argc, argv, &g_stop);

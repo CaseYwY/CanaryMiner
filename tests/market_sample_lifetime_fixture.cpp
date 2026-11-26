@@ -14,6 +14,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <time.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -27,6 +28,7 @@ void advanceEpoch() {
 thread_local unsigned faultOnThread = 0;
 thread_local bool tickerClockRollback = false;
 thread_local size_t tickerClockRead = 0;
+thread_local volatile sig_atomic_t *stopAfterSync = nullptr;
 #endif
 }
 
@@ -52,6 +54,13 @@ extern "C" int clock_gettime(clockid_t clock, struct timespec *value) noexcept {
         return 0;
     }
     return readClock ? readClock(clock, value) : -1;
+}
+
+extern "C" int fsync(int fd) {
+    static const auto sync = reinterpret_cast<decltype(&fsync)>(dlsym(RTLD_NEXT, "fsync"));
+    const int result = sync ? sync(fd) : -1;
+    if (!result && stopAfterSync) *stopAfterSync = 1;
+    return result;
 }
 #endif
 
@@ -84,11 +93,14 @@ int main(int argc, char **argv) {
     if (command == "market-tickers") {
         om::MarketTickerOptions options;
         if (!om::parseMarketTickerCli(argc, argv, 2, options)) return 2;
+        volatile sig_atomic_t stop = 0;
 #if defined(__linux__)
         tickerClockRollback = mode == "clock-rollback";
+        if (mode == "stop-after-sync") stopAfterSync = &stop;
 #endif
-        const auto result = om::commandPublicTickers(options, module, argc, argv, nullptr);
+        const auto result = om::commandPublicTickers(options, module, argc, argv, &stop);
 #if defined(__linux__)
+        stopAfterSync = nullptr;
         if (tickerClockRollback && tickerClockRead < 4) return 4;
 #endif
         return result;

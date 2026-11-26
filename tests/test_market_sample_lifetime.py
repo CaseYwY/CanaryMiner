@@ -58,6 +58,14 @@ def main(cli, worker):
             assert result.returncode == 3 and not result.stdout and "local clock unavailable or changed" in result.stderr, result
             assert requests.read_text().splitlines() == ["0"]
             assert not (root / "rollback.cmt").exists() and not (root / "rollback.cmt.tmp").exists()
+            requests.unlink()
+            (root / "ticker-scenario").unlink()
+            (root / "sample-lifetime-mode").write_text("stop-after-sync", encoding="ascii")
+            stopped = subprocess.run([fixture, "market-tickers", "--allow-public-tickers", "--save-review", "sync.cmt"],
+                                     cwd=root, capture_output=True, text=True, timeout=8)
+            assert stopped.returncode == 130 and not stopped.stdout and "sample cancelled" in stopped.stderr, stopped
+            assert requests.read_text().splitlines() == ["0", "2"]
+            assert not (root / "sync.cmt").exists() and not (root / "sync.cmt.tmp").exists()
     for failure in failures:
         print(repr(failure))
     if failures:

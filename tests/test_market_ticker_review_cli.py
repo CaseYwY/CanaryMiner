@@ -2,7 +2,9 @@
 from copy import deepcopy
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -55,6 +57,15 @@ def run_suite(cli):
         assert "age at cutoff 120 s" in first.stdout and "age at cutoff 90 s" in first.stdout
         assert "Declared PRL/USD reference at cutoff: 2.45" in first.stdout
         assert first.stdout == call(0, "--file", path).stdout
+        if os.name == "posix":
+            reader, writer = os.pipe()
+            os.close(reader)
+            try:
+                closed = subprocess.run([cli, "market-tickers", "--file", path], cwd=root,
+                                        stdout=writer, stderr=subprocess.PIPE, timeout=10)
+            finally:
+                os.close(writer)
+            assert closed.returncode == -signal.SIGPIPE and not closed.stderr, closed
 
         earlier = deepcopy(document)
         earlier["gate"]["observed_utc"] -= 1
