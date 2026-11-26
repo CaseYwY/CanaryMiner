@@ -6,6 +6,19 @@ The `kryptex-tls` preset selects strict TLS for the first user pool. It expands 
 
 Use `kryptex-hk-tls` to select `stratum+ssl://prl-hk.kryptex.network:8048` with the same strict policy and Kryptex protocol identity. The first user pool must use a TLS-enabled build with donation off. Existing Hong Kong TCP configurations can be reviewed in the migration panel. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en) · [Migration instructions](pool-tls-migration.md)
 
+The other Kryptex Pearl regions use the same strict policy and port 8048.
+
+| Region | Preset | DNS host |
+| --- | --- | --- |
+| Global | `kryptex-global-tls` | `prl.kryptex.network` |
+| Europe | `kryptex-eu-tls` | `prl-eu.kryptex.network` |
+| South America | `kryptex-br-tls` | `prl-br.kryptex.network` |
+| Singapore | `kryptex-sg-tls` | `prl-sg.kryptex.network` |
+| Russia | `kryptex-ru-tls` | `prl-ru.kryptex.network` |
+| Middle East | `kryptex-ae-tls` | `prl-ae.kryptex.network` |
+
+To check any of these endpoints before mining, pass `stratum+ssl://DNS:8048` with the host from the table to `canary-miner pool-tls-check --pool`. The check verifies the certificate and hostname and closes the connection. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en)
+
 Use `herominers-tls` for the Pearl US East endpoint `stratum+ssl://us2.pearl.herominers.com:1200`. The pool publishes both transports on port 1200. The preset uses the existing HeroMiners protocol rules and requires donation off. To upgrade the legacy `herominers` preset, review and save the same host and port in Settings. [HeroMiners Pearl regions](https://pearl.herominers.com/) · [Official TCP/TLS instructions](https://pearl.herominers.com/help/) · [Migration instructions](pool-tls-migration.md)
 
 Use a strict preset in a [TLS-enabled local build](pool-tls-runtime.md), with donation explicitly off:

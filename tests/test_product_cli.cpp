@@ -94,7 +94,7 @@ int main() {
         CHECK(parsePoolSpec("example.net:3333", &e, &err) && e.preset.empty() && !e.policyKnown && e.host == "example.net");
         CHECK(parsePoolSpec("stratum+ssl://pearl.f2pool.com:5500", &e, &err) && e.tls && e.host=="pearl.f2pool.com" && e.port==5500 && e.preset=="f2pool");
         CHECK(!parsePoolSpec("stratum+ssl://127.0.0.1:5500", &e, &err) && contains(err,"no TCP fallback"));
-        CHECK(!parsePoolSpec("stratum+tcp://", &e, &err) && contains(err, "neither a preset"));
+        CHECK(!parsePoolSpec("stratum+tcp://", &e, &err) && contains(err, "pool must be a known preset"));
         // a lookalike domain is not a known host
         CHECK(parsePoolSpec("evilf2pool.com:5500", &e, &err) && e.preset.empty());
     }
@@ -213,7 +213,7 @@ int main() {
             pool.port = 7;
             CHECK(!parsePoolSpec("stratum+tcp://fixture-user:" + payload + "@fixture.invalid:3333", &pool, &err) &&
                   pool.host == "fixture-kept.invalid" && pool.port == 7 &&
-                  err == "pool is neither a preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted");
+                  err == "pool must be a known preset, HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT; rejected original omitted");
         }
     }
 

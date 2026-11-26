@@ -6,6 +6,12 @@ Open **Pools / TLS declarations** in the dashboard settings or run `canary-miner
 | --- | --- |
 | `kryptex` or `prl-us.kryptex.network:7048` | `stratum+ssl://prl-us.kryptex.network:8048` |
 | `prl-hk.kryptex.network:7048` | `stratum+ssl://prl-hk.kryptex.network:8048` |
+| `prl.kryptex.network:7048` | `stratum+ssl://prl.kryptex.network:8048` |
+| `prl-eu.kryptex.network:7048` | `stratum+ssl://prl-eu.kryptex.network:8048` |
+| `prl-br.kryptex.network:7048` | `stratum+ssl://prl-br.kryptex.network:8048` |
+| `prl-sg.kryptex.network:7048` | `stratum+ssl://prl-sg.kryptex.network:8048` |
+| `prl-ru.kryptex.network:7048` | `stratum+ssl://prl-ru.kryptex.network:8048` |
+| `prl-ae.kryptex.network:7048` | `stratum+ssl://prl-ae.kryptex.network:8048` |
 | `herominers` or `us2.pearl.herominers.com:1200` | `stratum+ssl://us2.pearl.herominers.com:1200` |
 
 The proposal requires a clean draft and an `Unchanged` first-user declaration with empty URLs and no plaintext consent. Existing declarations can be edited through the ordinary fields. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en) · [Official HeroMiners TLS instructions](https://pearl.herominers.com/help/)

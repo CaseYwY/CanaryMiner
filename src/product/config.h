@@ -19,6 +19,8 @@
 
 #pragma once
 
+#include "pool_tls_presets.h"
+
 #include <stdint.h>
 
 #include <cctype>
@@ -109,14 +111,7 @@ struct PoolPreset {
 };
 
 inline constexpr char kKryptexUsPoolHost[] = "prl-us.kryptex.network";
-inline constexpr char kKryptexHkPoolHost[] = "prl-hk.kryptex.network";
-inline constexpr int kKryptexPoolTcpPort = 7048;
-inline constexpr char kKryptexUsPoolTlsUrl[] = "stratum+ssl://prl-us.kryptex.network:8048";
-inline constexpr char kKryptexHkPoolTlsUrl[] = "stratum+ssl://prl-hk.kryptex.network:8048";
-
 inline constexpr char kHeroMinersUsEastPoolHost[] = "us2.pearl.herominers.com";
-inline constexpr int kHeroMinersPoolPort = 1200;
-inline constexpr char kHeroMinersUsEastPoolTlsUrl[] = "stratum+ssl://us2.pearl.herominers.com:1200";
 
 /** Presets whose pool speaks the v2 gzip dialect. A custom HOST:PORT never offers it. */
 inline bool poolPresetSpeaksV2(const std::string &name) {
@@ -199,15 +194,17 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
     // A secure alias has the same meaning in every build; runtime availability never changes it to TCP.
     // Use the ordinary URL path so the pool-specific protocol/policy identity is retained.
     std::string endpoint = spec;
-    if (spec == "kryptex-tls") endpoint = kKryptexUsPoolTlsUrl;
-    else if (spec == "kryptex-hk-tls") endpoint = kKryptexHkPoolTlsUrl;
-    else if (spec == "herominers-tls") endpoint = kHeroMinersUsEastPoolTlsUrl;
+    for (const auto &preset : kPoolTlsPresets) {
+        if (spec != preset.alias) continue;
+        endpoint = preset.tlsUrl;
+        break;
+    }
     if (endpoint.rfind("stratum+ssl://", 0) == 0) {
         e.tls=true;endpoint=endpoint.substr(std::string("stratum+ssl://").size());
     }
     else if (endpoint.rfind("stratum+tcp://", 0) == 0) endpoint = endpoint.substr(std::string("stratum+tcp://").size());
     if (!parseEndpoint(endpoint, &e.host, &e.port)) {
-        if (error) *error = "pool is neither a preset (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool), HOST:PORT, nor stratum+tcp://HOST:PORT; rejected original omitted";
+        if (error) *error = "pool must be a known preset, HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT; rejected original omitted";
         return false;
     }
     if(e.tls&&!normalizePoolTlsDns(&e.host)){
@@ -433,7 +430,7 @@ inline bool validateConfig(const ProductConfig &cfg, bool forRun, std::string *e
     if (forRun) {
         if (!checkPoolLogin(cfg, error)) return false;
         if (cfg.wallet.empty()) return fail(error, "no wallet: set \"wallet\" in the config or pass --wallet");
-        if (cfg.pools.empty()) return fail(error, "no pool: set \"pools\" in the config or pass --pool (kryptex, kryptex-tls, kryptex-hk-tls, herominers, f2pool or HOST:PORT)");
+        if (cfg.pools.empty()) return fail(error, "no pool: set \"pools\" in the config or pass --pool; see --help for presets and endpoint forms");
     }
     return true;
 }

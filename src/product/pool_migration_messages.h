@@ -40,15 +40,10 @@ inline LocalizedMessage poolMigrationMessage(std::string_view language,PoolMigra
 }
 inline bool validPoolMigrationMessageArgument(PoolMigrationMessageKey key,std::string_view name,std::string_view value){
     if(name!="endpoint")return false;
-    using Candidate=PoolTlsMigrationCandidate;
-    if(key==PoolMigrationMessageKey::Source)
-        return value==poolTlsMigrationSource(Candidate::KryptexUsTcp7048)||
-               value==poolTlsMigrationSource(Candidate::KryptexHkTcp7048)||
-               value==poolTlsMigrationSource(Candidate::HeroMinersUsEastTcp1200);
-    if(key==PoolMigrationMessageKey::Target)
-        return value==poolTlsMigrationTarget(Candidate::KryptexUsTcp7048)||
-               value==poolTlsMigrationTarget(Candidate::KryptexHkTcp7048)||
-               value==poolTlsMigrationTarget(Candidate::HeroMinersUsEastTcp1200);
+    for(const auto &preset : kPoolTlsPresets){
+        if(key==PoolMigrationMessageKey::Source && value==preset.tcpUrl) return true;
+        if(key==PoolMigrationMessageKey::Target && value==preset.tlsUrl) return true;
+    }
     return false;
 }
 inline std::string poolMigrationEnglish(PoolMigrationMessageKey key,const MessageArguments &arguments={}){
