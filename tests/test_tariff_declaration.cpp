@@ -1601,7 +1601,8 @@ int main(int argc,char **argv){
         auto &rate=member(member(history,"plan"),"revisions").items.front();
         set(rate,"time_mode","\"dynamic\"");
         set(rate,"base_rate_per_kwh","\"0\"");
-        for(int64_t start=T;start<T+86400000;start+=3600000){
+        const auto historyBegin=static_cast<int64_t>(T);
+        for(auto start=historyBegin;start<historyBegin+86400000;start+=3600000){
             auto row=tariffRowTemplate("dynamic",false,false);
             set(row,"begin_utc_ms",std::to_string(start));
             set(row,"end_utc_ms",std::to_string(start+3600000));
