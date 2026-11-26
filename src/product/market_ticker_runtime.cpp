@@ -1,13 +1,8 @@
 #include "market_ticker_runtime.h"
 #include "market_reference_runtime.h"
-#include "market_public_sample.h"
+#include <utility>
 
 namespace om {
-
-bool validDashboardHourConsent(int argc, const char *const *argv, int tickerIndex, int hourIndex) {
-    return market_detail::nativeMarketArgumentPair(argc, argv, tickerIndex, "--allow-public-tickers",
-                                                   hourIndex, "--allow-public-candles");
-}
 
 std::filesystem::path installedPublicTickerHelper(const std::filesystem::path &module) {
     if (!module.is_absolute() || !module.has_filename()) return {};
@@ -19,14 +14,16 @@ std::filesystem::path installedPublicTickerHelper(const std::filesystem::path &m
 }
 
 MarketReferenceFactory installedPublicTickerFactory(const std::filesystem::path &module, PublicTickerLaunch launch) {
-    if (!launch.available || !launch.requested || !launch.permitted || !launch.dashboard || launch.suppressed) return {};
+    if (!launch.available || !launch.requested || !launch.permitted || !launch.dashboard || launch.suppressed ||
+        (!launch.dnsServer.empty() && !validPublicDnsServer(launch.dnsServer))) return {};
     const auto helper = installedPublicTickerHelper(module);
     if (helper.empty()) return {};
     // A caller may bind a path before startup. Only the owned background worker launches the helper.
-    return [helper, enableHour = launch.hourPermitted] {
+    return [helper, enableHour = launch.hourPermitted, dns = std::move(launch.dnsServer)] {
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.publicHour = enableHour;
+        policy.https.dnsServer = dns;
         return makeMarketReferenceRuntime(marketProcessFetch(helper), policy);
     };
 }

@@ -71,6 +71,9 @@ void launchPolicy(){
     const PublicTickerLaunch enabled{true,true,true,true,false};
     CHECK(!installedPublicTickerFactory("relative-module",enabled));
     CHECK(!installedPublicTickerFactory({},enabled));
+    auto invalid=enabled;
+    invalid.dnsServer="resolver.example";
+    CHECK(!installedPublicTickerFactory(module,invalid));
     MarketPollingPolicy policy;
     policy.scheduleEconomicRequests=false;
     MarketPollingPlan plan;
@@ -130,7 +133,12 @@ int installedPath(const std::filesystem::path &fixture){
     CHECK(!runtime->start(3));
     const auto requests = directory / "candle-requests";
     CHECK(!std::filesystem::exists(requests));
-    const auto withHour = installedPublicTickerFactory(directory/"synthetic-module",{true,true,true,true,false,true});
+    const auto resolverRequests = directory / "resolver-requests";
+    CHECK(!std::filesystem::exists(resolverRequests));
+    const std::string resolver = "fd00::53";
+    auto launch = PublicTickerLaunch{true,true,true,true,false,true,resolver};
+    const auto withHour = installedPublicTickerFactory(directory/"synthetic-module",launch);
+    launch.dnsServer = "192.168.50.53";  // an installed factory has already frozen its input
     for (const auto *mode : {"full", "gap-fx", "gap-pearl", "future"}) {
         std::ofstream(directory / "candle-scenario") << mode;
         auto session = withHour();
@@ -143,6 +151,15 @@ int installedPath(const std::filesystem::path &fixture){
         }));
         const std::string_view scenario(mode);
         const auto text = view(*session);
+        CHECK(text.find(resolver) == text.npos);
+        {
+            std::ifstream reader(resolverRequests);
+            std::string line;
+            for (unsigned n = 0; n < 4; ++n)
+                CHECK(std::getline(reader, line) && line == resolver);
+            CHECK(!std::getline(reader, line));
+        }
+        std::filesystem::remove(resolverRequests);
         CHECK_MSG((std::string("Latest ticker with candle scenario ") + mode + "\n" + text).c_str(),
                   text.find("Latest PRL/USD reference: 2.45") != text.npos);
         CHECK(text.find("TWAP approximation | candidate data, finality unverified") != text.npos);

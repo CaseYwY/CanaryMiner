@@ -45,6 +45,7 @@
 #endif
 #include "../product/manual_market.h"
 #include "../product/market_ticker_runtime.h"
+#include "../product/market_native_arguments.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
 #include "../product/worker_process.h"
@@ -363,7 +364,8 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
-    int publicTickerPermissionArg = 0, publicHourPermissionArg = 0;
+    int publicTickerPermissionArg = 0, publicHourPermissionArg = 0, publicDnsArg = 0;
+    std::string publicDnsServer;
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
     bool workerPoolFallbackSeen=false;
@@ -411,6 +413,17 @@ int main(int argc, char **argv) {
         else if (a.rfind("--allow-public-candles=", 0) == 0) {
             fprintf(stderr, "--allow-public-candles takes no value\n");
             return kExitUsage;
+        }
+        else if (a == "--market-dns-server" || a.rfind("--market-dns-server=", 0) == 0) {
+            const int flagIndex = cli.restArgIndices[i];
+            if (a != "--market-dns-server" || cli.command != Command::Run || publicDnsArg ||
+                i + 1 >= cli.rest.size() || cli.restArgIndices[i + 1] != flagIndex + 1 ||
+                !validPublicDnsServer(cli.rest[i + 1])) {
+                fprintf(stderr, "--market-dns-server requires one unicast IPv4 or unscoped IPv6 address for run\n");
+                return kExitUsage;
+            }
+            publicDnsArg = flagIndex;
+            publicDnsServer = next();
         }
         else if (a == "--algo") algoName = next();
         else if (a == "--work-wait-ms") {
@@ -611,6 +624,7 @@ int main(int argc, char **argv) {
                 "  --no-market       suppress manual and public references for this run\n"
                 "  --allow-public-tickers  allow saved public tickers in an opt-in dashboard build\n"
                 "  --allow-public-candles  also allow public hourly candles for this dashboard run\n"
+                "  --market-dns-server IP  use this resolver for the authorized Dashboard feeds on this run\n"
                 "  --no-energy       disable optional session board-energy recording this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
                 "                    not duty cycle; runtime defaults can be edited in Settings\n"
@@ -676,11 +690,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Dashboard candles require --allow-public-tickers as well\n");
         return kExitUsage;
     }
-    if constexpr (kPublicTickerRuntimeBuilt) {
-        if (publicHourPermissionArg && !validDashboardHourConsent(argc, argv, publicTickerPermissionArg, publicHourPermissionArg)) {
-            fprintf(stderr, "Dashboard candles require the exact public-feed flags\n");
-            return kExitUsage;
-        }
+    if (publicDnsArg && (!publicTickerPermissionArg || workerChild)) {
+        fprintf(stderr, "--market-dns-server requires --allow-public-tickers at the Dashboard parent\n");
+        return kExitUsage;
+    }
+    if (publicTickerPermissionArg && !market_detail::validDashboardMarketArguments(argc, argv, publicTickerPermissionArg,
+            publicHourPermissionArg, publicDnsArg, publicDnsServer)) {
+        fprintf(stderr, "Dashboard market access requires the exact public-feed arguments\n");
+        return kExitUsage;
     }
 
     RuntimePreferences runtimeDefaults;
@@ -1248,12 +1265,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "cannot locate this program to start the GPU workers\n");
             return kExitRuntime;
         }
-        for (int i = 1; i < argc; i++) {
-            if (i == publicTickerPermissionArg) continue;
-            if (i == publicHourPermissionArg) continue;
-            if (std::string(argv[i]) == "--gpu-id") { ++i; continue; }
-            so.userArgs.push_back(argv[i]);
-        }
+        so.userArgs = supervisorUserArguments(argc, argv, cli,
+            {publicTickerPermissionArg, publicHourPermissionArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0});
         for (const DeviceIdentity &d : chosenAll) {
             WorkerSeed seed;
             seed.index = d.index;
@@ -1303,7 +1316,7 @@ int main(int argc, char **argv) {
         if constexpr (kPublicTickerRuntimeBuilt) {
             const PublicTickerLaunch launch{kPublicTickerRuntimeBuilt, so.runtimeContext.effective.publicTickersRequested,
                 publicTickerPermissionArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket,
-                publicHourPermissionArg != 0};
+                publicHourPermissionArg != 0, std::move(publicDnsServer)};
             so.marketReferenceFactory = installedPublicTickerFactory(std::filesystem::u8path(so.exe), launch);
         }
         so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();

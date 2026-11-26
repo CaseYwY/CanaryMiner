@@ -30,7 +30,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <climits>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -109,6 +111,7 @@ struct CliParse {
     std::string poolTlsCheckUrl;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
+    std::vector<int> gpuIdArgIndices; // only consumed --gpu-id option/value pairs, for worker argument forwarding
 };
 
 inline std::vector<std::string> splitCommaList(const std::string &s) {
@@ -237,6 +240,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         r.rest.push_back(text);
         r.restArgIndices.push_back(argvIndex);
     };
+    bool dashboardDnsOption = false;
     for (; i < argc; ++i) {
         const std::string a = argv[i];
         std::string v;
@@ -317,6 +321,10 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
                 return false;
             }
             r.ov.devicesSet = true;
+            if (a == "--gpu-id") {
+                r.gpuIdArgIndices.push_back(i - 1);
+                r.gpuIdArgIndices.push_back(i);
+            }
         } else if (a == "--api-enable") {
             r.ov.apiEnable = true;
         } else if (a == "--api-bind") {
@@ -419,11 +427,29 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             r.commandExplicit = true;
         } else {
             if (a == "--help" || a == "-h") r.help = true;
+            if (a == "--market-dns-server" || a.rfind("--market-dns-server=", 0) == 0)
+                dashboardDnsOption = true;
             keep(a, i);  // --help too: the legacy loop in miner.cu calls productHelpText()
         }
     }
+    if (dashboardDnsOption && r.command != Command::Run) {
+        if (error) *error = "--market-dns-server is for run only";
+        return false;
+    }
     *out = r;
     return true;
+}
+
+inline std::vector<std::string> supervisorUserArguments(int argc, const char *const *argv, const CliParse &cli,
+                                                        std::initializer_list<int> parentOnlyIndices) {
+    std::vector<std::string> result;
+    for (int i = 1; i < argc; ++i) {
+        if (std::find(parentOnlyIndices.begin(), parentOnlyIndices.end(), i) != parentOnlyIndices.end() ||
+            std::find(cli.gpuIdArgIndices.begin(), cli.gpuIdArgIndices.end(), i) != cli.gpuIdArgIndices.end())
+            continue;
+        result.emplace_back(argv[i]);
+    }
+    return result;
 }
 
 /** Account name accepted by F2Pool's login: letters, digits and '_', at most 64 (the same rule as a config pool entry). */
@@ -530,6 +556,7 @@ inline std::string productHelpText() {
         "       --no-market                   suppress manual and public references for this run\n"
         "       --allow-public-tickers        allow a saved public ticker request for this run in an opt-in build\n"
         "       --allow-public-candles        also allow hourly Dashboard candles with --allow-public-tickers\n"
+        "       --market-dns-server IP         choose a resolver for this run's authorized Dashboard feeds\n"
         "       --no-energy                   disable optional session energy recording; safety telemetry stays\n"
         "       --language ID                 requested message language; never infers format/currency/timezone\n"
         "       --format-locale ID            independent requested number/date style; no implicit Save\n"

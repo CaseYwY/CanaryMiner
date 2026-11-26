@@ -33,7 +33,7 @@ int main(int argc,char **argv){
         std::ofstream(std::filesystem::u8path(argv[i+1]),std::ios::app)<<"start\n";
         std::cout<<"Synthetic inert child ready\n"<<std::flush;while(std::cin.get()!=EOF){}return kExitOk;
     }
-    if(argc<2||argc>3)return 2;
+    if(argc<2||argc>4||(argc==4&&std::string_view(argv[2])!="--hour-fixture"))return 2;
     const auto dir=std::filesystem::u8path(argv[1]);std::filesystem::create_directories(dir);Counts counts;
     if(!platformInit())return 3;
     StatsServer local;std::string error;if(!local.start("127.0.0.1",0,[]{return "{}";},"{}",&error)){platformShutdown();return 4;}
@@ -46,8 +46,9 @@ int main(int argc,char **argv){
     options.manualMarketPreferencesPath=(dir/"manual-market-preferences.json").u8string();options.manualMarketFactory=makeManualMarketProjector;
     options.uiPreferencesPath=(dir/"ui-preferences.json").u8string();options.runtimePreferencesPath=(dir/"runtime-preferences.json").u8string();
     MarketReferenceFactory installed;
-    if(argc==3&&std::string_view(argv[2])=="--hour-fixture"){
-        installed=installedPublicTickerFactory(std::filesystem::u8path(options.exe),{true,true,true,true,false,true});
+    if(argc>=3&&std::string_view(argv[2])=="--hour-fixture"){
+        installed=installedPublicTickerFactory(std::filesystem::u8path(options.exe),
+            {true,true,true,true,false,true,argc==4?argv[3]:""});
         if(!installed){local.stop();platformShutdown();return 2;}
     }
     options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{

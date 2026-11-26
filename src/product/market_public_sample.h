@@ -1,5 +1,6 @@
 #pragma once
 
+#include "market_native_arguments.h"
 #include "market_owner.h"
 #include "native_process_admission.h"
 #include <algorithm>
@@ -7,34 +8,8 @@
 #include <csignal>
 #include <future>
 #include <string_view>
-#if defined(_WIN32)
-#include <windows.h>
-#include <shellapi.h>
-#endif
 
 namespace om::market_detail {
-
-inline bool nativeMarketArgumentPair(int argc, const char *const *argv, int firstIndex, std::string_view first,
-                                     int secondIndex, std::string_view second) {
-    if (firstIndex <= 0 || firstIndex >= argc || secondIndex <= 0 || secondIndex >= argc || firstIndex == secondIndex)
-        return false;
-#if defined(_WIN32)
-    (void)argv;
-    // CRT argv best-fit conversion cannot supply consent on behalf of a different native spelling.
-    struct WideArguments {
-        LPWSTR *values;
-        ~WideArguments() { if (values) LocalFree(values); }
-    };
-    int count = 0;
-    const WideArguments args{CommandLineToArgvW(GetCommandLineW(), &count)};
-    const auto exact = [](std::string_view ascii, std::wstring_view native) {
-        return std::equal(ascii.begin(), ascii.end(), native.begin(), native.end());
-    };
-    return args.values && count == argc && exact(first, args.values[firstIndex]) && exact(second, args.values[secondIndex]);
-#else
-    return std::string_view(argv[firstIndex]) == first && std::string_view(argv[secondIndex]) == second;
-#endif
-}
 
 using MarketSampleClock = std::pair<uint64_t, uint64_t>;
 
