@@ -10,9 +10,9 @@ constexpr uint64_t lastMs=253402300799999ULL;
 struct Invalid {TariffProblem problem;};
 [[noreturn]] void bad(const std::string &path,const std::string &message,TariffProblemKind kind,std::vector<std::string> choices={},std::optional<ElectricityStatus> status={}){throw Invalid{{path,message,kind,std::move(choices),status}};}
 void keys(const JsonValue &v,const std::string &path,std::initializer_list<const char *> names,
-          std::initializer_list<const char *> additional={}){
-    if(!v.isObject()||v.members.size()!=names.size()+additional.size())bad(path,"Missing/unknown fields; unsupported rules are never discarded.",TariffProblemKind::MissingFields);
-    for(const auto fields:{names,additional})for(const auto *name:fields)
+          std::initializer_list<const char *> additional={},std::initializer_list<const char *> extra={}){
+    if(!v.isObject()||v.members.size()!=names.size()+additional.size()+extra.size())bad(path,"Missing/unknown fields; unsupported rules are never discarded.",TariffProblemKind::MissingFields);
+    for(const auto fields:{names,additional,extra})for(const auto *name:fields)
         if(!v.find(name))bad(path,"Missing/unknown fields; reopen the documented schema.",TariffProblemKind::SchemaFields);
     std::set<std::string> seen;for(const auto &m:v.members)if(!seen.insert(m.first).second)bad(path,"Duplicate field.",TariffProblemKind::DuplicateField);
 }
@@ -322,6 +322,42 @@ void decodeDemandHistory(const JsonValue &rows,const DemandChargeRule &rule,cons
     }
 }
 
+BillRestrictedCreditOpening decodeRestrictedCredit(const JsonValue &value,const BillOpening &opening,
+                                                  const ExactDecimal &denominator,size_t &total){
+    constexpr char path[]="restricted_credit";
+    constexpr char subtotalPath[]="restricted_credit.accrued_import_subtotal";
+    constexpr char lotsPath[]="restricted_credit.lots";
+    keys(value,path,{"accrued_import_subtotal","lots"});
+    BillRestrictedCreditOpening result;
+    const auto subtotal=decimal(*value.find("accrued_import_subtotal"),subtotalPath);
+    if(opening.importedKwh.numerator.zero()&&!subtotal.zero())
+        bad(subtotalPath,"Enter zero without prior imported energy.",TariffProblemKind::OpeningQuantity);
+    if(!subtotal.multiply(denominator,&result.accruedImportSubtotal.numerator))
+        bad(subtotalPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+    const auto &lots=*value.find("lots");
+    boundedArray(lots,lotsPath,maxRestrictedCreditLots,total);
+    auto previousExpiry=opening.throughUtcMs;
+    for(const auto &lot:lots.items){
+        const auto row=std::string(lotsPath)+"["+std::to_string(result.lots.size())+"]";
+        keys(lot,row,{"expires_utc_ms","amount"});
+        const auto expiryPath=child(row,"expires_utc_ms");
+        const auto expiry=static_cast<int64_t>(integer(*lot.find("expires_utc_ms"),expiryPath));
+        if(expiry<=previousExpiry)
+            bad(expiryPath,"Expiry must be after the opening time and after the previous lot.",TariffProblemKind::Unknown);
+        const auto amountPath=child(row,"amount");
+        const auto amount=decimal(*lot.find("amount"),amountPath);
+        if(amount.negative()||amount.zero())
+            bad(amountPath,"Use a positive unused credit amount.",TariffProblemKind::OpeningQuantity);
+        RestrictedCreditLot decoded;
+        decoded.expiresUtcMs=expiry;
+        if(!amount.multiply(denominator,&decoded.remaining.numerator))
+            bad(amountPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+        result.lots.push_back(std::move(decoded));
+        previousExpiry=expiry;
+    }
+    return result;
+}
+
 bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const TariffPlan &plan){
     if(plan.demandCharge&&plan.demandCharge->ratchet){
         auto &history=opening.demandHistory;
@@ -337,6 +373,7 @@ bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const Tar
     opening.accruedSubtotal={};
     if(opening.peakDemand)opening.peakDemand=ElectricityAmount{};
     if(opening.exports)opening.exports=BillExportOpening{};
+    if(opening.restrictedCredit)opening.restrictedCredit->accruedImportSubtotal={};
     return true;
 }
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
@@ -379,6 +416,7 @@ JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier,boo
         if(componentMultiplier)row.members.emplace_back("multiplier",literal(R"("")"));
         return row;
     }
+    if(name=="lots")return literal(R"({"expires_utc_ms":0,"amount":""})");
     if(name=="bands")return literal(R"({"through_kwh":null,"rate_per_kwh":""})");
     if(name=="seasons")return literal(R"({"start_month":0,"start_day":0,"kwh_per_day":""})");
     if(name=="demand_history")return literal(apparentDemand?R"({"cycle_end_utc_ms":0,"peak_kva":""})":
@@ -515,8 +553,12 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::
             auto step=evaluateBill(plan,opening,trace,window.endUtcMs,decision,d.dailyFeeAllocation(),cancel);
             if(cancel&&cancel->load(std::memory_order_relaxed))return {};
             if(step.status!=ElectricityStatus::Ok)return {step.status,cycle,false,{},{},{}};
-            ElectricityAmount net;
-            if(!step.netChange(net)||!totals[scenario]->add(net.numerator,totals[scenario]))
+            ElectricityAmount comparison;
+            if(step.restrictedCredit && step.restrictedCredit->cashDue)
+                comparison=*step.restrictedCredit->cashDue;
+            else if(!step.netChange(comparison))
+                return {ElectricityStatus::Capacity,cycle,false,{},{},{}};
+            if(!totals[scenario]->add(comparison.numerator,totals[scenario]))
                 return {ElectricityStatus::Capacity,cycle,false,{},{},{}};
             opening=std::move(*step.ending);
         }
@@ -532,11 +574,15 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(tariffJson(root).size()>tariffDeclarationMaxBytes)bad("","Declaration exceeds 64 KiB.",TariffProblemKind::Oversized);
         const auto *allowance=root.find("seasonal_allowance");
         const auto *demand=root.find("demand_charge");
+        const auto *restrictedCredit=root.find("restricted_credit");
         using Fields=std::initializer_list<const char *>;
         keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"},
              allowance?(demand?Fields{"seasonal_allowance","demand_charge"}:Fields{"seasonal_allowance"}):
-                       (demand?Fields{"demand_charge"}:Fields{}));
-        const auto version=integer(*root.find("schema_version"),"schema_version",12);
+                       (demand?Fields{"demand_charge"}:Fields{}),
+             restrictedCredit?Fields{"restricted_credit"}:Fields{});
+        const auto version=integer(*root.find("schema_version"),"schema_version",13);
+        if((version==13)!=static_cast<bool>(restrictedCredit))
+            bad("schema_version","Restricted credits require version 13.",TariffProblemKind::SchemaVersion);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         const auto &plan=*root.find("plan");
         const auto *exportRule=plan.find("export_payment");
@@ -567,6 +613,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(allowance)d.seasonalAllowance=decodeSeasonalAllowance(*allowance,confirmedMs);
         auto &p=d.plan;
         if(demand)p.demandCharge=decodeDemandCharge(*demand,confirmedMs,apparent);
+        p.restrictedCreditAtClose=restrictedCredit!=nullptr;
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"},
              exportRule?Fields{"export_payment"}:Fields{});
         if(exportRule){
@@ -693,6 +740,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
                 bad(paymentPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
             s.exports=BillExportOpening{std::move(*exported),std::move(accrued)};
         }
+        if(restrictedCredit)s.restrictedCredit=decodeRestrictedCredit(*restrictedCredit,s,denominator,total);
         if(p.demandCharge){
             s.apparentDemand=apparent;
             const auto path=child("opening",openingPeak);

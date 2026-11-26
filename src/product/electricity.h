@@ -123,9 +123,23 @@ struct TariffPlan {
     uint32_t unsupportedRules = 0;             // any unmodelled rule rejects evaluation
     std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter demand windows
     std::optional<ExportPaymentRule> exportPayment{};  // independent payout, outside the supply subtotal
+    bool restrictedCreditAtClose = false;
 };
 struct BillExportOpening {
     ElectricityAmount exportedKwh, accruedPayment;
+};
+inline constexpr size_t maxRestrictedCreditLots = 16;
+struct RestrictedCreditLot {
+    int64_t expiresUtcMs = 0;
+    ElectricityAmount remaining;
+};
+struct BillRestrictedCreditOpening {
+    ElectricityAmount accruedImportSubtotal;  // signed energy charges before the subtotal multiplier
+    std::vector<RestrictedCreditLot> lots;     // strictly increasing absolute expiry instants
+};
+struct BillRestrictedCreditAccrual {
+    ElectricityAmount eligible, applied, expired, remaining;
+    std::optional<ElectricityAmount> cashDue;
 };
 struct BillOpening {
     bool declared = false;
@@ -137,6 +151,7 @@ struct BillOpening {
     std::vector<ElectricityAmount> demandHistory;  // completed monthly measured peaks, oldest first
     bool apparentDemand = false;  // binds the opening peak and history to the demand rule's unit
     std::optional<BillExportOpening> exports{};  // earned through the opening, before the current trace
+    std::optional<BillRestrictedCreditOpening> restrictedCredit{};
 };
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
@@ -156,9 +171,11 @@ struct BillEstimate {
     bool cycleSettled = false;
     std::optional<ElectricityAmount> billedKwh;  // current trace only, when interval rounding is selected
     std::optional<ElectricityAmount> exportPayment{};  // payout from this trace only
+    std::optional<BillRestrictedCreditAccrual> restrictedCredit{};
     bool netChange(ElectricityAmount &out) const {
         if (!charge) return false;
         if (exportPayment) return charge->numerator.subtract(exportPayment->numerator,&out.numerator);
+        if (restrictedCredit) return charge->numerator.subtract(restrictedCredit->applied.numerator,&out.numerator);
         out=*charge;
         return true;
     }
@@ -185,6 +202,7 @@ struct BillAccrual {
     bool settlementDependent=false; // future cycle quantity can change already accrued all-units/floor amounts
     std::optional<ElectricityAmount> billedKwh;  // current trace only; ending.importedKwh retains physical usage
     std::optional<BillExportAccrual> exportAccrual{};
+    std::optional<BillRestrictedCreditAccrual> restrictedCredit{};
 };
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
                       int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},

@@ -8,7 +8,8 @@ enum class TariffComparisonMessageKey {
     Footer, NeedWatts, Clock, Pending, Failed, ModelStatus, DisplayRange, WithoutCharge, WithCharge, Difference,
     RetryAfterCancel, Cycles, EndUnavailable, CycleStatus, ChargedDay,
     WithoutApparent, WithApparent, ApparentInput, ApparentFactorInput, NeedApparent, NeedApparentFactor,
-    WithoutNetWatts, WithNetWatts, NetInstruction, NetCycles, NeedNetWatts, WithoutNetCharge, WithNetCharge
+    WithoutNetWatts, WithNetWatts, NetInstruction, NetCycles, NeedNetWatts, WithoutNetCharge, WithNetCharge,
+    WithoutCreditCharge, WithCreditCharge
 };
 
 inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffComparisonMessageKey key) {
@@ -36,7 +37,8 @@ inline LocalizedMessage tariffComparisonMessage(std::string_view locale, TariffC
         "Net watts per scenario (+import, -export).",
         "[Left/Right] {count}/{max} | +import -export",
         "Enter signed net watts for each scenario (+import, -export).",
-        "Net without mining: {amount} {currency}", "Net with mining:    {amount} {currency}"
+        "Net without mining: {amount} {currency}", "Net with mining:    {amount} {currency}",
+        "Cash due without mining: {amount} {currency}", "Cash due with mining:    {amount} {currency}"
     };
     const auto index = static_cast<size_t>(key);
     if (index >= sizeof(messages) / sizeof(*messages)) return {};

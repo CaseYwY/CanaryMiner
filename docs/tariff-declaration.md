@@ -23,7 +23,7 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). Version 12 declares a [separate payment for exports](#price-electricity-exports-separately). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). Version 12 declares a [separate payment for exports](#price-electricity-exports-separately). Version 13 adds [restricted opening credits](#apply-restricted-credit-at-cycle-close). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
@@ -296,10 +296,52 @@ one hour, moving from -2,000 W to -1,000 W loses 1 kWh of export. At 1 USD/kWh t
 costs 1 USD. Moving from -1,000 W to +1,000 W loses the same payment and adds 1 kWh of
 import. At 3 USD/kWh for import, the difference is 4 USD. These examples cover T28 and T29.
 
-This rule models a separate payment using a fixed price. Banked or restricted credits,
-expiry, time-varying export pricing, supplier-specific settlement and the combination
-with apparent-power demand need their own declarations and evidence.
+This rule models a separate payment using a fixed price. [Restricted opening credits](#apply-restricted-credit-at-cycle-close) use their own declaration. Time-varying export pricing, supplier-specific settlement and the combination with apparent-power demand require additional rules.
 [Example of provider-specific export credits](https://www.pge.com/en/clean-energy/solar/getting-started-with-solar/solar-billing-plan.html)
+
+### Apply restricted credit at cycle close
+
+Select **Plan** in Settings and press **U** to add `restricted_credit` under schema version
+13. Enter `accrued_import_subtotal`, the signed import-energy charge through the opening
+before the subtotal multiplier, and `lots`, the unused credits at that opening. Enter
+zero for the subtotal at cycle start and review it separately from `opening.accrued_subtotal`,
+which still includes fees. For a mid-cycle opening, use the energy and fee breakdown
+from the reviewed statement. Each lot has an `amount` in the plan currency and an absolute
+`expires_utc_ms`. Use up to 16 positive lots listed in strictly increasing expiry order,
+combining amounts with an identical expiry. Use an empty list for a zero credit balance.
+Adding or removing the rule requires new plan and opening keys. Changing the credit
+amounts or expiry dates within the same rule requires a new opening key.
+
+Only the net import-energy charge is eligible. The calculation includes the declared
+base and tier prices, rounds meter quantities only when declared, and applies the
+subtotal multiplier to the eligible charge. Fixed and daily fees, demand charges, and
+any minimum-subtotal top-up stay outside the eligible amount. Credit use is bounded
+by the positive eligible charge and the positive gross supply charge. For example,
+10 USD of eligible import, 5 USD of fixed fees and 20 USD in live credit leaves
+5 USD cash due and 10 USD of credit. A negative gross supply charge remains visible
+in the report, and using restricted credit never generates a cash payment.
+
+Credits expire at their stated UTC instants. At a close that coincides with an expiry,
+expiry is processed first. Closing uses the live lots in earliest-expiry order.
+A monthly, two-month or annual reset clears the import quantities and accrued energy
+subtotal for the next cycle. It carries any unused live lots with their original
+expiries. Local clock and time-zone edits leave the expiry instants intact. When you change
+the opening through-time, meter scope/adapter or currency in Settings, review the
+opening credit amounts against the new declaration.
+
+Meter review uses the usual import power or register format. It reports eligible
+charges, applied, expired and remaining credit at the end of each reviewed span.
+An open cycle can have expired credit and provisional eligible charges. Cash due is
+reported at closing. Expiry is evaluated through the last reading, even if the selected
+review cutoff is later. Saved reviews and their extensions bind the exact credit and
+supply amounts. Optional invoice comparison continues to match the gross supply
+charge, including for annual reconciliation.
+
+This covers T30 and T31 for declared opening balances. The rule supports kW demand
+and the declared historical demand floor. Supplier grants during a cycle, refund and
+renewal policies, per-component eligibility beyond import energy, separate cash
+payments for exports, and combined kVA/credit plans require additional declarations
+and evidence.
 
 ### Apply a seasonal baseline allowance
 
@@ -368,8 +410,11 @@ explicit cycle dates still has one horizon.
 Every selected cycle needs complete rates known at the original comparison time. A missing rate in any selected
 cycle withholds all three amounts. The first cycle uses the saved opening's daily-fee rule. Without allocation, the comparison reports the first later cycle that splits a charged tariff day. With the declared allocation, it splits the daily fee across the affected cycles. Selecting a horizon applies only to the estimate.
 
-The amounts are the hypothetical remaining costs for both scenarios and their difference in the plan currency.
+The comparison reports the amounts for both scenarios and their difference in the plan currency. Standard supply amounts cover only the remaining horizon.
 With a separate export payment, the displayed amounts are net of the export payout.
+With restricted credit, each scenario spends its own copy of the opening balance at
+eligible closings. The display shows the full forecast cash due, including charges
+and credits attributable to the declared opening.
 The two scenarios share one opening and the same known tariff revisions. An incomplete rate schedule produces an
 unavailable result. A background calculation uses the inputs and local time captured at Enter. Escape returns to the
 tariff declaration and cancels the calculation. The new comparison starts with empty inputs. If a cancelled calculation

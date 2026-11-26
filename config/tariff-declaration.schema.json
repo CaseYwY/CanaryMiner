@@ -5,7 +5,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -14,9 +14,10 @@
     "plan": {"$ref": "#/$defs/plan"},
     "opening": {"$ref": "#/$defs/opening"},
     "seasonal_allowance": {"$ref": "#/$defs/seasonalAllowance"},
-    "demand_charge": {"$ref": "#/$defs/demandCharge"}
+    "demand_charge": {"$ref": "#/$defs/demandCharge"},
+    "restricted_credit": {"$ref": "#/$defs/restrictedCredit"}
   },
-  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8, 9, 10, 11, 12]}}},
+  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]}}},
   "then": {
     "if": {"properties": {"schema_version": {"const": 4}}},
     "then": {
@@ -60,10 +61,15 @@
   },
   "allOf": [
     {
+      "if": {"properties": {"schema_version": {"const": 13}}},
+      "then": {"required": ["restricted_credit"]},
+      "else": {"not": {"required": ["restricted_credit"]}}
+    },
+    {
       "if": {"properties": {"schema_version": {"const": 7}}},
       "then": {"required": ["seasonal_allowance"]},
       "else": {
-        "if": {"properties": {"schema_version": {"enum": [8, 9, 10, 11, 12]}}},
+        "if": {"properties": {"schema_version": {"enum": [8, 9, 10, 11, 12, 13]}}},
         "else": {"not": {"required": ["seasonal_allowance"]}}
       }
     },
@@ -73,7 +79,7 @@
         "revisions": {"contains": {"required": ["component_multiplier"]}}
       }}}},
       "else": {
-        "if": {"properties": {"schema_version": {"enum": [9, 10, 11, 12]}}},
+        "if": {"properties": {"schema_version": {"enum": [9, 10, 11, 12, 13]}}},
         "else": {"properties": {"plan": {"properties": {
           "revisions": {"items": {"not": {"required": ["component_multiplier"]}}}
         }}}}
@@ -85,7 +91,7 @@
         "required": ["demand_charge"]
       },
       "else": {
-        "if": {"properties": {"schema_version": {"const": 12}}},
+        "if": {"properties": {"schema_version": {"enum": [12, 13]}}},
         "else": {"not": {"required": ["demand_charge"]}}
       }
     },
@@ -126,7 +132,7 @@
     {
       "if": {"anyOf": [
         {"properties": {"schema_version": {"enum": [9, 10]}}},
-        {"required": ["demand_charge"], "properties": {"schema_version": {"const": 12}}}
+        {"required": ["demand_charge"], "properties": {"schema_version": {"enum": [12, 13]}}}
       ]},
       "then": {"properties": {"opening": {"required": ["peak_demand_kw"]}}},
       "else": {"properties": {"opening": {"not": {"required": ["peak_demand_kw"]}}}}
@@ -135,7 +141,7 @@
       "if": {"anyOf": [
         {"properties": {"schema_version": {"const": 10}}},
         {"required": ["demand_charge"], "properties": {
-          "schema_version": {"enum": [11, 12]}, "demand_charge": {"required": ["ratchet"]}
+          "schema_version": {"enum": [11, 12, 13]}, "demand_charge": {"required": ["ratchet"]}
         }}
       ]},
       "then": {"properties": {
@@ -281,6 +287,19 @@
         "annual_day": {"type": "integer", "minimum": 1, "maximum": 31},
         "clock": {"$ref": "#/$defs/clockChoice"},
         "daily_fee_allocation": {"const": "prorate_by_cycle_minutes"}
+      }
+    },
+    "restrictedCredit": {
+      "type": "object", "additionalProperties": false, "required": ["accrued_import_subtotal", "lots"],
+      "properties": {
+        "accrued_import_subtotal": {"$ref": "#/$defs/decimal"},
+        "lots": {"type": "array", "maxItems": 16, "items": {
+          "type": "object", "additionalProperties": false, "required": ["expires_utc_ms", "amount"],
+          "properties": {
+            "expires_utc_ms": {"$ref": "#/$defs/instant"},
+            "amount": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]", "not": {"const": "0"}}]}
+          }
+        }}
       }
     },
     "plan": {

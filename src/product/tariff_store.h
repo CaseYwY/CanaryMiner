@@ -23,12 +23,17 @@ class TariffDeclarationStore {
                 const auto *demand=v.find("demand_charge");
                 return tariffJson(*v.find("plan"))+tariffJson(*v.find("country"))+
                     tariffJson(*v.find("source_reference"))+tariffJson(*v.find("reset_policy"))+
-                    (allowance?tariffJson(*allowance):std::string{})+(demand?tariffJson(*demand):std::string{});
+                    (allowance?tariffJson(*allowance):std::string{})+(demand?tariffJson(*demand):std::string{})+
+                    (v.find("restricted_credit")?"restricted-credit-at-close":"");
+            };
+            const auto opening=[](const JsonValue &v){
+                const auto *credit=v.find("restricted_credit");
+                return tariffJson(*v.find("opening"))+(credit?tariffJson(*credit):std::string{});
             };
             if(oldPlan->find("key")->text==newPlan->find("key")->text&&identity(baseline_)!=identity(value))
                 return fail(error,"Declaration changed: choose a NEW plan.key. Rules/identity/source/clock cannot reuse the loaded version.");
             if(baseline_.find("opening")->find("key")->text==value.find("opening")->find("key")->text&&
-               (tariffJson(*baseline_.find("opening"))!=tariffJson(*value.find("opening"))||identity(baseline_)!=identity(value)))
+               (opening(baseline_)!=opening(value)||identity(baseline_)!=identity(value)))
                 return fail(error,"Opening or its plan binding changed: choose a NEW opening.key; this is not a ledger reset.");
         }
         std::error_code ec;if(path_.has_parent_path())std::filesystem::create_directories(path_.parent_path(),ec);

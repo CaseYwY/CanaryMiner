@@ -234,8 +234,10 @@ class TariffComparisonSettings {
             return {tariffComparisonEnglish(Key::DisplayRange)};
         }
         const bool net=d.plan.exportPayment.has_value();
-        return {tariffComparisonEnglish(net?Key::WithoutNetCharge:Key::WithoutCharge, {{"amount", baseCharge}, {"currency", d.plan.currency}}),
-                tariffComparisonEnglish(net?Key::WithNetCharge:Key::WithCharge, {{"amount", withCharge}, {"currency", d.plan.currency}}),
+        const auto withoutKey=d.plan.restrictedCreditAtClose?Key::WithoutCreditCharge:net?Key::WithoutNetCharge:Key::WithoutCharge;
+        const auto withKey=d.plan.restrictedCreditAtClose?Key::WithCreditCharge:net?Key::WithNetCharge:Key::WithCharge;
+        return {tariffComparisonEnglish(withoutKey, {{"amount", baseCharge}, {"currency", d.plan.currency}}),
+                tariffComparisonEnglish(withKey, {{"amount", withCharge}, {"currency", d.plan.currency}}),
                 tariffComparisonEnglish(Key::Difference, {{"amount", change}, {"currency", d.plan.currency}})};
     }
 };
