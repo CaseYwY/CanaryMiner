@@ -42,7 +42,8 @@ std::string candleBody(bool pearl, int64_t start, unsigned count) {
 }  // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 8) return 2;
+    if (argc != 8 && argc != 9) return 2;
+    if (argc == 9 && !om::validPublicDnsServer(argv[8])) return 2;
     const std::string_view feed(argv[1]);
     const bool candles = feed == "4" || feed == "5";
     if (!candles && feed != "0" && feed != "2") return 3;
@@ -60,6 +61,11 @@ int main(int argc, char **argv) {
         output << feed;
         if (candles) output << ' ' << from << ' ' << to;
         output << '\n';
+        if (!output) return 4;
+    }
+    if (argc == 9) {
+        std::ofstream output(dir / "resolver-requests", std::ios::app);
+        output << argv[8] << '\n';
         if (!output) return 4;
     }
     if (mode == "slow") std::this_thread::sleep_for(std::chrono::seconds(10));

@@ -176,7 +176,7 @@ int main(int argc, char **argv) {
     }
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
-            std::puts("canary-miner market-tickers --allow-public-tickers\n"
+            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP]\n"
                       "canary-miner market-tickers --file FILE\n"
                       "Sample Gate PEARL_USDT and Kraken USDTUSD with the installed HTTPS helper, or review saved JSON offline.\n"
                       "Public sampling requires a public-HTTPS-enabled build. Both commands run independently of mining settings.");

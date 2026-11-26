@@ -29,6 +29,9 @@ def main(cli_path, fixture, capable):
         helper = install / worker_name
         shutil.copy2(fixture, work / worker_name)  # Never resolve a helper through cwd.
         requests = install / 'ticker-requests'
+        resolver_requests = install / 'resolver-requests'
+        resolver = '192.168.50.53'
+        dns = ('--dns-server', resolver)
         scenario = install / 'ticker-scenario'
 
         def invoke(*args):
@@ -53,15 +56,20 @@ def main(cli_path, fixture, capable):
         shutil.copy2(fixture, helper)
         for args in ((), (allow, allow), (allow, '--no-market'), (allow, '--config', config.name),
                      (allow+'=true',), ('--help', allow), ('--allow-public-ticker\uff53',),
-                     ('--url', 'private-sentinel')):
+                     ('--url', 'private-sentinel'), dns, (allow, '--dns-server'),
+                     (allow, '--dns-server', '8.8.8.8:53'), (allow, *dns, *dns),
+                     (allow, '--dn\uff53-server', resolver), (allow, '--dns-server', '\uff11' + resolver[1:]),
+                     ('--file', config.name, *dns)):
             result = run(*args)
             assert result.returncode == 2 and not result.stdout and not requests.exists(), result
         result = invoke('market-ticker\uff53', allow)
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
+        assert not resolver_requests.exists()
         if not capable:
-            result = run(allow)
-            assert result.returncode == 3 and not result.stdout and 'HTTPS unavailable in this build' in result.stderr
-            assert not requests.exists()
+            for args in ((allow,), (allow, *dns)):
+                result = run(*args)
+                assert result.returncode == 3 and not result.stdout and 'HTTPS unavailable in this build' in result.stderr
+            assert not requests.exists() and not resolver_requests.exists()
             print('ticker CLI: disabled build refused all network admissions')
             return 0
 
@@ -85,12 +93,21 @@ def main(cli_path, fixture, capable):
         assert '1h' not in result.stdout
         assert_requests(['0', '2'])
 
+        assert not resolver_requests.exists()
+        resolved = run(allow, *dns)
+        assert resolved.returncode == 0 and not resolved.stderr and resolver not in resolved.stdout, resolved
+        assert 'Latest PRL/USD reference: 2.45' in resolved.stdout
+        assert_requests(['0', '2'])
+        assert resolver_requests.read_text(encoding='ascii').splitlines() == [resolver, resolver]
+        resolver_requests.unlink()
+
         scenario.write_text('lagged', encoding='ascii')
         late = run(allow)
         assert late.returncode == 0, late
         ages = [int(value) for value in re.findall(r'observation age ([0-9]+)s', late.stdout)]
         assert len(ages) == 2 and ages[0] >= 2, late
         assert_requests(['0', '2'])
+        assert not resolver_requests.exists()
 
         for mode, valid, failed in (
             ('foreign', 'Latest PRL/USDT [Gate international PEARL_USDT; Pearl mainnet]: 2.5', '87213'),

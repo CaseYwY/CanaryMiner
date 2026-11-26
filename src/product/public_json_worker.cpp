@@ -1,4 +1,4 @@
-// Installed sibling helper. Fixed public request identifiers/numbers only, never mining credentials or arbitrary URLs.
+// Installed sibling helper. Fixed public requests with an optional validated DNS address.
 #include "public_https_client.h"
 #include "public_json_process.h"
 #include <cstdio>
@@ -9,7 +9,8 @@
 #endif
 
 int main(int argc, char **argv) {
-    if (argc != 8) return 2;
+    if (argc != 8 && argc != 9) return 2;
+    if (argc == 9 && !om::validPublicDnsServer(argv[8])) return 2;
     uint64_t n[7] = {};
     for (int i = 0; i < 7; ++i) {
         const std::string arg = argv[i + 1];
@@ -26,7 +27,8 @@ int main(int argc, char **argv) {
     std::atomic<bool> cancel{false};
     om::PublicJsonClient client;
     auto response = client.get({static_cast<om::PublicFeed>(n[0]), static_cast<int64_t>(n[1]), static_cast<int64_t>(n[2])}, cancel,
-        {static_cast<unsigned>(n[3]), static_cast<unsigned>(n[4]), static_cast<size_t>(n[5]), static_cast<size_t>(n[6])});
+        {static_cast<unsigned>(n[3]), static_cast<unsigned>(n[4]), static_cast<size_t>(n[5]), static_cast<size_t>(n[6]),
+         argc == 9 ? argv[8] : ""});
     std::string wire;
     if (!om::encodePublicJsonResponse(response, &wire)) return 2;
     return std::fwrite(wire.data(), 1, wire.size(), stdout) == wire.size() && std::fflush(stdout) == 0 ? 0 : 2;

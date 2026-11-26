@@ -27,6 +27,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
         shutil.copy2(fixture, helper)
         shutil.copy2(fixture, operator / worker_name)
         requests = installed / "candle-requests"
+        resolver_requests = installed / "resolver-requests"
+        resolver = "fd00::53"
+        dns = ("--dns-server", resolver)
         scenario = installed / "candle-scenario"
         archive = operator / "public.cmh"
         save = (allow, "--save-review", archive.name)
@@ -57,7 +60,10 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert result.returncode == 0 and "market-hour " + allow in result.stdout
         for arguments in ((), (allow, allow), (allow, "--no-market"), (allow, "--config", config.name),
                           ("--file", config.name, allow), (allow + "=true",), ("--help", allow),
-                          ("--allow-public-candle\uff53",), ("--url", "private-sentinel")):
+                          ("--allow-public-candle\uff53",), ("--url", "private-sentinel"), dns,
+                          (allow, "--dns-server"), (allow, "--dns-server", "hostname"),
+                          (allow, *dns, *dns), ("--file", config.name, *dns),
+                          ("--open-review", archive.name, *dns), (allow, "--dn\uff53-server", resolver)):
             result = run(*arguments)
             assert result.returncode == 2 and not result.stdout and not requests.exists(), result
         result = call("market-hou\uff52", allow)
@@ -77,12 +83,13 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert result.returncode == 2 and not result.stdout and expected in result.stderr, result
             assert not requests.exists() and not (installed / "ticker-requests").exists()
 
+        assert not resolver_requests.exists()
         if not enabled:
-            for args in ((allow,), save):
+            for args in ((allow,), save, (allow, *dns)):
                 result = run(*args)
                 assert result.returncode == 3 and not result.stdout and "HTTPS unavailable in this build" in result.stderr
             assert not requests.exists()
-            assert not archive.exists()
+            assert not archive.exists() and not resolver_requests.exists()
             print("Public hour: default build refuses network opt-in")
             return 0
         result = run(allow)
@@ -99,6 +106,21 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert result.stdout.count("60/60 elapsed minute buckets") == 2
         assert "180 / 60" in result.stdout and "210 / 60" in result.stdout
         assert len(re.findall(r"observed UTC [0-9]+ \(receipt age [0-9]+ s\)", result.stdout)) == 2
+
+        assert not resolver_requests.exists()
+        for args in ((allow, *dns), (*save, *dns), (allow, *dns, *save[1:])):
+            resolved = run(*args)
+            assert resolved.returncode == 0 and not resolved.stderr and resolver not in resolved.stdout, resolved
+            assert "180 / 60" in resolved.stdout and "210 / 60" in resolved.stdout
+            launched(["4", "5"])
+            assert resolver_requests.read_text(encoding="ascii").splitlines() == [resolver, resolver]
+            resolver_requests.unlink()
+            if "--save-review" in args:
+                assert resolver.encode("ascii") not in archive.read_bytes()
+                replay = run("--open-review", archive.name)
+                assert replay.returncode == 0 and replay.stdout == resolved.stdout and not replay.stderr, replay
+                archive.unlink()
+            assert not requests.exists() and not resolver_requests.exists()
 
         for mode, expected in (
             ("gap-fx", "59/60 elapsed minute buckets"),

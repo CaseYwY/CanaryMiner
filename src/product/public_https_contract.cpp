@@ -1,7 +1,14 @@
 // Shared validation for the miner's IPC and the public JSON helper.
 #include "public_https.h"
 #include "json_dom.h"
+#include <algorithm>
 #include <utility>
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#endif
 
 namespace om {
 
@@ -80,6 +87,29 @@ bool publicIpv6(const uint8_t *b) {
     if (b[0] == 0x20 && b[1] == 2) return false;  // 6to4 embeds another endpoint
     if (b[0] == 0x3f && b[1] == 0xff && (b[2] & 0xf0) == 0) return false;  // documentation 3fff::/20
     return true;
+}
+
+bool validPublicDnsServer(std::string_view address) {
+    if (address.empty() || address.size() >= INET6_ADDRSTRLEN ||
+        address.find_first_not_of("0123456789abcdefABCDEF:.") != std::string_view::npos) return false;
+    char literal[INET6_ADDRSTRLEN]{};
+    std::copy(address.begin(), address.end(), literal);
+    uint8_t bytes[16]{};
+    if (inet_pton(AF_INET, literal, bytes) == 1) {
+        // The DNS socket may address a local or shared resolver. Payload sockets use publicIpv4 alone.
+        return publicIpv4(bytes) || bytes[0] == 10 || bytes[0] == 127 ||
+            (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127) ||
+            (bytes[0] == 169 && bytes[1] == 254) ||
+            (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || (bytes[0] == 192 && bytes[1] == 168);
+    }
+    if (address.find('.') != std::string_view::npos) {
+        const auto colon = address.rfind(':');
+        // Apply the same strict dotted-decimal spelling on both socket APIs.
+        if (colon == std::string_view::npos || inet_pton(AF_INET, literal + colon + 1, bytes) != 1) return false;
+    }
+    if (inet_pton(AF_INET6, literal, bytes) != 1) return false;
+    return publicIpv6(bytes) || (bytes[0] & 0xfe) == 0xfc ||
+        (bytes[15] == 1 && std::all_of(bytes, bytes + 15, [](uint8_t value) { return value == 0; }));
 }
 
 static bool validUtf8(const std::string &s) {

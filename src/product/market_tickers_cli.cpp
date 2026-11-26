@@ -1,5 +1,6 @@
 #include "market_ticker_runtime.h"
 #include "market_public_sample.h"
+#include "market_hour.h"
 
 #include <cstdio>
 
@@ -78,7 +79,11 @@ int interrupted() {
 
 int commandPublicTickers(const std::filesystem::path &module, int argc, const char *const *argv,
                          const volatile sig_atomic_t *stop) {
-    if (!market_detail::nativeMarketConsent(argc, argv, "market-tickers", "--allow-public-tickers")) {
+    using market_detail::nativeMarketArgumentPair;
+    std::string dnsServer;
+    if (!parsePublicTickerCli(argc,argv,2,dnsServer) ||
+        !nativeMarketArgumentPair(argc,argv,1,"market-tickers",2,"--allow-public-tickers") ||
+        (!dnsServer.empty() && !nativeMarketArgumentPair(argc,argv,3,"--dns-server",4,dnsServer))) {
         std::fputs("market-tickers: exact --allow-public-tickers required\n", stderr);
         return 2;
     }
@@ -94,6 +99,7 @@ int commandPublicTickers(const std::filesystem::path &module, int argc, const ch
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.maxAttempts = 1;
+        policy.https.dnsServer=std::move(dnsServer);
         const auto sample = sampleTickers(helper, policy, lifetime, stop);
         if (sample.snapshot.helperFault || !lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return interrupted();

@@ -36,10 +36,6 @@ inline bool nativeMarketArgumentPair(int argc, const char *const *argv, int firs
 #endif
 }
 
-inline bool nativeMarketConsent(int argc, const char *const *argv, std::string_view command, std::string_view option) {
-    return argc == 3 && nativeMarketArgumentPair(argc, argv, 1, command, 2, option);
-}
-
 inline bool marketSampleStopped(const volatile sig_atomic_t *stop) { return stop && *stop; }
 
 inline PublicJsonResponse marketSampleFailure(PublicHttpsStatus status) {

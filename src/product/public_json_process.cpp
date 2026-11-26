@@ -141,7 +141,7 @@ struct PublicJsonProcessClient::Impl {
         STARTUPINFOEXW si{};
         si.StartupInfo.cb = sizeof(si); si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
         si.StartupInfo.hStdInput = temp.null; si.StartupInfo.hStdOutput = temp.write; si.StartupInfo.hStdError = temp.null; si.lpAttributeList = attributes;
-        // Only fixed numeric args. No shell, PATH lookup, arbitrary quoting, inherited user environment or console.
+        // Only bounded numeric fields and an optional validated address. No shell or environment inheritance.
         std::wstring command = L"\"" + helper.wstring() + L"\"";
         for (const auto &arg : args) command += L" " + std::wstring(arg.begin(), arg.end());
         std::vector<wchar_t> cmd(command.begin(), command.end()); cmd.push_back(0);
@@ -307,7 +307,8 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
     if (impl_->busy.test_and_set()) { response.status = PublicHttpsStatus::Busy; return response; }
     struct Busy { Impl *p; ~Busy() { p->busy.clear(); } } busy{impl_.get()};
     std::string ignored;
-    if (!publicFeedUrl(request, &ignored) || limits.totalMs < 50 || limits.totalMs > 60000 || !limits.connectMs || limits.connectMs > limits.totalMs ||
+    if (!publicFeedUrl(request, &ignored) || (!limits.dnsServer.empty() && !validPublicDnsServer(limits.dnsServer)) ||
+        limits.totalMs < 50 || limits.totalMs > 60000 || !limits.connectMs || limits.connectMs > limits.totalMs ||
         !limits.bodyBytes || limits.bodyBytes > 1024 * 1024 || limits.headerBytes < 64 || limits.headerBytes > 32768) {
         response.status = PublicHttpsStatus::InvalidRequest; return response;
     }
@@ -321,8 +322,9 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
 #endif
         if (!impl_->helper.is_absolute() || !std::filesystem::is_regular_file(impl_->helper)) return response;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(limits.totalMs);
-        const std::vector<std::string> args = {std::to_string(static_cast<unsigned>(request.feed)), std::to_string(request.fromUtc), std::to_string(request.toUtc),
+        std::vector<std::string> args = {std::to_string(static_cast<unsigned>(request.feed)), std::to_string(request.fromUtc), std::to_string(request.toUtc),
             std::to_string(limits.connectMs), std::to_string(limits.totalMs), std::to_string(limits.bodyBytes), std::to_string(limits.headerBytes)};
+        if (!limits.dnsServer.empty()) args.push_back(limits.dnsServer);
         response.status = Impl::reserve(impl_.get());
         if (response.status != PublicHttpsStatus::Ok) return response;
         response = {};

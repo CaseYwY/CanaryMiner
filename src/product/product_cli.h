@@ -184,8 +184,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         const auto option = argc == i + 1 ? std::string_view(argv[i]) : std::string_view();
         r.help = option == "--help" || option == "-h";
         r.reviewTickerFile = argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0];
-        if (!r.help && option != "--allow-public-tickers" && !r.reviewTickerFile) {
-            if (error) *error = "market-tickers: use --file FILE, --allow-public-tickers or --help";
+        std::string dnsServer;
+        if (!r.help && !r.reviewTickerFile && !parsePublicTickerCli(argc,argv,i,dnsServer)) {
+            if (error) *error = "market-tickers: invalid options; use market-tickers --help";
             return false;
         }
         *out = std::move(r);
