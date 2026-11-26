@@ -11,7 +11,7 @@ inline std::optional<i18n::ElectricityStatusMessageKey> electricityStatusSourceK
         case Status::Unsupported:return Key::Unsupported;case Status::MissingPrice:return Key::MissingPrice;
         case Status::Conflict:return Key::Conflict;case Status::NotYetKnown:return Key::NotYetKnown;
         case Status::ClockFault:return Key::ClockFault;case Status::Capacity:return Key::Capacity;
-        case Status::MeterBoundary: case Status::MeterRoundingBoundary: case Status::SeasonalDayBoundary: case Status::DemandWindowBoundary: case Status::DemandHistoryNotYetKnown: case Status::DemandApparentEvidence: case Status::ExportEvidenceMissing: case Status::ExportRateBoundary: case Status::TaxPeriodBoundary:return std::nullopt;
+        case Status::MeterBoundary: case Status::MeterRoundingBoundary: case Status::SeasonalDayBoundary: case Status::DemandWindowBoundary: case Status::DemandHistoryNotYetKnown: case Status::DemandApparentEvidence: case Status::ExportEvidenceMissing: case Status::ExportRateBoundary: case Status::TaxPeriodBoundary: case Status::TaxScheduleBoundary: case Status::TaxMeterBoundary:return std::nullopt;
     }
     return std::nullopt;
 }

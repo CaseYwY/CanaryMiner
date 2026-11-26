@@ -7,7 +7,7 @@
 #include <optional>
 namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
-constexpr uint64_t tariffDeclarationLatestVersion=15;
+constexpr uint64_t tariffDeclarationLatestVersion=16;
 inline constexpr char finalDisplayRounding[] = "final_display_only";
 inline constexpr char meterHalfHourRounding[] = "meter_import_half_hour_kwh_half_even_2";
 enum class TariffResetCadence { Monthly, Annual, Bimonthly };

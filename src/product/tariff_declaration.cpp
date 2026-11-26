@@ -428,20 +428,35 @@ std::vector<TariffTaxPeriod> decodeTaxPeriods(const JsonValue &value, int64_t co
     return periods;
 }
 
-BillTaxOpening decodeTaxOpening(const JsonValue &value, const ExactDecimal &denominator) {
-    const std::string path = "opening.tax_bases";
-    keys(value, path, {"energy", "daily_fee", "cycle_fee", "demand", "billed_kwh"});
+BillTaxOpening decodeTaxBases(const JsonValue &value, const std::string &path, const ExactDecimal &denominator) {
     BillTaxOpening opening;
     for (size_t i = 0; i < opening.components.size(); ++i) {
         const auto *name = taxComponentNames[i];
+        const auto *field = value.find(name);
+        if (!field) continue;  // Segmented declarations derive the closing demand charge.
         const auto at = child(path, name);
-        if (!decimal(*value.find(name), at).multiply(denominator, &opening.components[i].numerator))
+        if (!decimal(*field, at).multiply(denominator, &opening.components[i].numerator))
             bad(at, "Arithmetic capacity exceeded.", TariffProblemKind::ArithmeticCapacity);
     }
     const auto quantity = electricityKwh(decimal(*value.find("billed_kwh"), path + ".billed_kwh"));
     if (!quantity) bad(path + ".billed_kwh", "Use a nonnegative billed quantity.", TariffProblemKind::OpeningQuantity);
     opening.billedKwh = *quantity;
     return opening;
+}
+
+std::vector<BillTaxSegment> decodeTaxSegments(const JsonValue &value, const ExactDecimal &denominator, size_t &total) {
+    const std::string path = "opening.tax_segments";
+    boundedArray(value, path, maxTaxPeriods, total);
+    std::vector<BillTaxSegment> segments;
+    for (const auto &row : value.items) {
+        const auto at = path + "[" + std::to_string(segments.size()) + "]";
+        keys(row, at, {"begin_utc_ms", "imported_kwh", "energy", "daily_fee", "cycle_fee", "billed_kwh"});
+        const auto begin = integer(*row.find("begin_utc_ms"), at + ".begin_utc_ms");
+        const auto quantity = electricityKwh(decimal(*row.find("imported_kwh"), at + ".imported_kwh"));
+        if (!quantity) bad(at + ".imported_kwh", "Use a nonnegative imported quantity.", TariffProblemKind::OpeningQuantity);
+        segments.push_back({static_cast<int64_t>(begin), *quantity, decodeTaxBases(row, at, denominator)});
+    }
+    return segments;
 }
 
 bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const TariffPlan &plan){
@@ -461,6 +476,7 @@ bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const Tar
     if(opening.exports)opening.exports=BillExportOpening{};
     if(opening.restrictedCredit)opening.restrictedCredit->accruedImportSubtotal={};
     if(opening.tax)opening.tax=BillTaxOpening{};
+    if(opening.taxSegments)opening.taxSegments->clear();
     return true;
 }
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
@@ -496,6 +512,7 @@ std::string tariffJson(const JsonValue &v){
 }
 JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier,bool apparentDemand){
     if(name=="tax_periods")return literal(R"({"begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"rules":[]})");
+    if(name=="tax_segments")return literal(R"({"begin_utc_ms":0,"imported_kwh":"","energy":"","daily_fee":"","cycle_fee":"","billed_kwh":"0"})");
     if(name=="rules")return literal(R"({"key":"","kind":"fraction","rate":"","components":[],"included_in":[],"prior_taxes":[]})");
     if(name=="components"||name=="included_in"||name=="prior_taxes")return literal("\"\"");
     if(name=="revisions")return literal(R"({"key":"","begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"time_mode":"constant","base_rate_per_kwh":"","charge_per_civil_day":"","calendar":[],"dynamic":[],"bands":[]})");
@@ -689,15 +706,17 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         const auto &plan=*root.find("plan");
         const auto *exportRule=plan.find("export_payment");
         const auto *taxPeriods=plan.find("tax_periods");
-        if((version==15)!=static_cast<bool>(taxPeriods))
-            bad("schema_version","Ordered tax periods require version 15.",TariffProblemKind::SchemaVersion);
-        const bool scheduledExport=version==14||(version==15&&exportRule&&exportRule->find("dynamic"));
-        if(version!=15&&((version==12||version==14)!=static_cast<bool>(exportRule)))
-            bad("schema_version","Export payment requires version 12, 14 or 15.",TariffProblemKind::SchemaVersion);
+        const bool segmentedTaxes=version==16;
+        const bool orderedTaxes=version>=15;
+        if(orderedTaxes!=static_cast<bool>(taxPeriods))
+            bad("schema_version","Ordered taxes require version 15 or 16.",TariffProblemKind::SchemaVersion);
+        const bool scheduledExport=version==14||(orderedTaxes&&exportRule&&exportRule->find("dynamic"));
+        if(!orderedTaxes&&((version==12||version==14)!=static_cast<bool>(exportRule)))
+            bad("schema_version","Export payment requires version 12, 14, 15 or 16.",TariffProblemKind::SchemaVersion);
         if(version<12&&(version>=9)!=static_cast<bool>(demand))
             bad("schema_version","Demand charge requires version 9.",TariffProblemKind::SchemaVersion);
         const auto *ratchet=demand?demand->find("ratchet"):nullptr;
-        const bool apparent=version==11||(version==15&&demand&&demand->find("power_factor_va_places"));
+        const bool apparent=version==11||(orderedTaxes&&demand&&demand->find("power_factor_va_places"));
         if(version<11&&(version==10)!=static_cast<bool>(ratchet))
             bad("schema_version","Historical kW demand requires version 10.",TariffProblemKind::SchemaVersion);
         const char *openingPeak=apparent?"peak_demand_kva":"peak_demand_kw";
@@ -721,9 +740,14 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(demand)p.demandCharge=decodeDemandCharge(*demand,confirmedMs,apparent);
         p.restrictedCreditAtClose=restrictedCredit!=nullptr;
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"},
-             exportRule?Fields{"export_payment"}:Fields{},taxPeriods?Fields{"tax_periods"}:Fields{});
+             exportRule?Fields{"export_payment"}:Fields{},
+             segmentedTaxes?Fields{"tax_periods","tax_allocation"}:orderedTaxes?Fields{"tax_periods"}:Fields{});
         size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0;
         if(taxPeriods)p.taxPeriods=decodeTaxPeriods(*taxPeriods,confirmedMs,total);
+        if(segmentedTaxes){
+            choice(*plan.find("tax_allocation"),"plan.tax_allocation",{"service_and_cycle_close"});
+            p.taxByServiceTime=true;
+        }
         if(scheduledExport){
             const std::string path="plan.export_payment.dynamic";
             keys(*exportRule,"plan.export_payment",{"dynamic"});
@@ -829,7 +853,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
                                    demand?Fields{openingPeak,"exported_kwh","accrued_export_payment"}:
                                           Fields{"exported_kwh","accrued_export_payment"}):
                         (ratchet?Fields{openingPeak,"demand_history"}:demand?Fields{openingPeak}:Fields{}),
-             taxPeriods?Fields{"tax_bases"}:Fields{});
+             segmentedTaxes?Fields{"tax_segments"}:orderedTaxes?Fields{"tax_bases"}:Fields{});
         choice(*opening.find("basis"),"opening.basis",{"whole_meter_import"});choice(*opening.find("origin"),"opening.origin",{"declared_forecast"});
         s.declared=true;s.planKey=p.key;s.evidence={PowerBasis::WholeMeterImport,PowerOrigin::DeclaredForecast,label(*opening.find("scope"),"opening.scope"),label(*opening.find("adapter"),"opening.adapter")};
         d.openingKey=label(*opening.find("key"),"opening.key");
@@ -856,7 +880,12 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         auto quantity=electricityKwh(decimal(*opening.find("imported_kwh"),"opening.imported_kwh"));if(!quantity)bad("opening.imported_kwh","Nonnegative whole-meter quantity required.",TariffProblemKind::OpeningQuantity);s.importedKwh=*quantity;
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
-        if(taxPeriods)s.tax=decodeTaxOpening(*opening.find("tax_bases"),denominator);
+        if(segmentedTaxes)s.taxSegments=decodeTaxSegments(*opening.find("tax_segments"),denominator,total);
+        else if(orderedTaxes){
+            const auto &bases=*opening.find("tax_bases");
+            keys(bases,"opening.tax_bases",{"energy","daily_fee","cycle_fee","demand","billed_kwh"});
+            s.tax=decodeTaxBases(bases,"opening.tax_bases",denominator);
+        }
         if(exportRule){
             constexpr char path[]="opening.exported_kwh";
             auto exported=electricityKwh(decimal(*opening.find("exported_kwh"),path));
