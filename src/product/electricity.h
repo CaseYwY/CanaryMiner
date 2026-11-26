@@ -212,6 +212,15 @@ BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const P
 BillAccrual accrueMeterImport(const TariffPlan &plan,const BillOpening &opening,const MeterImportTrace &trace,
                              int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},
                              DailyFeeAllocation dailyFeeAllocation=DailyFeeAllocation::WholeDay);
+// Price a complete export statement period independently of supply accrual and resets.
+struct ExportPeriodEstimate {
+    ElectricityStatus status = ElectricityStatus::Unavailable;
+    ElectricityAmount exportedKwh, payment;
+};
+ExportPeriodEstimate estimateExportPeriod(const ExportPaymentRule &rule, const PowerTrace &trace,
+    int64_t beginUtcMs, int64_t endUtcMs, int64_t observedUtcMs, const std::function<bool()> &stop);
+ExportPeriodEstimate estimateExportPeriod(const ExportPaymentRule &rule, const MeterImportTrace &trace,
+    int64_t beginUtcMs, int64_t endUtcMs, int64_t observedUtcMs, const std::function<bool()> &stop);
 struct CounterfactualBill {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     BillEstimate withoutMining, withMining;
