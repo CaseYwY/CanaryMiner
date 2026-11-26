@@ -1,5 +1,6 @@
 """Exercise separate whole-meter export payment and archive binding."""
 import copy
+from hashlib import sha256
 import json
 from pathlib import Path
 import shutil
@@ -101,6 +102,16 @@ def main(cli, bundle=None):
             amounts(result, "0.000000", "4.000000", "0.000000", "2.000000", "-2.000000")
             assert "Reviewed IANA time database 2026e" in result
             assert run("--open-review", "named-scheduled.cmr") == result
+            write(invoice, {"schema_version": 3, "scope": SCOPE, "currency": "USD", "decimal_places": 2,
+                            "rounding": "half_even", "cycles": [
+                                {"begin_utc_ms": begin, "end_utc_ms": end, "supply_charge": "0.00",
+                                 "export_payment": "2.00"}
+                            ]})
+            result = review(policy, net_power((begin, end, "-1000")), end,
+                            "--invoice", invoice, "--save-review", "named-invoice.cmr")
+            assert "Calculated net electricity cost at invoice precision -2.00 USD" in result
+            assert result.count("0.00 USD (match)") == 3
+            assert run("--open-review", "named-invoice.cmr") == result
         else:
             begin = utc("2024-01-01")
             end, half = begin + HOUR, begin + HOUR // 2
@@ -300,6 +311,95 @@ def main(cli, bundle=None):
             review({**declaration, "schema_version": 14}, power, end, error="saved tariff declaration")
             review({**policy, "plan": {**policy["plan"], "export_payment": {"dynamic": []}}},
                    power, end, error="saved tariff declaration")
+
+            # Round the signed components at invoice precision, then compare the net difference.
+            priced = scheduled_tariff(begin, end, (begin, half, "-0.005"), (half, end, "1"))
+            priced["plan"]["revisions"][0]["base_rate_per_kwh"] = "0.015"
+            billed = paired((begin, "0", "0"), (half, "1", "1"), (end, "1", "1"))
+            charge = {"begin_utc_ms": begin, "end_utc_ms": end, "supply_charge": "0.02",
+                      "export_payment": "0.00"}
+            statement = {"schema_version": 3, "scope": SCOPE, "currency": "USD", "decimal_places": 2,
+                         "rounding": "half_even", "cycles": [charge]}
+            write(invoice, statement)
+            saved = root / "export-invoice.cmr"
+            result = review(priced, billed, end, "--invoice", invoice, "--save-review", saved.name)
+            assert "Invoice export payment 0.00 USD" in result
+            assert "Calculated export payment at invoice precision 0.00 USD" in result
+            assert "Calculated net electricity cost at invoice precision 0.02 USD" in result
+            assert result.count("0.00 USD (match)") == 3
+
+            before = saved.read_bytes()
+            original_invoice = invoice.read_bytes()
+            assert before.startswith(b"CANARY-METER-REVIEW-3\n") and original_invoice in before
+            for path in (tariff, meter, invoice):
+                path.unlink()
+            assert run("--open-review", saved.name) == result
+            tampered = before[:-65].replace(b'"export_payment":"0.00"', b'"export_payment":"0.01"')
+            assert tampered != before[:-65]
+            saved.write_bytes(tampered + sha256(tampered).hexdigest().encode("ascii") + b"\n")
+            run("--open-review", saved.name, error="differ from the recalculated amounts")
+            saved.write_bytes(before)
+
+            away = {**statement, "rounding": "half_away_from_zero",
+                    "cycles": [{**charge, "export_payment": "-0.01"}]}
+            write(invoice, away)
+            result = review(priced, billed, end, "--invoice", invoice)
+            assert "Calculated export payment at invoice precision -0.01 USD" in result
+            assert "Calculated net electricity cost at invoice precision 0.03 USD" in result
+            assert "Net electricity cost at closing 0.020000 USD" in result
+            assert result.count("0.00 USD (match)") == 3
+
+            write(invoice, {**statement, "cycles": [{**charge, "supply_charge": "0.01", "export_payment": "-0.01"}]})
+            result = review(priced, billed, end, "--invoice", invoice)
+            assert "Difference for supply charge (calculated minus invoice) 0.01 USD (mismatch)" in result
+            assert "Difference for export payment (calculated minus invoice) 0.01 USD (mismatch)" in result
+            assert "Difference for net electricity cost (calculated minus invoice) 0.00 USD (match)" in result
+
+            for value, error in (
+                ({**statement, "currency": "GBP"}, "scope or currency differs"),
+                ({**statement, "scope": "other"}, "scope or currency differs"),
+                ({**statement, "cycles": [{**charge, "export_payment": "-0.005"}]}, "invalid invoice export payment"),
+                ({**statement, "cycles": [{**charge, "export_payment": None}]}, "invalid invoice export payment"),
+                ({**statement, "cycles": [{**charge, "extra": "0.00"}]}, "invalid invoice export payment"),
+                ({**statement, "cycles": [{**charge, "end_utc_ms": half}]}, "cycle bounds differ"),
+            ):
+                write(invoice, value)
+                review(priced, billed, end, "--invoice", invoice, "--save-review", "invalid-invoice.cmr", error=error)
+                assert not (root / "invalid-invoice.cmr").exists()
+
+            write(invoice, statement)
+            review(priced, paired((begin, "0", "0"), (half, "1", "1")), half, "--invoice", invoice,
+                   error="requires complete billing cycles")
+            mid_cycle = copy.deepcopy(priced)
+            mid_cycle["opening"].update(through_utc_ms=half, imported_kwh="1", accrued_subtotal="0.015",
+                                        exported_kwh="1", accrued_export_payment="-0.005")
+            review(mid_cycle, paired((half, "1", "1"), (end, "1", "1")), end, "--invoice", invoice,
+                   error="from a zero opening")
+            unpriced = plan(begin, begin, end, UTC, "explicit_cycle_only")
+            unpriced["schema_version"] = 1
+            review(unpriced, interval(begin, end), end, "--invoice", invoice,
+                   error="requires a declared export payment")
+
+            write(invoice, {**statement, "cycles": [{**charge, "supply_charge": "3.00", "export_payment": "2.00"}]})
+            result = review(declaration, source, end, "--invoice", invoice)
+            assert "Invoice net electricity cost 1.00 USD" in result
+            assert result.count("0.00 USD (match)") == 3
+            review(declaration, source, end, "--save-review", "export-meter-only.cmr")
+            assert run("--open-review", "export-meter-only.cmr", "--invoice", invoice) == result
+
+            january = {**charge, "end_utc_ms": feb, "supply_charge": "0.00", "export_payment": "-744.00"}
+            february = {**january, "begin_utc_ms": feb, "end_utc_ms": mar, "export_payment": "696.00"}
+            write(invoice, {**statement, "cycles": [january]})
+            january_report = review(recurring, net_power((begin, feb, "-1000")), feb, "--invoice", invoice,
+                                    "--save-review", "january-invoice.cmr")
+            write(meter, net_power((begin, feb, "-1000"), (feb, mar, "-1000")))
+            write(invoice, {**statement, "cycles": [january, february]})
+            continuation = run("--extend-review", "january-invoice.cmr", "--intervals", meter, "--invoice", invoice,
+                               "--as-of-utc-ms", mar, "--save-review", "two-month-invoice.cmr")
+            assert continuation.count("0.00 USD (match)") == 6
+            assert "Invoice net electricity cost -696.00 USD" in continuation
+            assert run("--open-review", "two-month-invoice.cmr") == continuation
+            assert run("--open-review", "january-invoice.cmr") == january_report
 
         print(f"Export payment: {checked} ordinary meter-bill invocations passed")
 

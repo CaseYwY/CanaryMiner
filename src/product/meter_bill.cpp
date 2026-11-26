@@ -515,7 +515,9 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
     if (!original.invoice.empty()) {
         if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice.emplace()))
             return problem;
-        review.report += invoice->annual ? "Annual reconciliation uses " : "Invoice comparison uses ";
+        review.report += invoice->kind == MeterInvoiceKind::Annual ? "Annual reconciliation uses " :
+                         invoice->kind == MeterInvoiceKind::Export ? "Export invoice reconciliation uses " :
+                                                                    "Invoice comparison uses ";
         review.report += std::to_string(invoice->places) + " decimal places with ties ";
         review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
     }
@@ -612,7 +614,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Demand requires complete aligned windows. Add a register reading wherever a demand boundary splits nonzero import.\n"
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
-                  "Use --invoice to compare supply charges or reconcile interim charges against a complete annual estimate.\n"
+                  "Use --invoice to compare supply charges, reconcile separate export payments, or review interim annual charges.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.\n"
                   "Extend verifies the saved review and requires the complete interval history with additional readings.");

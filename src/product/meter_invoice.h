@@ -21,15 +21,21 @@ struct AnnualInvoice {
     std::optional<ExactDecimal> statedAdjustment;
 };
 
+struct ExportInvoice {
+    ExactDecimal supplyCharge, exportPayment;
+};
+
 struct InvoiceCycle {
     InvoicePeriod period;
-    std::variant<ExactDecimal, AnnualInvoice> charge;
+    std::variant<ExactDecimal, AnnualInvoice, ExportInvoice> charge;
 };
+
+enum class MeterInvoiceKind { Supply, Annual, Export };
 
 struct MeterInvoice {
     unsigned places = 0;
     DecimalTies ties = DecimalTies::ToEven;
-    bool annual = false;
+    MeterInvoiceKind kind = MeterInvoiceKind::Supply;
     std::vector<InvoiceCycle> cycles;
 };
 
@@ -85,7 +91,7 @@ inline const char *decodeMeterInvoice(const std::string &bytes, const TariffDecl
     const auto *rounding = root.find("rounding");
     const auto *cycles = root.find("cycles");
     uint64_t version = 0, places = 0;
-    if (!schema || !schema->asUint64(&version) || (version != 1 && version != 2) || !scope || !scope->isString() ||
+    if (!schema || !schema->asUint64(&version) || version < 1 || version > 3 || !scope || !scope->isString() ||
         !currency || !currency->isString() || !precision || !precision->asUint64(&places) || places > 6 ||
         !rounding || !rounding->isString() ||
         (rounding->text != "half_even" && rounding->text != "half_away_from_zero") ||
@@ -94,9 +100,12 @@ inline const char *decodeMeterInvoice(const std::string &bytes, const TariffDecl
     if (scope->text != declaration.opening.evidence.scope || currency->text != declaration.plan.currency)
         return "invoice scope or currency differs from the saved tariff";
 
-    invoice.annual = version == 2;
-    if (invoice.annual && (!declaration.resetSchedule || !declaration.resetSchedule->annualMonth))
+    invoice.kind = version == 2 ? MeterInvoiceKind::Annual :
+                   version == 3 ? MeterInvoiceKind::Export : MeterInvoiceKind::Supply;
+    if (invoice.kind == MeterInvoiceKind::Annual && (!declaration.resetSchedule || !declaration.resetSchedule->annualMonth))
         return "annual invoice comparison requires an annual tariff reset";
+    if (invoice.kind == MeterInvoiceKind::Export && !declaration.plan.exportPayment)
+        return "export invoice comparison requires a declared export payment";
     invoice.places = static_cast<unsigned>(places);
     if (rounding->text == "half_away_from_zero") invoice.ties = DecimalTies::AwayFromZero;
     invoice.cycles.reserve(cycles->items.size());
@@ -105,10 +114,16 @@ inline const char *decodeMeterInvoice(const std::string &bytes, const TariffDecl
         if (!row.isObject() || !decodeInvoicePeriod(row, cycle.period) ||
             (!invoice.cycles.empty() && cycle.period.begin != invoice.cycles.back().period.end))
             return "invalid invoice cycle or supply charge";
-        if (invoice.annual) {
+        if (invoice.kind == MeterInvoiceKind::Annual) {
             if (const auto *problem = decodeAnnualInvoice(row, cycle.period, invoice.places,
                                                           cycle.charge.emplace<AnnualInvoice>()))
                 return problem;
+        } else if (invoice.kind == MeterInvoiceKind::Export) {
+            auto &statement = cycle.charge.emplace<ExportInvoice>();
+            if (row.members.size() != 4 ||
+                !decodeInvoiceCharge(row.find("supply_charge"), invoice.places, statement.supplyCharge) ||
+                !decodeInvoiceCharge(row.find("export_payment"), invoice.places, statement.exportPayment))
+                return "invalid invoice export payment or supply charge";
         } else if (row.members.size() != 3 ||
                    !decodeInvoiceCharge(row.find("supply_charge"), invoice.places, std::get<ExactDecimal>(cycle.charge))) {
             return "invalid invoice cycle or supply charge";
@@ -171,6 +186,48 @@ inline const char *appendAnnualReconciliation(const MeterInvoice &invoice, const
     return nullptr;
 }
 
+inline bool appendExportInvoiceLine(const char *label, const ExactDecimal &calculated, const ExactDecimal &stated,
+                                    unsigned places, const std::string &currency, std::string &report, std::string *exact) {
+    std::string estimate, amount, change;
+    ExactDecimal difference;
+    if (!calculated.formatRatio(1, places, &estimate) || !stated.formatRatio(1, places, &amount) ||
+        !calculated.subtract(stated, &difference) || !difference.formatRatio(1, places, &change))
+        return false;
+    report += std::string("  Invoice ") + label + " " + amount + " " + currency + "\n";
+    report += std::string("  Calculated ") + label + " at invoice precision " + estimate + " " + currency + "\n";
+    report += std::string("  Difference for ") + label + " (calculated minus invoice) " + change + " " + currency +
+        (difference.zero() ? " (match)\n" : " (mismatch)\n");
+    if (exact)
+        *exact += ",[" + jsonQuote(estimate) + "," + jsonQuote(amount) + "," + jsonQuote(change) + "]";
+    return true;
+}
+
+inline const char *appendExportInvoiceComparison(const MeterInvoice &invoice, const InvoicePeriod &period,
+                                                const ExportInvoice &statement, const BillAccrual &accrual,
+                                                const ExactDecimal &roundedSupply, const std::string &currency,
+                                                std::string &report, std::string *exact) {
+    if (!accrual.exportAccrual) return "export invoice comparison requires complete export readings";
+    ExactDecimal roundedExport, calculatedNet, statedNet;
+    std::string exportAmount;
+    if (!accrual.exportAccrual->paymentTotal.numerator.formatRatio(wattMsPerKwh, invoice.places, invoice.ties, &exportAmount) ||
+        !ExactDecimal::parse(exportAmount, &roundedExport) ||
+        !roundedSupply.subtract(roundedExport, &calculatedNet) ||
+        !statement.supplyCharge.subtract(statement.exportPayment, &statedNet))
+        return "invoice comparison amount exceeds arithmetic capacity";
+
+    if (exact) {
+        const char *ties = invoice.ties == DecimalTies::ToEven ? "half_even" : "half_away_from_zero";
+        *exact += "[\"export_invoice\"," + std::to_string(period.begin) + "," + std::to_string(period.end) +
+            "," + std::to_string(invoice.places) + "," + jsonQuote(ties);
+    }
+    if (!appendExportInvoiceLine("supply charge", roundedSupply, statement.supplyCharge, invoice.places, currency, report, exact) ||
+        !appendExportInvoiceLine("export payment", roundedExport, statement.exportPayment, invoice.places, currency, report, exact) ||
+        !appendExportInvoiceLine("net electricity cost", calculatedNet, statedNet, invoice.places, currency, report, exact))
+        return "invoice comparison amount exceeds arithmetic capacity";
+    if (exact) *exact += "]\n";
+    return nullptr;
+}
+
 inline const char *appendInvoiceComparison(const MeterInvoice &invoice, size_t index, const BillOpening &opening,
                                            const BillAccrual &accrual, const std::string &currency,
                                            std::string &report, std::string *exact) {
@@ -189,6 +246,8 @@ inline const char *appendInvoiceComparison(const MeterInvoice &invoice, size_t i
         return "invoice comparison amount exceeds arithmetic capacity";
     if (const auto *annual = std::get_if<AnnualInvoice>(&cycle.charge))
         return appendAnnualReconciliation(invoice, cycle, *annual, rounded, estimate, currency, report, exact);
+    if (const auto *statement = std::get_if<ExportInvoice>(&cycle.charge))
+        return appendExportInvoiceComparison(invoice, cycle.period, *statement, accrual, rounded, currency, report, exact);
     const auto &amount = std::get<ExactDecimal>(cycle.charge);
     std::string stated, change;
     ExactDecimal difference;
