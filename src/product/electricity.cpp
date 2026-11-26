@@ -704,7 +704,8 @@ ElectricityStatus validateTaxDailyFees(const TariffPlan &plan, const BillOpening
 }
 
 ElectricityStatus validateTaxEnergy(const TariffPlan &plan, const BillOpening &opening, int64_t decision,
-                                    const std::vector<TaxSlice> &slices) {
+                                    const std::vector<TaxSlice> &slices, const std::atomic<bool> *cancel = nullptr,
+                                    const std::function<bool()> &stop = {}) {
     if (!opening.taxSegments) return ElectricityStatus::Ok;
     const bool roundMeter = plan.rounding == TariffRounding::MeterHalfHourKwhHalfEven2;
     const auto &segments = *opening.taxSegments;
@@ -724,6 +725,8 @@ ElectricityStatus validateTaxEnergy(const TariffPlan &plan, const BillOpening &o
             const auto end = (std::min)(slices[i].end, opening.throughUtcMs);
             bool covered = true, seenRate = false;
             for (auto cursor = slices[i].begin; cursor < end;) {
+                if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+                    return ElectricityStatus::Unavailable;
                 if (++cuts > maxCuts) return ElectricityStatus::Capacity;
                 while (plan.revisions[revision].endUtcMs <= cursor) ++revision;
                 const auto &entry = plan.revisions[revision];
@@ -942,7 +945,7 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     }
     result.status = validateTaxDailyFees(p, opening, decision, dailyFeeAllocation, taxSlices);
     if (result.status != ElectricityStatus::Ok) return result;
-    result.status = validateTaxEnergy(p, opening, decision, taxSlices);
+    result.status = validateTaxEnergy(p, opening, decision, taxSlices, cancel, stop);
     if (result.status != ElectricityStatus::Ok) return result;
     result.timeDatabaseVersion = civilAt(p.clock,opening.throughUtcMs).databaseVersion;
     result.status = validateTrace(trace,opening.throughUtcMs,end);

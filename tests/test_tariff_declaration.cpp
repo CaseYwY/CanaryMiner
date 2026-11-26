@@ -1590,6 +1590,32 @@ int main(int argc,char **argv){
         CHECK(!decodeTariffDeclaration(gap,&checked,&error)&&error.modelStatus==ElectricityStatus::TaxScheduleBoundary);
         set(taxPeriods.back(),"begin_utc_ms",std::to_string(boundary-1));
         CHECK(!decodeTariffDeclaration(gap,&checked,&error)&&error.modelStatus==ElectricityStatus::Conflict);
+
+        auto history=panel.active;
+        auto &opening=member(history,"opening");
+        set(opening,"through_utc_ms",std::to_string(boundary));
+        set(opening,"imported_kwh","\"12\"");
+        set(opening,"accrued_subtotal","\"12\"");
+        set(opening,"tax_segments","[{\"begin_utc_ms\":"+std::to_string(T)+
+            ",\"imported_kwh\":\"12\",\"energy\":\"12\",\"daily_fee\":\"0\",\"cycle_fee\":\"0\",\"billed_kwh\":\"0\"}]");
+        auto &rate=member(member(history,"plan"),"revisions").items.front();
+        set(rate,"time_mode","\"dynamic\"");
+        set(rate,"base_rate_per_kwh","\"0\"");
+        for(int64_t start=T;start<T+86400000;start+=3600000){
+            auto row=tariffRowTemplate("dynamic",false,false);
+            set(row,"begin_utc_ms",std::to_string(start));
+            set(row,"end_utc_ms",std::to_string(start+3600000));
+            set(row,"published_utc_ms",std::to_string(T));
+            set(row,"rate_per_kwh","\"1\"");
+            member(rate,"dynamic").items.push_back(std::move(row));
+        }
+        CHECK(decodeTariffDeclaration(history,&checked));
+        const auto finish=boundary+3600000;
+        const PowerTrace trace{checked.opening.evidence,{{boundary,finish,dec("1000")}}};
+        CHECK(accrueBill(checked.plan,checked.opening,trace,finish,finish).status==ElectricityStatus::Ok);
+        unsigned polls=0;
+        const auto stopped=accrueBill(checked.plan,checked.opening,trace,finish,finish,[&]{return ++polls==5;});
+        CHECK(stopped.status==ElectricityStatus::Unavailable&&!stopped.ending&&polls==5);
     }
     return finishTests("tariff declaration");
 }
