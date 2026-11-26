@@ -29,7 +29,7 @@ The decoder calls `validateTariffOpening`, not a fake zero-power bill. This prov
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families include contracted capacity, reactive power, export netting and restricted export credits, prepaid/inventory/debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Unsupported families include contracted capacity, reactive power, export netting and supplier-specific restricted export credits, live prepaid enrollment and debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
 
 ## Use named tariff and reset clocks
 
@@ -517,6 +517,67 @@ that change.
 Always supply readings at billing-cycle boundaries inside the review. The report uses exact
 differences and rejects an incomplete review before printing cycle amounts. The same historical
 cutoff, twelve-cycle limit and private archive replay apply.
+
+### Review prepaid purchases
+
+Run `canary-miner meter-bill --tariff TARIFF.json --intervals METER.json --prepaid PREPAID.json`.
+The prepaid file records purchases for the same meter and currency as the saved tariff.
+Use cumulative import readings (versions 2, 5 or 7) with an exact reading at every
+purchase time. Consumption up to that time uses the previous token inventory. A
+purchase at that time becomes available for the next interval. A review that would
+overdraw the inventory stops without producing an estimate or archive.
+
+```json
+{
+  "schema_version": 1,
+  "scope": "synthetic-whole-meter-scenario",
+  "currency": "USD",
+  "published_utc_ms": 1705276800000,
+  "purchase_reset": {"monthly_day": 1, "clock": {"kind": "utc", "fixed_offset_seconds": 0}},
+  "fee_clock": {"kind": "utc", "fixed_offset_seconds": 0},
+  "fee_per_civil_day": "1",
+  "bands": [
+    {"through_kwh": "100", "rate_per_kwh": "1"},
+    {"through_kwh": null, "rate_per_kwh": "2"}
+  ],
+  "opening": {
+    "through_utc_ms": 1705276800000,
+    "purchased_in_cycle_kwh": "0",
+    "token_inventory_kwh": "5",
+    "unpaid_fee": "0"
+  },
+  "purchases": [
+    {"utc_ms": 1706140800000, "kwh": "60", "cash_paid": "70"},
+    {"utc_ms": 1706572800000, "kwh": "60", "cash_paid": "85"}
+  ]
+}
+```
+
+Enter cumulative purchases in the current purchase period, usable inventory
+in kWh, and unpaid daily fees as of the saved opening. Include a purchase at the
+opening itself in those opening amounts. List up to 256 later purchases in strict UTC
+order and within the meter coverage. The 64 KiB file uses nonnegative decimal strings.
+Purchase quantities must be positive. Progressive thresholds strictly increase, with
+an unbounded final band. The policy's publication time must be at or before the
+review cutoff. The monthly reset uses the specified clock and clamps dates past month end.
+
+The purchase reset starts a fresh purchase quantity without clearing inventory or fees.
+Supply cycles, annual accrual and demand histories use the tariff's own calendar. A
+purchase charges the incremental progressive block cost and collects fees for the
+civil dates that ended since the previous purchase or the opening. The fee clock may
+use a different reviewed UTC, fixed-offset or named IANA clock. A purchase at midnight
+includes the date just ended. A period with no purchase retains accrued fees through
+the last meter reading.
+
+The report gives acquisition charges, fees, declared cash paid and remaining token
+inventory. Supply estimates and optional supply-invoice comparisons remain separate.
+The review covers T07 and T26–T27 for explicitly declared terms. Supplier settlement,
+tax rules, fee forgiveness, debt and cash wallet transfers require additional evidence.
+
+With `--save-review NAME.cmr`, the archive retains the meter, tariff and prepaid
+inputs. `--open-review` replays them. When extending it, supply the full purchase history
+with `--prepaid NEW.json` alongside the full meter history. Changing the prepaid terms,
+opening amounts or previously covered purchases requires a fresh review.
 
 ### Round cumulative readings for half-hour billing
 

@@ -442,6 +442,18 @@ bool deriveTariffRecurringCycle(const JsonValue &policy,const JsonValue &through
         : policy.find("bimonthly_start_month") ? TariffResetCadence::Bimonthly : TariffResetCadence::Monthly;
     return deriveCycle(policy,through,bounds,problem,cadence);
 }
+bool decodeTariffCivilClock(const JsonValue &input,CivilClock &clock){
+    try{
+        clock=decodeClock(input,"clock",true);
+        return true;
+    }catch(const Invalid &){return false;}
+}
+bool tariffMonthlyCycleAt(unsigned day,const CivilClock &clock,int64_t at,TariffCycleBounds &bounds){
+    try{
+        bounds=recurringCycle({day,clock},at);
+        return true;
+    }catch(const Invalid &){return false;}
+}
 bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem){
     return deriveCycle(policy,through,bounds,problem,TariffResetCadence::Monthly);
 }

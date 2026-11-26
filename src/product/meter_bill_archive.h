@@ -2,6 +2,7 @@
 #include "hash.h"
 #include "local_review_archive.h"
 #include "meter_bill.h"
+#include "meter_prepaid.h"
 #include "octopus_meter_rates.h"
 #include "tariff_declaration.h"
 
@@ -15,7 +16,8 @@ constexpr size_t maxExactResultsBytes = 32 * 1024;
 constexpr size_t maxOriginalArchiveBytes = tariffDeclarationMaxBytes + maxMeterFileBytes + maxExactResultsBytes + 256;
 constexpr size_t maxRatesArchiveBytes = maxOriginalArchiveBytes + maxOctopusRateFileBytes + 16;
 constexpr size_t maxInvoiceArchiveBytes = maxRatesArchiveBytes + maxInvoiceBytes + 16;
-constexpr size_t maxArchiveBytes = maxInvoiceArchiveBytes + 192;
+constexpr size_t maxExtendedArchiveBytes = maxInvoiceArchiveBytes + 192;
+constexpr size_t maxArchiveBytes = maxExtendedArchiveBytes + maxPrepaidFileBytes + 16;
 static_assert(maxArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-METER-REVIEW-1\n";
 
@@ -23,6 +25,7 @@ constexpr std::string_view archiveRatesHeader = "CANARY-METER-REVIEW-2\n";
 constexpr std::string_view archiveInvoiceHeader = "CANARY-METER-REVIEW-3\n";
 
 constexpr std::string_view archiveExtendedHeader = "CANARY-METER-REVIEW-4\n";
+constexpr std::string_view archivePrepaidHeader = "CANARY-METER-REVIEW-5\n";
 
 struct PreviousMeterReview {
     int64_t cutoff = 0, through = 0;
@@ -33,6 +36,7 @@ struct ReviewOriginal {
     std::string tariff, intervals, results, supplierRates, invoice;
     int64_t cutoff = 0;
     std::optional<PreviousMeterReview> previous;
+    std::string prepaid;
 };
 
 inline bool validReviewDigest(std::string_view text) {
@@ -42,21 +46,23 @@ inline bool validReviewDigest(std::string_view text) {
 }
 
 inline std::string encodeReviewOriginal(const ReviewOriginal &review) {
-    std::string body(review.previous ? archiveExtendedHeader : !review.invoice.empty() ? archiveInvoiceHeader :
-        review.supplierRates.empty() ? archiveHeader : archiveRatesHeader);
+    const bool hasPrepaid=!review.prepaid.empty();
+    const unsigned mask=(!review.invoice.empty() ? 1u : 0u) | (!review.supplierRates.empty() ? 2u : 0u);
+    std::string body(hasPrepaid ? archivePrepaidHeader : review.previous ? archiveExtendedHeader :
+        !review.invoice.empty() ? archiveInvoiceHeader : review.supplierRates.empty() ? archiveHeader : archiveRatesHeader);
     body += std::to_string(review.cutoff) + '\n';
     for (const auto *part : {&review.tariff, &review.intervals, &review.results}) {
         body += std::to_string(part->size()) + '\n';
         body += *part;
     }
+    if (hasPrepaid) body+=std::to_string(1u+mask+(review.previous ? 4u : 0u))+'\n';
     if (review.previous) {
         const auto &previous = *review.previous;
         body += std::to_string(previous.cutoff) + '\n' + std::to_string(previous.through) + '\n';
         body += previous.archiveSha256 + '\n' + previous.prefixSha256 + '\n';
-        const unsigned mask = (!review.invoice.empty() ? 1u : 0u) | (!review.supplierRates.empty() ? 2u : 0u);
-        body += std::to_string(mask + 1) + '\n';
+        if (!hasPrepaid) body+=std::to_string(mask+1)+'\n';
     }
-    for (const auto *part : {&review.invoice, &review.supplierRates}) {
+    for (const auto *part : {&review.invoice, &review.supplierRates, &review.prepaid}) {
         if (part->empty()) continue;
         body += std::to_string(part->size()) + '\n';
         body += *part;
@@ -76,12 +82,13 @@ inline bool readReviewDigest(const std::string &bytes, size_t &offset, std::stri
 
 inline bool decodeReviewOriginal(const std::string &bytes, ReviewOriginal &out) {
     const auto header = std::string_view(bytes).substr(0, archiveHeader.size());
-    const bool extended = header == archiveExtendedHeader;
+    const bool extended=header==archiveExtendedHeader;
+    const bool prepaid=header==archivePrepaidHeader;
     bool hasRates = header == archiveRatesHeader;
     bool hasInvoice = header == archiveInvoiceHeader;
-    if (bytes.size() > (extended ? maxArchiveBytes : hasInvoice ? maxInvoiceArchiveBytes :
-                       hasRates ? maxRatesArchiveBytes : maxOriginalArchiveBytes) ||
-        (!extended && !hasRates && !hasInvoice && header != archiveHeader))
+    if (bytes.size() > (prepaid ? maxArchiveBytes : extended ? maxExtendedArchiveBytes :
+                       hasInvoice ? maxInvoiceArchiveBytes : hasRates ? maxRatesArchiveBytes : maxOriginalArchiveBytes) ||
+        (!prepaid && !extended && !hasRates && !hasInvoice && header!=archiveHeader))
         return false;
 
     using local_review_archive::readArchiveNumber;
@@ -93,22 +100,32 @@ inline bool decodeReviewOriginal(const std::string &bytes, ReviewOriginal &out) 
         !readArchivePart(bytes, offset, maxMeterFileBytes, candidate.intervals) ||
         !readArchivePart(bytes, offset, maxExactResultsBytes, candidate.results))
         return false;
-    if (extended) {
+    bool hasPrevious=extended;
+    int64_t mask=0;
+    if (prepaid) {
+        if (!readArchiveNumber(bytes,offset,8,mask)) return false;
+        --mask;
+        hasPrevious=(mask&4)!=0;
+    }
+    if (hasPrevious) {
         auto &previous = candidate.previous.emplace();
-        int64_t mask = 0;
         if (!readArchiveNumber(bytes, offset, candidate.cutoff, previous.cutoff) ||
             !readArchiveNumber(bytes, offset, previous.cutoff, previous.through) ||
             !readReviewDigest(bytes, offset, previous.archiveSha256) ||
-            !readReviewDigest(bytes, offset, previous.prefixSha256) ||
-            !readArchiveNumber(bytes, offset, 4, mask))
-            return false;
+            !readReviewDigest(bytes,offset,previous.prefixSha256)) return false;
+    }
+    if (extended) {
+        if (!readArchiveNumber(bytes,offset,4,mask)) return false;
         --mask;
+    }
+    if (extended || prepaid) {
         hasInvoice = (mask & 1) != 0;
         hasRates = (mask & 2) != 0;
     }
     if ((hasInvoice && !readArchivePart(bytes, offset, maxInvoiceBytes, candidate.invoice)) ||
-        ((hasRates || (!extended && hasInvoice && bytes.size() - offset > 65)) &&
+        ((hasRates || (!prepaid && !extended && hasInvoice && bytes.size()-offset>65)) &&
             !readArchivePart(bytes, offset, maxOctopusRateFileBytes, candidate.supplierRates)) ||
+        (prepaid && (!readArchivePart(bytes,offset,maxPrepaidFileBytes,candidate.prepaid) || candidate.prepaid.empty())) ||
         bytes.size() - offset != 65 || bytes.back() != '\n' ||
         bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
         return false;

@@ -400,6 +400,13 @@ std::optional<ElectricityAmount> electricityKwh(const ExactDecimal &kwh) {
     if (kwh.negative() || !kwh.multiply(number(wattMsPerKwh),&result.numerator)) return std::nullopt;
     return result;
 }
+bool progressiveTierChange(const std::vector<TariffBand> &bands,const ExactDecimal &before,
+                           const ExactDecimal &after,ExactDecimal &change) {
+    ExactDecimal oldCost, newCost;
+    return tierCost(bands,TierMode::Progressive,before,&oldCost) &&
+           tierCost(bands,TierMode::Progressive,after,&newCost) &&
+           newCost.subtract(oldCost,&change);
+}
 EnergyEstimate sampleHoldEnergy(const PowerEvidence &e, const std::vector<PowerObservation> &samples, int64_t begin, int64_t end, int64_t maxGap) {
     EnergyEstimate result; result.beginUtcMs = begin; result.endUtcMs = end; result.coveredTrace.evidence = e;
     if (!evidenceValid(e) || !instant(begin) || !instant(end) || end <= begin || maxGap <= 0 || maxGap > dayMs) { result.status = ElectricityStatus::Invalid; return result; }
@@ -642,8 +649,8 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
                 return result;
             }
             if (p.tiers == TierMode::Progressive) {
-                ExactDecimal before, after, delta;
-                if (!tierCost(r.bands,p.tiers,quantity,&before) || !tierCost(r.bands,p.tiers,newQuantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta) ||
+                ExactDecimal delta;
+                if (!progressiveTierChange(r.bands,quantity,newQuantity,delta) || !accumulate(cost,delta) ||
                     (state.restrictedCredit && !accumulate(state.restrictedCredit->accruedImportSubtotal.numerator,delta))) {
                     result.status = ElectricityStatus::Capacity;
                     return result;

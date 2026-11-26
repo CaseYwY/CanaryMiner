@@ -1,5 +1,7 @@
 #include "meter_bill.h"
 #include "meter_bill_archive.h"
+#include "meter_bill_input.h"
+#include "meter_prepaid.h"
 #include "meter_invoice.h"
 #include "octopus_meter_consumption.h"
 
@@ -29,12 +31,12 @@ struct MeterReadings {
     uint64_t version = 0;
 };
 
-struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice; };
+struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice, prepaid; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
     const auto archiveIndex = options.archiveArg ? options.archiveArg : options.extendArg;
     for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
-                      options.saveArg, options.ratesArg, options.invoiceArg})
+                      options.saveArg, options.ratesArg, options.invoiceArg, options.prepaidArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -52,7 +54,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     };
     if (!matches(options.archiveArg, L"--open-review") || !matches(options.extendArg, L"--extend-review") ||
         !matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals") ||
-        !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates"))
+        !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates") ||
+        !matches(options.prepaidArg, L"--prepaid"))
         return std::nullopt;
     if (options.reviewCutoffArg &&
         (!matches(options.reviewCutoffArg, L"--as-of-utc-ms") ||
@@ -67,23 +70,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     const auto path = [&](int i) { return i ? std::filesystem::path(argv[i]) : std::filesystem::path{}; };
 #endif
     return MeterBillPaths{path(options.tariffArg), path(options.intervalsArg), path(archiveIndex),
-                          path(options.ratesArg), path(options.invoiceArg)};
-}
-
-bool instant(const JsonValue *value, int64_t &result, bool allowEpoch = false) {
-    uint64_t number = 0;
-    if (!value || !value->asUint64(&number) || (!allowEpoch && !number) || number > meterBillMaxUtcMs) return false;
-    result = static_cast<int64_t>(number);
-    return true;
-}
-
-bool signedAmount(const JsonValue *value, ExactDecimal &amount) {
-    return value && value->isString() && ExactDecimal::parse(value->text, &amount) &&
-           amount.text() == value->text && amount.digits() <= 38 && amount.scale() <= 18;
-}
-
-bool nonnegativeAmount(const JsonValue *value, ExactDecimal &amount) {
-    return signedAmount(value,amount) && !amount.negative();
+                          path(options.ratesArg), path(options.invoiceArg), path(options.prepaidArg)};
 }
 
 const char *decodeIntervals(const JsonValue &intervals, const BillOpening &opening, int64_t cutoff,
@@ -425,6 +412,7 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
 struct MeterReview {
     TariffDeclaration declaration;
     MeterReadings readings;
+    std::optional<PrepaidReviewInput> prepaid;
     std::string report, exact;
 };
 
@@ -438,14 +426,10 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return "saved tariff declaration unavailable or invalid";
     const auto *schema = root.find("schema_version");
     uint64_t schemaVersion = 0;
-    const auto usesNamedClock = [](const JsonValue *part) {
-        const auto *clock = part ? part->find("clock") : nullptr;
-        const auto *kind = clock ? clock->find("kind") : nullptr;
-        return kind && kind->isString() && kind->text == "named_iana";
-    };
+    const auto *plan=root.find("plan"), *policy=root.find("reset_policy");
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
         (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 13 &&
-         (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
+         (usesNamedClock(plan ? plan->find("clock") : nullptr) || usesNamedClock(policy ? policy->find("clock") : nullptr))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
     if (!decodeTariffDeclaration(root, &declaration)) return "saved tariff declaration unavailable or invalid";
@@ -461,6 +445,13 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
                                                    review.readings, stopped))
         return problem;
 
+    if (!original.prepaid.empty()) {
+        if (!review.readings.registerStart) return "prepaid review requires cumulative meter register readings";
+        const auto &series=std::get<std::vector<MeterImportInterval>>(review.readings.series);
+        if (const auto *problem=decodePrepaidReview(original.prepaid,declaration,cutoff,series.back().endUtcMs,
+                                                   review.prepaid.emplace()))
+            return problem;
+    }
     auto &report = review.report;
     report = std::holds_alternative<std::vector<MeterImportInterval>>(review.readings.series)
         ? "Estimated electricity costs from a declared tariff and user-supplied meter register readings\n"
@@ -505,6 +496,16 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
     return nullptr;
 }
 
+template<class Interval>
+const char *addPrepaidReview(const std::optional<PrepaidReviewInput> &prepaid,const std::vector<Interval> &series,int64_t cutoff,
+                             const std::function<bool()> &stopped,std::string &report,std::string &exact) {
+    if (!prepaid) return nullptr;
+    if constexpr (std::is_same_v<Interval,MeterImportInterval>)
+        return reviewPrepaid(*prepaid,series,cutoff,stopped,report,exact);
+    else
+        return "prepaid review requires cumulative meter register readings";
+}
+
 const char *calculateMeterReview(const ReviewOriginal &original, bool includeInvoiceInExact,
                                  const std::function<bool()> &stopped, MeterReview &review,
                                  std::string *meterOnlyExact = nullptr) {
@@ -517,9 +518,15 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
         review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
     }
     return std::visit([&](const auto &series) {
-        return reviewReadings(series, review.declaration, original.cutoff, stopped, review.report, review.exact,
-                              invoice ? &*invoice : nullptr, includeInvoiceInExact ? &review.exact : nullptr,
-                              meterOnlyExact);
+        const auto *problem=reviewReadings(series, review.declaration, original.cutoff, stopped, review.report, review.exact,
+                                           invoice ? &*invoice : nullptr, includeInvoiceInExact ? &review.exact : nullptr,
+                                           meterOnlyExact);
+        if (problem || !review.prepaid) return problem;
+        const auto start=review.exact.size();
+        if (const auto *prepaidProblem=addPrepaidReview(review.prepaid,series,original.cutoff,stopped,review.report,review.exact))
+            return prepaidProblem;
+        if (meterOnlyExact) meterOnlyExact->append(review.exact,start);
+        return static_cast<const char *>(nullptr);
     }, review.readings.series);
 }
 
@@ -563,6 +570,7 @@ const char *verifyMeterPrefix(const ReviewOriginal &original, const MeterReview 
         std::string ignored, prefixExact;
         if (const auto *problem = reviewReadings(prefix, review.declaration, previous.cutoff, stopped, ignored,
                                                  prefixExact, nullptr, nullptr)) return problem;
+        if (const auto *problem=addPrepaidReview(review.prepaid,prefix,previous.cutoff,stopped,ignored,prefixExact)) return problem;
         if (meterPrefixDigest(review.readings, prefix, prefixExact) != previous.prefixSha256)
             return "new readings or exact charges differ from the saved review prefix";
         if (original.cutoff != previous.cutoff) {
@@ -570,6 +578,7 @@ const char *verifyMeterPrefix(const ReviewOriginal &original, const MeterReview 
             std::string currentExact;
             if (const auto *problem = reviewReadings(prefix, review.declaration, original.cutoff, stopped, ignored,
                                                      currentExact, nullptr, nullptr)) return problem;
+            if (const auto *problem=addPrepaidReview(review.prepaid,prefix,original.cutoff,stopped,ignored,currentExact)) return problem;
             if (currentExact != prefixExact) return "the new cutoff would change the saved review charges";
         }
         return nullptr;
@@ -586,10 +595,10 @@ int refuse(const char *reason) {
 int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
     if (options.help) {
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
-                  "    [--invoice FILE] [--save-review NAME.cmr]\n"
+                  "    [--invoice FILE] [--prepaid FILE] [--save-review NAME.cmr]\n"
                   "canary-miner meter-bill --open-review FILE [--invoice FILE]\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
-                  "    [--as-of-utc-ms MS] [--invoice FILE]\n"
+                  "    [--as-of-utc-ms MS] [--invoice FILE] [--prepaid FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
                   "Accepts average-watt intervals or cumulative whole-meter import readings. Prints an estimate to stdout.\n"
                   "For a saved kVA tariff, include apparent VA, a permitted power factor, or paired kWh/kVAh registers.\n"
@@ -635,6 +644,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (!readLocalReviewInput(paths->archive, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, original))
                 return fail("review archive unavailable or invalid");
             if (extending) {
+                if (static_cast<bool>(options.prepaidArg)!=!original.prepaid.empty())
+                    return fail("prepaid continuation requires the same review format and complete purchase history");
                 const auto cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
                 if (cutoff < original.cutoff) return fail("new review cutoff precedes the saved cutoff");
                 MeterReview earlier;
@@ -669,6 +680,10 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             (!readLocalReviewInput(paths->rates, maxOctopusRateFileBytes, original.supplierRates) ||
              original.supplierRates.empty()))
             return fail("Octopus rate file unavailable, empty, oversized or not a regular file");
+
+        if (options.prepaidArg &&
+            (!readLocalReviewInput(paths->prepaid,maxPrepaidFileBytes,original.prepaid) || original.prepaid.empty()))
+            return fail("prepaid file unavailable, empty, oversized or not a regular file");
 
         MeterReview review;
         if (const auto *problem = prepareMeterReview(original, now, options.reviewCutoffArg || reopening || archiving,
