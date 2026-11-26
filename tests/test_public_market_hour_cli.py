@@ -13,6 +13,8 @@ import time
 
 def main(cli_path, fixture, enabled, sample_only=False):
     worker_name = "canary_public_json_worker" + (".exe" if os.name == "nt" else "")
+    libc = os.confstr("CS_GNU_LIBC_VERSION") if sys.platform == "linux" else None
+    older_linux = libc and tuple(map(int, libc.split()[1].split(".")[:2])) < (2, 40)
     allow = "--allow-public-candles"
     with tempfile.TemporaryDirectory(prefix="canary-hour-sample-") as directory:
         root = Path(directory)
@@ -106,7 +108,11 @@ def main(cli_path, fixture, enabled, sample_only=False):
                                        "--wallet", "prl1" + "q" * 59, "--no-donation",
                                        ticker, allow, dashboard_dns, resolver],
                                       cwd=operator, capture_output=True, text=True, timeout=8)
-            assert admitted.returncode == 97 and "FORBIDDEN_DEVICE_SETUP" in admitted.stderr, admitted
+            if older_linux:
+                assert admitted.returncode == 3 and "Pre-run preferences unavailable" in admitted.stderr, admitted
+                assert "FORBIDDEN_DEVICE_SETUP" not in admitted.stderr, admitted
+            else:
+                assert admitted.returncode == 97 and "FORBIDDEN_DEVICE_SETUP" in admitted.stderr, admitted
             assert resolver not in admitted.stdout + admitted.stderr
             for args in (("--allow-public-ticker\uff53", dashboard_dns, resolver),
                          (ticker, "\u00ad-market-dns-server", resolver),
@@ -135,8 +141,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
         result = run(allow)
         unavailable = "verified HTTPS/c-ares backend unavailable"
         if sys.platform == "linux" and not requests.exists() and unavailable in result.stdout:
-            libc = os.confstr("CS_GNU_LIBC_VERSION")
-            assert libc and tuple(map(int, libc.split()[1].split(".")[:2])) < (2, 40), result
+            assert older_linux, result
             return 77
         assert result.returncode == 0 and not result.stderr, result
         start, end = launched(["4", "5"])
