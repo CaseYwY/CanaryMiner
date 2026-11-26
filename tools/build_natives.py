@@ -33,6 +33,7 @@ else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market'
               ('meter_bill','src/product/meter_bill.cpp'),('meter_prepaid','src/product/meter_prepaid.cpp'),
               ('octopus_meter_rates','src/product/octopus_meter_rates.cpp'),
               ('market_hour','src/product/market_hour.cpp'),('market_ticker_review','src/product/market_ticker_review.cpp'),
+              ('market_trade_review','src/product/market_trade_review.cpp'),
               ('market_reward','src/product/market_reward.cpp'),
               ('market_data','src/product/market_data.cpp'),('public_https_contract','src/product/public_https_contract.cpp'),
               ('preferences_protocol','src/product/preferences_protocol.cpp'),('preferences_document','src/product/preferences_document.cpp'),
