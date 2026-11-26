@@ -69,14 +69,15 @@ struct MarketSnapshot {
     std::shared_ptr<const PublicHourObservation> pearlHour, fxHour;
 };
 using MarketFetch = std::function<PublicJsonResponse(const PublicJsonRequest &, const std::atomic<bool> &, PublicHttpsLimits)>;
-using MarketClock = std::function<std::pair<uint64_t, uint64_t>()>;  // monotonic milliseconds, UTC seconds
+// Monotonic milliseconds followed by UTC seconds, or UTC milliseconds for publicTrades.
+using MarketClock = std::function<std::pair<uint64_t, uint64_t>()>;
 std::pair<uint64_t, uint64_t> marketSystemClock();
 // Production fetch seam uses the P-06a owned process, not helper-side PublicJsonClient in the miner.
 MarketFetch marketProcessFetch(std::filesystem::path installedHelper);
 class MarketDataOwner {
    public:
     MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy = {}, MarketOrigin origin = MarketOrigin::ProviderResponse,
-                    bool fixtureCandles = false, MarketClock clock = {}, MarketClock tradeClock = {});
+                    bool fixtureCandles = false, MarketClock clock = {});
     ~MarketDataOwner();
     MarketDataOwner(const MarketDataOwner &) = delete;
     MarketDataOwner &operator=(const MarketDataOwner &) = delete;

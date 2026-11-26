@@ -129,7 +129,7 @@ void tradeOwner(){
                     ".125,\"b\",\"m\",\"\",4]],\"last\":\"123\"}}";
             }
             return r;
-        },policy,MarketOrigin::ProviderResponse,false,{},clock);
+        },policy,MarketOrigin::ProviderResponse,false,clock);
         CHECK(owner.start(1));
         CHECK(waitUntil([&]{const auto snapshot=owner.snapshot();return snapshot->pearlTrade && snapshot->fxTrade;}));
         const auto original=owner.snapshot();
@@ -167,7 +167,7 @@ void tradeOwner(){
             "\",\"currency_pair\":\"PEARL_USDT\",\"price\":\"2.50\"}]";
         receiptJump=true;
         return r;
-    },policy,MarketOrigin::ProviderResponse,false,{},[&]{
+    },policy,MarketOrigin::ProviderResponse,false,[&]{
         return std::make_pair(uint64_t{1000},epoch*1000+(receiptJump.exchange(false) ? 7000 : 1000));
     });
     CHECK(jumped.start(1));
@@ -175,6 +175,21 @@ void tradeOwner(){
     const auto failed=jumped.snapshot();
     CHECK(failed->clockFault && !failed->running && !failed->pearlTrade && !failed->fxTrade);
     jumped.stop();
+
+    auto runtime=makeMarketReferenceRuntime([=](const PublicJsonRequest &request,const std::atomic<bool> &,PublicHttpsLimits){
+        PublicJsonResponse r;r.status=PublicHttpsStatus::Ok;r.httpStatus=200;r.observedUtc=epoch+1;
+        if (request.feed==PublicFeed::GatePearlTrades) {
+            r.body="[{\"id\":\"1\",\"create_time_ms\":\""+std::to_string(epoch*1000)+
+                "\",\"currency_pair\":\"PEARL_USDT\",\"price\":\"2.50\"}]";
+        } else {
+            r.body="{\"error\":[],\"result\":{\"USDTZUSD\":[[\"0.98\",\"1\","+std::to_string(epoch)+
+                ",\"b\",\"m\",\"\",4]],\"last\":\"123\"}}";
+        }
+        return r;
+    },policy,MarketOrigin::ProviderResponse,false,[=]{return std::make_pair(uint64_t{1000},epoch*1000+1000);});
+    CHECK(runtime->start(1));
+    CHECK(waitUntil([&]{return joined(runtime->view(epoch+1,1000)).find("PRL/USD trade reference: 2.45")!=std::string::npos;}));
+    runtime->stop();
 }
 
 int installedPath(const std::filesystem::path &fixture){

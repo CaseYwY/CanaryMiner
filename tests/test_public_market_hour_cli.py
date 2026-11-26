@@ -76,6 +76,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
 
         ticker = "--allow-public-tickers"
         trades = "--allow-public-trades"
+        run_help = call("run", "--help")
+        assert run_help.returncode == 0 and trades in run_help.stdout
+        assert any(allow in line and "with either quote flag" in line for line in run_help.stdout.splitlines())
         dashboard_dns = "--market-dns-server"
         dns_required = "--market-dns-server requires --allow-public-tickers at the Dashboard parent"
         dns_usage = "--market-dns-server requires one unicast IPv4 or unscoped IPv6 address for run"

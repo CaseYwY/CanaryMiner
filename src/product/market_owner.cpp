@@ -305,10 +305,9 @@ struct MarketDataOwner::Impl {
     }
 };
 MarketDataOwner::MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy, MarketOrigin origin, bool fixture,
-                                 MarketClock clock, MarketClock tradeClock) : impl_(new Impl()) {
+                                 MarketClock clock) : impl_(new Impl()) {
     impl_->fetch = std::move(fetch); impl_->policy = policy; impl_->origin = origin; impl_->fixture = fixture;
-    if (policy.publicTrades) impl_->clock=tradeClock ? std::move(tradeClock) : MarketClock(marketTradeClock);
-    else impl_->clock=clock ? std::move(clock) : MarketClock(marketSystemClock);
+    impl_->clock=clock ? std::move(clock) : MarketClock(policy.publicTrades ? marketTradeClock : marketSystemClock);
 }
 MarketDataOwner::~MarketDataOwner() { stop(); }
 bool MarketDataOwner::start(uint64_t generation) {
