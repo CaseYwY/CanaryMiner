@@ -40,6 +40,9 @@
 #include "../product/startup_config.h"
 #include "../product/pool_tls_runtime_policy.h"
 #include "../product/pool_tls_migration.h"
+#if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
+#include "../product/pool_tls_runtime_transport.h"
+#endif
 #include "../product/manual_market.h"
 #include "../product/market_ticker_runtime.h"
 #include "../product/gpu_tuning.h"
@@ -137,6 +140,59 @@ int main(int argc, char **argv) {
     if(cli.command==Command::Diagnostics){
         signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
         return commandDiagnostics(cli.diagnostics,&g_stop); // before any config, preference, platform or device/runtime setup
+    }
+    if (cli.command == Command::PoolTlsCheck) {
+        if (cli.help) {
+            std::puts(poolTlsCheckHelp);
+            return kExitOk;
+        }
+        PoolSecurityEndpoint endpoint;
+        if (!parsePoolSecurityUrl(cli.poolTlsCheckUrl, &endpoint) || !endpoint.tls) {
+            std::fputs("pool-tls-check: supply one explicit TLS URL with a DNS name and port. See pool-tls-check --help\n", stderr);
+            return kExitUsage;
+        }
+#if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
+        signal(SIGINT, onSignal);
+        signal(SIGTERM, onSignal);
+#if defined(SIGBREAK)
+        signal(SIGBREAK, onSignal);
+#endif
+        const auto helper = poolTlsRuntimeWorkerPath();
+        if (helper.empty()) {
+            std::fputs("pool-tls-check: cannot locate the installed TLS worker\n", stderr);
+            return kExitConfig;
+        }
+        const auto epoch = nativeProcessAdmissionEpoch();
+        PoolTransportObservation observation;
+        {
+            PoolTlsCheckRequest request;
+            request.enabled = true;
+            request.host = endpoint.host;
+            request.port = endpoint.port;
+            request.totalMs = kPoolTlsRuntimeOpenMs;
+            PoolTlsRuntimeTransport transport(helper, std::move(request), &g_stop);
+            transport.open(endpoint.host, static_cast<int>(endpoint.port));
+            observation = transport.observation();
+        }
+        if (!nativeProcessEpochCurrent(epoch)) {
+            std::fputs("pool-tls-check: TLS worker cleanup could not be confirmed\n", stderr);
+            return kExitFaultLatched;
+        }
+        if (g_stop || observation.error == PoolTransportError::Cancelled) {
+            std::fputs("pool-tls-check: cancelled\n", stderr);
+            return 130;
+        }
+        if (observation.security == PoolTransportSecurity::VerifiedTls && observation.error == PoolTransportError::None) {
+            std::puts("Pool TLS check: certificate and hostname verified. Connection closed.");
+            return kExitOk;
+        }
+        const auto reason = poolTransportErrorName(observation.error);
+        std::fprintf(stderr, "pool-tls-check: %s\n",
+                     reason && observation.error != PoolTransportError::None ? reason : "unavailable");
+#else
+        std::fputs("pool-tls-check: the pool TLS runtime is unavailable in this build\n", stderr);
+#endif
+        return kExitConfig;
     }
     if (cli.command == Command::MeterBill) {
         signal(SIGINT, onSignal);
@@ -528,7 +584,8 @@ int main(int argc, char **argv) {
                 "       canary-miner meter-bill        review imported meter intervals; see meter-bill --help\n"
                 "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
                 "       canary-miner market-tickers   review saved tickers or take a public sample; see market-tickers --help\n"
-                "       canary-miner market-reward    review the next Pearl mainnet block subsidy; see market-reward --help\n\n"
+                "       canary-miner market-reward    review the next Pearl mainnet block subsidy; see market-reward --help\n"
+                "       canary-miner pool-tls-check   check one TLS endpoint without mining; see pool-tls-check --help\n\n"
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"

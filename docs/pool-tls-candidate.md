@@ -74,7 +74,8 @@ python3 -B packaging/release/tls_candidate.py install --platform linux \
 
 Installation writes to a new directory after the complete verification step. The verifier checks the exact archive inventory, duplicates, links, sizes and modes. Installation re-reads every output and checks Linux executable permissions. Use a POSIX filesystem for the Linux package and a filesystem supporting hard links when creating either package. A failed interrupted install can leave its new directory for inspection. Choose a fresh directory for another attempt.
 
-Use the extracted miner's `version` and interactive `settings` commands for CPU-only acceptance. The examples request strict TLS for the first user pool and turn donation off. Qualified native GPU, real pool login and proof submission, donation TLS and redistribution acceptance are separate release checks.
+Use the extracted miner's `version` and interactive `settings` commands for offline CPU-only acceptance.
+Use [`pool-tls-check`](pool-tls-runtime.md#check-a-pool-before-mining) for a single explicitly selected endpoint with the installed TLS worker. The examples request strict TLS for the first user pool and turn donation off. Qualified native GPU, real pool login and proof submission, donation TLS and redistribution acceptance are separate release checks.
 
 Settings keeps economic mode off for fresh installations and old preferences that have no economic mode field. An explicitly saved request remains selected on reopening Settings.
 

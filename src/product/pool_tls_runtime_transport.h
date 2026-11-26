@@ -5,6 +5,9 @@
 #include <csignal>
 
 namespace om {
+inline constexpr unsigned kPoolTlsRuntimeOpenMs = 10000;
+std::filesystem::path poolTlsRuntimeWorkerPath();
+
 class PoolTlsRuntimeTransport final : public PearlPoolTransport {
 public:
     PoolTlsRuntimeTransport(std::filesystem::path helper, PoolTlsCheckRequest request,

@@ -6,6 +6,8 @@ M-TLS; R-TLS-003/004; T-TLS/T-INTENT/T-PRIVACY/T-RELEASE; D-96.
 
 `CANARY_ENABLE_POOL_TLS_CHECK=ON` requires an explicitly selected platform TLS engine. The helper is not installed or deployed to the existing miner by this batch. `CANARY_POOL_TLS_CHECK_LOOPBACK_TESTS` is independently OFF and requires explicit private fixture scratch; Windows positive private fixtures also require the existing development private-trust inspector. Configure installs/downloads nothing. Default builds retain only the CPU contract/disabled implementation and owned synthetic lifecycle fixtures, without performing DNS or creating a network socket.
 
+For a standalone system-trust check with the installed ordinary runtime, use [`pool-tls-check`](pool-tls-runtime.md#check-a-pool-before-mining). It uses the runtime stream worker.
+
 ## Frozen request and private local IPC
 
 The request pins one original ASCII DNS host, port and 50–60000-ms total budget. The **same host** is used for resolution, SNI and reference-name verification; no resolved address, peer-provided name or separate display label replaces it. Literal IP/URL/user-info/path syntax is not supported by this initial API. Linux explicit PEM anchors are limited to 64 KiB. Optional Windows development private material retains the same reference, requires empty leaf, disallows simultaneous PEM mode, and permits at most sixteen anchors/intermediates/CRLs per collection, 64 KiB per object and 96 KiB combined supporting material. The queried actual peer remains the inspection leaf. Normal Windows mode still uses automatic validation; private-mode success does not qualify it.

@@ -16,6 +16,18 @@ The parent freezes the selected TLS URL and disabled-donation choice for worker 
 
 Only ordinary first-user-pool mining is supported. Research/evidence modes, secure requests for unused pool slots and donation TLS are refused before device setup. Saved Prefer TLS follows the additional consent and failure rules in P-12j; it never weakens an explicit SSL input. Legacy TCP remains an explicit compatibility path with its warning. The module neither changes the donation schedule nor applies user TLS permission to the developer's peer. A defensive fee-session check also refuses an unexpected TLS donation attempt.
 
+## Check a pool before mining
+
+A TLS-enabled build can check a documented endpoint through the installed TLS stream worker. To test the Kryptex Hong Kong TLS target, run:
+
+```text
+canary-miner pool-tls-check --pool stratum+ssl://prl-hk.kryptex.network:8048
+```
+
+Supply one explicit `stratum+ssl://` URL with an ASCII DNS name and port. The check runs before loading mining configuration or starting GPU work. It uses system trust and the same DNS reference, SNI and certificate validation as a strict mining connection. It sends no Stratum messages and never attempts plaintext. The result describes that one completed handshake. A later mining run performs its own TLS handshake and pool login.
+
+DNS, TCP and TLS setup share the ordinary ten-second budget, including the [bounded selection of a resolved address](pool-tls-check.md#native-connection-and-verification). The command retires its worker before reporting. Exit status 0 records verified TLS, 2 indicates invalid arguments, and 3 indicates an unavailable build or a connection failure. It prints a bounded failure category such as `dns`, `connect`, `verification` or `timeout`. Status 130 indicates cancellation with confirmed cleanup. Status 8 indicates that worker cleanup could not be confirmed.
+
 ## Connection and failure behavior
 
 The actual `runMiner` source construction owns a `PoolTlsRuntimeTransport` for the complete `PearlPoolSource` lifetime. Each open creates a fresh one-attempt process transport. The old helper is closed and settled first; the shared native admission epoch prevents replacement after unresolved ownership. Normal close permits a new TLS connection. Stop or loss of the original epoch permanently revokes this runtime owner. A caller from another scope cannot close or cancel the original owner's connection.

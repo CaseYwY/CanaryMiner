@@ -1,19 +1,11 @@
 #include "pool_tls_check.h"
+#include "../core/pool_dns_name.h"
 #include <algorithm>
 #include <limits>
 namespace om {
 namespace {
 using S=PoolTlsCheckStatus;using G=PoolTlsCheckStage;using E=PearlTlsError;
 constexpr std::size_t materialLimit=96*1024;
-bool dns(const std::string &s){
-    if(s.empty()||s.size()>253||s.back()=='.'||s.find_first_not_of("0123456789.")==s.npos)return false;
-    std::size_t start=0;
-    for(std::size_t i=0;i<=s.size();++i){if(i==s.size()||s[i]=='.'){
-            if(i==start||i-start>63||s[start]=='-'||s[i-1]=='-')return false;
-            start=i+1;
-        }else{const auto c=static_cast<unsigned char>(s[i]);if(!((c>='A'&&c<='Z')||(c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='-'))return false;}}
-    return true;
-}
 void number(std::string &s,uint64_t n){s+=std::to_string(n);s+='\n';}
 void blob(std::string &s,const char *p,std::size_t size){number(s,size);s.append(p,size);s+='\n';}
 struct Reader {
@@ -46,7 +38,7 @@ bool validReply(const PoolTlsCheckReply &r){
 }
 }
 bool validPoolTlsCheckRequest(const PoolTlsCheckRequest &r){
-    if(!dns(r.host)||!r.port||r.port>65535||r.totalMs<50||r.totalMs>60000||r.caPem.size()>65536)return false;
+    if(!validPoolDnsName(r.host)||!r.port||r.port>65535||r.totalMs<50||r.totalMs>60000||r.caPem.size()>65536)return false;
     if(r.windowsPrivateTrust){const auto &p=*r.windowsPrivateTrust;
         if(!r.caPem.empty()||!p.enabled||p.referenceDnsName!=r.host||!p.leaf.empty()||p.anchors.empty()||p.anchors.size()>16||p.intermediates.size()>16||p.crls.size()>16)return false;
         std::size_t total=0;

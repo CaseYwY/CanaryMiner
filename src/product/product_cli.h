@@ -46,7 +46,12 @@
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods, MarketReward };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods, MarketReward, PoolTlsCheck };
+
+inline constexpr char poolTlsCheckHelp[] =
+    "canary-miner pool-tls-check --pool stratum+ssl://HOST:PORT\n"
+    "Check one TLS connection with system trust. Requires a TLS-enabled build.\n"
+    "The check sends no mining login or share, and closes the connection before reporting.";
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -100,6 +105,7 @@ struct CliParse {
     MarketRewardOptions marketReward;
     bool reviewTickerFile = false;
     EnergyPeriodsOptions energyPeriods;
+    std::string poolTlsCheckUrl;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
 };
@@ -145,6 +151,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "market-tickers") r.command = Command::MarketTickers;
         else if (c == "market-reward") r.command = Command::MarketReward;
         else if (c == "energy-periods") r.command = Command::EnergyPeriods;
+        else if (c == "pool-tls-check") r.command = Command::PoolTlsCheck;
         else {
             if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted";
             return false;
@@ -155,6 +162,19 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
     if(r.command==Command::Diagnostics){
         if(!parseDiagnosticCli(argc,argv,i,&r.diagnostics,error))return false;
         r.help=r.diagnostics.help;*out=std::move(r);return true;
+    }
+    if (r.command == Command::PoolTlsCheck) {
+        const auto option = i < argc ? std::string_view(argv[i]) : std::string_view();
+        r.help = argc == i + 1 && (option == "-h" || option == "--help");
+        if (!r.help) {
+            if (argc != i + 2 || option != "--pool" || !argv[i + 1][0]) {
+                if (error) *error = "pool-tls-check: supply one explicit TLS URL. See pool-tls-check --help";
+                return false;
+            }
+            r.poolTlsCheckUrl = argv[i + 1];
+        }
+        *out = std::move(r);
+        return true;
     }
     if (r.command == Command::MeterBill) {
         if (!parseMeterBillCli(argc, argv, i, &r.meterBill)) {
@@ -504,6 +524,7 @@ inline std::string productHelpText() {
         "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
         "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
         "       canary-miner market-reward    review the next Pearl mainnet subsidy (see market-reward --help)\n"
+        "       canary-miner pool-tls-check   check one TLS endpoint without mining (see pool-tls-check --help)\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress manual and public references for this run\n"
         "       --allow-public-tickers        allow a saved public ticker request for this run in an opt-in build\n"

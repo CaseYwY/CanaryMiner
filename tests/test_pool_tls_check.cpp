@@ -25,6 +25,10 @@ void codecs(){
         if(mode==11)bad.host=std::string(64,'x')+".test";
         std::string unchanged="unchanged";CHECK(!validPoolTlsCheckRequest(bad)&&!encodePoolTlsCheckRequest(bad,1,&unchanged)&&unchanged=="unchanged");
     }
+    for(const auto *literal:{"0x7f000001","0X7f.0.0.1","0x7f.1","0177.0.0.1"}){
+        auto bad=request();bad.host=literal;CHECK(!validPoolTlsCheckRequest(bad));
+    }
+    auto dnsName=request();dnsName.host="0x7f.001.pool.test";CHECK(validPoolTlsCheckRequest(dnsName));
     auto p=std::make_shared<PearlTlsPrivateTrustInput>();p->enabled=true;p->referenceDnsName=r.host;p->anchors={{0,1,2,10,0}};p->crls={{3,0,4,10}};
     r.windowsPrivateTrust=p;CHECK(encodePoolTlsCheckRequest(r,UINT32_MAX,&wire)&&decodePoolTlsCheckRequest(wire,&decoded,&parent)&&parent==UINT32_MAX&&decoded.windowsPrivateTrust->anchors==p->anchors&&decoded.windowsPrivateTrust->crls==p->crls);
     CHECK(!encodePoolTlsCheckRequest(r,0,&wire)&&!encodePoolTlsCheckRequest(r,UINT64_MAX,&wire));

@@ -16,7 +16,6 @@
 #include "pearl_production_evidence.h"
 #if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
 #include "../product/pool_tls_runtime_transport.h"
-#include "../product/executable_path.h"
 #endif
 #include <thread>
 
@@ -559,22 +558,16 @@ int runMiner(Algorithm *algo, const RunOptions &opt, const char *gpuName,
 #else
 #if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
         if (opt.poolTls) {
-            const auto executable = selfExecutablePath();
-            if (executable.empty()) {
+            const auto helper = poolTlsRuntimeWorkerPath();
+            if (helper.empty()) {
                 logLine(tty, "error", "cannot locate the installed pool TLS helper");
                 return 1;
             }
-            const auto helper = std::filesystem::u8path(executable).parent_path() /
-#if defined(_WIN32)
-                "canary_pool_tls_stream_worker.exe";
-#else
-                "canary_pool_tls_stream_worker";
-#endif
             PoolTlsCheckRequest request;
             request.enabled = true;
             request.host = opt.poolHost;
             request.port = static_cast<unsigned>(opt.poolPort);
-            request.totalMs = 10000;
+            request.totalMs = kPoolTlsRuntimeOpenMs;
             if (!validPoolTlsCheckRequest(request)) {
                 logLine(tty, "error", "invalid strict pool TLS endpoint");
                 return 1;
