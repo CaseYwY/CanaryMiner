@@ -88,12 +88,62 @@ int interrupted() {
     return 130;
 }
 
+int tradeClockFault() {
+    std::fputs("market-tickers: local clock unavailable or changed during sampling\n", stderr);
+    return 3;
+}
+
+int samplePublicTrades(const std::filesystem::path &helper,const MarketTickerOptions &options,
+                       const NativeProcessLifetime &lifetime,const volatile sig_atomic_t *stop) {
+    using market_detail::marketTradeClock;
+    using market_detail::marketTradeClockContinuous;
+    PublicTickerCapture capture;
+    capture.trades=true;
+    PublicHttpsLimits limits;
+    limits.bodyBytes=maxPublicTradeBodyBytes;
+    limits.dnsServer=options.dnsServer;
+    const auto start=marketTradeClock();
+    if (!marketTradeClockContinuous(start,start,start)) return tradeClockFault();
+    capture.startedUtc=start.second;
+    const auto fetch=marketProcessFetch(helper);
+    auto previous=start;
+    for (auto feed:{PublicFeed::GatePearlTrades,PublicFeed::KrakenUsdtTrades}) {
+        if (!lifetime.permitted()) return ownershipUncertain();
+        if (marketSampleStopped(stop)) return interrupted();
+        const auto sent=marketTradeClock();
+        if (!marketTradeClockContinuous(start,previous,sent)) return tradeClockFault();
+        auto reply=awaitPublicMarketReply(fetch,{feed},limits,lifetime,stop);
+        if (reply.status==PublicHttpsStatus::Unreaped || !lifetime.permitted()) return ownershipUncertain();
+        if (marketSampleStopped(stop)) return interrupted();
+        const auto received=marketTradeClock();
+        if (!marketTradeClockContinuous(start,sent,received)) return tradeClockFault();
+        auto &receipt=feed==PublicFeed::GatePearlTrades ? capture.gate : capture.kraken;
+        receipt={sent.second,received.second,received.first-start.first,std::move(reply)};
+        previous=received;
+    }
+    const auto cutoff=marketTradeClock();
+    if (!marketTradeClockContinuous(start,previous,cutoff)) return tradeClockFault();
+    capture.cutoffUtc=cutoff.second;
+    capture.elapsedMs=cutoff.first-start.first;
+    if (options.saveFlag) return savePublicTickerReview(options.archiveName,capture,lifetime,stop);
+
+    std::string report;
+    const auto status=renderPublicTradeSample(capture,report);
+    if (!lifetime.permitted()) return ownershipUncertain();
+    if (marketSampleStopped(stop)) return interrupted();
+    if (status==PublicTradeReport::InvalidClock) return tradeClockFault();
+    if (std::fwrite(report.data(),1,report.size(),stdout)!=report.size() || std::fflush(stdout)!=0) return 1;
+    return status==PublicTradeReport::Complete ? 0 : 3;
+}
+
 }  // namespace
 
 int commandPublicTickers(const MarketTickerOptions &options, const std::filesystem::path &module,
                          int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
     if (!market_detail::nativePublicTickerInvocation(options, argc, argv)) {
-        std::fputs("market-tickers: exact --allow-public-tickers required\n", stderr);
+        std::fputs(options.action==MarketTickerAction::PublicTradeSample ?
+            "market-tickers: exact --allow-public-trades required\n" :
+            "market-tickers: exact --allow-public-tickers required\n", stderr);
         return 2;
     }
     if (marketSampleStopped(stop)) return interrupted();
@@ -105,6 +155,7 @@ int commandPublicTickers(const MarketTickerOptions &options, const std::filesyst
             std::fputs("market-tickers: installed helper path unavailable\n", stderr);
             return 3;
         }
+        if (options.action==MarketTickerAction::PublicTradeSample) return samplePublicTrades(helper,options,lifetime,stop);
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.maxAttempts = 1;

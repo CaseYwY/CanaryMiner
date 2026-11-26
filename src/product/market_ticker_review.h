@@ -12,7 +12,10 @@ struct PublicTickerReceipt {
 struct PublicTickerCapture {
     uint64_t startedUtc = 0, cutoffUtc = 0, elapsedMs = 0;
     PublicTickerReceipt gate, kraken;
+    bool trades = false;  // Parent UTC fields, including receipt sent/received, use milliseconds for trades.
 };
+enum class PublicTradeReport { InvalidClock, Incomplete, Complete };
+PublicTradeReport renderPublicTradeSample(const PublicTickerCapture &capture, std::string &report);
 
 // Reads one explicit local file, independently of the installed HTTPS helper.
 int commandTickerFile(MarketTickerAction action, int argc, const char *const *argv,

@@ -45,9 +45,10 @@ inline bool nativeMarketArgumentPair(int argc, const char *const *argv, int firs
 }
 
 inline bool nativePublicTickerInvocation(const MarketTickerOptions &options, int argc, const char *const *argv) {
-    return options.action == MarketTickerAction::PublicSample &&
+    const char *consent=options.action==MarketTickerAction::PublicTradeSample ? "--allow-public-trades" : "--allow-public-tickers";
+    return isPublicTickerSample(options.action) &&
         argc == 3 + (options.dnsFlag ? 2 : 0) + (options.saveFlag ? 2 : 0) &&
-        nativeMarketArgumentPair(argc, argv, 1, "market-tickers", 2, "--allow-public-tickers") &&
+        nativeMarketArgumentPair(argc, argv, 1, "market-tickers", 2, consent) &&
         (!options.dnsFlag || nativeMarketArgumentPair(argc, argv, options.dnsFlag, "--dns-server",
                                                       options.dnsFlag + 1, options.dnsServer)) &&
         (!options.saveFlag || nativeMarketArgumentPair(argc, argv, options.saveFlag, "--save-review",
