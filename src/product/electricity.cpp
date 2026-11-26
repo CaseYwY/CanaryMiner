@@ -194,6 +194,22 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
                        s.throughUtcMs % meterHalfHourMs || end % meterHalfHourMs))
         return ElectricityStatus::MeterRoundingBoundary;
     if (s.throughUtcMs == s.cycleBeginUtcMs && (!s.importedKwh.numerator.zero() || !s.accruedSubtotal.numerator.zero())) return ElectricityStatus::Invalid;
+    if (p.restrictedCreditAtClose!=s.restrictedCredit.has_value()) return ElectricityStatus::Invalid;
+    if (s.restrictedCredit) {
+        if (s.evidence.basis!=PowerBasis::WholeMeterImport || p.exportPayment ||
+            (p.demandCharge && p.demandCharge->apparent())) return ElectricityStatus::Unsupported;
+        const auto &credit=*s.restrictedCredit;
+        if (s.importedKwh.numerator.zero() && !credit.accruedImportSubtotal.numerator.zero())
+            return ElectricityStatus::Invalid;
+        if (credit.lots.size()>maxRestrictedCreditLots) return ElectricityStatus::Capacity;
+        auto previousExpiry=s.throughUtcMs;
+        for (const auto &lot:credit.lots) {
+            if (!instant(lot.expiresUtcMs) || lot.expiresUtcMs<=previousExpiry ||
+                lot.remaining.numerator.negative() || lot.remaining.numerator.zero())
+                return ElectricityStatus::Invalid;
+            previousExpiry=lot.expiresUtcMs;
+        }
+    }
     if (p.exportPayment.has_value()!=s.exports.has_value()) return ElectricityStatus::Invalid;
     if (p.exportPayment) {
         if (s.evidence.basis!=PowerBasis::WholeMeterImport || (p.demandCharge && p.demandCharge->apparent()))
@@ -443,6 +459,43 @@ bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
 ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
     return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
 }
+static bool accrueRestrictedCredit(BillOpening &state,int64_t end,const ExactDecimal &multiplier,
+                                   BillRestrictedCreditAccrual &credit) {
+    auto &opening=*state.restrictedCredit;
+    auto &lots=opening.lots;
+    if (!opening.accruedImportSubtotal.numerator.negative() &&
+        !opening.accruedImportSubtotal.numerator.multiply(multiplier,&credit.eligible.numerator)) return false;
+
+    // Expiry has effect at the exact instant, before a settlement at that instant.
+    const auto firstLive=std::find_if(lots.begin(),lots.end(),[end](const RestrictedCreditLot &lot){
+        return lot.expiresUtcMs>end;
+    });
+    for (auto it=lots.begin();it!=firstLive;++it)
+        if (!accumulate(credit.expired.numerator,it->remaining.numerator)) return false;
+    lots.erase(lots.begin(),firstLive);
+
+    if (end==state.cycleEndUtcMs) {
+        auto &cash=credit.cashDue.emplace().numerator;
+        if (!state.accruedSubtotal.numerator.negative() &&
+            !state.accruedSubtotal.numerator.multiply(multiplier,&cash)) return false;
+        auto limit=cash.compare(credit.eligible.numerator)<0?cash:credit.eligible.numerator;
+        for (auto &lot:lots) {
+            auto &balance=lot.remaining.numerator;
+            const auto applied=balance.compare(limit)<0?balance:limit;
+            if (!balance.subtract(applied,&balance) || !limit.subtract(applied,&limit) ||
+                !accumulate(credit.applied.numerator,applied)) return false;
+            if (limit.zero()) break;
+        }
+        if (!cash.subtract(credit.applied.numerator,&cash)) return false;
+        lots.erase(std::remove_if(lots.begin(),lots.end(),[](const RestrictedCreditLot &lot){
+            return lot.remaining.numerator.zero();
+        }),lots.end());
+    }
+    for (const auto &lot:lots)
+        if (!accumulate(credit.remaining.numerator,lot.remaining.numerator)) return false;
+    return true;
+}
+
 template<class Trace>
 static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &opening,const Trace &trace,int64_t end,int64_t decision,bool accrual,
                                      const std::atomic<bool> *cancel=nullptr, const std::function<bool()> &stop={},
@@ -583,17 +636,29 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
                 }
                 energy = billed->numerator;
             }
-            if (!productAdd(cost,energy,rate)) { result.status = ElectricityStatus::Capacity; return result; }
+            if (!productAdd(cost,energy,rate) ||
+                (state.restrictedCredit && !productAdd(state.restrictedCredit->accruedImportSubtotal.numerator,energy,rate))) {
+                result.status = ElectricityStatus::Capacity;
+                return result;
+            }
             if (p.tiers == TierMode::Progressive) {
                 ExactDecimal before, after, delta;
-                if (!tierCost(r.bands,p.tiers,quantity,&before) || !tierCost(r.bands,p.tiers,newQuantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta)) { result.status = ElectricityStatus::Capacity; return result; }
+                if (!tierCost(r.bands,p.tiers,quantity,&before) || !tierCost(r.bands,p.tiers,newQuantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta) ||
+                    (state.restrictedCredit && !accumulate(state.restrictedCredit->accruedImportSubtotal.numerator,delta))) {
+                    result.status = ElectricityStatus::Capacity;
+                    return result;
+                }
             }
             quantity = newQuantity; now = next;
         }
     }
     if (p.tiers == TierMode::AllUnits) {
         ExactDecimal before, after, delta;
-        if (!tierCost(p.revisions[0].bands,p.tiers,opening.importedKwh.numerator,&before) || !tierCost(p.revisions[0].bands,p.tiers,quantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta)) { result.status = ElectricityStatus::Capacity; return result; }
+        if (!tierCost(p.revisions[0].bands,p.tiers,opening.importedKwh.numerator,&before) || !tierCost(p.revisions[0].bands,p.tiers,quantity,&after) || !after.subtract(before,&delta) || !accumulate(cost,delta) ||
+            (state.restrictedCredit && !accumulate(state.restrictedCredit->accruedImportSubtotal.numerator,delta))) {
+            result.status = ElectricityStatus::Capacity;
+            return result;
+        }
     }
     if (!opening.accruedSubtotal.numerator.add(cost,&state.accruedSubtotal.numerator)) { result.status = ElectricityStatus::Capacity; return result; }
     if (p.minimumCycleSubtotal && end==opening.cycleEndUtcMs) {
@@ -604,6 +669,14 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     }
     ElectricityAmount charge;
     if (!cost.multiply(*p.subtotalMultiplier,&charge.numerator)) { result.status = ElectricityStatus::Capacity; return result; }
+    if (state.restrictedCredit) {
+        BillRestrictedCreditAccrual credit;
+        if (!accrueRestrictedCredit(state,end,*p.subtotalMultiplier,credit)) {
+            result.status=ElectricityStatus::Capacity;
+            return result;
+        }
+        result.restrictedCredit=std::move(credit);
+    }
     if (roundMeter) result.billedKwh = ElectricityAmount{billedQuantity};
     state.importedKwh.numerator = quantity; state.throughUtcMs = end;
     result.ending = state; result.charge = charge; result.cycleSettled = end == state.cycleEndUtcMs; result.status = ElectricityStatus::Ok;
@@ -638,6 +711,7 @@ static BillAccrual accrueBillImpl(const TariffPlan &p,const BillOpening &opening
     }
     result.ending=step.ending;result.provisionalChange=step.charge;result.provisionalTotal=total;
     result.billedKwh=step.billedKwh;
+    result.restrictedCredit=step.restrictedCredit;
     if(step.cycleSettled)result.settledTotal=total;
     else result.settlementDependent=p.tiers==TierMode::AllUnits||p.minimumCycleSubtotal.has_value()||p.demandCharge.has_value();
     return result;

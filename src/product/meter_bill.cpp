@@ -305,6 +305,20 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         report += std::string(accrual.settledTotal ? "  Net electricity cost at closing " : "  Provisional net electricity cost ") +
                   netTotal + " " + currency + "\n";
     }
+    if (const auto &credit=accrual.restrictedCredit) {
+        std::string eligible, applied, expired, remaining;
+        if (!credit->eligible.format(6,&eligible) || !credit->applied.format(6,&applied) ||
+            !credit->expired.format(6,&expired) || !credit->remaining.format(6,&remaining)) return false;
+        report += "  Eligible import energy charges to date " + eligible + " " + currency + "\n";
+        report += "  Restricted credit applied " + applied + " " + currency + "\n";
+        report += "  Restricted credit expired " + expired + " " + currency + "\n";
+        report += "  Restricted credit remaining " + remaining + " " + currency + "\n";
+        if (credit->cashDue) {
+            std::string cash;
+            if (!credit->cashDue->format(6,&cash)) return false;
+            report += "  Cash due after restricted credit " + cash + " " + currency + "\n";
+        } else report += "  Eligible charges are provisional. Restricted credit is applied only at closing.\n";
+    }
     const auto &ending = *accrual.ending;
     exact += "[" + std::to_string(opening.cycleBeginUtcMs) + "," + std::to_string(opening.cycleEndUtcMs) +
               "," + std::to_string(opening.throughUtcMs) + "," + std::to_string(ending.throughUtcMs) +
@@ -327,6 +341,22 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
                  "," + jsonQuote(exported->paymentTotal.numerator.text()) +
                  "," + jsonQuote(exported->netChange.numerator.text()) +
                  "," + jsonQuote(exported->netTotal.numerator.text());
+    if (const auto &credit=accrual.restrictedCredit) {
+        const auto &state=*ending.restrictedCredit;
+        exact += ",\"restricted_credit\"," + jsonQuote(state.accruedImportSubtotal.numerator.text()) +
+                 "," + jsonQuote(credit->eligible.numerator.text()) +
+                 "," + jsonQuote(credit->applied.numerator.text()) +
+                 "," + jsonQuote(credit->expired.numerator.text()) +
+                 "," + jsonQuote(credit->remaining.numerator.text()) +
+                 "," + (credit->cashDue ? jsonQuote(credit->cashDue->numerator.text()) : "null") + ",[";
+        bool first=true;
+        for (const auto &lot:state.lots) {
+            if (!first) exact += ',';
+            first=false;
+            exact += "[" + std::to_string(lot.expiresUtcMs) + "," + jsonQuote(lot.remaining.numerator.text()) + "]";
+        }
+        exact += ']';
+    }
     exact += "]\n";
     return true;
 }
@@ -414,7 +444,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return kind && kind->isString() && kind->text == "named_iana";
     };
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 12 &&
+        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 13 &&
          (usesNamedClock(root.find("plan")) || usesNamedClock(root.find("reset_policy")))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
@@ -449,6 +479,8 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
             std::to_string(review.readings.octopusObserved) + " UTC ms.\n";
     }
     if (namedTariff) report += std::string("Reviewed IANA time database ") + tariffTzdbVersion + "\n";
+    if (declaration.plan.restrictedCreditAtClose)
+        report += "Restricted credits apply only to import energy at cycle close and expire at their stated UTC instants.\n";
     if (declaration.componentMultipliers)
         report += "Component multipliers apply to the declared part of the unit rate.\n";
     if (showCutoff) report += "Review cutoff " + std::to_string(cutoff) + " UTC ms\n";

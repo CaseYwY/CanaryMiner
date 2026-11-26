@@ -522,6 +522,29 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['plan']['export_payment']['rate_per_kwh'] = '-1'
         self.assertTrue(validate(example, schema, schema))
 
+    def test_restricted_credit_requires_v13_and_a_strict_credit_record(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 13
+        self.assertTrue(validate(example, schema, schema))
+        lot = {'expires_utc_ms': 1800086400001, 'amount': '0.01'}
+        example['restricted_credit'] = {'accrued_import_subtotal': '-0.1', 'lots': [lot]}
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 1}, schema, schema))
+        for value in ('0', '-1', 1):
+            lot['amount'] = value
+            self.assertTrue(validate(example, schema, schema))
+        lot['amount'] = '1'
+        lot['expires_utc_ms'] = 253402300800000
+        self.assertTrue(validate(example, schema, schema))
+        lot['expires_utc_ms'] = 1800086400001
+        example['restricted_credit']['lots'] *= 17
+        self.assertTrue(validate(example, schema, schema))
+        example['restricted_credit']['lots'] = []
+        self.assertEqual(validate(example, schema, schema), [])
+        example['plan']['export_payment'] = {'rate_per_kwh': '1', 'published_utc_ms': 0}
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')

@@ -396,6 +396,92 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
 }
 
+void restrictedCredit(JsonValue draft,const std::filesystem::path &target) {
+    const auto close=T+3600000;
+    auto &plan=member(draft,"plan");
+    set(plan,"tiers",R"("none")");
+    set(plan,"cycle_charge",R"("5")");
+    set(plan,"subtotal_multiplier",R"("1")");
+    auto &revision=member(plan,"revisions").items.front();
+    set(revision,"end_utc_ms",std::to_string(close));
+    set(revision,"time_mode",R"("constant")");
+    set(revision,"base_rate_per_kwh",R"("1")");
+    set(revision,"charge_per_civil_day",R"("0")");
+    set(revision,"calendar","[]");
+    set(revision,"bands","[]");
+    set(member(draft,"opening"),"cycle_end_utc_ms",std::to_string(close));
+
+    TariffDeclarationStore store(target);
+    std::string reason;
+    JsonValue saved;
+    CHECK(store.load(&saved,&reason)&&store.save(draft,&reason));
+    TariffSettingsPanel panel;
+    panel.open(draft);
+    enter(panel,"plan");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,25,ColorLevel::None).find("[U] Restricted credit")!=std::string::npos);
+    panel.key('u',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="13");
+    enter(panel,"restricted_credit");
+    enter(panel,"accrued_import_subtotal");type(panel,"0");
+    enter(panel,"lots");
+    panel.key('a',{},T/1000);
+    panel.key('\r',{},T/1000);
+    enter(panel,"expires_utc_ms");type(panel,std::to_string(close+1));
+    enter(panel,"amount");type(panel,"20");
+    const auto save=[&](const JsonValue &value,std::string *error){return store.save(value,error);};
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,25,ColorLevel::None).find("Restricted credit offsets import energy")!=std::string::npos);
+    panel.key('\r',save,T/1000);
+    CHECK(panel.message.find("NEW plan.key")!=std::string::npos);
+    panel.key(27,{},T/1000);
+    set(member(panel.draft,"plan"),"key",R"("restricted-plan-v13")");
+    set(member(panel.draft,"opening"),"key",R"("restricted-opening-v13")");
+    panel.key('v',{},T/1000);
+    panel.key('\r',save,T/1000);
+    const bool persisted=store.load(&saved,&reason)&&saved.find("schema_version")->text=="13";
+    CHECK(persisted);
+    if(!persisted)return;
+
+    TariffDeclaration decoded;
+    const bool declared=decodeTariffDeclaration(saved,&decoded)&&decoded.plan.restrictedCreditAtClose;
+    CHECK(declared);
+    if(!declared)return;
+    checkComparison(compareTariffCycles(decoded,{dec("10000"),dec("25000")},1,T),
+                    "5.000000","10.000000","5.000000");
+    panel.key('p',{},T/1000);
+    for(char c:std::string("10000\t25000\r"))panel.key(c,{},T/1000);
+    const auto rendered=awaitComparison(panel);
+    CHECK(rendered.find("Cash due without mining: 5.000000 USD")!=std::string::npos);
+    CHECK(rendered.find("10.000000 USD")!=std::string::npos);
+    frame(panel,60,12);
+    panel.key(27,{},T/1000);
+
+    auto revised=saved;
+    auto &lot=member(member(revised,"restricted_credit"),"lots").items.front();
+    set(lot,"amount",R"("21")");
+    CHECK(!store.save(revised,&reason)&&reason.find("NEW opening.key")!=std::string::npos);
+    set(member(revised,"opening"),"key",R"("restricted-opening-v13-updated")");
+    CHECK(store.save(revised,&reason));
+
+    auto midcycle=saved;
+    auto &opening=member(midcycle,"opening");
+    set(opening,"through_utc_ms",std::to_string(T+1800000));
+    set(opening,"imported_kwh",R"("5")");
+    set(opening,"accrued_subtotal",R"("10")");
+    set(member(midcycle,"restricted_credit"),"accrued_import_subtotal",R"("5")");
+    CHECK(decodeTariffDeclaration(midcycle,&decoded));
+    checkComparison(compareTariffCycles(decoded,{dec("0"),dec("10000")},1,T),
+                    "5.000000","5.000000","0.000000");
+
+    panel.open(saved);
+    enter(panel,"plan");
+    enter(panel,"currency");type(panel,"EUR");
+    const auto &cleared=panel.draft.find("restricted_credit")->find("lots")->items.front();
+    CHECK(cleared.find("amount")->text.empty()&&cleared.find("expires_utc_ms")->text==std::to_string(close+1));
+    CHECK(!decodeTariffDeclaration(panel.draft,&decoded));
+}
+
 void exportPayment(JsonValue draft,const std::filesystem::path &target) {
     const auto close=T+3600000;
     auto &plan=member(draft,"plan");
@@ -1137,6 +1223,7 @@ int main(int argc,char **argv){
     demandRatchet(original,root/"ratchet-version-test.json");
     apparentDemand(original,root/"apparent-demand-version-test.json");
     exportPayment(original,root/"export-payment-version-test.json");
+    restrictedCredit(original,root/"restricted-credit-version-test.json");
     TariffDeclarationStore store(file),other(file);JsonValue loaded;
     std::string message;CHECK(!store.save(original,&message));CHECK(store.load(&loaded,&message)&&!std::filesystem::exists(file));
     CHECK(!store.save(loaded,&message)&&!std::filesystem::exists(file));CHECK(store.save(original,&message)&&other.load(&loaded,&message));
