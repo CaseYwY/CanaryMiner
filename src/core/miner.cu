@@ -246,6 +246,9 @@ int main(int argc, char **argv) {
 #if defined(SIGBREAK)
         signal(SIGBREAK, onSignal);
 #endif
+#if defined(SIGPIPE)
+        signal(SIGPIPE, SIG_IGN); // Let the command report stdout failure, including after publication.
+#endif
         if (localReview)
             return commandMarketRewardFile(cli.marketReward, argc, argv, &g_stop);
         if constexpr (kPublicTickerRuntimeBuilt) {

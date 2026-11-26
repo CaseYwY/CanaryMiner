@@ -56,6 +56,17 @@ def with_checksum(payload):
     return payload + sha256(payload).hexdigest().encode("ascii") + b"\n"
 
 
+def run_with_closed_stdout(cli, cwd, *args):
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        result = subprocess.run([cli, "market-reward", *args], cwd=cwd, stdout=write_end,
+                                stderr=subprocess.PIPE, timeout=10)
+        assert result.returncode == 1 and not result.stderr, result
+    finally:
+        os.close(write_end)
+
+
 def offline_archive(cli, root, cutoff):
     file = root / "\u00adcapture 主网.cmr"
     body = json.dumps(status(42, cutoff), indent=2).encode("ascii") + b"\n"
@@ -76,6 +87,9 @@ def offline_archive(cli, root, cutoff):
     result = run(cli, root, "--open-review", file.name)
     assert_reward(result, 42)
     assert result.stdout.encode("ascii") == report and file.read_bytes() == original, result
+    if os.name != "nt":
+        run_with_closed_stdout(cli, root, "--open-review", file.name)
+        assert file.read_bytes() == original
     reject = (
         (original[:-1], "archive unavailable or invalid"),
         (original + b"extra", "archive unavailable or invalid"),
@@ -275,6 +289,12 @@ def public(cli_path, fixture, enabled, root):
     assert archive.is_file() and not temporary_archive.exists() and requests.read_text().splitlines() == ["6"]
     archive.unlink()
     requests.unlink()
+    if os.name != "nt":
+        run_with_closed_stdout(cli, root, ALLOW, "--save-review", archive.name)
+        assert requests.read_text().splitlines() == ["6"] and not temporary_archive.exists()
+        assert_reward(run(cli, root, "--open-review", archive.name), 148_569)
+        archive.unlink()
+        requests.unlink()
     for mode, expected in (("future", "invalid response observation time"), ("timeout", "deadline exceeded")):
         scenario.write_text(mode, encoding="ascii")
         result = run(cli, root, ALLOW, "--save-review", archive.name)
