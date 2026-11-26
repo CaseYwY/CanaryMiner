@@ -20,9 +20,10 @@ Copy config.tls.example.json to a private config, then review it in a terminal:
   .\bin\canary-miner.exe settings --config FILE  (Windows PowerShell)
 
 The example requests strict TLS on the first user pool and disables donation.
-Use kryptex-tls for US or kryptex-hk-tls for Hong Kong. Strict TLS requires
-system trust and a matching DNS name. The strict presets disable plaintext
-fallback. Each installation uses system trust rather than a bundled CA file.
+kryptex-tls selects the US server. Use kryptex-hk-tls for Hong Kong or see
+canary-miner --help for the other Kryptex regions and the HeroMiners preset.
+Strict TLS uses the system CA store, requires a matching DNS name and
+disables plaintext fallback.
 
 Windows uses Schannel and requires the x64 Visual C++ 2015–2022 runtime
 at least as recent as the build toolset. Linux uses static OpenSSL 3.5.9
