@@ -244,6 +244,18 @@ def main(cli, bundle=None):
             amounts(result, "1.000000", "3.000000", "6.000000", "-1.000000", "7.000000")
             assert run("--open-review", "scheduled-extended.cmr") == result
 
+            # Preserve quarter-hour export evidence and round the summed half-hour imports once.
+            quarter = begin + HOUR // 4
+            rounded_schedule = scheduled_tariff(begin, half, (begin, quarter, "-2"), (quarter, half, "6"))
+            rounded_schedule["plan"]["rounding"] = "meter_import_half_hour_kwh_half_even_2"
+            fine = paired((begin, "0", "10"), (quarter, "0.006", "11"), (half, "0.015", "12"))
+            review(rounded_schedule, paired((begin, "0", "10"), (half, "0.015", "12")), half,
+                   error="export register needs a reading at an export-rate boundary")
+            result = review(rounded_schedule, fine, half, "--save-review", "scheduled-rounding.cmr")
+            assert "Billed usage 0.020000 kWh" in result
+            amounts(result, "0.015000", "2.000000", "0.060000", "4.000000", "-3.940000")
+            assert run("--open-review", "scheduled-rounding.cmr") == result
+
             mid = copy.deepcopy(policy)
             mid["opening"].update(through_utc_ms=half, imported_kwh="1", accrued_subtotal="3",
                                   exported_kwh="1", accrued_export_payment="-3")

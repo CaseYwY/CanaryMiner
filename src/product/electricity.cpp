@@ -619,8 +619,9 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     Intervals halfHours;
     const auto *billingIntervals=&trace.intervals;
     if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
-        if (roundMeter && p.demandCharge) {
-            // Demand already used the finer physical deltas. Energy is rounded once per half hour.
+        const bool scheduledExport=p.exportPayment && !p.exportPayment->dynamic.empty();
+        if (roundMeter && (p.demandCharge || scheduledExport)) {
+            // Demand and scheduled exports use the original deltas. Round imports once per half hour.
             halfHours.reserve(static_cast<size_t>((end-opening.throughUtcMs)/meterHalfHourMs));
             result.status=foldHalfHours(trace,halfHours,cancel,stop);
             if (result.status!=ElectricityStatus::Ok) return result;
