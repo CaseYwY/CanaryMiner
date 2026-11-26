@@ -188,6 +188,23 @@ The ages in the report are measured at its recorded capture time. The archive an
 check the stored calculation and detect corruption. They carry no provider signature or current freshness claim.
 Existing [user-declared reviews](manual-market.md#save-and-reopen-a-local-hour-review) remain readable.
 
+### Choose a resolver for one public sample
+
+A public sample can use one explicitly selected DNS server if the deployment's resolver returns a
+non-public address for a provider. Substitute the IPv4 or unscoped IPv6 address of your approved
+resolver for `IP`. It must answer ordinary DNS on port 53.
+
+```text
+canary-miner market-tickers --allow-public-tickers --dns-server IP
+canary-miner market-hour --allow-public-candles --dns-server IP --save-review capture.cmh
+```
+
+The flag applies only to the one-shot public invocation and requires the public consent flag. If
+omitted, the helper uses its usual resolver configuration. The option does not enter Settings,
+saved reviews, offline replay or Dashboard polling. A DNS answer must still resolve to an allowed
+public destination, and HTTPS still verifies the provider name and certificate. The selected
+resolver address is visible to users with access to the command line.
+
 ### Native ownership across a one-shot sample
 
 Both requests share one native ownership lifetime when an explicit command starts. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.

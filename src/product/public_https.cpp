@@ -178,7 +178,8 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
     struct Busy { Impl *value; ~Busy() { value->busy.clear(); } } busy{impl_.get()};
     PublicJsonResponse response;
     std::string url;
-    if (!publicFeedUrl(request, &url) || limits.totalMs < 50 || limits.totalMs > 60000 || !limits.connectMs || limits.connectMs > limits.totalMs ||
+    if (!publicFeedUrl(request, &url) || (!limits.dnsServer.empty() && !validPublicDnsServer(limits.dnsServer)) ||
+        limits.totalMs < 50 || limits.totalMs > 60000 || !limits.connectMs || limits.connectMs > limits.totalMs ||
         !limits.bodyBytes || limits.bodyBytes > 1024 * 1024 || limits.headerBytes < 64 || limits.headerBytes > 32 * 1024) {
         response.status = PublicHttpsStatus::InvalidRequest; return response;
     }
@@ -187,7 +188,7 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
     try {
         Transfer t;
         t.response.status = PublicHttpsStatus::Ok; t.limits = limits;
-        std::unique_ptr<curl_slist, ListDelete> headers, resolve;
+        std::unique_ptr<curl_slist, ListDelete> headers, resolve, connectTo;
         std::unique_ptr<CURLM, MultiDelete> multi(curl_multi_init());
         std::unique_ptr<CURL, EasyDelete> easy(curl_easy_init());
         if (!easy || !multi) return response;
@@ -225,6 +226,17 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
 #ifdef CANARY_HTTPS_TESTING
         if (impl_->port && (!set(CURLOPT_RESOLVE, resolve.get()) || !set(CURLOPT_CAINFO, impl_->caFile.c_str()))) return response;
 #endif
+        if (!limits.dnsServer.empty()) {
+            const auto resolver = limits.dnsServer.find(':') == std::string::npos
+                ? limits.dnsServer + ":53" : "[" + limits.dnsServer + "]:53";
+            constexpr std::string_view httpsScheme = "https://";
+            const auto host = url.substr(httpsScheme.size(), url.find_first_of(":/", httpsScheme.size()) - httpsScheme.size());
+            // Resolve the absolute provider name so deployment search suffixes never reach the selected server.
+            // CONNECT_TO leaves the URL's authority in use for HTTP and TLS.
+            const auto route = host + "::" + host + ".:";
+            if (!append(connectTo, route.c_str()) || !set(CURLOPT_CONNECT_TO, connectTo.get()) ||
+                !set(CURLOPT_DNS_SERVERS, resolver.c_str())) return response;
+        }
         if (curl_multi_setopt(multi.get(), CURLMOPT_MAX_TOTAL_CONNECTIONS, 2L) != CURLM_OK ||
             curl_multi_setopt(multi.get(), CURLMOPT_MAXCONNECTS, 2L) != CURLM_OK) return response;
         if (curl_multi_add_handle(multi.get(), easy.get()) != CURLM_OK) return response;

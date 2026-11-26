@@ -6,6 +6,9 @@ option(CANARY_ENABLE_PUBLIC_HTTPS "Build optional verified public JSON HTTPS tra
 add_library(canary_public_https STATIC
   "${CMAKE_SOURCE_DIR}/src/product/public_https_contract.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/public_json_process.cpp")
+if(WIN32)
+  target_link_libraries(canary_public_https PUBLIC ws2_32)
+endif()
 add_library(canary_public_https_client STATIC EXCLUDE_FROM_ALL
   "${CMAKE_SOURCE_DIR}/src/product/public_https.cpp")
 target_link_libraries(canary_public_https_client PUBLIC canary_public_https)

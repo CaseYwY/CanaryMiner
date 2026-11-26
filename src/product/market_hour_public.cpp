@@ -50,9 +50,13 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
                             int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop) {
     const bool saving = options.action == MarketHourAction::PublicSave;
-    if (argc != (saving ? 5 : 3) ||
-        !nativeMarketArgumentPair(argc, argv, 1, "market-hour", 2, "--allow-public-candles") ||
-        (saving && !nativeMarketArgumentPair(argc, argv, 3, "--save-review", 4, options.archiveName)))
+    const auto operandCount=3+(saving ? 2 : 0)+(options.dnsFlag ? 2 : 0);
+    if (argc!=operandCount ||
+        !nativeMarketArgumentPair(argc,argv,1,"market-hour",2,"--allow-public-candles") ||
+        (saving && !nativeMarketArgumentPair(argc,argv,options.saveFlag,"--save-review",
+                                              options.saveFlag+1,options.archiveName)) ||
+        (options.dnsFlag && !nativeMarketArgumentPair(argc,argv,options.dnsFlag,"--dns-server",
+                                                      options.dnsFlag+1,options.dnsServer)))
         return hourError("exact --allow-public-candles required", 2);
     if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
     const auto ownershipUncertain = [] { return hourError("helper ownership uncertain"); };
@@ -69,6 +73,7 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
         const auto fetch = marketProcessFetch(helper);
         auto limits = policy.https;
         limits.bodyBytes = marketHourBodyBytes;
+        limits.dnsServer=options.dnsServer;
         auto previous = initial;
         HourSample pearl, fx;
         PublicHourOriginal original{initial.second, end, {}, {}};

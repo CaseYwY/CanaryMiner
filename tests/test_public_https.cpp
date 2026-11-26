@@ -67,6 +67,16 @@ int main() {
     v6[0] = 0x3f; v6[1] = 0xff; v6[2] = 1; CHECK(!publicIpv6(v6));
     v6[0] = 0x26; v6[1] = 6; v6[2] = 0x47; v6[3] = 0; CHECK(publicIpv6(v6));
     CHECK(!publicIpv6(nullptr));
+    for (const char *address : {"8.8.8.8", "10.1.2.3", "172.31.4.5", "192.168.50.53", "127.0.0.1",
+                                "100.100.100.100", "169.254.1.53", "2606:4700:4700::1111", "2606::8.10.8.8", "fd00::53", "::1"}) {
+        CHECK(validPublicDnsServer(address));
+    }
+    for (const char *address : {"", "resolver.local", "8.8.8.8:53", "8.8.8.8,1.1.1.1", " 8.8.8.8",
+                                "8.8.8.256", "0.0.0.0", "198.18.0.1", "255.255.255.255",
+                                "::", "[::1]", "::ffff:8.8.8.8", "2606::8.010.8.8", "2001:db8::1", "fe80::1%3", "ff02::1"}) {
+        CHECK(!validPublicDnsServer(address));
+    }
+    CHECK(!validPublicDnsServer(std::string_view("8.8.8.8\0" "bad", 11)));
     PublicJsonClient client;
     std::atomic<bool> cancel{true};
     CHECK(client.get({}, cancel).status == PublicHttpsStatus::Cancelled);
@@ -78,6 +88,7 @@ int main() {
     CHECK(client.get({}, cancel, {100, 200, 1024 * 1024 + 1}).status == PublicHttpsStatus::InvalidRequest);
     CHECK(client.get({}, cancel, {100, 200, 10, 63}).status == PublicHttpsStatus::InvalidRequest);
     CHECK(client.get({}, cancel, {100, 200, 10, 32769}).status == PublicHttpsStatus::InvalidRequest);
+    CHECK(client.get({}, cancel, {100, 200, 10, 64, "resolver.local"}).status == PublicHttpsStatus::InvalidRequest);
 #if !defined(CANARY_EXPECT_HTTPS)
     CHECK(!client.available());
     CHECK(client.get({}, cancel).status == PublicHttpsStatus::Unavailable);
