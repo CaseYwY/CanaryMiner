@@ -18,7 +18,11 @@ int main() {
     CHECK(url == "https://api.mexc.com/api/v3/klines?symbol=PEARLUSDT&interval=1m&limit=61&startTime=600000&endTime=4199999");
     CHECK(publicFeedUrl({PublicFeed::CoinbaseUsdtHour, 600, 4200}, &url));
     CHECK(url == "https://api.coinbase.com/api/v3/brokerage/market/products/USDT-USD/candles?granularity=ONE_MINUTE&limit=61&start=600&end=4200");
+    CHECK(publicFeedUrl({PublicFeed::PearlMainnetTip}, &url));
+    CHECK(url == "https://blockbook.pearlresearch.ai/api/status");
     for (auto r : {PublicJsonRequest{static_cast<PublicFeed>(99)},
+                   PublicJsonRequest{PublicFeed::PearlMainnetTip, 1, 0},
+                   PublicJsonRequest{PublicFeed::PearlMainnetTip, 0, 1},
                    PublicJsonRequest{PublicFeed::MexcPearlHour, 600, 4260},
                    PublicJsonRequest{PublicFeed::CoinbaseUsdtHour, 601, 4201},
                    PublicJsonRequest{PublicFeed::CoinbaseUsdtHour, 60, 60},

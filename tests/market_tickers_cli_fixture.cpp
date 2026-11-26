@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <string_view>
 #include <thread>
 #if defined(_WIN32)
@@ -46,18 +47,22 @@ int main(int argc, char **argv) {
     if (argc == 9 && !om::validPublicDnsServer(argv[8])) return 2;
     const std::string_view feed(argv[1]);
     const bool candles = feed == "4" || feed == "5";
-    if (!candles && feed != "0" && feed != "2") return 3;
+    const bool reward = feed == "6";
+    if (!candles && !reward && feed != "0" && feed != "2") return 3;
     int64_t from = 0, to = 0;
     if (!readTime(argv[2], from) || !readTime(argv[3], to) ||
         (candles ? from < 60 || from % 60 || to - from != 3600 || to > 253402300799LL : from || to)) return 2;
     if (candles && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
                     std::string_view(argv[6]) != "65536")) return 2;
+    if (reward && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
+                   std::string_view(argv[6]) != "16384")) return 2;
+    const char *family = candles ? "candle" : reward ? "reward" : "ticker";
     const auto dir = std::filesystem::u8path(om::selfExecutablePath()).parent_path();
     std::string mode;
     {
-        std::ifstream input(dir / (candles ? "candle-scenario" : "ticker-scenario"));
+        std::ifstream input(dir / (std::string(family) + "-scenario"));
         input >> mode;
-        std::ofstream output(dir / (candles ? "candle-requests" : "ticker-requests"), std::ios::app);
+        std::ofstream output(dir / (std::string(family) + "-requests"), std::ios::app);
         output << feed;
         if (candles) output << ' ' << from << ' ' << to;
         output << '\n';
@@ -97,6 +102,16 @@ int main(int argc, char **argv) {
             response.status = om::PublicHttpsStatus::HttpStatus;
             response.httpStatus = 429;
             response.retryAfterSeconds = 1;
+        }
+    } else if (reward) {
+        if (mode == "timeout") {
+            response = {};
+            response.status = om::PublicHttpsStatus::Timeout;
+        } else {
+            std::ifstream source(dir / "reward-response.json", std::ios::binary);
+            if (!source) return 4;
+            response.body.assign(std::istreambuf_iterator<char>(source), std::istreambuf_iterator<char>());
+            if (mode == "future") response.observedUtc += 3600;
         }
     } else if (feed == "0") {
         response.body = R"([{"currency_pair":"PEARL_USDT","last":"2.50"}])";

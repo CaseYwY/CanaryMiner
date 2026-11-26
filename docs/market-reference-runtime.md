@@ -205,8 +205,38 @@ saved reviews, offline replay or Dashboard polling. A DNS answer must still reso
 public destination, and HTTPS still verifies the provider name and certificate. The selected
 resolver address is visible to users with access to the command line.
 
-### Native ownership across a one-shot sample
+### Review the next Pearl mainnet subsidy
 
-Both requests share one native ownership lifetime when an explicit command starts. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.
+The live command makes one request to the documented `/api/status` endpoint of the Pearl Research Labs Blockbook indexer. Use a build with
+public HTTPS enabled. The optional DNS server is scoped to this sample. The saved-file command opens
+a user-selected raw status response with a declared UTC cutoff in Unix seconds. It starts no HTTPS helper.
+
+```text
+canary-miner market-reward --allow-public-reward [--dns-server IP]
+canary-miner market-reward --file blockbook-status.json --as-of UTC_SECONDS
+```
+
+The command checks Pearl mainnet identity, eight-digit grain precision, synchronized index and backend
+heights, and a valid index update time no more than 30 minutes before the observation or declared
+cutoff. The provider exposes index update time as `lastBlockTime`. It records synchronization activity
+and has no block-header time or finality guarantee. The report labels the indexed height and the
+backend hash separately. Equal heights can occur during a same-height reorganization. Live mode uses
+the HTTPS helper's whole observation second, including index timestamps within that second. Offline
+mode treats the supplied integer cutoff as an exact instant and rejects even a fractional second
+after it. [Pearl Blockbook contract](https://github.com/pearl-research-labs/blockbook/blob/master/openapi.yaml) · [Status time source](https://github.com/pearl-research-labs/blockbook/blob/master/api/worker.go#L2691-L2748)
+
+For next height `h`, calculate the integer subsidy in grains by flooring
+`S × H / ((h + H) × (h + H − 1))`. The supply cap `S` is 210,000,000,000,000,000 grains and
+`H = floor(4 × 365 × 86400 / 194) = 650226`. Divide by 100,000,000 to display eight decimal places in
+PRL. The report covers scheduled consensus subsidy. Transaction fees, pool payouts, each miner's credited earnings
+and profit forecasts require their own data. [Pearl v1.5.8 subsidy implementation](https://github.com/pearl-research-labs/pearl/blob/3db05e0de0ca90c3a043abd927b968cf53bcd4c8/node/blockchain/validate.go) · [Pearl mainnet target interval](https://github.com/pearl-research-labs/pearl/blob/3db05e0de0ca90c3a043abd927b968cf53bcd4c8/node/chaincfg/params.go)
+
+Exit code 0 means a valid subsidy reference. Exit code 1 means a report write failed. Exit code 2 means invalid input flags, 3 means an unusable
+source or review, and 130 means a cancelled sample or review. A public sample with unconfirmed helper
+cleanup returns 3. A rejected response never supplies a subsidy or changes financial settings.
+
+### Native ownership during one-shot ticker and hour sampling
+
+Each ticker or hour invocation gives both of its requests one native ownership lifetime. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.
 
 The CLI regression uses the real native process client with an installed synthetic worker. It checks stale caller scopes on Windows and Linux. On Linux it also changes the ownership epoch at the first or second request-thread creation. A valid sample launches both workers. A stale caller or first-request fault launches none, and a second-request fault launches only the first. These cases use no provider connection.

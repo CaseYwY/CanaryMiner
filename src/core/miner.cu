@@ -174,6 +174,24 @@ int main(int argc, char **argv) {
         std::fputs("market-hour: public HTTPS unavailable in this build\n", stderr);
         return kExitConfig;
     }
+    if (cli.command == Command::MarketReward) {
+        if (cli.help) {
+            std::puts(marketRewardHelp);
+            return kExitOk;
+        }
+        signal(SIGINT, onSignal);
+        signal(SIGTERM, onSignal);
+#if defined(SIGBREAK)
+        signal(SIGBREAK, onSignal);
+#endif
+        if (cli.marketReward.action == MarketRewardAction::LocalReview)
+            return commandMarketRewardFile(cli.marketReward, argc, argv, &g_stop);
+        if constexpr (kPublicTickerRuntimeBuilt) {
+            return commandPublicMarketReward(cli.marketReward, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
+        }
+        std::fputs("market-reward: public HTTPS unavailable in this build\n", stderr);
+        return kExitConfig;
+    }
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
             std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP]\n"
@@ -502,7 +520,8 @@ int main(int argc, char **argv) {
                 "       canary-miner diagnostics       build-only preview/export; see diagnostics --help\n"
                 "       canary-miner meter-bill        review imported meter intervals; see meter-bill --help\n"
                 "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
-                "       canary-miner market-tickers   review saved tickers or take a public sample; see market-tickers --help\n\n"
+                "       canary-miner market-tickers   review saved tickers or take a public sample; see market-tickers --help\n"
+                "       canary-miner market-reward    review the next Pearl mainnet block subsidy; see market-reward --help\n\n"
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"

@@ -6,6 +6,8 @@ add_library(canary_economics STATIC
   "${CMAKE_SOURCE_DIR}/src/product/tariff_declaration.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/meter_bill.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/meter_prepaid.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/market_reward.cpp"
+  "${CMAKE_SOURCE_DIR}/src/product/market_reward_public.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/octopus_meter_rates.cpp"
   "${CMAKE_SOURCE_DIR}/src/product/energy_owner.cpp")
 target_compile_features(canary_economics PUBLIC cxx_std_17)

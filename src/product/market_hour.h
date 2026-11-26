@@ -26,19 +26,6 @@ struct MarketHourOptions {
     }
 };
 
-inline bool parsePublicTickerCli(int argc, const char *const *argv, int begin, std::string &dnsServer) {
-    if (!argv || begin < 1 || begin >= argc || std::string_view(argv[begin]) != "--allow-public-tickers")
-        return false;
-    const auto count = argc - begin;
-    if (count == 1) {
-        dnsServer.clear();
-    } else if (count == 3 && std::string_view(argv[begin + 1]) == "--dns-server" &&
-               validPublicDnsServer(argv[begin + 2])) {
-        dnsServer = argv[begin + 2];
-    } else return false;
-    return true;
-}
-
 inline bool parseMarketHourCli(int argc,const char *const *argv,int begin,MarketHourOptions &out) {
     if (!argv || begin<1 || begin>=argc) return false;
     const std::string_view option(argv[begin]);

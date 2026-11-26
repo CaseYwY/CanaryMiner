@@ -10,11 +10,11 @@ namespace om {
 
 enum class PublicFeed {
     GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles,
-    MexcPearlHour, CoinbaseUsdtHour
+    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip
 };
 struct PublicJsonRequest {
     PublicFeed feed = PublicFeed::GatePearlTicker;
-    int64_t fromUtc = 0, toUtc = 0;  // minute bounds for candles; zero for ticker requests
+    int64_t fromUtc = 0, toUtc = 0;  // minute bounds for candles; zero otherwise
 };
 struct PublicHttpsLimits {
     unsigned connectMs = 5000, totalMs = 15000;

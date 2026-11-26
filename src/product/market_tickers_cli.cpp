@@ -1,6 +1,6 @@
 #include "market_ticker_runtime.h"
 #include "market_public_sample.h"
-#include "market_hour.h"
+#include "market_sample_options.h"
 
 #include <cstdio>
 
@@ -81,7 +81,7 @@ int commandPublicTickers(const std::filesystem::path &module, int argc, const ch
                          const volatile sig_atomic_t *stop) {
     using market_detail::nativeMarketArgumentPair;
     std::string dnsServer;
-    if (!parsePublicTickerCli(argc,argv,2,dnsServer) ||
+    if (!parsePublicMarketSampleCli(argc, argv, 2, "--allow-public-tickers", dnsServer) ||
         !nativeMarketArgumentPair(argc,argv,1,"market-tickers",2,"--allow-public-tickers") ||
         (!dnsServer.empty() && !nativeMarketArgumentPair(argc,argv,3,"--dns-server",4,dnsServer))) {
         std::fputs("market-tickers: exact --allow-public-tickers required\n", stderr);
