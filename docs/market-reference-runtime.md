@@ -235,8 +235,8 @@ Exit code 0 means a valid subsidy reference. Exit code 1 means a report write fa
 source or review, and 130 means a cancelled sample or review. A public sample with unconfirmed helper
 cleanup returns 3. A rejected response never supplies a subsidy or changes financial settings.
 
-### Native ownership across a one-shot sample
+### Native ownership during one-shot ticker and hour sampling
 
-Both requests share one native ownership lifetime when an explicit command starts. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.
+Each ticker or hour invocation gives both of its requests one native ownership lifetime. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.
 
 The CLI regression uses the real native process client with an installed synthetic worker. It checks stale caller scopes on Windows and Linux. On Linux it also changes the ownership epoch at the first or second request-thread creation. A valid sample launches both workers. A stale caller or first-request fault launches none, and a second-request fault launches only the first. These cases use no provider connection.

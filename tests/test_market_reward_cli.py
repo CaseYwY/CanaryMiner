@@ -138,6 +138,10 @@ def public(cli_path, fixture, enabled, root):
                  ("--allow-public-rewar\uff44",), (ALLOW, "--dn\uff53-server", resolver)):
         result = run(cli, root, *args)
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
+    for flag in ("-h", "--help"):
+        top_help = subprocess.run([cli, flag], cwd=root, capture_output=True, text=True, timeout=10)
+        assert top_help.returncode == 0 and "canary-miner market-reward" in top_help.stdout, top_help
+        assert "FORBIDDEN_DEVICE_SETUP" not in top_help.stdout + top_help.stderr, top_help
     help_result = run(cli, root, "--help")
     assert help_result.returncode == 0 and "--as-of UTC_SECONDS" in help_result.stdout
     assert "--allow-public-reward" in help_result.stdout

@@ -503,6 +503,7 @@ inline std::string productHelpText() {
         "       canary-miner energy-periods   review local GPU-board energy by month; see energy-periods --help\n"
         "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
         "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
+        "       canary-miner market-reward    review the next Pearl mainnet subsidy (see market-reward --help)\n"
         "       --no-history                  disable local accepted-share history for this run\n"
         "       --no-market                   suppress manual and public references for this run\n"
         "       --allow-public-tickers        allow a saved public ticker request for this run in an opt-in build\n"
