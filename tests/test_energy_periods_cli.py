@@ -161,6 +161,14 @@ def main(host, ordinary, auth, collector, fixture, tzdb=None):
             report(destination, code=3, message='verified local energy history unavailable')
         finally:
             moved.rename(missing)
+        missing.rename(moved)
+        try:
+            shutil.copy2(installed / auth.name, missing)
+            report(destination, code=3, message='verified local energy history unavailable')
+            assert snapshot(destination) == original
+        finally:
+            missing.unlink(missing_ok=True)
+            moved.rename(missing)
 
         if tzdb:
             policy(clock={'kind': 'utc', 'fixed_offset_seconds': 0})

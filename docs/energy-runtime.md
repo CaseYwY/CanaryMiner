@@ -41,6 +41,8 @@ The native factory resolves its own module through Windows `GetModuleFileNameW` 
 
 There is no PATH/CWD executable search, executable config field, environment override, download or fallback. Unicode paths use native Windows wide APIs and UTF-8 configuration paths. The configured state directory becomes absolute while preserving its traversal semantics; `energy-persistence.json` is appended. Parent-side discovery does not probe/read helper files. A helper missing or speaking the wrong protocol fails through the existing bounded transport.
 
+Build and installation checks for the optional [v4 energy candidate](pool-tls-candidate.md#version-4-energy-runtime-layout) use the two fixed siblings and the system SQLite runtime.
+
 Both the executable directory and private state directory must be protected by deployment. Fixed names/absolute paths are not signatures or defense against same-privilege replacement, symlink/reparse races, copied authorization records or hostile library loading. Dependencies and loader behavior on a clean machine remain qualification work. SQLite stays the existing optional system ABI; this change does not bundle/download it or infer authorization from its presence.
 
 An enabled CMake native target depends on both helper targets and places them beside the main executable for single- and multi-config generators. `cmake --install` installs all three into `bin`. The CPU-only `energy-runtime-host` install component instead installs the explicitly named capability-enabled test CLI and both ordinary helpers. This component is for private host verification, never a replacement miner.

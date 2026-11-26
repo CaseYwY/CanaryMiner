@@ -17,6 +17,9 @@ WINDOWS_SYSTEM = frozenset(('kernel32.dll', 'user32.dll', 'advapi32.dll', 'shell
                             'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll', 'vcruntime140.dll',
                             'vcruntime140_1.dll', 'ucrtbase.dll'))
 PUBLIC_JSON_WORKER = 'canary_public_json_worker'
+ENERGY_RUNTIME_MARKER = b'  energy-runtime=opt-in\0'
+ENERGY_LEASE_QUERY = b'["CMELQ1",'
+ENERGY_AUTHORIZATION_FILE = b'energy-persistence.json'
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 HOME_PATH = re.compile(r'(?i)[a-z]:[\\/]+Users[\\/]+|/(?:home|Users)/|/mnt/[a-z]/')
 ELF64_PROGRAM_HEADER = struct.Struct('<IIQQQQQQ')
@@ -132,12 +135,20 @@ def check_linux_interpreter(name, data):
         raise ValueError(invalid)
 
 
+def energy_runtime_present(data):
+    # Older capable miners predate the version marker. Their leased runtime and authorization
+    # path distinguish them from the ordinary miner, including optimized native builds.
+    return ENERGY_RUNTIME_MARKER in data or (ENERGY_LEASE_QUERY in data and ENERGY_AUTHORIZATION_FILE in data)
+
+
 def verify(platform, stage, source, cache, deny_file, tool):
     check_cache(cache)
     names = ('canary-miner', 'canary_preferences_worker')
     if platform == 'windows':
         names = tuple(name + '.exe' for name in names)
-    floor, _ = verify_images(platform, stage, source, deny_file, tool, names)
+    floor, checked = verify_images(platform, stage, source, deny_file, tool, names)
+    if energy_runtime_present(checked[names[0]]):
+        raise ValueError('the release miner includes unqualified energy persistence')
     return '.'.join(map(str, floor))
 
 

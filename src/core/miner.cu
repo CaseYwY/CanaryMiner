@@ -215,7 +215,14 @@ int main(int argc, char **argv) {
     const bool explicitPresentation=cli.ov.presentation.language.has_value()||cli.ov.presentation.formattingLocale.has_value()||cli.ov.presentation.ascii;
     if(explicitPresentation)fprintf(stderr,"Language request: effective UI en / legacy per-field formatting; full native translation/layout integration unavailable. No mining setting changed.\n");
     if (cli.command == Command::Version) {
-        printf("%s%s\n", versionText().c_str(), kPublicTickerRuntimeBuilt ? "  public-https=opt-in" : "");
+        constexpr const char *energyCapability =
+#if defined(CANARY_ENABLE_ENERGY_RUNTIME) && CANARY_ENABLE_ENERGY_RUNTIME
+            "  energy-runtime=opt-in";
+#else
+            "";
+#endif
+        printf("%s%s%s\n", versionText().c_str(), kPublicTickerRuntimeBuilt ? "  public-https=opt-in" : "",
+               energyCapability);
         return kExitOk;
     }
     signal(SIGINT,onSignal);signal(SIGTERM,onSignal);

@@ -5,6 +5,9 @@
 #include <thread>
 #endif
 int main(int argc,char **argv){
+    // Retain the entry point's identity even when both helpers link shared protocol code.
+    static const volatile char packageRole[] = "CanaryMiner-EnergyAuthorizationWorker/1";
+    (void)packageRole[0];
     using namespace om;
     try{
         std::string wire;EnergyAuthorizationRequest request;
