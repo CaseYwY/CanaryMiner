@@ -23,7 +23,7 @@ The strict [declaration schema](../config/tariff-declaration.schema.json) and [i
 1. Independent jurisdiction, territory, supplier, product, currency, plan version key, clock and unverified local source reference. Three-letter currency is an identifier, not FX/legal-tender qualification.
 2. Contiguous revisions with constant/calendar/dynamic time pricing, signed rates, publication instants and additive shared-register progressive or true all-units bands. Calendar fallback/events, fees, optional minimum and one whole-subtotal multiplier retain the pure core's exact documented order.
 3. Separate opening key, whole-meter scope/adapter declaration, cycle begin/end/through, accumulated import kWh and **pre-multiplier accrued subtotal**. Origin is always **declared forecast**; typing a meter label cannot create observed telemetry. At cycle start both amounts must explicitly be zero; mid-cycle requires caller-supplied amounts and the clock version.
-4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). Version 12 declares a [separate payment for exports](#price-electricity-exports-separately). Version 13 adds [restricted opening credits](#apply-restricted-credit-at-cycle-close). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
+4. Version 1 uses `explicit_cycle_only`. Version 2 defines a monthly whole-meter cycle. Version 3 adds explicit daily-fee allocation to the monthly cycle. Version 4 supports named clocks. Version 5 supports an annual cycle. Version 6 defines a two-month cycle using monthly-average all-units pricing. Version 7 adds seasonal progressive allowances. Version 8 adds [component-specific unit-rate multipliers](#apply-a-multiplier-to-part-of-the-unit-rate). Version 9 adds [maximum average demand](#charge-for-maximum-average-demand). Version 10 adds a [historical demand floor](#use-a-historical-demand-floor). Version 11 adds [apparent maximum demand](#charge-for-apparent-demand-in-kva). Version 12 declares a [separate payment for exports](#price-electricity-exports-separately). Version 13 adds [restricted opening credits](#apply-restricted-credit-at-cycle-close). Version 14 adds [signed scheduled export rates](#price-electricity-exports-separately). The rounding default is `final_display_only`. All versions share the basis, origin, time-version and acknowledgement rules. Rate changes do not reset shared quantity.
 
 The decoder calls `validateTariffOpening`, not a fake zero-power bill. This proves **structure/binding**, not sufficient price/trace coverage or a forecast. Evaluation still requires complete bound trajectories, prices published at the decision instant, unambiguous calendar winners and a supported horizon. Dynamic gaps remain missing; overlapping records reject. Minimum/all-units need the full remaining cycle. Saving does not assert that a future decision can be priced.
 
@@ -311,7 +311,7 @@ one hour, moving from -2,000 W to -1,000 W loses 1 kWh of export. At 1 USD/kWh t
 costs 1 USD. Moving from -1,000 W to +1,000 W loses the same payment and adds 1 kWh of
 import. At 3 USD/kWh for import, the difference is 4 USD. These examples cover T28 and T29.
 
-[Restricted opening credits](#apply-restricted-credit-at-cycle-close) use their own declaration. Supplier-specific settlement and the combination with apparent-power demand require additional rules.
+[Export invoice reconciliation](#compare-separate-export-payments-with-an-invoice) compares the supply and export amounts for a common cycle. [Restricted opening credits](#apply-restricted-credit-at-cycle-close) use their own declaration. Supplier-specific settlement and the combination with apparent-power demand require additional rules.
 [Example of provider-specific export credits](https://www.pge.com/en/clean-energy/solar/getting-started-with-solar/solar-billing-plan.html)
 
 ### Apply restricted credit at cycle close
@@ -747,6 +747,43 @@ Each amount carries the chosen invoice precision and can be signed. Use only the
 The calculation rounds the annual estimate once at the invoice precision, sums the stated interim charges exactly, then subtracts that sum. For an annual estimate of 140.00 and interim charges totaling 120.00, the estimated adjustment is 20.00. A negative amount represents an estimated credit. When a stated adjustment is present, the report shows the signed difference. Incomplete cycles, gaps and overlapping statements withhold the comparison.
 
 The invoice file limit stays at 16 KiB. `--save-review` retains the exact statement and per-period results in the private archive. `--open-review` rechecks the annual estimate and reconciliation without the original files. Earlier readers require an update to open archives containing version 2 invoice data. When extending a review, the previous archive retains its reconciliation. In an extension with a new reconciliation, every reviewed annual cycle must be complete and appear in the supplied statement.
+
+### Compare separate export payments with an invoice
+
+Use invoice schema version 3 with a fixed or scheduled export tariff. Enter the supply
+charge and the export payment for each complete reviewed cycle. Both statements must
+cover the same meter, currency and UTC cycle bounds. An export payment has a positive
+sign when the supplier pays you and a negative sign when the supplier charges you.
+Use an explicit zero when the statement shows no payment. Exclude unrelated credits,
+account balances and payments.
+
+```json
+{
+  "schema_version": 3,
+  "scope": "synthetic-whole-meter-scenario",
+  "currency": "USD",
+  "decimal_places": 2,
+  "rounding": "half_even",
+  "cycles": [{
+    "begin_utc_ms": 1704067200000,
+    "end_utc_ms": 1706745600000,
+    "supply_charge": "18.55",
+    "export_payment": "-1.25"
+  }]
+}
+```
+
+The comparison rounds each calculated component once at the selected invoice precision.
+It derives the invoice and calculated net costs by subtracting their respective export
+payments from supply charges. The displayed net difference can be zero while both
+components differ. The ordinary meter estimate keeps its own precision.
+
+Use `--invoice FILE` for a new review or to compare a meter-only archive. A saved
+comparison binds the original invoice and all three amounts for each cycle. To
+compare an extended archive, provide a new invoice document covering all cycles in
+the extension. The original archive remains available for its own statement. Earlier
+readers need an update to open an archive with this invoice format. This format
+requires both monetary components to share a billing cycle.
 
 ### Save and reopen a local meter review
 
