@@ -220,8 +220,10 @@ The command checks Pearl mainnet identity, eight-digit grain precision, synchron
 heights, and a valid index update time no more than 30 minutes before the observation or declared
 cutoff. The provider exposes index update time as `lastBlockTime`. It records synchronization activity
 and has no block-header time or finality guarantee. The report labels the indexed height and the
-backend hash separately. Equal heights can occur during a same-height reorganization. Live mode labels
-the HTTPS helper's local observation time. Offline mode labels the supplied cutoff. [Pearl Blockbook contract](https://github.com/pearl-research-labs/blockbook/blob/master/openapi.yaml) · [Status time source](https://github.com/pearl-research-labs/blockbook/blob/master/api/worker.go#L2691-L2748)
+backend hash separately. Equal heights can occur during a same-height reorganization. Live mode uses
+the HTTPS helper's whole observation second, including index timestamps within that second. Offline
+mode treats the supplied integer cutoff as an exact instant and rejects even a fractional second
+after it. [Pearl Blockbook contract](https://github.com/pearl-research-labs/blockbook/blob/master/openapi.yaml) · [Status time source](https://github.com/pearl-research-labs/blockbook/blob/master/api/worker.go#L2691-L2748)
 
 For next height `h`, calculate the integer subsidy in grains by flooring
 `S × H / ((h + H) × (h + H − 1))`. The supply cap `S` is 210,000,000,000,000,000 grains and

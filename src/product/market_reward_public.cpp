@@ -43,7 +43,7 @@ int commandPublicMarketReward(const MarketRewardOptions &options, const std::fil
         if (!marketSampleClockContinuous(initial, initial, received) || response.observedUtc < initial.second ||
             response.observedUtc > received.second || response.httpStatus != 200)
             return sampleError("invalid response observation time or HTTP status");
-        const auto result = parsePearlBlockbookTip(response.body, response.observedUtc);
+        const auto result = parsePearlBlockbookTip(response.body, response.observedUtc, PearlRewardCutoff::WholeObservationSecond);
         if (!lifetime.permitted()) return sampleError("helper ownership uncertain");
         if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
         return reportPearlSubsidy(result, response.observedUtc, true);

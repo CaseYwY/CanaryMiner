@@ -64,6 +64,16 @@ def offline(cli, root):
         assert "saved Blockbook status, user-declared cutoff" in result.stdout
         assert file.read_bytes() == before
 
+    precise = status(42, cutoff)
+    whole_second = precise["blockbook"]["lastBlockTime"].split(".", 1)[0]
+    precise["blockbook"]["lastBlockTime"] = whole_second + ".000000000Z"
+    file.write_text(json.dumps(precise), encoding="utf-8")
+    assert_reward(run(cli, root, *args), 42)
+    precise["blockbook"]["lastBlockTime"] = whole_second + ".000000001Z"
+    file.write_text(json.dumps(precise), encoding="utf-8")
+    after_cutoff = run(cli, root, *args)
+    assert after_cutoff.returncode == 3 and not after_cutoff.stdout and "future" in after_cutoff.stderr
+
     for group, field, value, error in (
         ("blockbook", "coin", "Bitcoin", "invalid Pearl"),
         ("blockbook", "network", "TPRL", "invalid Pearl"),

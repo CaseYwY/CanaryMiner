@@ -22,7 +22,12 @@ bool stringIs(const JsonValue *field, const char *expected) {
     return field && field->isString() && field->text == expected;
 }
 
-std::optional<uint64_t> utcTimestamp(std::string_view text) {
+struct IndexTimestamp {
+    uint64_t second;
+    bool hasSubsecond;
+};
+
+std::optional<IndexTimestamp> utcTimestamp(std::string_view text) {
     if (text.size() < 20 || text.size() > 30 || text.back() != 'Z' || text[4] != '-' ||
         text[7] != '-' || text[10] != 'T' || text[13] != ':' || text[16] != ':') return {};
     if (text.size() != 20 &&
@@ -40,7 +45,10 @@ std::optional<uint64_t> utcTimestamp(std::string_view text) {
     if (hour > 23 || minute > 59 || second > 59) return {};
     const auto serial = civilSerialDay({static_cast<int>(digits(0, 4)), digits(5, 2), digits(8, 2)});
     if (!serial || *serial < 0) return {};
-    return static_cast<uint64_t>(*serial) * 86400 + hour * 3600 + minute * 60 + second;
+    const auto unixSecond = static_cast<uint64_t>(*serial) * 86400 + hour * 3600 + minute * 60 + second;
+    const auto hasSubsecond = text.size() != 20 &&
+        text.substr(20, text.size() - 21).find_first_not_of('0') != std::string_view::npos;
+    return IndexTimestamp{unixSecond, hasSubsecond};
 }
 
 std::optional<std::filesystem::path> nativeReviewFile(int argc, const char *const *argv, uint64_t cutoffUtc) {
@@ -94,7 +102,7 @@ std::optional<uint64_t> pearlMainnetSubsidyGrains(uint32_t height) {
     return grains - static_cast<uint64_t>(accounted.compare(numerator) > 0);
 }
 
-PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutoffUtc) {
+PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutoffUtc, PearlRewardCutoff precision) {
     JsonValue root;
     if (!cutoffUtc || cutoffUtc > rewardUtcLimit || body.size() > marketRewardBodyBytes ||
         !boundedPublicJson(body) || !parseJsonStrict(body, &root, nullptr, {marketRewardBodyBytes, 256}) || !root.isObject()) return {};
@@ -116,12 +124,14 @@ PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutof
     if (!inSync->boolean || initialSync->boolean || bestHeight != nodeBlocks || nodeBlocks != nodeHeaders)
         return {PearlRewardStatus::Unsynced, {}};
     const auto indexUpdateUtc = utcTimestamp(timestamp->text);
-    if (!indexUpdateUtc || *indexUpdateUtc > cutoffUtc || cutoffUtc - *indexUpdateUtc > maxIndexAgeSeconds)
+    if (!indexUpdateUtc || indexUpdateUtc->second > cutoffUtc ||
+        (precision == PearlRewardCutoff::ExactSecond && indexUpdateUtc->second == cutoffUtc && indexUpdateUtc->hasSubsecond) ||
+        cutoffUtc - indexUpdateUtc->second > maxIndexAgeSeconds)
         return {PearlRewardStatus::Stale, {}};
     const auto subsidy = pearlMainnetSubsidyGrains(static_cast<uint32_t>(bestHeight + 1));
     if (!subsidy) return {};
     return {PearlRewardStatus::Ok, PearlSubsidyObservation{static_cast<uint32_t>(bestHeight), hash->text,
-                                                         *indexUpdateUtc, *subsidy}};
+                                                         indexUpdateUtc->second, *subsidy}};
 }
 
 int reportPearlSubsidy(const PearlRewardResult &result, uint64_t cutoffUtc, bool live) {
@@ -160,7 +170,7 @@ int commandMarketRewardFile(const MarketRewardOptions &options, int argc, const 
             std::chrono::system_clock::now().time_since_epoch()).count();
         if (now < 1 || static_cast<uint64_t>(now) > rewardUtcLimit ||
             options.cutoffUtc > static_cast<uint64_t>(now)) return reviewError("declared cutoff is in the future or local UTC is unavailable");
-        const auto result = parsePearlBlockbookTip(body, options.cutoffUtc);
+        const auto result = parsePearlBlockbookTip(body, options.cutoffUtc, PearlRewardCutoff::ExactSecond);
         if (stopped()) return reviewError("review cancelled", 130);
         return reportPearlSubsidy(result, options.cutoffUtc, false);
     } catch (...) {

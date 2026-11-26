@@ -60,7 +60,8 @@ struct PearlRewardResult {
 };
 
 std::optional<uint64_t> pearlMainnetSubsidyGrains(uint32_t height);
-PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutoffUtc);
+enum class PearlRewardCutoff { ExactSecond, WholeObservationSecond };
+PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutoffUtc, PearlRewardCutoff precision);
 int reportPearlSubsidy(const PearlRewardResult &result, uint64_t cutoffUtc, bool live);
 int commandMarketRewardFile(const MarketRewardOptions &options, int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop);
