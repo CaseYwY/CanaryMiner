@@ -1,6 +1,6 @@
 #include "market_ticker_runtime.h"
 #include "market_public_sample.h"
-#include "market_sample_options.h"
+#include "market_ticker_review.h"
 
 #include <cstdio>
 
@@ -16,9 +16,11 @@ struct TickerSample {
 };
 
 TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPollingPolicy &policy,
-                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop) {
+                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
+                           PublicTickerCapture *capture) {
     TickerSample result;
     const auto start = marketSystemClock();
+    if (capture) capture->startedUtc = start.second;
     MarketPollingPlan plan;
     constexpr uint64_t generation = 1;  // the whole sample shares one locally owned request sequence
     if (!plan.start(generation, start.first, start.second, policy, false)) {
@@ -39,7 +41,7 @@ TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPoll
             result.snapshot.clockFault = true;
             return result;
         }
-        const auto reply = awaitPublicMarketReply(fetch, ticket->request, policy.https, lifetime, stop);
+        auto reply = awaitPublicMarketReply(fetch, ticket->request, policy.https, lifetime, stop);
         // Parent-side cleanup uncertainty outranks a simultaneous stop and invalidates both quotes.
         if (reply.status == PublicHttpsStatus::Unreaped || !lifetime.permitted()) {
             result.snapshot.helperFault = true;
@@ -51,9 +53,20 @@ TickerSample sampleTickers(const std::filesystem::path &helper, const MarketPoll
             MarketOrigin::ProviderResponse, MarketMinuteConvention::Unqualified, received.second};
         auto quote = parseMarketQuote(reply, context);
         const auto finished = marketSystemClock();
+        if (capture && (!market_detail::marketSampleClockContinuous(start, sent, received) ||
+                        !market_detail::marketSampleClockContinuous(start, received, finished))) {
+            result.snapshot.clockFault = true;
+            return result;
+        }
         if (!plan.complete(*ticket, reply, quote.status, finished.first, finished.second)) {
             result.snapshot.clockFault = true;
             return result;
+        }
+        if (capture) {
+            auto &receipt = feed == PublicFeed::GatePearlTicker ? capture->gate : capture->kraken;
+            receipt = {ticket->startedUtc, received.second, received.first - start.first, std::move(reply)};
+            capture->cutoffUtc = finished.second;
+            capture->elapsedMs = finished.first - start.first;
         }
         if (feed == PublicFeed::GatePearlTicker) result.snapshot.pearlQuote = std::move(quote.value);
         else result.snapshot.fxQuote = std::move(quote.value);
@@ -77,13 +90,9 @@ int interrupted() {
 
 }  // namespace
 
-int commandPublicTickers(const std::filesystem::path &module, int argc, const char *const *argv,
-                         const volatile sig_atomic_t *stop) {
-    using market_detail::nativeMarketArgumentPair;
-    std::string dnsServer;
-    if (!parsePublicMarketSampleCli(argc, argv, 2, "--allow-public-tickers", dnsServer) ||
-        !nativeMarketArgumentPair(argc,argv,1,"market-tickers",2,"--allow-public-tickers") ||
-        (!dnsServer.empty() && !nativeMarketArgumentPair(argc,argv,3,"--dns-server",4,dnsServer))) {
+int commandPublicTickers(const MarketTickerOptions &options, const std::filesystem::path &module,
+                         int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
+    if (!market_detail::nativePublicTickerInvocation(options, argc, argv)) {
         std::fputs("market-tickers: exact --allow-public-tickers required\n", stderr);
         return 2;
     }
@@ -99,14 +108,16 @@ int commandPublicTickers(const std::filesystem::path &module, int argc, const ch
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.maxAttempts = 1;
-        policy.https.dnsServer=std::move(dnsServer);
-        const auto sample = sampleTickers(helper, policy, lifetime, stop);
+        policy.https.dnsServer = options.dnsServer;
+        PublicTickerCapture capture;
+        const auto sample = sampleTickers(helper, policy, lifetime, stop, options.saveFlag ? &capture : nullptr);
         if (sample.snapshot.helperFault || !lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return interrupted();
         if (sample.snapshot.clockFault) {
             std::fputs("market-tickers: local clock unavailable or changed during sampling\n", stderr);
             return 3;
         }
+        if (options.saveFlag) return savePublicTickerReview(options.archiveName, capture, lifetime, stop);
         const auto &p = sample.snapshot.pearlQuote, &f = sample.snapshot.fxQuote;
         const auto latest = latestMarketReference(p ? &*p : nullptr, f ? &*f : nullptr, sample.utc, sample.mono,
                                                    policy.freshness);

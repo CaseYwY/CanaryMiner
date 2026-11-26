@@ -127,6 +127,26 @@ Source-use and capability approval, native helper deployment/trust/auxiliary egr
 sources, archives, actual credit/reward collection, economic/forecast source wiring and production/physical qualification
 remain unfinished. P-06 and the affected requirements remain partial.
 
+### Archive and replay one public ticker sample
+
+```sh
+canary-miner market-tickers --allow-public-tickers --save-review tickers.cmt
+canary-miner market-tickers --open-review tickers.cmt
+```
+
+Save requires both Gate and Kraken replies to pass their market identity and timestamp checks. Each observation
+must be within 120 seconds of capture and the two observations must be at most 30 seconds apart. The checks use
+UTC and the local monotonic clock. The archive stores the two original JSON responses, observation and receipt
+times, and relative elapsed times. The report uses the sample's original cutoff and labels prices as historical.
+An optional `--dns-server IP` applies only when sampling. Its value is omitted from the archive.
+
+Use a new `.cmt` filename in a trusted local working directory. Save preserves any existing archive. Open works
+offline on either build profile. It checks the checksum, validates the saved times, and recomputes the report
+using the original cutoff. The command checks for cancellation before the final publication step.
+Once published, the archive stays saved through terminal output errors. The checksum detects corruption.
+It provides no signature or proof of a provider's
+trade time. The command runs independently of Dashboard consent and economic-mode settings.
+
 ### Review saved ticker payloads
 
 Use `canary-miner market-tickers --file FILE` to review a local document on either

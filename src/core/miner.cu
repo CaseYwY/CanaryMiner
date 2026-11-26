@@ -45,6 +45,7 @@
 #endif
 #include "../product/manual_market.h"
 #include "../product/market_ticker_runtime.h"
+#include "../product/market_ticker_review.h"
 #include "../product/market_native_arguments.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
@@ -260,10 +261,11 @@ int main(int argc, char **argv) {
     }
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
-            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP]\n"
+            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP] [--save-review NAME.cmt]\n"
                       "canary-miner market-tickers --file FILE\n"
+                      "canary-miner market-tickers --open-review FILE\n"
                       "Sample Gate PEARL_USDT and Kraken USDTUSD with the installed HTTPS helper, or review saved JSON offline.\n"
-                      "Public sampling requires a public-HTTPS-enabled build. Both commands run independently of mining settings.");
+                      "Open recalculates the original capture offline. Public sampling requires a public-HTTPS-enabled build.");
             return kExitOk;
         }
         signal(SIGINT, onSignal);
@@ -271,9 +273,18 @@ int main(int argc, char **argv) {
 #if defined(SIGBREAK)
         signal(SIGBREAK, onSignal);
 #endif
-        if (cli.reviewTickerFile) return commandTickerFile(argc, argv, &g_stop);
+#if defined(SIGPIPE)
+        if (cli.marketTicker.saveFlag || cli.marketTicker.action == MarketTickerAction::OpenReview)
+            signal(SIGPIPE, SIG_IGN);
+#endif
+        if (cli.marketTicker.action != MarketTickerAction::PublicSample)
+            return commandTickerFile(cli.marketTicker.action, argc, argv, &g_stop);
         if constexpr (kPublicTickerRuntimeBuilt) {
-            return commandPublicTickers(std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
+            return commandPublicTickers(cli.marketTicker, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
+        }
+        if (!market_detail::nativePublicTickerInvocation(cli.marketTicker, argc, argv)) {
+            std::fputs("market-tickers: invalid options; use market-tickers --help\n", stderr);
+            return kExitUsage;
         }
         std::fputs("market-tickers: public HTTPS unavailable in this build\n", stderr);
         return kExitConfig;
