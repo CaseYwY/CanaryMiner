@@ -901,7 +901,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             if(status!=ElectricityStatus::Ok)
                 bad("opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
         }
-        const auto status=validateTariffOpening(adjusted?adjusted->plan:p,s);if(status!=ElectricityStatus::Ok)bad("plan/opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
+        const auto status=validateTariffOpening(adjusted?adjusted->plan:p,s,d.dailyFeeAllocation());if(status!=ElectricityStatus::Ok)bad("plan/opening",electricityStatusName(status),TariffProblemKind::ModelStatus,{},status);
         // This store is an offline declaration, so publication is a local claim bounded by confirmation, not certification.
         for(const auto &r:p.revisions){
             if(r.publishedUtcMs>static_cast<int64_t>(d.confirmedUtc*1000))bad("plan.revisions","Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);

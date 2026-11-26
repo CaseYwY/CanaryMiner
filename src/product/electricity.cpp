@@ -277,6 +277,35 @@ bool sumTaxComponents(const BillTaxOpening &opening, ExactDecimal &subtotal) {
     return true;
 }
 
+ElectricityStatus validateRoundedTaxOpening(const BillOpening &s) {
+    const auto &billed = s.tax->billedKwh.numerator;
+    std::string billedText;
+    ExactDecimal kwh;
+    if (!s.tax->billedKwh.format(2, &billedText) || !ExactDecimal::parse(billedText, &kwh))
+        return ElectricityStatus::Capacity;
+    const auto represented = electricityKwh(kwh);
+    if (!represented) return ElectricityStatus::Capacity;
+    if (billed.compare(represented->numerator) != 0) return ElectricityStatus::Invalid;
+
+    const auto intervals = (s.throughUtcMs - s.cycleBeginUtcMs) / meterHalfHourMs;
+    const auto intervalCents = number(intervals * (wattMsPerKwh / 100));
+    const auto &positiveCents = billed.compare(intervalCents) < 0 ? billed : intervalCents;
+    ExactDecimal lowerError, lower, upper;
+    if (!positiveCents.divideExact(2, &lowerError) || !billed.subtract(lowerError, &lower) ||
+        !billed.add(number(intervals * (wattMsPerKwh / 200)), &upper)) return ElectricityStatus::Capacity;
+
+    // At most min(billed cents, intervals) slots can have a positive billed quantity.
+    // A half-cent endpoint is included only when all slots at that endpoint round to even cents.
+    const bool even = (billedText.back() - '0') % 2 == 0;
+    ExactDecimal positiveEvenCents;
+    if (!positiveCents.add(positiveCents, &positiveEvenCents)) return ElectricityStatus::Capacity;
+    const bool lowerIncluded = even && billed.compare(positiveEvenCents) >= 0;
+    const auto &measured = s.importedKwh.numerator;
+    const int from = measured.compare(lower), to = measured.compare(upper);
+    return from < 0 || (from == 0 && !lowerIncluded) || to > 0 || (to == 0 && !even)
+        ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
+}
+
 ElectricityStatus validateTaxPlan(const TariffPlan &p, const BillOpening &s, int64_t decision, const TariffTaxPeriod *&selected) {
     if (p.taxPeriods.empty()) return s.tax ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
     if (!s.tax) return ElectricityStatus::Invalid;
@@ -303,34 +332,9 @@ ElectricityStatus validateTaxPlan(const TariffPlan &p, const BillOpening &s, int
         (energyQuantity.zero() && !parts[static_cast<size_t>(TaxComponent::Energy)].numerator.zero()) ||
         (cycleStart && std::any_of(parts.begin(), parts.end(), [](const auto &part) {return !part.numerator.zero();})))
         return ElectricityStatus::Invalid;
-    if (!billed.zero()) {
-        std::string text;
-        ExactDecimal quantity;
-        if (!s.tax->billedKwh.format(2, &text) || !ExactDecimal::parse(text, &quantity))
-            return ElectricityStatus::Capacity;
-        const auto represented = electricityKwh(quantity);
-        if (!represented) return ElectricityStatus::Capacity;
-        if (billed.compare(represented->numerator) != 0) return ElectricityStatus::Invalid;
-    }
     if (roundMeter && !cycleStart) {
-        const auto intervals = (s.throughUtcMs - s.cycleBeginUtcMs) / meterHalfHourMs;
-        const auto &measured = s.importedKwh.numerator;
-        if (intervals == 1) {
-            std::string text;
-            ExactDecimal quantity;
-            if (!s.importedKwh.format(2, &text) || !ExactDecimal::parse(text, &quantity))
-                return ElectricityStatus::Capacity;
-            const auto rounded = electricityKwh(quantity);
-            if (!rounded) return ElectricityStatus::Capacity;
-            if (billed.compare(rounded->numerator) != 0) return ElectricityStatus::Invalid;
-        } else {
-            ExactDecimal error;
-            const bool above = billed.compare(measured) > 0;
-            if (!(above ? billed.subtract(measured, &error) : measured.subtract(billed, &error)))
-                return ElectricityStatus::Capacity;
-            // Each interval can contribute at most 0.005 kWh of absolute rounding error.
-            if (error.compare(number(intervals * (wattMsPerKwh / 200))) > 0) return ElectricityStatus::Invalid;
-        }
+        const auto status = validateRoundedTaxOpening(s);
+        if (status != ElectricityStatus::Ok) return status;
     }
     ExactDecimal subtotal, expectedCycleFee;
     ElectricityAmount billable, floor, expectedDemand;
@@ -576,6 +580,31 @@ ElectricityStatus addDailyFee(const TariffPlan &plan, const BillOpening &opening
     return accumulate(cost,share)?ElectricityStatus::Ok:ElectricityStatus::Capacity;
 }
 
+ElectricityStatus validateTaxDailyFees(const TariffPlan &plan, const BillOpening &opening, int64_t decision,
+                                       DailyFeeAllocation allocation) {
+    if (!opening.tax || opening.throughUtcMs == opening.cycleBeginUtcMs) return ElectricityStatus::Ok;
+    ExactDecimal expected;
+    size_t revision = 0;
+    std::optional<CivilDate> previous;
+    for (auto cursor = opening.cycleBeginUtcMs; cursor < opening.throughUtcMs;) {
+        const auto day = civilDayAt(plan.clock, cursor);
+        if (day.status != CivilStatus::Ok) return ElectricityStatus::Unavailable;
+        if (cursor < day.beginUtcMs || cursor >= day.endUtcMs || !civilDayIsContiguous(plan.clock, day) ||
+            (previous && civilSerialDay(day.date) <= civilSerialDay(*previous))) return ElectricityStatus::Unsupported;
+        while (revision < plan.revisions.size() && plan.revisions[revision].endUtcMs <= cursor) ++revision;
+        if (revision == plan.revisions.size() || plan.revisions[revision].beginUtcMs > cursor)
+            return ElectricityStatus::Unavailable;
+        const auto &rate = plan.revisions[revision];
+        if (rate.publishedUtcMs > decision) return ElectricityStatus::NotYetKnown;
+        const auto status = addDailyFee(plan, opening, rate, cursor, decision, allocation, expected);
+        if (status != ElectricityStatus::Ok) return status;
+        previous = day.date;
+        cursor = day.endUtcMs;
+    }
+    const auto &declared = opening.tax->components[static_cast<size_t>(TaxComponent::DailyFee)].numerator;
+    return expected.compare(declared) == 0 ? ElectricityStatus::Ok : ElectricityStatus::Invalid;
+}
+
 }  // namespace
 
 const char *electricityStatusName(ElectricityStatus s) {
@@ -670,8 +699,12 @@ bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
     return true;
 }
 
-ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening) {
-    return validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
+ElectricityStatus validateTariffOpening(const TariffPlan &p, const BillOpening &opening, DailyFeeAllocation allocation) {
+    const auto status = validatePlan(p,opening,opening.cycleEndUtcMs,lastUtcMs);
+    if (status != ElectricityStatus::Ok) return status;
+    if (allocation != DailyFeeAllocation::WholeDay && allocation != DailyFeeAllocation::ProrateByCycleMinutes)
+        return ElectricityStatus::Unsupported;
+    return validateTaxDailyFees(p, opening, lastUtcMs, allocation);
 }
 static bool accrueRestrictedCredit(BillOpening &state,int64_t end,const ExactDecimal &multiplier,
                                    BillRestrictedCreditAccrual &credit) {
@@ -729,6 +762,8 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         result.status = ElectricityStatus::Unsupported;
         return result;
     }
+    result.status = validateTaxDailyFees(p, opening, decision, dailyFeeAllocation);
+    if (result.status != ElectricityStatus::Ok) return result;
     result.timeDatabaseVersion = civilAt(p.clock,opening.throughUtcMs).databaseVersion;
     result.status = validateTrace(trace,opening.throughUtcMs,end);
     if (result.status != ElectricityStatus::Ok) return result;

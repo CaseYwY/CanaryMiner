@@ -84,7 +84,9 @@ would produce 13.00.
 Version 15 requires `opening.tax_bases` with `energy`, `daily_fee`,
 `cycle_fee`, `demand` and `billed_kwh`. Use zeros at cycle start. A mid-cycle
 opening uses the independently reviewed amounts before added taxes. The first
-three bases sum to the declared opening `accrued_subtotal`. The demand base
+three bases sum to the declared opening `accrued_subtotal`. The daily-fee
+base must agree with the declared fees and allocation rule from cycle start
+through the elapsed opening. The demand base
 matches the charge on the established billable peak, including any declared
 historical floor. Use zero for `billed_kwh` unless the half-hour rounding rule
 is selected. For that rule, enter the exact cumulative billed kWh to two

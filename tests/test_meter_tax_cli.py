@@ -77,6 +77,12 @@ def main(cli, bundle=None):
             assert "Tax vat added 3.200000 USD on 32.000000 USD" in total
             assert "Cycle estimate at closing 35.200000 USD" in total
             assert run("--open-review", "named-tax.cmr") == total
+            through = begin + HOUR
+            value["opening"].update(through_utc_ms=through, imported_kwh="1", accrued_subtotal="3")
+            value["opening"]["tax_bases"].update(energy="1", daily_fee="2")
+            total = review(value, interval(through, end), end)
+            assert "Change from imported readings 31.680000 USD" in total
+            assert "Cycle estimate at closing 35.200000 USD" in total
         else:
             begin = utc("2024-01-01")
             middle, end = begin + HOUR, begin + 2 * HOUR
@@ -150,6 +156,14 @@ def main(cli, bundle=None):
             assert "Cycle estimate at closing 13.200000 USD" in total
             midcycle["opening"]["tax_bases"]["energy"] = "4"
             review(midcycle, register([(middle, "1"), (end, "2")]), end, error="saved tariff declaration")
+            midcycle["opening"]["tax_bases"].update(energy="0", daily_fee="5")
+            review(midcycle, register([(middle, "1"), (end, "2")]), end, error="saved tariff declaration")
+            midcycle["plan"]["revisions"][0]["charge_per_civil_day"] = "4"
+            midcycle["opening"]["accrued_subtotal"] = "9"
+            midcycle["opening"]["tax_bases"].update(energy="5", daily_fee="4")
+            total = review(midcycle, register([(middle, "1"), (end, "2")]), end)
+            assert "Cycle estimate at closing 17.200000 USD" in total
+            assert "Change from imported readings 6.600000 USD" in total
 
             rounded = tax_tariff(plan(begin, begin, middle, UTC), period(begin, middle,
                 unit("physical", "1"), unit("rated", "2", basis="billed_kwh")))
@@ -176,6 +190,22 @@ def main(cli, bundle=None):
             rounded["opening"]["accrued_subtotal"] = "0"
             rounded["opening"]["tax_bases"]["energy"] = "0"
             assert "Change from imported readings 0.036000 USD" in review(rounded, rounded_end, middle)
+
+            # Two elapsed half-hours. Positive slots cannot round below zero and exact ties round to even.
+            split = tax_tariff(plan(begin, begin, end, UTC), period(begin, end, unit("rated", "1", basis="billed_kwh")))
+            split["plan"]["rounding"] = "meter_import_half_hour_kwh_half_even_2"
+            for measured, billed, possible in (
+                ("0.01", "0.02", False), ("0.001", "0.01", False), ("0.02", "0.01", False),
+                ("0.03", "0.04", True), ("0.03", "0.02", True), ("0.015", "0.02", True), ("0.01", "0", True),
+            ):
+                opening = split["opening"]
+                opening.update(through_utc_ms=middle, imported_kwh=measured, accrued_subtotal=billed)
+                opening["tax_bases"].update(energy=billed, billed_kwh=billed)
+                remaining = register([(middle, measured), (middle + HOUR // 2, measured), (end, measured)])
+                if possible:
+                    assert "Change from imported readings 0.000000 USD" in review(split, remaining, end)
+                else:
+                    review(split, remaining, end, error="saved tariff declaration")
 
             signed = tax_tariff(plan(begin, begin, end, UTC), period(begin, end,
                 unit("rated", "0.5", basis="billed_kwh"), fraction("vat", "0.1", ("energy",))))

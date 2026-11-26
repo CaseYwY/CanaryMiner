@@ -219,10 +219,11 @@ struct BillEstimate {
         return true;
     }
 };
-// Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
-ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening);
 // The opt-in rule splits the fee selected at civil midnight by each cycle's share of that day.
 enum class DailyFeeAllocation { WholeDay, ProrateByCycleMinutes };
+// Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
+ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening,
+                                        DailyFeeAllocation allocation=DailyFeeAllocation::WholeDay);
 // Full coverage only. Horizon stays within one explicitly supplied cycle (<=370 elapsed days).
 // All-units/floor require the remainder through cycle end.
 BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, const PowerTrace &trace,
