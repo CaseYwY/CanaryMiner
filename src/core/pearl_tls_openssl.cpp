@@ -1,7 +1,11 @@
 #include "pearl_tls_engine.h"
 #if defined(CANARY_POOL_TLS_OPENSSL) && !defined(_WIN32)
+#include <algorithm>
 #include <array>
+#include <ctime>
+#include <vector>
 #include <openssl/err.h>
+#include <openssl/ocsp.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
@@ -12,6 +16,10 @@ namespace om {
 namespace {
 using K=PearlTlsEngineStatus;using E=PearlTlsError;
 constexpr std::size_t bufferLimit=65536;
+constexpr long ocspClockSkewSeconds = 300;
+constexpr long ocspWithoutNextUpdateMaxAgeSeconds = 86400;
+constexpr int maximumOcspEntries = 64;
+constexpr int maximumTlsFeatures = 64;
 bool dnsName(const std::string &name){
     if(name.empty()||name.size()>253||name.back()=='.')return false;
     std::size_t begin=0;
@@ -24,6 +32,104 @@ bool dnsName(const std::string &name){
     }
     return true;
 }
+
+bool requiresOcspStaple(X509 *leaf, bool &required) {
+    int critical = -1;
+    const std::unique_ptr<TLS_FEATURE, decltype(&TLS_FEATURE_free)> features(
+        static_cast<TLS_FEATURE *>(X509_get_ext_d2i(leaf, NID_tlsfeature, &critical, nullptr)), TLS_FEATURE_free);
+    if (!features) return critical == -1;  // Absent extension, as opposed to an invalid or duplicated one.
+    const int count = sk_ASN1_INTEGER_num(features.get());
+    if (count < 1 || count > maximumTlsFeatures) return false;
+    auto *original = X509_get_ext(leaf, X509_get_ext_by_NID(leaf, NID_tlsfeature, -1));
+    const std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)> canonical(
+        X509V3_EXT_i2d(NID_tlsfeature, critical, features.get()), X509_EXTENSION_free);
+    if (!original || !canonical ||
+        ASN1_OCTET_STRING_cmp(X509_EXTENSION_get_data(original), X509_EXTENSION_get_data(canonical.get())) != 0)
+        return false;
+    for (int i = 0; i < count; ++i) {
+        int64_t feature = 0;
+        if (!ASN1_INTEGER_get_int64(&feature, sk_ASN1_INTEGER_value(features.get(), i)) ||
+            feature < 0 || feature > 65535) return false;
+        if (feature == TLSEXT_TYPE_status_request) required = true;
+    }
+    return true;
+}
+
+const EVP_MD *ocspIdentityDigest(OCSP_CERTID *identity) {
+    ASN1_OBJECT *algorithm = nullptr;
+    if (!OCSP_id_get0_info(nullptr, &algorithm, nullptr, nullptr, identity) || !algorithm) return nullptr;
+    switch (OBJ_obj2nid(algorithm)) {
+        case NID_sha1: return EVP_sha1();
+        case NID_sha224: return EVP_sha224();
+        case NID_sha256: return EVP_sha256();
+        case NID_sha384: return EVP_sha384();
+        case NID_sha512: return EVP_sha512();
+        default: return nullptr;
+    }
+}
+
+bool exactOcspEncoding(OCSP_BASICRESP *basic, const unsigned char *encoded, long size) {
+    // OpenSSL's decoder for the embedded BasicOCSPResponse does not check for trailing bytes.
+    const std::unique_ptr<OCSP_RESPONSE, decltype(&OCSP_RESPONSE_free)> reconstructed(
+        OCSP_response_create(OCSP_RESPONSE_STATUS_SUCCESSFUL, basic), OCSP_RESPONSE_free);
+    if (!reconstructed || i2d_OCSP_RESPONSE(reconstructed.get(), nullptr) != size) return false;
+    std::vector<unsigned char> canonical(static_cast<std::size_t>(size));
+    auto *cursor = canonical.data();
+    return i2d_OCSP_RESPONSE(reconstructed.get(), &cursor) == size &&
+        std::equal(canonical.begin(), canonical.end(), encoded);
+}
+
+bool verifyOcspStaple(SSL *ssl, X509 *leaf, X509_STORE *trust) {
+    bool required = false;
+    if (!requiresOcspStaple(leaf, required)) return false;
+    unsigned char *encoded = nullptr;
+    const long size = SSL_get_tlsext_status_ocsp_resp(ssl, &encoded);
+    if (size == -1 && !encoded) return !required;
+    if (!encoded || size <= 0 || size > static_cast<long>(bufferLimit)) return false;
+
+    const unsigned char *cursor = encoded;
+    const std::unique_ptr<OCSP_RESPONSE, decltype(&OCSP_RESPONSE_free)> response(
+        d2i_OCSP_RESPONSE(nullptr, &cursor, size), OCSP_RESPONSE_free);
+    if (!response || cursor != encoded + size ||
+        OCSP_response_status(response.get()) != OCSP_RESPONSE_STATUS_SUCCESSFUL) return false;
+    const std::unique_ptr<OCSP_BASICRESP, decltype(&OCSP_BASICRESP_free)> basic(
+        OCSP_response_get1_basic(response.get()), OCSP_BASICRESP_free);
+    if (!basic) return false;
+    const int responses = OCSP_resp_count(basic.get());
+    if (responses < 1 || responses > maximumOcspEntries || !exactOcspEncoding(basic.get(), encoded, size)) return false;
+    auto *chain = SSL_get0_verified_chain(ssl);
+    auto *issuer = chain ? sk_X509_value(chain, 1) : nullptr;
+    if (!issuer) return false;
+
+    OCSP_SINGLERESP *match = nullptr;
+    for (int i = 0; i < responses; ++i) {
+        auto *entry = OCSP_resp_get0(basic.get(), i);
+        if (!entry) return false;
+        // The legacy accessor reads the ID but takes a non-const pointer.
+        auto *identity = const_cast<OCSP_CERTID *>(OCSP_SINGLERESP_get0_id(entry));
+        const auto *digest = identity ? ocspIdentityDigest(identity) : nullptr;
+        if (!digest) return false;
+        const std::unique_ptr<OCSP_CERTID, decltype(&OCSP_CERTID_free)> expected(
+            OCSP_cert_to_id(digest, leaf, issuer), OCSP_CERTID_free);
+        if (!expected) return false;
+        if (OCSP_id_cmp(identity, expected.get()) != 0) continue;
+        if (match) return false;
+        match = entry;
+    }
+    if (!match || OCSP_basic_verify(basic.get(), chain, trust, OCSP_NOEXPLICIT) != 1) return false;
+
+    const auto *produced = OCSP_resp_get0_produced_at(basic.get());
+    auto latest = std::time(nullptr);
+    if (latest == static_cast<std::time_t>(-1) || !produced) return false;
+    latest += ocspClockSkewSeconds;
+    if (X509_cmp_time(produced, &latest) >= 0) return false;
+    ASN1_GENERALIZEDTIME *thisUpdate = nullptr, *nextUpdate = nullptr;
+    const int status = OCSP_single_get0_status(match, nullptr, nullptr, &thisUpdate, &nextUpdate);
+    return status == V_OCSP_CERTSTATUS_GOOD && thisUpdate &&
+        OCSP_check_validity(thisUpdate, nextUpdate, ocspClockSkewSeconds,
+                            nextUpdate ? -1 : ocspWithoutNextUpdateMaxAgeSeconds) == 1;
+}
+
 struct OpenSslEngine final:PearlTlsEngine {
     SSL_CTX *ctx=nullptr;SSL *ssl=nullptr;BIO *network=nullptr;E failure=E::Protocol;
     ~OpenSslEngine()override{SSL_free(ssl);BIO_free(network);SSL_CTX_free(ctx);}
@@ -55,7 +161,7 @@ struct OpenSslEngine final:PearlTlsEngine {
         SSL_CTX_clear_mode(ctx,SSL_MODE_AUTO_RETRY|SSL_MODE_ENABLE_PARTIAL_WRITE|SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
         SSL_CTX_set_max_cert_list(ctx,bufferLimit);
         if(SSL_CTX_set_min_proto_version(ctx,TLS1_2_VERSION)!=1||!roots(p.caPem))return false;
-        ssl=SSL_new(ctx);if(!ssl)return false;
+        ssl=SSL_new(ctx);if(!ssl||SSL_set_tlsext_status_type(ssl,TLSEXT_STATUSTYPE_ocsp)!=1)return false;
         std::array<unsigned char,16> address;const bool ip=inet_pton(AF_INET,p.serverName.c_str(),address.data())==1||inet_pton(AF_INET6,p.serverName.c_str(),address.data())==1;
         if(ip){if(X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl),p.serverName.c_str())!=1)return false;}
         else{if(!dnsName(p.serverName))return false;
@@ -74,7 +180,8 @@ struct OpenSslEngine final:PearlTlsEngine {
         ERR_clear_error();const int ret=SSL_do_handshake(ssl);const int err=SSL_get_error(ssl,ret);
         if(ret!=1)return mapped(err);
         if(SSL_get_verify_result(ssl)!=X509_V_OK){failure=E::Verification;return {K::Error,0};}
-        X509 *peer=SSL_get1_peer_certificate(ssl);if(!peer){failure=E::Verification;return {K::Error,0};}X509_free(peer);
+        auto *peer=SSL_get0_peer_certificate(ssl);
+        if(!peer||!verifyOcspStaple(ssl,peer,SSL_CTX_get_cert_store(ctx))){failure=E::Verification;return {K::Error,0};}
         return {K::Complete,0};
     }
     PearlTlsEngineStep send(const char *p,std::size_t size)override{
