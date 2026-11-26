@@ -177,17 +177,18 @@ int main(int argc, char **argv) {
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
             std::puts("canary-miner market-tickers --allow-public-tickers\n"
-                      "Takes one read-only sample from the installed HTTPS helper for Gate PEARL_USDT and Kraken USDTUSD.\n"
-                      "Requires a public-HTTPS-enabled build. Reports locally observed reference prices.\n"
-                      "Runs independently of mining settings and exits after the sample.");
+                      "canary-miner market-tickers --file FILE\n"
+                      "Sample Gate PEARL_USDT and Kraken USDTUSD with the installed HTTPS helper, or review saved JSON offline.\n"
+                      "Public sampling requires a public-HTTPS-enabled build. Both commands run independently of mining settings.");
             return kExitOk;
         }
-        if constexpr (kPublicTickerRuntimeBuilt) {
-            signal(SIGINT, onSignal);
-            signal(SIGTERM, onSignal);
+        signal(SIGINT, onSignal);
+        signal(SIGTERM, onSignal);
 #if defined(SIGBREAK)
-            signal(SIGBREAK, onSignal);
+        signal(SIGBREAK, onSignal);
 #endif
+        if (cli.reviewTickerFile) return commandTickerFile(argc, argv, &g_stop);
+        if constexpr (kPublicTickerRuntimeBuilt) {
             return commandPublicTickers(std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
         }
         std::fputs("market-tickers: public HTTPS unavailable in this build\n", stderr);
@@ -501,7 +502,7 @@ int main(int argc, char **argv) {
                 "       canary-miner diagnostics       build-only preview/export; see diagnostics --help\n"
                 "       canary-miner meter-bill        review imported meter intervals; see meter-bill --help\n"
                 "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
-                "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n\n"
+                "       canary-miner market-tickers   review saved tickers or take a public sample; see market-tickers --help\n\n"
                 "  --config FILE     config-v1 JSON file (options below override it)\n"
                 "  --algo NAME       pearl-pow only (default pearl-pow)\n"
                 "  --list-algos      list compiled-in algorithms and exit\n"

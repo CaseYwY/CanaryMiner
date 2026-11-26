@@ -29,6 +29,8 @@ inline uint64_t publicHourEnd(uint64_t initialUtc) {
         ? (initialUtc - settlementGuardSeconds) / 60 * 60 : 0;
 }
 
+std::string publicHourCoverage(uint64_t end,uint64_t cutoff,const HourSample &pearl,const HourSample &fx);
+
 bool renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &fx,
                       std::string &report);
 

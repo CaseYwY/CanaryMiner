@@ -107,6 +107,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
             ("future", "invalid response observation time"),
             ("stale", "invalid response observation time"),
             ("limited", "provider rate limited"),
+            ("blocked", "non-public destination refused"),
         ):
             scenario.write_text(mode, encoding="ascii")
             result = run(allow)
@@ -116,6 +117,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
             launched(["4", "5"])
             result = run(*save)
             assert result.returncode == 3 and not result.stdout and "complete aligned" in result.stderr, result
+            assert expected in result.stderr and "UTC seconds [" in result.stderr, result
+            assert "MEXC Pearl mainnet PRL/USDT:" in result.stderr and "Coinbase USDT/USD:" in result.stderr
+            assert "Mean " not in result.stderr and "180 / 60" not in result.stderr
             launched(["4", "5"])
             assert not archive.exists() and not temporary.exists()
 

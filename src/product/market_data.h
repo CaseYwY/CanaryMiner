@@ -7,7 +7,7 @@
 
 namespace om {
 enum class MarketSeries { GatePearlMainnetUsdtV1, KrakenUsdtUsdV1 };
-enum class MarketOrigin { ProviderResponse, SyntheticFixture };
+enum class MarketOrigin { ProviderResponse, SyntheticFixture, DeclaredPayload };
 // The documented candle time anchors are not yet production-qualified. Only offline fixtures can opt in.
 enum class MarketMinuteConvention { Unqualified, FixtureMinuteStart };
 enum class MarketDataStatus { Ok, Transport, Identity, Schema, Decimal, Timestamp, UnsupportedConvention, Coverage, Arithmetic, ProviderError, RateLimited };
@@ -68,6 +68,7 @@ struct MarketFreshnessPolicy {
     uint64_t maxObservationAgeMs = 120000, maxCrossFeedSkewMs = 30000;
     bool requireEventTime = false;
 };
+inline constexpr MarketFreshnessPolicy declaredTickerV1Policy{120000,30000,false};
 struct MarketLatest {
     MarketFreshness tokenStatus = MarketFreshness::Missing, usdStatus = MarketFreshness::Missing;
     std::optional<ExactDecimal> tokenUsdt, usdtUsd, tokenUsd;
@@ -75,4 +76,6 @@ struct MarketLatest {
 };
 MarketLatest latestMarketReference(const MarketQuote *pearl, const MarketQuote *fx, uint64_t nowUtc, uint64_t nowMonoMs,
                                   MarketFreshnessPolicy policy = {});
+// Offline UTC-only replay. Declared observations cannot enter the live reference calculation.
+MarketLatest declaredMarketReference(const MarketQuote *pearl,const MarketQuote *fx,uint64_t asOfUtc);
 }  // namespace om

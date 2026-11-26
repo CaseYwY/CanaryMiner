@@ -39,6 +39,7 @@
 #include "diagnostic_cli.h"
 #include "language_preferences.h"
 #include "market_hour.h"
+#include "market_ticker_review.h"
 #include "meter_bill.h"
 #include "energy_periods_cli.h"
 
@@ -95,6 +96,7 @@ struct CliParse {
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     MeterBillOptions meterBill;
     MarketHourOptions marketHour;
+    bool reviewTickerFile = false;
     EnergyPeriodsOptions energyPeriods;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
@@ -181,8 +183,9 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
     if (r.command == Command::MarketTickers) {
         const auto option = argc == i + 1 ? std::string_view(argv[i]) : std::string_view();
         r.help = option == "--help" || option == "-h";
-        if (!r.help && option != "--allow-public-tickers") {
-            if (error) *error = "market-tickers: use --allow-public-tickers for one sample or --help";
+        r.reviewTickerFile = argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0];
+        if (!r.help && option != "--allow-public-tickers" && !r.reviewTickerFile) {
+            if (error) *error = "market-tickers: use --file FILE, --allow-public-tickers or --help";
             return false;
         }
         *out = std::move(r);
