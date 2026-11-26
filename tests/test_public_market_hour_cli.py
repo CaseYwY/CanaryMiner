@@ -75,10 +75,16 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
 
         ticker = "--allow-public-tickers"
+        trades = "--allow-public-trades"
         dashboard_dns = "--market-dns-server"
         dns_required = "--market-dns-server requires --allow-public-tickers at the Dashboard parent"
         dns_usage = "--market-dns-server requires one unicast IPv4 or unscoped IPv6 address for run"
         dashboard_refusals = (
+            ([trades, trades], "--allow-public-trades is accepted once, for run only"),
+            ([trades + "=true"], "--allow-public-trades takes no value"),
+            ([ticker, trades], "cannot be combined with --allow-public-tickers"),
+            ([trades, "--worker-child"], "--allow-public-trades requires the Dashboard parent"),
+            (["--pass", trades, dashboard_dns, resolver], dns_required),
             ([allow], "Dashboard candles require --allow-public-tickers as well"),
             ([ticker, allow, allow], "--allow-public-candles is accepted once, for run only"),
             ([ticker, allow + "=true"], "--allow-public-candles takes no value"),
@@ -104,17 +110,19 @@ def main(cli_path, fixture, enabled, sample_only=False):
             positive = call("run", ticker, allow, dashboard_dns, resolver, "--help")
             assert positive.returncode == 0 and dashboard_dns in positive.stdout
             assert resolver not in positive.stdout + positive.stderr
-            admitted = subprocess.run([cli, "run", "--algo", "pearl-pow", "--pool", "kryptex",
-                                       "--wallet", "prl1" + "q" * 59, "--no-donation",
-                                       ticker, allow, dashboard_dns, resolver],
-                                      cwd=operator, capture_output=True, text=True, timeout=8)
-            if older_linux:
-                assert admitted.returncode == 3 and "Pre-run preferences unavailable" in admitted.stderr, admitted
-                assert "FORBIDDEN_DEVICE_SETUP" not in admitted.stderr, admitted
-            else:
-                assert admitted.returncode == 97 and "FORBIDDEN_DEVICE_SETUP" in admitted.stderr, admitted
-            assert resolver not in admitted.stdout + admitted.stderr
+            for source in (ticker, trades):
+                admitted = subprocess.run([cli, "run", "--algo", "pearl-pow", "--pool", "kryptex",
+                                           "--wallet", "prl1" + "q" * 59, "--no-donation",
+                                           source, allow, dashboard_dns, resolver],
+                                          cwd=operator, capture_output=True, text=True, timeout=8)
+                if older_linux:
+                    assert admitted.returncode == 3 and "Pre-run preferences unavailable" in admitted.stderr, admitted
+                    assert "FORBIDDEN_DEVICE_SETUP" not in admitted.stderr, admitted
+                else:
+                    assert admitted.returncode == 97 and "FORBIDDEN_DEVICE_SETUP" in admitted.stderr, admitted
+                assert resolver not in admitted.stdout + admitted.stderr
             for args in (("--allow-public-ticker\uff53", dashboard_dns, resolver),
+                         ("--allow-public-trade\uff53", dashboard_dns, resolver),
                          (ticker, "\u00ad-market-dns-server", resolver),
                          (ticker, "--market-dns-\u017ferver", resolver)):
                 rejected = call("run", *args)

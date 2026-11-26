@@ -88,6 +88,92 @@ void launchPolicy(){
     CHECK(!plan.next(3601000,epoch+3600));
 }
 
+void tradeOwner(){
+    MarketPollingPolicy policy;
+    policy.publicTrades=true;
+    MarketPollingPlan plan;
+    CHECK(!plan.start(1,1000,epoch*1000,policy,false));
+    policy.scheduleEconomicRequests=false;
+    CHECK(!plan.start(1,1000,epoch*1000,policy,true));
+    CHECK(plan.start(1,1000,epoch*1000+100,policy,false));
+    CHECK(!plan.takeEconomicRequest(1000,epoch*1000+100));
+    const auto ticket=plan.next(1000,epoch*1000+100);
+    CHECK(ticket && ticket->request.feed==PublicFeed::GatePearlTrades && ticket->startedUtc==epoch);
+    CHECK(!plan.next(1100,epoch*1000+99) && plan.clockFault());
+
+    enum class Refresh { OlderEvent, ConflictingPrice, ConflictingBatch, OlderConflictingBatch };
+    for (const auto refresh:{Refresh::OlderEvent,Refresh::ConflictingPrice,Refresh::ConflictingBatch,Refresh::OlderConflictingBatch}) {
+        std::atomic<uint64_t> mono{1000};
+        std::atomic<unsigned> requests{0}, badRequests{0};
+        const auto clock=[&]{const auto elapsed=mono.load();return std::make_pair(elapsed,epoch*1000+elapsed);};
+        policy.quoteRefreshMs=1000;
+        MarketDataOwner owner([&](const PublicJsonRequest &request,const std::atomic<bool> &,PublicHttpsLimits limits){
+            const auto call=requests.fetch_add(1);
+            const auto isGate=request.feed==PublicFeed::GatePearlTrades;
+            if ((!isGate && request.feed!=PublicFeed::KrakenUsdtTrades) || request.fromUtc || request.toUtc ||
+                limits.bodyBytes!=maxPublicTradeBodyBytes) ++badRequests;
+            PublicJsonResponse r;r.status=PublicHttpsStatus::Ok;r.httpStatus=200;r.observedUtc=clock().second/1000;
+            if (isGate) {
+                const bool later=call>=2;
+                const bool older=later && (refresh==Refresh::OlderEvent || refresh==Refresh::OlderConflictingBatch);
+                const auto event=epoch-(older ? 3 : 2);
+                const auto row=[event](const char *id,const char *price){
+                    return std::string("{\"id\":\"")+id+"\",\"create_time_ms\":\""+std::to_string(event*1000)+
+                        ".1001\",\"currency_pair\":\"PEARL_USDT\",\"price\":\""+price+"\"}";
+                };
+                r.body="["+row("1",later && refresh==Refresh::ConflictingPrice ? "3" : "2.50");
+                if (later && (refresh==Refresh::ConflictingBatch || refresh==Refresh::OlderConflictingBatch)) r.body+=","+row("2","3");
+                r.body+="]";
+            } else {
+                r.body="{\"error\":[],\"result\":{\"USDTZUSD\":[[\"0.98\",\"1\","+std::to_string(epoch-3)+
+                    ".125,\"b\",\"m\",\"\",4]],\"last\":\"123\"}}";
+            }
+            return r;
+        },policy,MarketOrigin::ProviderResponse,false,{},clock);
+        CHECK(owner.start(1));
+        CHECK(waitUntil([&]{const auto snapshot=owner.snapshot();return snapshot->pearlTrade && snapshot->fxTrade;}));
+        const auto original=owner.snapshot();
+        CHECK(original->pearlTrade && original->fxTrade && !original->pearlQuote && !original->fxQuote &&
+              original->economicRequests==0 && requests==2 && badRequests==0);
+        const auto text=joined(marketDashboardView(*original,policy,epoch+1,1000));
+        CHECK(text.find("PRL/USD trade reference: 2.45")!=text.npos &&
+              text.find("Event UTC "+std::to_string(epoch-2)+".000100100")!=text.npos &&
+              text.find("Receipt UTC ms "+std::to_string(epoch*1000+1000))!=text.npos);
+        CHECK(joined(marketDashboardView(*original,policy,epoch+121,121000)).find(
+            "PRL/USD trade reference: N/A")!=text.npos);
+        mono=2000;
+        CHECK(waitUntil([&]{return owner.snapshot()->health[0].latched;}));
+        const auto updated=owner.snapshot();
+        if (refresh==Refresh::ConflictingPrice || refresh==Refresh::ConflictingBatch) {
+            CHECK(!updated->pearlTrade && updated->health[0].data==MarketDataStatus::Coverage);
+            CHECK(joined(marketDashboardView(*updated,policy,epoch+2,2000)).find("PRL/USD trade reference: N/A")!=text.npos);
+        }
+        else if (original->pearlTrade && updated->pearlTrade)
+            CHECK(updated->pearlTrade->receivedUtcMs==original->pearlTrade->receivedUtcMs &&
+                  updated->health[0].data==(refresh==Refresh::OlderEvent ? MarketDataStatus::Timestamp : MarketDataStatus::Coverage));
+        else CHECK(false);
+        owner.stop();
+        const auto stopped=joined(marketDashboardView(*owner.snapshot(),policy,epoch+2,2000));
+        CHECK(stopped.find("PRL/USD trade reference: N/A")!=stopped.npos && stopped.find("Event UTC ")==stopped.npos);
+    }
+
+    std::atomic<bool> receiptJump{false};
+    MarketDataOwner jumped([&](const PublicJsonRequest &,const std::atomic<bool> &,PublicHttpsLimits){
+        PublicJsonResponse r;r.status=PublicHttpsStatus::Ok;r.httpStatus=200;r.observedUtc=epoch+1;
+        r.body="[{\"id\":\"1\",\"create_time_ms\":\""+std::to_string(epoch*1000)+
+            "\",\"currency_pair\":\"PEARL_USDT\",\"price\":\"2.50\"}]";
+        receiptJump=true;
+        return r;
+    },policy,MarketOrigin::ProviderResponse,false,{},[&]{
+        return std::make_pair(uint64_t{1000},epoch*1000+(receiptJump.exchange(false) ? 7000 : 1000));
+    });
+    CHECK(jumped.start(1));
+    CHECK(waitUntil([&]{return jumped.snapshot()->clockFault;}));
+    const auto failed=jumped.snapshot();
+    CHECK(failed->clockFault && !failed->running && !failed->pearlTrade && !failed->fxTrade);
+    jumped.stop();
+}
+
 int installedPath(const std::filesystem::path &fixture){
 #if defined(__linux__)
 #if !defined(__GLIBC__)
@@ -189,6 +275,34 @@ int installedPath(const std::filesystem::path &fixture){
         CHECK(view(*session).find(unavailable) != text.npos);
         session->stop();
     }
+    const auto event=marketSystemClock().second-3;
+    std::ofstream(directory/"trade-response-7.json")<<"[{\"id\":\"4\",\"create_time_ms\":\""<<event*1000
+        <<".25\",\"currency_pair\":\"PEARL_USDT\",\"price\":\"2.50\"}]";
+    std::ofstream(directory/"trade-response-8.json")<<"{\"error\":[],\"result\":{\"USDTZUSD\":[[\"0.98\",\"1\","
+        <<event<<".2499,\"b\",\"m\",\"\",5]],\"last\":\"123\"}}";
+    const auto tickerRequests=directory/"ticker-requests";
+    const auto originalTickerBytes=std::filesystem::file_size(tickerRequests);
+    launch.hourPermitted=false;
+    launch.tradesPermitted=true;
+    launch.dnsServer=resolver;
+    const auto withTrades=installedPublicTickerFactory(directory/"synthetic-module",launch);
+    auto tradeRuntime=withTrades();
+    CHECK(tradeRuntime && tradeRuntime->start(1));
+    CHECK(waitUntil([&]{return view(*tradeRuntime).find("PRL/USD trade reference: 2.45")!=std::string::npos;}));
+    const auto tradeDisplay=view(*tradeRuntime);
+    CHECK(tradeDisplay.find("Event UTC ")!=tradeDisplay.npos && tradeDisplay.find("Receipt UTC ms ")!=tradeDisplay.npos);
+    CHECK(tradeDisplay.find(resolver)==tradeDisplay.npos && tradeDisplay.find("Latest PRL/USD reference")==tradeDisplay.npos);
+    tradeRuntime->stop();
+    CHECK(view(*tradeRuntime).find("PRL/USD trade reference: N/A")!=tradeDisplay.npos);
+    CHECK(std::filesystem::file_size(tickerRequests)==originalTickerBytes && !std::filesystem::exists(requests));
+    {
+        std::ifstream tradeRequests(directory/"trade-requests");
+        unsigned gate=0, kraken=0, unexpected=0;
+        CHECK(bool(tradeRequests>>gate>>kraken) && gate==7 && kraken==8 && !(tradeRequests>>unexpected));
+        std::ifstream resolvers(resolverRequests);
+        std::string first, second, extra;
+        CHECK(bool(resolvers>>first>>second) && first==resolver && second==resolver && !(resolvers>>extra));
+    }
     std::error_code ignored;
     std::filesystem::remove_all(directory,ignored); // only the scratch directory created above
     return finishTests("installed ticker helper path and native process");
@@ -196,6 +310,6 @@ int installedPath(const std::filesystem::path &fixture){
 }
 int main(int argc,char **argv){
     if(argc==2)return installedPath(std::filesystem::u8path(argv[1]));
-    lifecycle();late();staleAndClock();helperFault();launchPolicy();
+    lifecycle();late();staleAndClock();helperFault();launchPolicy();tradeOwner();
     return finishTests("frozen native public-reference ownership with memory-only revocation and post-drain settlement");
 }

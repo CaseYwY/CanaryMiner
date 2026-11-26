@@ -1,4 +1,5 @@
 #include "market_ticker_review.h"
+#include "market_trade_data.h"
 #include "json_dom.h"
 #include "market_public_sample.h"
 
@@ -8,11 +9,10 @@
 namespace om {
 namespace {
 
-using TradeTime = std::pair<uint64_t, uint32_t>;  // UTC milliseconds and nanoseconds within that millisecond
 constexpr uint64_t maxAgeMs=120000, maxSkewMs=30000;
 
 struct Trade {
-    TradeTime time;
+    MarketTradeTime time;
     ExactDecimal price;
     uint64_t id=0;
 };
@@ -24,7 +24,7 @@ bool unsignedNumber(std::string_view text,uint64_t &out) {
     return parsed.ptr==end && parsed.ec==std::errc();
 }
 
-bool tradeTime(const JsonValue *value,bool gate,TradeTime &out) {
+bool tradeTime(const JsonValue *value,bool gate,MarketTradeTime &out) {
     if (!value || (gate ? !value->isString() : value->type!=JsonValue::Type::Number)) return false;
     const std::string_view text(value->text);
     const auto dot=text.find('.');
@@ -39,8 +39,8 @@ bool tradeTime(const JsonValue *value,bool gate,TradeTime &out) {
         for (const char digit:tail) fraction=fraction*10+static_cast<unsigned>(digit-'0');
         for (size_t i=tail.size();i<precision;++i) fraction*=10;
     }
-    out=gate ? TradeTime{whole,static_cast<uint32_t>(fraction)} :
-               TradeTime{whole*1000+fraction/1000000,static_cast<uint32_t>(fraction%1000000)};
+    out=gate ? MarketTradeTime{whole,static_cast<uint32_t>(fraction)} :
+               MarketTradeTime{whole*1000+fraction/1000000,static_cast<uint32_t>(fraction%1000000)};
     return true;
 }
 
@@ -72,12 +72,13 @@ MarketDataStatus krakenRow(const JsonValue &row,Trade &out) {
     return positivePrice(&row.items[0],out.price) ? MarketDataStatus::Ok : MarketDataStatus::Decimal;
 }
 
-MarketDataResult<Trade> latestTrade(const PublicTickerReceipt &receipt,bool gate) {
-    const auto &response=receipt.response;
+MarketDataResult<Trade> latestTrade(const PublicJsonResponse &response,bool gate,uint64_t sent,uint64_t received,
+                                    std::optional<MarketTradeTime> *conflictingEvent) {
     if (response.status!=PublicHttpsStatus::Ok || response.httpStatus!=200)
         return {MarketDataStatus::Transport,{}};
-    if (!response.observedUtc || response.observedUtc<receipt.sentUtc/1000 ||
-        response.observedUtc>receipt.receivedUtc/1000) return {MarketDataStatus::Timestamp,{}};
+    if (!sent || received<sent || received>market_detail::maxMarketUtcMs ||
+        !response.observedUtc || response.observedUtc<sent/1000 || response.observedUtc>received/1000)
+        return {MarketDataStatus::Timestamp,{}};
     JsonValue document;
     if (!boundedPublicJson(response.body) || !parseJsonStrict(response.body,&document,nullptr,{maxPublicTradeBodyBytes}))
         return {MarketDataStatus::Schema,{}};
@@ -86,7 +87,14 @@ MarketDataResult<Trade> latestTrade(const PublicTickerReceipt &receipt,bool gate
     if (!gate) {
         const auto *errors=document.find("error"), *result=document.find("result");
         if (!document.isObject() || !errors || !errors->isArray()) return {MarketDataStatus::Schema,{}};
-        if (!errors->items.empty()) return {MarketDataStatus::ProviderError,{}};
+        if (!errors->items.empty()) {
+            bool limited=false;
+            for (const auto &error:errors->items) {
+                if (!error.isString()) return {MarketDataStatus::Schema,{}};
+                limited=limited || error.text=="EAPI:Rate limit exceeded";
+            }
+            return {limited ? MarketDataStatus::RateLimited : MarketDataStatus::ProviderError,{}};
+        }
         if (!result || !result->isObject()) return {MarketDataStatus::Schema,{}};
         rows=result->find("USDTZUSD");
         const auto *cursor=result->find("last");
@@ -104,7 +112,7 @@ MarketDataResult<Trade> latestTrade(const PublicTickerReceipt &receipt,bool gate
         Trade candidate;
         const auto status=gate ? gateRow(row,candidate) : krakenRow(row,candidate);
         if (status!=MarketDataStatus::Ok) return {status,{}};
-        if (candidate.time>TradeTime{receipt.receivedUtc,0} || candidate.time.first/1000>response.observedUtc)
+        if (candidate.time>MarketTradeTime{received,0} || candidate.time.first/1000>response.observedUtc)
             return {MarketDataStatus::Timestamp,{}};
         if (!ids.insert(candidate.id).second) return {MarketDataStatus::Schema,{}};
         if (candidate.time>latest.time) {
@@ -114,47 +122,99 @@ MarketDataResult<Trade> latestTrade(const PublicTickerReceipt &receipt,bool gate
             conflict=true;
         }
     }
-    if (conflict) return {MarketDataStatus::Coverage,{}};
+    if (conflict) {
+        if (conflictingEvent) *conflictingEvent=latest.time;
+        return {MarketDataStatus::Coverage,{}};
+    }
     return {MarketDataStatus::Ok,std::move(latest)};
 }
 
-uint64_t tradeSkewMs(const TradeTime &first,const TradeTime &second) {
+uint64_t tradeSkewMs(const MarketTradeTime &first,const MarketTradeTime &second) {
     const auto &earlier=(std::min)(first,second), &later=(std::max)(first,second);
     return later.first-earlier.first+static_cast<unsigned>(later.second>earlier.second);
 }
 
-std::string eventUtc(const TradeTime &time) {
+std::string eventUtc(const MarketTradeTime &time) {
     const auto nanos=(time.first%1000)*1000000+time.second;
     auto subsecond=std::to_string(nanos);
     subsecond.insert(0,9-subsecond.size(),'0');
     return std::to_string(time.first/1000)+"."+subsecond;
 }
 
-bool appendTrade(std::string &report,const char *name,const MarketDataResult<Trade> &trade,
-                 const PublicTickerReceipt &receipt,const PublicTickerCapture &capture) {
+std::optional<MarketTradeAges> tradeAges(const MarketTradeObservation &trade,uint64_t utcMs,uint64_t monoMs) {
+    if (!utcMs || utcMs>market_detail::maxMarketUtcMs || utcMs<trade.receivedUtcMs ||
+        monoMs<trade.receivedMonoMs || trade.time>MarketTradeTime{trade.receivedUtcMs,0}) return {};
+    return MarketTradeAges{utcMs-trade.time.first,(std::max)(utcMs-trade.receivedUtcMs,monoMs-trade.receivedMonoMs)};
+}
+
+bool tradeFresh(const MarketTradeObservation *trade,uint64_t utcMs,uint64_t monoMs) {
+    const auto age=trade ? tradeAges(*trade,utcMs,monoMs) : std::nullopt;
+    return age && age->eventMs<=maxAgeMs && age->receiptMs<=maxAgeMs;
+}
+
+uint64_t gap(uint64_t a,uint64_t b) { return (std::max)(a,b)-(std::min)(a,b); }
+
+void appendTrade(std::string &report,const char *name,const MarketDataResult<MarketTradeObservation> &trade,
+                 PublicHttpsStatus transport,const PublicTickerCapture &capture) {
     report+=std::string(name)+": ";
     if (!trade.value) {
-        const char *reason=marketDataStatusName(trade.status);
-        if (trade.status==MarketDataStatus::Transport)
-            reason=receipt.response.status==PublicHttpsStatus::Ok ? "public provider HTTP error" :
-                                                                  publicHttpsStatusName(receipt.response.status);
-        else if (trade.status==MarketDataStatus::Timestamp) reason="invalid trade or receipt timestamp";
-        else if (trade.status==MarketDataStatus::Coverage) reason="no unambiguous trade coverage";
-        report+="N/A ("+std::string(reason)+")\n";
-        return false;
+        report+="N/A ("+std::string(marketTradeStatusName(trade.status,transport))+")\n";
+        return;
     }
-    const auto eventAge=capture.cutoffUtc-trade.value->time.first;
-    const auto receiveAge=(std::max)(capture.cutoffUtc-receipt.receivedUtc,capture.elapsedMs-receipt.elapsedMs);
-    const bool fresh=eventAge<=maxAgeMs && receiveAge<=maxAgeMs;
-    report+=trade.value->price.text()+" | event UTC "+eventUtc(trade.value->time)+
-        " | receipt UTC ms "+std::to_string(receipt.receivedUtc)+
-        " | event age "+std::to_string(eventAge)+" ms | receipt age "+std::to_string(receiveAge)+" ms";
-    if (!fresh) report+=" | outside age limit";
+    const auto &value=*trade.value;
+    const auto ages=tradeAges(value,capture.cutoffUtc,capture.elapsedMs);
+    report+=value.price.text()+" | event UTC "+eventUtc(value.time)+
+        " | receipt UTC ms "+std::to_string(value.receivedUtcMs);
+    if (ages) {
+        report+=" | event age "+std::to_string(ages->eventMs)+" ms | receipt age "+std::to_string(ages->receiptMs)+" ms";
+        if (ages->eventMs>maxAgeMs || ages->receiptMs>maxAgeMs) report+=" | outside age limit";
+    }
     report+='\n';
-    return fresh;
 }
 
 } // namespace
+
+MarketDataResult<MarketTradeObservation> parsePublicTrade(const PublicJsonResponse &response,PublicFeed feed,
+    uint64_t sentUtcMs,uint64_t receivedUtcMs,uint64_t receivedMonoMs,std::optional<MarketTradeTime> *conflictingEvent) {
+    if (conflictingEvent) conflictingEvent->reset();
+    const bool gate=feed==PublicFeed::GatePearlTrades;
+    if (!gate && feed!=PublicFeed::KrakenUsdtTrades) return {MarketDataStatus::Identity,{}};
+    auto trade=latestTrade(response,gate,sentUtcMs,receivedUtcMs,conflictingEvent);
+    if (!trade.value) return {trade.status,{}};
+    return {MarketDataStatus::Ok,
+            MarketTradeObservation{trade.value->time,std::move(trade.value->price),receivedUtcMs,receivedMonoMs}};
+}
+
+MarketTradeReference publicTradeReference(const MarketTradeObservation *pearl,const MarketTradeObservation *fx,
+    uint64_t nowUtcMs,uint64_t nowMonoMs) {
+    MarketTradeReference result;
+    result.pearlFresh=tradeFresh(pearl,nowUtcMs,nowMonoMs);
+    result.fxFresh=tradeFresh(fx,nowUtcMs,nowMonoMs);
+    if (!result.pearlFresh || !result.fxFresh) return result;
+    if (tradeSkewMs(pearl->time,fx->time)>maxSkewMs ||
+        gap(pearl->receivedUtcMs,fx->receivedUtcMs)>maxSkewMs || gap(pearl->receivedMonoMs,fx->receivedMonoMs)>maxSkewMs) {
+        result.unavailable="trade events or receipts more than 30 s apart";
+    } else {
+        ExactDecimal usd;
+        if (pearl->price.multiply(fx->price,&usd)) result.usd=std::move(usd);
+        else result.unavailable="combined price exceeds arithmetic capacity";
+    }
+    return result;
+}
+
+std::string marketTradeUtc(const MarketTradeTime &time) { return eventUtc(time); }
+
+std::optional<MarketTradeAges> marketTradeAges(const MarketTradeObservation &trade,uint64_t nowUtcMs,uint64_t nowMonoMs) {
+    return tradeAges(trade,nowUtcMs,nowMonoMs);
+}
+
+const char *marketTradeStatusName(MarketDataStatus status,PublicHttpsStatus transport) {
+    if (status==MarketDataStatus::Transport)
+        return transport==PublicHttpsStatus::Ok ? "public provider HTTP error" : publicHttpsStatusName(transport);
+    if (status==MarketDataStatus::Timestamp) return "invalid trade or receipt timestamp";
+    if (status==MarketDataStatus::Coverage) return "no unambiguous trade coverage";
+    return marketDataStatusName(status);
+}
 
 PublicTradeReport renderPublicTradeSample(const PublicTickerCapture &capture,std::string &report) {
     using market_detail::MarketSampleClock;
@@ -168,24 +228,20 @@ PublicTradeReport renderPublicTradeSample(const PublicTickerCapture &capture,std
         !marketTradeClockContinuous(start,second,cutoff))
         return PublicTradeReport::InvalidClock;
 
-    const auto pearl=latestTrade(gate,true), fx=latestTrade(kraken,false);
+    const auto pearl=parsePublicTrade(gate.response,PublicFeed::GatePearlTrades,gate.sentUtc,gate.receivedUtc,gate.elapsedMs);
+    const auto fx=parsePublicTrade(kraken.response,PublicFeed::KrakenUsdtTrades,kraken.sentUtc,kraken.receivedUtc,kraken.elapsedMs);
     report="Public trade sample (newest timestamp in each returned batch)\n"
         "Capture UTC ms "+std::to_string(capture.cutoffUtc)+" | ages at capture\n";
-    const bool pearlFresh=appendTrade(report,"Gate Pearl mainnet PRL/USDT",pearl,gate,capture);
-    const bool fxFresh=appendTrade(report,"Kraken USDT/USD",fx,kraken,capture);
+    appendTrade(report,"Gate Pearl mainnet PRL/USDT",pearl,gate.response.status,capture);
+    appendTrade(report,"Kraken USDT/USD",fx,kraken.response.status,capture);
+    const auto reference=publicTradeReference(pearl.value?&*pearl.value:nullptr,fx.value?&*fx.value:nullptr,
+                                               capture.cutoffUtc,capture.elapsedMs);
     report+="PRL/USD trade reference at capture: ";
-    ExactDecimal usd;
-    if (!pearlFresh || !fxFresh) {
-        report+="N/A (requires two valid trades and receipts within 120 s)\n";
-    } else if (tradeSkewMs(pearl.value->time,fx.value->time)>maxSkewMs ||
-               kraken.receivedUtc-gate.receivedUtc>maxSkewMs || kraken.elapsedMs-gate.elapsedMs>maxSkewMs) {
-        report+="N/A (trade events or receipts more than 30 s apart)\n";
-    } else if (!pearl.value->price.multiply(fx.value->price,&usd)) {
-        report+="N/A (combined price exceeds arithmetic capacity)\n";
-    } else {
-        report+=usd.text()+'\n';
+    if (reference.usd) {
+        report+=reference.usd->text()+'\n';
         return PublicTradeReport::Complete;
     }
+    report+="N/A ("+std::string(reference.unavailable)+")\n";
     return PublicTradeReport::Incomplete;
 }
 } // namespace om

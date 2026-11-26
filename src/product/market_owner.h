@@ -1,6 +1,7 @@
 // Independent public-data scheduling/ownership. Never selects a pool, starts a miner or changes credit facts.
 #pragma once
 #include "market_data.h"
+#include "market_trade_data.h"
 #include "market_view.h"
 #include <array>
 #include <atomic>
@@ -17,7 +18,7 @@ struct MarketPollingPolicy {
     MarketFreshnessPolicy freshness;
     PublicHttpsLimits https;
     bool scheduleEconomicRequests = true;
-    bool publicHour = false;
+    bool publicHour = false, publicTrades = false;
 };
 bool validMarketPollingPolicy(const MarketPollingPolicy &policy);
 struct MarketFetchTicket {
@@ -34,9 +35,11 @@ struct MarketFeedHealth {
 // Pure state machine: caller owns clocks and execution; no sleeps or network in this class.
 class MarketPollingPlan {
    public:
+    // The wall-clock argument uses UTC milliseconds for publicTrades and UTC seconds otherwise.
     bool start(uint64_t generation, uint64_t nowMs, uint64_t nowUtc, const MarketPollingPolicy &policy, bool fixtureCandles);
     void stop();
     void helperUnreaped();  // trusted local lifecycle outcome; terminal across generations, even after cancellation
+    bool observeClock(uint64_t nowMs, uint64_t nowUtc);
     std::optional<MarketFetchTicket> next(uint64_t nowMs, uint64_t nowUtc);
     bool complete(const MarketFetchTicket &ticket, const PublicJsonResponse &response, MarketDataStatus data, uint64_t nowMs, uint64_t nowUtc);
     bool takeEconomicRequest(uint64_t nowMs, uint64_t nowUtc);
@@ -45,7 +48,6 @@ class MarketPollingPlan {
     bool helperFault() const { return helperFault_; }
     const std::array<MarketFeedHealth, 6> &health() const { return health_; }
    private:
-    bool clock(uint64_t nowMs, uint64_t nowUtc);
     MarketPollingPolicy policy_;
     bool active_ = false, fixtureCandles_ = false, clockFault_ = false, helperFault_ = false;
     uint64_t generation_ = 0, serial_ = 0, baseMs_ = 0, baseUtc_ = 0, lastMs_ = 0, lastUtc_ = 0, economicDue_ = 0;
@@ -62,6 +64,7 @@ struct MarketSnapshot {
     MarketOrigin origin = MarketOrigin::ProviderResponse;
     std::array<MarketFeedHealth, 6> health;
     std::optional<MarketQuote> pearlQuote, fxQuote;
+    std::optional<MarketTradeObservation> pearlTrade, fxTrade;
     std::optional<MarketCandles> pearlCandles, fxCandles;
     std::shared_ptr<const PublicHourObservation> pearlHour, fxHour;
 };
@@ -73,7 +76,7 @@ MarketFetch marketProcessFetch(std::filesystem::path installedHelper);
 class MarketDataOwner {
    public:
     MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy = {}, MarketOrigin origin = MarketOrigin::ProviderResponse,
-                    bool fixtureCandles = false, MarketClock clock = {});
+                    bool fixtureCandles = false, MarketClock clock = {}, MarketClock tradeClock = {});
     ~MarketDataOwner();
     MarketDataOwner(const MarketDataOwner &) = delete;
     MarketDataOwner &operator=(const MarketDataOwner &) = delete;
