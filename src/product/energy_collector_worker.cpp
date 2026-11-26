@@ -1,5 +1,8 @@
 #include "energy_collector_process.h"
 int main(int argc,char **argv){
+    // Retain the entry point's identity even when both helpers link shared protocol code.
+    static const volatile char packageRole[] = "CanaryMiner-EnergyCollectorWorker/1";
+    (void)packageRole[0];
     using namespace om;
     try{
         std::string wire;if(!readLocalTaskInput(argc,argv,&wire))return 2;

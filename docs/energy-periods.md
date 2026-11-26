@@ -1,6 +1,6 @@
 # Monthly periods for stored energy
 
-Run the following command in a development build with `CANARY_ENABLE_ENERGY_RUNTIME=ON`. Use the state directory spelling from enrollment and a separate reset policy file. Resolve a relative state directory from the same working directory used at enrollment.
+Run the following command in an [energy-enabled candidate](pool-tls-candidate.md#version-4-energy-runtime-layout) or a development build with `CANARY_ENABLE_ENERGY_RUNTIME=ON`. Use the state directory spelling from enrollment and a separate reset policy file. Resolve a relative state directory from the same working directory used at enrollment.
 
 ```text
 canary-miner energy-periods --state-dir DIR --reset-policy RULE.json --cycles 2

@@ -78,6 +78,25 @@ Use the extracted miner's `version` and interactive `settings` commands for CPU-
 
 Settings keeps economic mode off for fresh installations and old preferences that have no economic mode field. An explicitly saved request remains selected on reopening Settings.
 
+## Version 4 energy runtime layout
+
+Build with `CANARY_ENABLE_ENERGY_RUNTIME=ON` and add `--with-energy-runtime` to `tls_candidate.py pack`.
+The v4 manifest declares whether named tariff clocks are bundled and records the system SQLite
+requirement. A TLS energy candidate may also carry the existing public HTTPS worker when that
+capability and the named clock data are explicitly selected. Candidates with all three optional
+capabilities have six native programs and 37 hashed payload files.
+
+Keep the energy authorization and collector workers in the same `bin` directory as the miner.
+Only the miner may import the GPU driver. The collector loads the platform SQLite library at
+runtime. The installer verifies the archive, file hashes and permissions. Clean-run tests exercise
+SQLite by opening an enrolled journal with the installed helper. SQLite remains a serviced
+system dependency and is absent from the archive.
+
+`version` reports `energy-runtime=opt-in`. Saved enrollment remains off by default. Use the existing
+[energy authorization controls](energy-runtime.md) and [monthly journal report](energy-periods.md).
+Archive verification cannot establish physical sensor accuracy or whole-meter coverage.
+The official release path retains its default-off build and refuses energy-enabled artifacts.
+
 ## Candidate evidence
 
 ### Version 3 clean installation

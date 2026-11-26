@@ -278,6 +278,13 @@ class CandidateTests(unittest.TestCase):
                         if platform == 'linux':
                             self.assertEqual(stat.S_IMODE((prefix / tzdb['version']).stat().st_mode), 0o644)
 
+    @staticmethod
+    def public_worker_payload(platform):
+        backend_name = b'Schannel\0' if platform == 'windows' else b'OpenSSL 3.5.9 '
+        backend = (b'schannel: AcquireCredentialsHandle failed:' if platform == 'windows' else b'OpenSSL SSL_connect:')
+        return (b'CMJSON1 libcurl\0CanaryMiner-PublicData/1\0' + backend_name + backend +
+                b'8.23.0\0' + b'1.34.9\0')
+
     def test_public_https_install_refuses_mixed_native_images_and_wrong_inventory(self):
         for platform in ('windows', 'linux'):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
@@ -291,11 +298,9 @@ class CandidateTests(unittest.TestCase):
                 miner, preferences, pool, worker = (f'bin/{name}' for name in CANDIDATE.images(platform, True))
                 offline_miner = files[miner]
                 files[miner] += b'  public-https=opt-in\0'
-                backend_name = b'Schannel\0' if platform == 'windows' else b'OpenSSL 3.5.9 '
                 backend = (b'schannel: AcquireCredentialsHandle failed:' if platform == 'windows'
                            else b'OpenSSL SSL_connect:')
-                files[worker] = (b'CMJSON1 libcurl\0CanaryMiner-PublicData/1\0' +
-                                 backend_name + backend + b'8.23.0\0' + b'1.34.9\0')
+                files[worker] = self.public_worker_payload(platform)
 
                 def with_manifest(payload, public_https=True):
                     data = {name: value for name, value in payload.items() if name != CANDIDATE.MANIFEST}
@@ -332,6 +337,132 @@ class CandidateTests(unittest.TestCase):
                         self.assertEqual((prefix / worker).read_bytes(), files[worker])
                         if platform == 'linux':
                             self.assertEqual(stat.S_IMODE((prefix / worker).stat().st_mode), 0o755)
+
+    def test_energy_cache_approval_is_explicit_and_official_release_refuses_enabled_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory) / 'CMakeCache.txt'
+            base = ['CANARY_PROFILE:STRING=production-sm120', 'CMAKE_BUILD_TYPE:STRING=Release',
+                    'CANARY_ENABLE_POOL_TLS_RUNTIME:BOOL=ON', 'CANARY_ENABLE_NAMED_TZDB:BOOL=OFF',
+                    'CANARY_ENABLE_PUBLIC_HTTPS:BOOL=OFF', '_OPENSSL_VERSION:INTERNAL=3.5.9',
+                    *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF if key != CANDIDATE.ENERGY_RUNTIME)]
+            for setting in ('BOOL=OFF', 'BOOL=ON', 'STRING=ON'):
+                with self.subTest(setting=setting):
+                    cache.write_text('\n'.join([*base, f'{CANDIDATE.ENERGY_RUNTIME}:{setting}']), encoding='utf8')
+                    if setting == 'BOOL=ON':
+                        CANDIDATE.check_cache(cache, 'linux', energy_runtime=True)
+                    else:
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.check_cache(cache, 'linux', energy_runtime=True)
+            cache.write_text('\n'.join([*base, f'{CANDIDATE.ENERGY_RUNTIME}:BOOL=ON']), encoding='utf8')
+            with self.assertRaises(ValueError):
+                CANDIDATE.check_cache(cache, 'linux')
+            with self.assertRaises(ValueError):
+                RELEASE.check_cache(cache)
+        legacy = RELEASE.ENERGY_LEASE_QUERY + RELEASE.ENERGY_AUTHORIZATION_FILE
+        for indicator in (RELEASE.ENERGY_RUNTIME_MARKER, legacy):
+            with patch.object(RELEASE, 'check_cache'), patch.object(
+                    RELEASE, 'verify_images', return_value=((), {'canary-miner.exe': indicator})):
+                with self.assertRaises(ValueError):
+                    RELEASE.verify('windows', None, None, None, None, None)
+
+    def test_energy_candidate_profiles_bind_helpers_sqlite_and_consent(self):
+        for platform in ('windows', 'linux'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / ('energy' + CANDIDATE.suffix(platform))
+                prefix = root / 'energy install'
+                old = self.files(platform)
+                files = {name: value for name, value in old.items() if name != CANDIDATE.MANIFEST}
+                glibc = '2.40' if platform == 'linux' else None
+                miner = 'bin/' + CANDIDATE.images(platform)[0]
+                auth, collector = ('bin/' + name for name in CANDIDATE.images(platform, energy_runtime=True)[-2:])
+                tls_ref = CANDIDATE.images(platform)[2].encode('ascii') + b'\0'
+                files[miner] += RELEASE.ENERGY_RUNTIME_MARKER + tls_ref
+                auth_marker, collector_marker = CANDIDATE.ENERGY_ROLE_MARKERS
+                files[auth] = auth_marker + b'authorization with ["CMEPQ1",'
+                sqlite = CANDIDATE.ENERGY_SQLITE[platform].encode('utf-16-le' if platform == 'windows' else 'ascii')
+                files[collector] = collector_marker + b'collector with CMERQ1\n\0sqlite3_libversion_number\0' + sqlite
+
+                def with_manifest(payload, **fields):
+                    doc = CANDIDATE.manifest(platform, REVISION, glibc, payload, energy_runtime=True)
+                    doc.update(fields)
+                    return {**payload, CANDIDATE.MANIFEST: json.dumps(doc).encode()}
+
+                with patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+                    for mixed in (
+                        with_manifest({key: value for key, value in files.items() if key != collector}),
+                        with_manifest({**files, miner: old[miner]}),
+                        with_manifest({**files, miner: files[miner].replace(tls_ref, b'')}),
+                        with_manifest({**files, collector: files[auth]}),
+                        with_manifest({**files, auth: collector_marker + b'other build with ["CMEPQ1",'}),
+                        with_manifest({**files, auth: files[auth] + collector_marker}),
+                        with_manifest({**files, auth: files[miner] + files[auth]}),
+                        with_manifest({**files, collector: files[collector].replace(sqlite, b'other SQLite')}),
+                        with_manifest({**files, auth: files[auth] + b'fixture-stall-before.json'}),
+                        with_manifest(files, named_tzdb=0),
+                        with_manifest(files, energy_runtime={'default_consent': 'on'}),
+                    ):
+                        digest = self.archive(platform, mixed, archive)
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.install(platform, archive, digest, prefix)
+                    self.assertFalse(prefix.exists())
+                    legacy = {key: value for key, value in files.items() if key not in (auth, collector)}
+                    for marker in (RELEASE.ENERGY_RUNTIME_MARKER,
+                                   RELEASE.ENERGY_LEASE_QUERY + RELEASE.ENERGY_AUTHORIZATION_FILE):
+                        legacy[miner] = old[miner] + marker
+                        doc = CANDIDATE.manifest(platform, REVISION, glibc, {
+                            key: value for key, value in legacy.items() if key != CANDIDATE.MANIFEST})
+                        legacy[CANDIDATE.MANIFEST] = json.dumps(doc).encode()
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.load(platform, archive, self.archive(platform, legacy, archive))
+                    digest = self.archive(platform, with_manifest(files), archive)
+                    _, document, _ = CANDIDATE.load(platform, archive, digest)
+                    self.assertEqual(document['schema'], CANDIDATE.ENERGY_RUNTIME_SCHEMA)
+                    self.assertEqual(document['energy_runtime'], {
+                        'default_consent': 'off', 'sqlite_library': CANDIDATE.ENERGY_SQLITE[platform],
+                        'min_sqlite': '3.31.0'})
+                    if platform == 'windows' or os.name == 'posix':
+                        CANDIDATE.install(platform, archive, digest, prefix)
+                        self.assertEqual((prefix / auth).read_bytes(), files[auth])
+                        self.assertEqual((prefix / collector).read_bytes(), files[collector])
+                        if platform == 'linux':
+                            self.assertEqual(stat.S_IMODE((prefix / collector).stat().st_mode), 0o755)
+
+    def test_energy_with_named_clocks_and_optional_public_worker(self):
+        for platform in ('windows', 'linux'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                archive = Path(directory) / ('integrated' + CANDIDATE.suffix(platform))
+                files, fixture_pin = self.named_payload(platform)
+                files.pop(CANDIDATE.MANIFEST, None)
+                glibc = '2.40' if platform == 'linux' else None
+                miner, _, _, public, auth, collector = (
+                    'bin/' + name for name in CANDIDATE.images(platform, public_https=True, energy_runtime=True))
+                files[miner] += RELEASE.ENERGY_RUNTIME_MARKER
+                auth_marker, collector_marker = CANDIDATE.ENERGY_ROLE_MARKERS
+                files[auth] = auth_marker + b'["CMEPQ1",'
+                sqlite = CANDIDATE.ENERGY_SQLITE[platform].encode('utf-16-le' if platform == 'windows' else 'ascii')
+                files[collector] = collector_marker + b'CMERQ1\n\0sqlite3_libversion_number\0' + sqlite
+                for name in CANDIDATE.PUBLIC_HTTPS_NOTICE_SHA256:
+                    files[name] = (Path(__file__).resolve().parents[1] / name).read_bytes()
+
+                def check(payload, public_https, expected):
+                    doc = CANDIDATE.manifest(platform, REVISION, glibc, payload, named_tzdb=True,
+                                             public_https=public_https, energy_runtime=True)
+                    digest = self.archive(platform, {**payload, CANDIDATE.MANIFEST: json.dumps(doc).encode()}, archive)
+                    if expected:
+                        self.assertEqual(CANDIDATE.load(platform, archive, digest)[1], doc)
+                    else:
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.load(platform, archive, digest)
+
+                with patch.dict(CANDIDATE.TZDB_INVENTORY_SHA256, {platform: fixture_pin}), \
+                        patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+                    check(files, False, True)
+                    files[miner] += CANDIDATE.PUBLIC_HTTPS_OPT_IN
+                    files[public] = self.public_worker_payload(platform)
+                    check(files, True, True)
+                    for unexpected in (auth, collector):
+                        check({**files, unexpected: files[unexpected] + CANDIDATE.PUBLIC_HTTPS_AGENT}, True, False)
 
     def test_refuses_wrong_hash_changed_file_extra_and_missing_members(self):
         for platform in ('linux', 'windows'):

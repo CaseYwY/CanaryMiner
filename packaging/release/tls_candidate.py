@@ -16,12 +16,19 @@ import tempfile
 import zipfile
 import zlib
 
-from verify_artifacts import MAX_ARTIFACT_BYTES, PUBLIC_JSON_WORKER, verify_images
+from verify_artifacts import ENERGY_RUNTIME_MARKER, MAX_ARTIFACT_BYTES, PUBLIC_JSON_WORKER, energy_runtime_present, verify_images
 
 
 SCHEMA = 'canaryminer-tls-candidate-v1'
 NAMED_TZDB_SCHEMA = 'canaryminer-tls-named-tzdb-candidate-v2'
 PUBLIC_HTTPS_SCHEMA = 'canaryminer-tls-named-tzdb-public-https-candidate-v3'
+ENERGY_RUNTIME_SCHEMA = 'canaryminer-tls-energy-runtime-candidate-v4'
+ENERGY_WORKERS = ('canary_energy_authorization_worker', 'canary_energy_collector_worker')
+ENERGY_ROLE_MARKERS = (b'CanaryMiner-EnergyAuthorizationWorker/1\0', b'CanaryMiner-EnergyCollectorWorker/1\0')
+ENERGY_SQLITE = {'windows': 'winsqlite3.dll', 'linux': 'libsqlite3.so.0'}
+ENERGY_FIXTURE_MARKERS = (b'fixture-stall-before.json', b'fixture-stall-after.json', b'fixture-bad-ack.json',
+                          b'fixture-lease-no-ack.json', b'fixture-guard-delay.json',
+                          b'fixture-parent-death.json', b'fixture-entropy-fail.json', b'.fixture-ready')
 PUBLIC_HTTPS_OPT_IN = b'  public-https=opt-in\0'
 PUBLIC_HTTPS_AGENT = b'CanaryMiner-PublicData/1\0'
 CURL_VERSION = '8.23.0'
@@ -67,6 +74,7 @@ REQUIRED_OFF = ('CANARY_ENABLE_ENERGY_RUNTIME', 'CANARY_ENABLE_WORKER_CONTROL_RU
                 'CANARY_FEE_TEST_POLICY')
 TLS_RUNTIME = 'CANARY_ENABLE_POOL_TLS_RUNTIME'
 PUBLIC_HTTPS = 'CANARY_ENABLE_PUBLIC_HTTPS'
+ENERGY_RUNTIME = 'CANARY_ENABLE_ENERGY_RUNTIME'
 NAMED_TZDB = 'CANARY_ENABLE_NAMED_TZDB'
 BUNDLED_TZDB = 'CANARY_BUNDLED_TZDB_DIR'
 
@@ -96,8 +104,12 @@ def read_regular(path, limit):
     return data
 
 
-def images(platform, public_https=False):
-    names = (*IMAGE_NAMES, PUBLIC_JSON_WORKER) if public_https else IMAGE_NAMES
+def images(platform, public_https=False, energy_runtime=False):
+    names = IMAGE_NAMES
+    if public_https:
+        names += (PUBLIC_JSON_WORKER,)
+    if energy_runtime:
+        names += ENERGY_WORKERS
     return tuple(name + ('.exe' if platform == 'windows' else '') for name in names)
 
 
@@ -106,8 +118,8 @@ def tzdb_paths(platform):
     return {name: f'bin/{TZDB_DIR}/{name}' for name in names}
 
 
-def file_limits(platform, named_tzdb=False, public_https=False):
-    return {**{f'bin/{name}': MAX_ARTIFACT_BYTES for name in images(platform, public_https)},
+def file_limits(platform, named_tzdb=False, public_https=False, energy_runtime=False):
+    return {**{f'bin/{name}': MAX_ARTIFACT_BYTES for name in images(platform, public_https, energy_runtime)},
             **dict.fromkeys(RELEASE_FILES, MAX_TEXT_BYTES),
             **dict.fromkeys(tzdb_paths(platform).values() if named_tzdb else (), MAX_TEXT_BYTES),
             **({OPENSSL_LICENSE: MAX_TEXT_BYTES} if platform == 'linux' else {}),
@@ -118,7 +130,7 @@ def file_mode(name):
     return 0o755 if name.startswith('bin/') and name.count('/') == 1 else 0o644
 
 
-def check_cache(path, platform, named_tzdb=False, public_https=False):
+def check_cache(path, platform, named_tzdb=False, public_https=False, energy_runtime=False):
     if public_https and not named_tzdb:
         raise ValueError('public HTTPS candidate also requires the bundled tariff TZDB')
     keys = {}
@@ -138,13 +150,16 @@ def check_cache(path, platform, named_tzdb=False, public_https=False):
             keys.get(TLS_RUNTIME) != ('BOOL', 'ON') or
             keys.get(NAMED_TZDB) != ('BOOL', 'ON' if named_tzdb else 'OFF') or
             keys.get(PUBLIC_HTTPS) != ('BOOL', 'ON' if public_https else 'OFF') or
-            any(keys.get(key) != ('BOOL', 'OFF') for key in REQUIRED_OFF)):
+            any(keys.get(key) != ('BOOL', 'ON' if key == ENERGY_RUNTIME and energy_runtime else 'OFF')
+                for key in REQUIRED_OFF)):
         raise ValueError('candidate requires Release SM120 and the selected capabilities')
     enabled = {TLS_RUNTIME}
     if named_tzdb:
         enabled.add(NAMED_TZDB)
     if public_https:
         enabled.add(PUBLIC_HTTPS)
+    if energy_runtime:
+        enabled.add(ENERGY_RUNTIME)
     if any(value != ('BOOL', 'OFF') for key, value in keys.items()
            if key.startswith('CANARY_ENABLE_') and key not in enabled):
         raise ValueError('candidate includes an unsupported development capability')
@@ -162,11 +177,12 @@ def check_tzdb(platform, files):
         raise ValueError('tariff TZDB does not match the pinned file inventory')
 
 
-def check_public_https(platform, files):
-    miner, preferences, pool_worker, public_worker = images(platform, public_https=True)
+def check_public_https(platform, files, energy_runtime=False):
+    native = images(platform, public_https=True, energy_runtime=energy_runtime)
+    miner, public_worker = native[0], PUBLIC_JSON_WORKER + ('.exe' if platform == 'windows' else '')
     if PUBLIC_HTTPS_OPT_IN not in files[f'bin/{miner}']:
         raise ValueError('the candidate miner lacks public HTTPS admission')
-    if any(PUBLIC_HTTPS_AGENT in files[f'bin/{image}'] for image in (miner, preferences, pool_worker)):
+    if any(PUBLIC_HTTPS_AGENT in files[f'bin/{image}'] for image in native if image != public_worker):
         raise ValueError('public HTTPS transport must be confined to the public JSON worker')
     data = files[f'bin/{public_worker}']
     # The generic backend name also appears in the runtime's backend selection check.
@@ -183,7 +199,28 @@ def check_public_https(platform, files):
             raise ValueError('public HTTPS notice does not match the inventoried dependency')
 
 
-def manifest(platform, revision, glibc, files, named_tzdb=False, public_https=False):
+def check_energy_runtime(platform, files):
+    miner = files[f'bin/{images(platform)[0]}']
+    names = images(platform, energy_runtime=True)[-2:]
+    authorization, collector = (files[f'bin/{name}'] for name in names)
+    if (ENERGY_RUNTIME_MARKER not in miner or
+            any(ENERGY_RUNTIME_MARKER in worker for worker in (authorization, collector))):
+        raise ValueError('energy runtime requires a capable miner and two native workers')
+    authorization_role, collector_role = ENERGY_ROLE_MARKERS
+    if (authorization_role not in authorization or collector_role in authorization or
+            collector_role not in collector or authorization_role in collector):
+        raise ValueError('energy worker entry point identity mismatch')
+    sqlite = ENERGY_SQLITE[platform].encode('utf-16-le' if platform == 'windows' else 'ascii')
+    if (b'["CMEPQ1",' not in authorization or b'CMERQ1\n\0' not in collector or
+            b'sqlite3_libversion_number\0' not in collector or sqlite not in collector):
+        raise ValueError('energy runtime worker or system SQLite support is missing')
+    for image in (miner, authorization, collector):
+        if any(marker in image or marker.decode('ascii').encode('utf-16-le') in image
+               for marker in ENERGY_FIXTURE_MARKERS):
+            raise ValueError('energy candidate includes test-only worker hooks')
+
+
+def manifest(platform, revision, glibc, files, named_tzdb=False, public_https=False, energy_runtime=False):
     backend = 'schannel' if platform == 'windows' else 'openssl-3.5.9-static'
     document = {
         'schema': NAMED_TZDB_SCHEMA if named_tzdb else SCHEMA,
@@ -203,6 +240,14 @@ def manifest(platform, revision, glibc, files, named_tzdb=False, public_https=Fa
             'curl': CURL_VERSION,
             'resolver': 'c-ares-' + CARES_VERSION,
         }
+    if energy_runtime:
+        document['schema'] = ENERGY_RUNTIME_SCHEMA
+        document['named_tzdb'] = named_tzdb
+        document['energy_runtime'] = {
+            'default_consent': 'off',
+            'sqlite_library': ENERGY_SQLITE[platform],
+            'min_sqlite': '3.31.0',
+        }
     return document
 
 
@@ -214,27 +259,37 @@ def validate(platform, files):
     if MANIFEST not in files:
         raise ValueError('candidate manifest is missing')
     document = json.loads(files[MANIFEST], object_pairs_hook=one)
-    if not isinstance(document, dict) or document.get('schema') not in (SCHEMA, NAMED_TZDB_SCHEMA, PUBLIC_HTTPS_SCHEMA):
+    if not isinstance(document, dict) or document.get('schema') not in (
+            SCHEMA, NAMED_TZDB_SCHEMA, PUBLIC_HTTPS_SCHEMA, ENERGY_RUNTIME_SCHEMA):
         raise ValueError('invalid candidate manifest')
-    public_https = document['schema'] == PUBLIC_HTTPS_SCHEMA
-    named_tzdb = public_https or document['schema'] == NAMED_TZDB_SCHEMA
-    if set(files) != set(file_limits(platform, named_tzdb, public_https)):
+    schema = document['schema']
+    energy_runtime = schema == ENERGY_RUNTIME_SCHEMA
+    public_https = schema == PUBLIC_HTTPS_SCHEMA or (energy_runtime and 'public_https' in document)
+    named_tzdb = document.get('named_tzdb') if energy_runtime else public_https or schema == NAMED_TZDB_SCHEMA
+    if type(named_tzdb) is not bool or (public_https and not named_tzdb):
+        raise ValueError('invalid candidate clock capability')
+    if set(files) != set(file_limits(platform, named_tzdb, public_https, energy_runtime)):
         raise ValueError('candidate inventory mismatch')
+    miner, preferences, stream_worker = images(platform)
+    if named_tzdb or energy_runtime:
+        if stream_worker.encode('ascii') + b'\0' not in files[f'bin/{miner}']:
+            raise ValueError('pool TLS worker reference missing from the miner')
     if named_tzdb:
         check_tzdb(platform, files)
         # The miner and its preferences worker must both recognize the bundled clocks.
         pins = [sha256(files[path]).encode('ascii') for path in tzdb_paths(platform).values()]
-        miner, preferences, stream_worker = images(platform)
         for image in (miner, preferences):
             data = files[f'bin/{image}']
             if any(pin not in data for pin in pins):
                 raise ValueError('tariff TZDB pins missing from a native consumer')
-        if stream_worker.encode('ascii') + b'\0' not in files[f'bin/{miner}']:
-            raise ValueError('pool TLS worker reference missing from the miner')
     if public_https:
-        check_public_https(platform, files)
+        check_public_https(platform, files, energy_runtime)
     elif PUBLIC_HTTPS_OPT_IN in files[f'bin/{images(platform)[0]}']:
         raise ValueError('public HTTPS miner requires the public HTTPS candidate profile')
+    if energy_runtime:
+        check_energy_runtime(platform, files)
+    elif energy_runtime_present(files[f'bin/{miner}']):
+        raise ValueError('energy-enabled miner requires the energy candidate profile')
     revision, glibc = document.get('source_revision'), document.get('min_glibc')
     valid_glibc = (glibc is None if platform == 'windows' else
                    isinstance(glibc, str) and re.fullmatch(r'[0-9]{1,3}(?:\.[0-9]{1,3}){1,2}', glibc)
@@ -242,7 +297,7 @@ def validate(platform, files):
     if not valid_revision(revision) or not valid_glibc:
         raise ValueError('invalid candidate revision or runtime requirement')
     actual = manifest(platform, revision, glibc, {k: v for k, v in files.items() if k != MANIFEST},
-                      named_tzdb, public_https)
+                      named_tzdb, public_https, energy_runtime)
     if document != actual:
         raise ValueError('candidate manifest or file hash mismatch')
     if platform == 'linux' and sha256(files[OPENSSL_LICENSE]) != OPENSSL_LICENSE_SHA256:
@@ -259,7 +314,7 @@ def load(platform, archive, expected=None):
     digest = sha256(data)
     if expected is not None and digest != expected:
         raise ValueError('candidate archive hash mismatch')
-    files, limits = {}, file_limits(platform, named_tzdb=True, public_https=True)
+    files, limits = {}, file_limits(platform, named_tzdb=True, public_https=True, energy_runtime=True)
     total = 0
 
     def add(name, size, mode, open_entry):
@@ -315,13 +370,14 @@ def write_package(platform, files, stream):
                     package.addfile(entry, io.BytesIO(data))
 
 
-def pack(platform, build, revision, deny_file, tool, archive, openssl_license, named_tzdb=False, public_https=False):
+def pack(platform, build, revision, deny_file, tool, archive, openssl_license, named_tzdb=False, public_https=False,
+         energy_runtime=False):
     source_tree = Path(__file__).resolve().parent.parent.parent
     if not valid_revision(revision) or not archive.name.endswith(suffix(platform)):
         raise ValueError('invalid revision or candidate archive extension')
     if archive.exists() or archive.is_symlink():
         raise ValueError('candidate archive already exists')
-    check_cache(build / 'CMakeCache.txt', platform, named_tzdb, public_https)
+    check_cache(build / 'CMakeCache.txt', platform, named_tzdb, public_https, energy_runtime)
     files = {name: read_regular(source_tree / source, MAX_TEXT_BYTES)
              for name, source in RELEASE_FILES.items()}
     tzdb = {}
@@ -336,14 +392,14 @@ def pack(platform, build, revision, deny_file, tool, archive, openssl_license, n
         files[OPENSSL_LICENSE] = read_regular(openssl_license, MAX_TEXT_BYTES)
     elif openssl_license is not None:
         raise ValueError('Windows uses Schannel')
-    floor, checked = verify_images(platform, build, source_tree, deny_file, tool, images(platform, public_https),
+    floor, checked = verify_images(platform, build, source_tree, deny_file, tool, images(platform, public_https, energy_runtime),
                                    portable=True, payloads=files)
     if platform == 'linux' and LINUX_OPENSSL_VERSION not in checked[IMAGE_NAMES[2]]:
         raise ValueError('the static OpenSSL 3.5.9 image is required')
     files.update(tzdb)
     files.update({f'bin/{name}': data for name, data in checked.items()})
     glibc = '.'.join(map(str, floor)) if floor else None
-    document = manifest(platform, revision, glibc, files, named_tzdb, public_https)
+    document = manifest(platform, revision, glibc, files, named_tzdb, public_https, energy_runtime)
     files[MANIFEST] = (json.dumps(document, indent=2, sort_keys=True) + '\n').encode('utf8')
     validate(platform, files)
     if sum(map(len, files.values())) > MAX_PACKAGE_BYTES:
@@ -397,6 +453,8 @@ def main():
                                  help='include the reviewed IANA 2026e data for named tariff clocks')
             command.add_argument('--with-public-https', action='store_true',
                                  help='include the opt-in public JSON worker (requires --with-named-tzdb)')
+            command.add_argument('--with-energy-runtime', action='store_true',
+                                 help='include both workers for opt-in energy persistence and journal review')
         else:
             command.add_argument('--sha256', required=True)
         if action == 'install':
@@ -405,7 +463,8 @@ def main():
     try:
         if args.operation == 'pack':
             print(pack(args.platform, args.build, args.revision, args.deny_file, args.tool,
-                       args.archive, args.openssl_license, args.with_named_tzdb, args.with_public_https))
+                       args.archive, args.openssl_license, args.with_named_tzdb, args.with_public_https,
+                       args.with_energy_runtime))
         else:
             if not re.fullmatch('[0-9a-f]{64}', args.sha256):
                 raise ValueError('expected a trusted SHA-256 digest')
