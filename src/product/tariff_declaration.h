@@ -85,6 +85,9 @@ std::string tariffJson(const JsonValue &value);
 bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,TariffProblem *problem=nullptr);
 // Checks the rule and through-time independently of unfinished rates and opening amounts.
 bool deriveTariffRecurringCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem=nullptr);
+// Decode the same reviewed civil-clock shape used by a tariff and derive a typed monthly reset.
+bool decodeTariffCivilClock(const JsonValue &input,CivilClock &clock);
+bool tariffMonthlyCycleAt(unsigned day,const CivilClock &clock,int64_t at,TariffCycleBounds &bounds);
 // Monthly-only clients retain their original contract.
 bool deriveTariffMonthlyCycle(const JsonValue &policy,const JsonValue &through,TariffCycleBounds &bounds,TariffProblem *problem=nullptr);
 bool parseTariffDeclaration(const std::string &text,JsonValue *root,TariffProblem *problem=nullptr);

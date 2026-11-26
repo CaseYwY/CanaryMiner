@@ -59,6 +59,9 @@ struct TariffBand {
     std::optional<ExactDecimal> throughKwh;  // inclusive selection for all-units; last band must be unbounded
     ExactDecimal ratePerKwh;                // signed retail currency/kWh, not asset price
 };
+// The caller supplies a validated progressive band schedule and scaled quantities.
+bool progressiveTierChange(const std::vector<TariffBand> &bands,const ExactDecimal &before,
+                           const ExactDecimal &after,ExactDecimal &change);
 struct CalendarRate {
     std::string key;
     unsigned beginMinute = 0, endMinute = 1440, weekdayMask = 127, monthMask = 4095, priority = 0;
