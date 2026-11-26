@@ -592,14 +592,15 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
              allowance?(demand?Fields{"seasonal_allowance","demand_charge"}:Fields{"seasonal_allowance"}):
                        (demand?Fields{"demand_charge"}:Fields{}),
              restrictedCredit?Fields{"restricted_credit"}:Fields{});
-        const auto version=integer(*root.find("schema_version"),"schema_version",13);
+        const auto version=integer(*root.find("schema_version"),"schema_version",tariffDeclarationLatestVersion);
         if((version==13)!=static_cast<bool>(restrictedCredit))
             bad("schema_version","Restricted credits require version 13.",TariffProblemKind::SchemaVersion);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         const auto &plan=*root.find("plan");
         const auto *exportRule=plan.find("export_payment");
-        if((version==12)!=static_cast<bool>(exportRule))
-            bad("schema_version","Export payment requires version 12.",TariffProblemKind::SchemaVersion);
+        const bool scheduledExport=version==14;
+        if((version==12||scheduledExport)!=static_cast<bool>(exportRule))
+            bad("schema_version","Export payment requires version 12 or 14.",TariffProblemKind::SchemaVersion);
         if(version<12&&(version>=9)!=static_cast<bool>(demand))
             bad("schema_version","Demand charge requires version 9.",TariffProblemKind::SchemaVersion);
         const auto *ratchet=demand?demand->find("ratchet"):nullptr;
@@ -628,7 +629,29 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         p.restrictedCreditAtClose=restrictedCredit!=nullptr;
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"},
              exportRule?Fields{"export_payment"}:Fields{});
-        if(exportRule){
+        size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0;
+        if(scheduledExport){
+            const std::string path="plan.export_payment.dynamic";
+            keys(*exportRule,"plan.export_payment",{"dynamic"});
+            const auto &rows=*exportRule->find("dynamic");
+            boundedArray(rows,path,256,total);
+            if(rows.items.empty())bad(path,"Enter at least one export rate.",TariffProblemKind::Unknown);
+            p.exportPayment.emplace();
+            for(size_t i=0;i<rows.items.size();++i){
+                const auto at=path+"["+std::to_string(i)+"]";
+                const auto &row=rows.items[i];
+                keys(row,at,{"begin_utc_ms","end_utc_ms","published_utc_ms","rate_per_kwh"});
+                const auto published=static_cast<int64_t>(integer(*row.find("published_utc_ms"),child(at,"published_utc_ms")));
+                if(published>confirmedMs)
+                    bad(child(at,"published_utc_ms"),"Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);
+                p.exportPayment->dynamic.push_back({
+                    static_cast<int64_t>(integer(*row.find("begin_utc_ms"),child(at,"begin_utc_ms"))),
+                    static_cast<int64_t>(integer(*row.find("end_utc_ms"),child(at,"end_utc_ms"))),
+                    published,
+                    decimal(*row.find("rate_per_kwh"),child(at,"rate_per_kwh"))
+                });
+            }
+        }else if(exportRule){
             const std::string path="plan.export_payment";
             keys(*exportRule,path,{"rate_per_kwh","published_utc_ms"});
             auto rate=decimal(*exportRule->find("rate_per_kwh"),child(path,"rate_per_kwh"));
@@ -650,7 +673,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         p.cycleCharge=decimal(*plan.find("cycle_charge"),"plan.cycle_charge");
         if(!null(*plan.find("minimum_cycle_subtotal")))p.minimumCycleSubtotal=decimal(*plan.find("minimum_cycle_subtotal"),"plan.minimum_cycle_subtotal");
         p.subtotalMultiplier=decimal(*plan.find("subtotal_multiplier"),"plan.subtotal_multiplier");
-        size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0,index=0;
+        size_t index=0;
         boundedArray(*plan.find("revisions"),"plan.revisions",16,total);
         for(const auto &row:plan.find("revisions")->items){
             const auto at="plan.revisions["+std::to_string(index++)+"]";TariffRevision r;
@@ -745,8 +768,9 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
                 bad(path,"Use nonnegative exported kWh and enter zero at cycle start.",TariffProblemKind::OpeningQuantity);
             constexpr char paymentPath[]="opening.accrued_export_payment";
             auto paid=decimal(*opening.find("accrued_export_payment"),paymentPath);
-            if(paid.negative()||(exported->numerator.zero()&&!paid.zero()))
-                bad(paymentPath,"Use a nonnegative accrued export payment. Enter zero without prior exports.",TariffProblemKind::OpeningQuantity);
+            if((!scheduledExport&&paid.negative())||(exported->numerator.zero()&&!paid.zero()))
+                bad(paymentPath,scheduledExport?"Enter zero without prior exports.":
+                    "Use a nonnegative accrued export payment. Enter zero without prior exports.",TariffProblemKind::OpeningQuantity);
             ElectricityAmount accrued;
             if(!paid.multiply(denominator,&accrued.numerator))
                 bad(paymentPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);

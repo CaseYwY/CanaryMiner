@@ -21,6 +21,16 @@ def export_tariff(begin, end, clock=UTC, reset="explicit_cycle_only", rates_end=
     return tariff
 
 
+def scheduled_tariff(begin, end, *rates, **options):
+    document = export_tariff(begin, end, **options)
+    document["schema_version"] = 14
+    document["plan"]["export_payment"] = {"dynamic": [
+        {"begin_utc_ms": start, "end_utc_ms": stop, "published_utc_ms": begin, "rate_per_kwh": price}
+        for start, stop, price in rates
+    ]}
+    return document
+
+
 def net_power(*rows):
     return {"schema_version": 6, "scope": SCOPE, "intervals": [
         {"begin_utc_ms": begin, "end_utc_ms": end, "average_net_watts": watts}
@@ -83,6 +93,14 @@ def main(cli, bundle=None):
             amounts(result, "2.000000", "4.000000", "6.000000", "4.000000", "2.000000")
             assert "Reviewed IANA time database 2026e" in result
             assert run("--open-review", "named.cmr") == result
+            # The two local 01:00 hours across the fall-back each have their own UTC rate.
+            cut = begin + 2 * HOUR
+            policy = scheduled_tariff(begin, end, (begin, cut, "-1"), (cut, end, "2"),
+                                      clock=named("America/New_York"))
+            result = review(policy, net_power((begin, end, "-1000")), end, "--save-review", "named-scheduled.cmr")
+            amounts(result, "0.000000", "4.000000", "0.000000", "2.000000", "-2.000000")
+            assert "Reviewed IANA time database 2026e" in result
+            assert run("--open-review", "named-scheduled.cmr") == result
         else:
             begin = utc("2024-01-01")
             end, half = begin + HOUR, begin + HOUR // 2
@@ -195,6 +213,93 @@ def main(cli, bundle=None):
             assert "Net electricity cost at closing -744.000000 USD" in result
             assert "Net electricity cost at closing 2088.000000 USD" in result
             assert run("--open-review", "recurring.cmr") == result
+
+            # Scheduled export is independent of the supply rate and multiplier.
+            policy = scheduled_tariff(begin, end, (begin, half, "-3"), (half, end, "1"))
+            policy["plan"]["subtotal_multiplier"] = "2"
+            power = net_power((begin, end, "-2000"))
+            result = review(policy, power, end)
+            assert "A negative payment increases electricity cost." in result
+            amounts(result, "0.000000", "2.000000", "0.000000", "-2.000000", "2.000000")
+
+            split = paired((begin, "0", "10"), (half, "1", "11"), (end, "1", "13"))
+            result = review(policy, split, end, "--save-review", "scheduled.cmr")
+            amounts(result, "1.000000", "3.000000", "6.000000", "-1.000000", "7.000000")
+            assert run("--open-review", "scheduled.cmr") == result
+            review(policy, paired((begin, "0", "10"), (end, "1", "13")), end,
+                   error="export register needs a reading at an export-rate boundary")
+            amounts(review(policy, paired((begin, "0", "10"), (end, "1", "10")), end),
+                    "1.000000", "0.000000", "6.000000", "0.000000", "6.000000")
+            equal = copy.deepcopy(policy)
+            equal["plan"]["export_payment"]["dynamic"][1]["rate_per_kwh"] = "-3"
+            amounts(review(equal, paired((begin, "0", "10"), (end, "1", "13")), end),
+                    "1.000000", "3.000000", "6.000000", "-9.000000", "15.000000")
+
+            partial = paired((begin, "0", "10"), (half, "1", "11"))
+            result = review(policy, partial, half, "--save-review", "scheduled-partial.cmr")
+            assert "Export payment to date -3.000000 USD" in result
+            write(meter, split)
+            result = run("--extend-review", "scheduled-partial.cmr", "--intervals", meter, "--save-review",
+                         "scheduled-extended.cmr", "--as-of-utc-ms", end)
+            amounts(result, "1.000000", "3.000000", "6.000000", "-1.000000", "7.000000")
+            assert run("--open-review", "scheduled-extended.cmr") == result
+
+            # Preserve quarter-hour export evidence and round the summed half-hour imports once.
+            quarter = begin + HOUR // 4
+            rounded_schedule = scheduled_tariff(begin, half, (begin, quarter, "-2"), (quarter, half, "6"))
+            rounded_schedule["plan"]["rounding"] = "meter_import_half_hour_kwh_half_even_2"
+            fine = paired((begin, "0", "10"), (quarter, "0.006", "11"), (half, "0.015", "12"))
+            review(rounded_schedule, paired((begin, "0", "10"), (half, "0.015", "12")), half,
+                   error="export register needs a reading at an export-rate boundary")
+            result = review(rounded_schedule, fine, half, "--save-review", "scheduled-rounding.cmr")
+            assert "Billed usage 0.020000 kWh" in result
+            amounts(result, "0.015000", "2.000000", "0.060000", "4.000000", "-3.940000")
+            assert run("--open-review", "scheduled-rounding.cmr") == result
+
+            mid = copy.deepcopy(policy)
+            mid["opening"].update(through_utc_ms=half, imported_kwh="1", accrued_subtotal="3",
+                                  exported_kwh="1", accrued_export_payment="-3")
+            result = review(mid, net_power((half, end, "-4000")), end)
+            amounts(result, "0.000000", "2.000000", "6.000000", "-1.000000", "7.000000")
+            assert "Net change after export payment -2.000000 USD" in result
+
+            gap = copy.deepcopy(policy)
+            gap["plan"]["export_payment"]["dynamic"][1]["begin_utc_ms"] += 1
+            review(gap, power, end, error="dynamic price gap")
+            review(gap, net_power((begin, end, "0")), end, error="dynamic price gap")
+            overlap = copy.deepcopy(policy)
+            overlap["plan"]["export_payment"]["dynamic"][1]["begin_utc_ms"] -= 1
+            review(overlap, power, end, error="saved tariff declaration")
+
+            late = copy.deepcopy(policy)
+            late["confirmed_utc"] = (end + 1000) // 1000
+            late["plan"]["export_payment"]["dynamic"][1]["published_utc_ms"] = end + 1000
+            review(late, power, end, error="rate published after decision instant")
+            amounts(review(late, power, end + 1000),
+                    "0.000000", "2.000000", "0.000000", "-2.000000", "2.000000")
+
+            prefix = review(late, partial, half, "--save-review", "before-publication.cmr")
+            assert "Export payment to date -3.000000 USD" in prefix
+            assert run("--open-review", "before-publication.cmr") == prefix
+            write(meter, split)
+            run("--extend-review", "before-publication.cmr", "--intervals", meter, "--save-review",
+                "before-price.cmr", "--as-of-utc-ms", end, error="rate published after decision instant")
+            assert not (root / "before-price.cmr").exists()
+            result = run("--extend-review", "before-publication.cmr", "--intervals", meter, "--save-review",
+                         "after-price.cmr", "--as-of-utc-ms", end + 1000)
+            amounts(result, "1.000000", "3.000000", "6.000000", "-1.000000", "7.000000")
+            assert run("--open-review", "after-price.cmr") == result
+
+            recurring = scheduled_tariff(begin, feb, (begin, feb, "-1"), (feb, mar, "1"),
+                                         reset={"monthly_day": 1, "clock": UTC}, rates_end=mar)
+            result = review(recurring, net_power((begin, mar, "-1000")), mar)
+            assert "Export payment to date -744.000000 USD" in result
+            assert "Export payment to date 696.000000 USD" in result
+
+            review({**policy, "schema_version": 12}, power, end, error="saved tariff declaration")
+            review({**declaration, "schema_version": 14}, power, end, error="saved tariff declaration")
+            review({**policy, "plan": {**policy["plan"], "export_payment": {"dynamic": []}}},
+                   power, end, error="saved tariff declaration")
 
         print(f"Export payment: {checked} ordinary meter-bill invocations passed")
 

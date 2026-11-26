@@ -9,7 +9,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing, ExportRateBoundary };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for quantities and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -107,9 +107,7 @@ struct DemandChargeRule {
 struct ExportPaymentRule {
     int64_t publishedUtcMs = 0;
     ExactDecimal ratePerKwh;
-    bool payment(const ElectricityAmount &exported, ElectricityAmount &out) const {
-        return exported.numerator.multiply(ratePerKwh,&out.numerator);
-    }
+    std::vector<DynamicRate> dynamic{};  // when present, replaces the flat rate
 };
 struct TariffPlan {
     bool declared = false;

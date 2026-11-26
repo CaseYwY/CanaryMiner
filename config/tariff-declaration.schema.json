@@ -5,7 +5,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -17,7 +17,7 @@
     "demand_charge": {"$ref": "#/$defs/demandCharge"},
     "restricted_credit": {"$ref": "#/$defs/restrictedCredit"}
   },
-  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]}}},
+  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]}}},
   "then": {
     "if": {"properties": {"schema_version": {"const": 4}}},
     "then": {
@@ -69,7 +69,7 @@
       "if": {"properties": {"schema_version": {"const": 7}}},
       "then": {"required": ["seasonal_allowance"]},
       "else": {
-        "if": {"properties": {"schema_version": {"enum": [8, 9, 10, 11, 12, 13]}}},
+        "if": {"properties": {"schema_version": {"enum": [8, 9, 10, 11, 12, 13, 14]}}},
         "else": {"not": {"required": ["seasonal_allowance"]}}
       }
     },
@@ -79,7 +79,7 @@
         "revisions": {"contains": {"required": ["component_multiplier"]}}
       }}}},
       "else": {
-        "if": {"properties": {"schema_version": {"enum": [9, 10, 11, 12, 13]}}},
+        "if": {"properties": {"schema_version": {"enum": [9, 10, 11, 12, 13, 14]}}},
         "else": {"properties": {"plan": {"properties": {
           "revisions": {"items": {"not": {"required": ["component_multiplier"]}}}
         }}}}
@@ -91,16 +91,26 @@
         "required": ["demand_charge"]
       },
       "else": {
-        "if": {"properties": {"schema_version": {"enum": [12, 13]}}},
+        "if": {"properties": {"schema_version": {"enum": [12, 13, 14]}}},
         "else": {"not": {"required": ["demand_charge"]}}
       }
     },
     {
-      "if": {"properties": {"schema_version": {"const": 12}}},
-      "then": {"properties": {
-        "plan": {"required": ["export_payment"]},
-        "opening": {"required": ["exported_kwh", "accrued_export_payment"]}
-      }},
+      "if": {"properties": {"schema_version": {"enum": [12, 14]}}},
+      "then": {
+        "properties": {
+          "plan": {"required": ["export_payment"]},
+          "opening": {"required": ["exported_kwh", "accrued_export_payment"]}
+        },
+        "if": {"properties": {"schema_version": {"const": 14}}},
+        "then": {"properties": {"plan": {"properties": {
+          "export_payment": {"$ref": "#/$defs/scheduledExportPayment"}
+        }}}},
+        "else": {"properties": {
+          "plan": {"properties": {"export_payment": {"$ref": "#/$defs/exportPayment"}}},
+          "opening": {"properties": {"accrued_export_payment": {"pattern": "^[0-9]"}}}
+        }}
+      },
       "else": {"properties": {
         "plan": {"not": {"required": ["export_payment"]}},
         "opening": {"not": {"anyOf": [{"required": ["exported_kwh"]}, {"required": ["accrued_export_payment"]}]}}
@@ -132,7 +142,7 @@
     {
       "if": {"anyOf": [
         {"properties": {"schema_version": {"enum": [9, 10]}}},
-        {"required": ["demand_charge"], "properties": {"schema_version": {"enum": [12, 13]}}}
+        {"required": ["demand_charge"], "properties": {"schema_version": {"enum": [12, 13, 14]}}}
       ]},
       "then": {"properties": {"opening": {"required": ["peak_demand_kw"]}}},
       "else": {"properties": {"opening": {"not": {"required": ["peak_demand_kw"]}}}}
@@ -141,7 +151,7 @@
       "if": {"anyOf": [
         {"properties": {"schema_version": {"const": 10}}},
         {"required": ["demand_charge"], "properties": {
-          "schema_version": {"enum": [11, 12, 13]}, "demand_charge": {"required": ["ratchet"]}
+          "schema_version": {"enum": [11, 12, 13, 14]}, "demand_charge": {"required": ["ratchet"]}
         }}
       ]},
       "then": {"properties": {
@@ -311,7 +321,7 @@
         "tiers": {"enum": ["none", "progressive", "all_units"]}, "rounding": {"enum": ["final_display_only", "meter_import_half_hour_kwh_half_even_2"]},
         "cycle_charge": {"$ref": "#/$defs/decimal"}, "minimum_cycle_subtotal": {"$ref": "#/$defs/optionalDecimal"}, "subtotal_multiplier": {"$ref": "#/$defs/decimal"},
         "revisions": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/revision"}},
-        "export_payment": {"$ref": "#/$defs/exportPayment"}
+        "export_payment": {"oneOf": [{"$ref": "#/$defs/exportPayment"}, {"$ref": "#/$defs/scheduledExportPayment"}]}
       }
     },
     "exportPayment": {
@@ -320,6 +330,14 @@
       "properties": {
         "rate_per_kwh": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "published_utc_ms": {"$ref": "#/$defs/instant"}
+      }
+    },
+    "scheduledExportPayment": {
+      "type": "object", "additionalProperties": false, "required": ["dynamic"],
+      "properties": {
+        "dynamic": {"type": "array", "minItems": 1, "maxItems": 256, "items": {
+          "allOf": [{"$ref": "#/$defs/dynamic"}, {"not": {"required": ["multiplier"]}}]
+        }}
       }
     },
     "revision": {
@@ -383,7 +401,7 @@
         "cycle_begin_utc_ms": {"$ref": "#/$defs/instant"}, "cycle_end_utc_ms": {"$ref": "#/$defs/instant"}, "through_utc_ms": {"$ref": "#/$defs/instant"},
         "imported_kwh": {"$ref": "#/$defs/decimal"}, "accrued_subtotal": {"$ref": "#/$defs/decimal"}, "time_database_version": {"enum": ["explicit-fixed-clock", "2026e"]},
         "exported_kwh": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
-        "accrued_export_payment": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
+        "accrued_export_payment": {"$ref": "#/$defs/decimal"},
         "peak_demand_kw": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "peak_demand_kva": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "demand_history": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"$ref": "#/$defs/demandHistoryRow"}}

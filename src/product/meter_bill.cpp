@@ -428,7 +428,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
     uint64_t schemaVersion = 0;
     const auto *plan=root.find("plan"), *policy=root.find("reset_policy");
     const bool namedTariff = schema && schema->asUint64(&schemaVersion) &&
-        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= 13 &&
+        (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= tariffDeclarationLatestVersion &&
          (usesNamedClock(plan ? plan->find("clock") : nullptr) || usesNamedClock(policy ? policy->find("clock") : nullptr))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
@@ -460,6 +460,8 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
           "Average import is applied uniformly within each interval.\n";
     if (review.readings.version >= 6)
         report += "Supply charges use imported energy. Declared export payment is shown separately.\n";
+    if (declaration.plan.exportPayment && !declaration.plan.exportPayment->dynamic.empty())
+        report += "Export uses the declared UTC rate intervals. A negative payment increases electricity cost.\n";
     if (review.readings.version == 5)
         report += "Paired kVAh differences establish apparent demand. Active kWh supplies energy pricing.\n";
     else if (review.readings.version == 4)
