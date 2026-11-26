@@ -50,12 +50,13 @@ PoolFallbackFailure fallbackEvidence(const PoolTlsCheckReply &reply, uint64_t at
 std::filesystem::path poolTlsRuntimeWorkerPath() {
     const auto executable = selfExecutablePath();
     if (executable.empty()) return {};
-    return std::filesystem::u8path(executable).parent_path() /
+    // Keep the full worker filename in the native miner for the candidate verifier.
 #if defined(_WIN32)
-        "canary_pool_tls_stream_worker.exe";
+    const char *volatile sibling = "canary_pool_tls_stream_worker.exe";
 #else
-        "canary_pool_tls_stream_worker";
+    const char *volatile sibling = "canary_pool_tls_stream_worker";
 #endif
+    return std::filesystem::u8path(executable).parent_path() / sibling;
 }
 
 PoolTlsRuntimeTransport::PoolTlsRuntimeTransport(std::filesystem::path helper, PoolTlsCheckRequest request,
