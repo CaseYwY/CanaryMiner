@@ -39,11 +39,11 @@ periods, rules, components or prior tax keys. Enter on a rule's Kind cycles
 through fraction, measured import kWh and billed import kWh. Review and save the
 complete draft with the existing controls.
 
-One period must cover each complete supply cycle. Periods use non-overlapping
+With version 15, one period must cover each complete supply cycle. Periods use non-overlapping
 UTC ranges in time order, plus an explicit publication instant. The cutoff
 must be at or after the selected period's publication. Use separate periods
-when rules change at supply reset. A rule change inside a supply cycle
-requires a separate settlement model.
+when rules change at supply reset. Use [service-time allocation](#apply-a-tax-change-inside-a-supply-cycle)
+for a change within a supply cycle.
 
 For example, this fragment under `plan` adds an excise of 1 per measured
 import kWh. The VAT rate is 0.1 on the energy charge plus that excise.
@@ -102,6 +102,48 @@ subtracted afterward. Ordered taxes and restricted closing credits cannot
 share a declaration. Rate imports with VAT-inclusive prices refuse added
 tax rules. The declarations use local source evidence and display-only
 rounding for tax amounts.
+
+### Apply a tax change inside a supply cycle
+
+In Settings, add ordered taxes, select Tax periods in Plan and press **J**.
+Version 16 records this choice as `plan.tax_allocation: "service_and_cycle_close"`.
+Declare adjacent, non-overlapping UTC ranges covering the whole cycle. Each
+period carries its own ordered rules. The review cutoff must be at or after
+publication of each period used by the reviewed prefix. A prefix ending
+exactly at a change uses only the prior period.
+
+- Energy charges and measured or billed kWh belong to their service period.
+  Supply resets and tier thresholds keep their own clocks. The all-units
+  tier reprices each period's energy at the new whole-cycle tier rate.
+  Nonzero cumulative-meter deltas need a reading at every crossed tax
+  boundary. Average-power intervals use their declared constant power on
+  both sides. Rounded declarations require boundaries on UTC half hours.
+- A cycle fee uses the period containing cycle start. A daily fee uses the
+  period containing the first charged instant of that civil day in the cycle.
+  The existing whole-day or prorated amount stays with that first instant.
+- Demand and minimum-charge adjustments use the last period before the
+  cycle ends. Provisional reports include accrued demand in the supply
+  subtotal. They add its tax only when the cycle closes.
+- Prior tax keys refer to rules earlier in the same period. Reuse the same
+  key in different periods to show each period's result under the same name.
+
+At cycle start use an empty `opening.tax_segments` array. For a later
+opening, use **A** in Tax segments to add one row for each elapsed period
+in time order, including a partially elapsed period. Set `begin_utc_ms`
+to the first instant of that period inside this cycle. Enter the reviewed
+`imported_kwh`, `energy`, `daily_fee`, `cycle_fee` and `billed_kwh` for
+the part already elapsed. Enter zero billed kWh for ordinary tariffs.
+The program checks the segment totals, deterministic charges and feasible
+rounded quantities against the opening. Where historical rates cover a
+segment, it bounds the charge using those rates and checks the exact amount
+when the lowest and highest possible charge match. Where the charge depends
+on the timing of individual readings, use the reviewed historical
+breakdown. Keep the demand peak in its original opening field and leave
+its charge out of `opening.accrued_subtotal`. The model derives the amount.
+
+The report groups tax lines by period start. Saved reviews preserve the
+allocation and exact segment amounts. Confirm the supplier's attribution
+rules before applying this method to a specific bill.
 
 ## Use named tariff and reset clocks
 

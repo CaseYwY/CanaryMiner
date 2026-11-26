@@ -10,7 +10,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing, ExportRateBoundary, TaxPeriodBoundary };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing, ExportRateBoundary, TaxPeriodBoundary, TaxScheduleBoundary, TaxMeterBoundary };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for quantities and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -147,16 +147,23 @@ struct TariffPlan {
     std::optional<ExportPaymentRule> exportPayment{};  // independent payout, outside the supply subtotal
     bool restrictedCreditAtClose = false;
     std::vector<TariffTaxPeriod> taxPeriods{};
+    bool taxByServiceTime = false;
 };
 struct BillTaxOpening {
     std::array<ElectricityAmount, taxComponentCount - 1> components;
     ElectricityAmount billedKwh;  // independent from measured import only for rounded tariffs
+};
+struct BillTaxSegment {
+    int64_t beginUtcMs = 0;
+    ElectricityAmount importedKwh;
+    BillTaxOpening bases;
 };
 struct BillTaxLine {
     std::string key;
     TaxKind kind = TaxKind::Fraction;
     unsigned included = 0;
     ElectricityAmount base, added;
+    std::optional<int64_t> periodBeginUtcMs{};
 };
 struct BillTaxTotal {
     std::vector<BillTaxLine> lines;
@@ -190,6 +197,7 @@ struct BillOpening {
     std::optional<BillExportOpening> exports{};  // earned through the opening, before the current trace
     std::optional<BillRestrictedCreditOpening> restrictedCredit{};
     std::optional<BillTaxOpening> tax{};
+    std::optional<std::vector<BillTaxSegment>> taxSegments{};
 };
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,

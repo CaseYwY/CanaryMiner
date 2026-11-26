@@ -290,16 +290,37 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             report += "  Minimum-charge adjustment " + minimum + " " + currency + "\n";
         report += "  Ordered taxes through " + std::to_string(accrual.ending->throughUtcMs) + " UTC ms\n";
         std::string record;
-        for (const auto &part : accrual.ending->tax->components)
-            record += part.numerator.text() + '\n';
-        record += accrual.ending->tax->billedKwh.numerator.text() + '\n' +
-            tax->minimumAdjustment.numerator.text() + '\n';
+        const auto appendBases = [&](const BillTaxOpening &bases) {
+            for (const auto &part : bases.components) record += part.numerator.text() + '\n';
+            record += bases.billedKwh.numerator.text() + '\n';
+        };
+        if (const auto &segments = accrual.ending->taxSegments) {
+            record += "tax-by-service-and-cycle-close\n";
+            for (const auto &segment : *segments) {
+                record += "segment " + std::to_string(segment.beginUtcMs) + '\n' +
+                    segment.importedKwh.numerator.text() + '\n';
+                appendBases(segment.bases);
+            }
+            if (!accrual.settledTotal)
+                report += "  Demand and minimum adjustments use the closing tax period.\n";
+        } else appendBases(*accrual.ending->tax);
+        record += tax->minimumAdjustment.numerator.text() + '\n';
+        std::optional<int64_t> previousPeriod;
         for (const auto &line : tax->lines) {
+            if (line.periodBeginUtcMs && line.periodBeginUtcMs != previousPeriod) {
+                const auto begin = std::to_string(*line.periodBeginUtcMs);
+                report += "  Tax period from " + begin + " UTC ms\n";
+                record += "period " + begin + '\n';
+                previousPeriod = line.periodBeginUtcMs;
+            }
             std::string base, charge;
             if (!line.base.format(6, &base) || !line.added.format(6, &charge)) return false;
             report += "  Tax " + line.key + " added " + charge + " " + currency;
-            if (!line.base.numerator.zero())
+            if (!line.base.numerator.zero()) {
                 report += " on " + base + (line.kind == TaxKind::Fraction ? " " + currency : " kWh");
+                if (line.periodBeginUtcMs && line.kind != TaxKind::Fraction)
+                    report += line.kind == TaxKind::BilledKwh ? " billed" : " measured";
+            }
             bool first = true;
             for (unsigned i = 0; i < taxComponentCount; ++i) {
                 if (!(line.included & (1u << i))) continue;
@@ -308,6 +329,8 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
                 first = false;
             }
             report += '\n';
+            if (line.periodBeginUtcMs)
+                record += "kind " + std::to_string(static_cast<unsigned>(line.kind)) + '\n';
             record += line.key + '\n' + std::to_string(line.included) + '\n' +
                 line.base.numerator.text() + '\n' + line.added.numerator.text() + '\n';
         }
@@ -728,7 +751,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "For a saved kVA tariff, include apparent VA, a permitted power factor, or paired kWh/kVAh registers.\n"
                   "For export payment, supply signed average net watts or paired import/export registers.\n"
                   "Also accepts local Octopus electricity import bundles in schema version 3.\n"
-                  "Register readings need billing-cycle boundaries and any energy-rate boundaries that split nonzero use.\n"
+                  "Register readings need billing-cycle boundaries and any energy-rate or tax boundaries that split nonzero use.\n"
                   "Half-hour rounding uses complete UTC half hours. Without demand, give one reading per boundary.\n"
                   "With demand, finer readings are grouped. Add a reading wherever either grid splits nonzero import.\n"
                   "Demand requires complete aligned windows. Add a register reading wherever a demand boundary splits nonzero import.\n"

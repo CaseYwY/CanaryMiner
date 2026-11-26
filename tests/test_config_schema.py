@@ -589,6 +589,19 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         opening.update(exported_kwh='0', accrued_export_payment='0')
         self.assertEqual(validate(example, schema, schema), [])
 
+        example['schema_version'] = 16
+        self.assertTrue(validate(example, schema, schema))
+        plan['tax_allocation'] = 'service_and_cycle_close'
+        opening['tax_segments'] = []
+        self.assertTrue(validate(example, schema, schema))
+        del opening['tax_bases']
+        self.assertEqual(validate(example, schema, schema), [])
+        opening['tax_segments'] = [dict(begin_utc_ms=0, imported_kwh='1', energy='-2', daily_fee='0',
+                                        cycle_fee='0', billed_kwh='0')]
+        self.assertEqual(validate(example, schema, schema), [])
+        opening['tax_segments'][0]['demand'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -619,8 +632,9 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'revision': {'component_multiplier'},
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
-                    'plan': {'export_payment', 'tax_periods'},
-                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh', 'accrued_export_payment', 'tax_bases'},
+                    'plan': {'export_payment', 'tax_periods', 'tax_allocation'},
+                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh',
+                                'accrued_export_payment', 'tax_bases', 'tax_segments'},
                     'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
                 }.get(name, set())
