@@ -26,6 +26,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
         helper = installed / worker_name
         shutil.copy2(fixture, helper)
         shutil.copy2(fixture, operator / worker_name)
+        if not sample_only:
+            preferences = "canary_preferences_worker" + (".exe" if os.name == "nt" else "")
+            shutil.copy2(cli_path.parent / preferences, installed / preferences)
         requests = installed / "candle-requests"
         resolver_requests = installed / "resolver-requests"
         resolver = "fd00::53"
@@ -70,17 +73,54 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
 
         ticker = "--allow-public-tickers"
+        dashboard_dns = "--market-dns-server"
+        dns_required = "--market-dns-server requires --allow-public-tickers at the Dashboard parent"
+        dns_usage = "--market-dns-server requires one unicast IPv4 or unscoped IPv6 address for run"
         dashboard_refusals = (
             ([allow], "Dashboard candles require --allow-public-tickers as well"),
             ([ticker, allow, allow], "--allow-public-candles is accepted once, for run only"),
             ([ticker, allow + "=true"], "--allow-public-candles takes no value"),
             (["--pass", ticker, allow], "Dashboard candles require --allow-public-tickers as well"),
+            ([dashboard_dns, resolver], dns_required),
+            (["--pass", ticker, dashboard_dns, resolver], dns_required),
+            ([ticker, dashboard_dns], dns_usage),
+            ([ticker, dashboard_dns, "private-sentinel"], dns_usage),
+            ([ticker, dashboard_dns, "fe80::53%1"], dns_usage),
+            ([ticker, dashboard_dns + "=" + resolver], dns_usage),
+            ([ticker, dashboard_dns, resolver, dashboard_dns, resolver], dns_usage),
+            ([ticker, dashboard_dns, "--worker", "fixture-name", resolver], dns_usage),
+            ([ticker, dashboard_dns, resolver, "--worker-child"], dns_required),
         )
         # Native installs only exercise the one-shot command; run refusals use the inert host binary.
         for args, expected in (() if sample_only else dashboard_refusals):
             result = subprocess.run([cli, "run", "--pool", "kryptex", "--wallet", "prl1" + "q" * 59,
                                      *args], cwd=installed, capture_output=True, text=True, timeout=8)
             assert result.returncode == 2 and not result.stdout and expected in result.stderr, result
+            assert resolver not in result.stderr and "private-sentinel" not in result.stderr
+            assert not requests.exists() and not (installed / "ticker-requests").exists()
+        if not sample_only:
+            positive = call("run", ticker, allow, dashboard_dns, resolver, "--help")
+            assert positive.returncode == 0 and dashboard_dns in positive.stdout
+            assert resolver not in positive.stdout + positive.stderr
+            admitted = subprocess.run([cli, "run", "--algo", "pearl-pow", "--pool", "kryptex",
+                                       "--wallet", "prl1" + "q" * 59, "--no-donation",
+                                       ticker, allow, dashboard_dns, resolver],
+                                      cwd=operator, capture_output=True, text=True, timeout=8)
+            assert admitted.returncode == 97 and "FORBIDDEN_DEVICE_SETUP" in admitted.stderr, admitted
+            assert resolver not in admitted.stdout + admitted.stderr
+            for args in (("--allow-public-ticker\uff53", dashboard_dns, resolver),
+                         (ticker, "\u00ad-market-dns-server", resolver),
+                         (ticker, "--market-dns-\u017ferver", resolver)):
+                rejected = call("run", *args)
+                assert rejected.returncode in (1, 2) and not rejected.stdout
+            for command in ("status", "version", "settings", "list-devices", "selftest"):
+                rejected = call(command, dashboard_dns, resolver)
+                assert rejected.returncode == 2 and "--market-dns-server is for run only" in rejected.stderr
+            for alias in ("--version", "--list-devices"):
+                rejected = call(dashboard_dns, resolver, alias)
+                assert rejected.returncode == 2 and "--market-dns-server is for run only" in rejected.stderr
+                rejected = call(alias, dashboard_dns, resolver)
+                assert rejected.returncode == 2 and "--market-dns-server is for run only" in rejected.stderr
             assert not requests.exists() and not (installed / "ticker-requests").exists()
 
         assert not resolver_requests.exists()

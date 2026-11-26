@@ -50,6 +50,21 @@ int main() {
         CHECK(error.empty() && legacy.rest.size()==3 && legacy.rest[0]=="--pass" && legacy.rest[1]=="--allow-public-tickers");
         CHECK((legacy.restArgIndices==std::vector<int>{2,3,4}));
     }
+    {
+        const char *argv[] = {"canary-miner", "run", "--password", "--gpu-id",
+                              "--market-dns-server", "192.168.50.53", "--allow-public-tickers",
+                              "--gpu-id", "0", "--pool", "kryptex"};
+        const int argc = sizeof(argv) / sizeof(argv[0]);
+        CliParse parsed;
+        CHECK(parseProductCli(argc, argv, &parsed, nullptr));
+        CHECK((parsed.gpuIdArgIndices == std::vector<int>{7, 8}));
+        CHECK((parsed.restArgIndices == std::vector<int>{2, 3, 4, 5, 6}));
+        const auto forwarded = supervisorUserArguments(argc, argv, parsed, {4, 5, 6});
+        CHECK((forwarded == std::vector<std::string>{"run", "--password", "--gpu-id", "--pool", "kryptex"}));
+        CHECK((supervisorUserArguments(argc, argv, parsed, {0}) ==
+               std::vector<std::string>{"run", "--password", "--gpu-id", "--market-dns-server", "192.168.50.53",
+                                        "--allow-public-tickers", "--pool", "kryptex"}));
+    }
 
     // ---- pool forms: legacy/strict presets, explicit endpoints, and canonical protocol identity
     {

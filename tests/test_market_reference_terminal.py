@@ -22,7 +22,7 @@ def main():
     preference_fixture = Path(sys.argv[3]).resolve()
     checks = 0
 
-    def session(root, work, disabled=False, hour=False):
+    def session(root, work, disabled=False, hour=False, resolver=None):
         nonlocal checks
         executable = fixture
         if hour:
@@ -32,6 +32,9 @@ def main():
             shutil.copy2(helper_fixture, installed / 'canary_public_json_worker')
             shutil.copy2(preference_fixture, installed / 'canary_preferences_worker')
         options = ['--hour-fixture'] if hour else ['--no-market'] if disabled else []
+        if resolver:
+            assert hour
+            options.append(resolver)
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 60, 120, 0, 0))
 
@@ -119,25 +122,29 @@ def main():
         checks += 1
         libc = os.confstr('CS_GNU_LIBC_VERSION') if 'CS_GNU_LIBC_VERSION' in os.confstr_names else None
         if libc and tuple(map(int, libc.split()[1].split('.')[:2])) >= (2, 40):
+            resolver = '192.168.50.53'
+
             def public_hour(send, until):
                 nonlocal checks
                 text = until(b'1h mean of minute closes: 3.000000 USDT/PRL | 3.500000 USD/PRL')
                 assert b'Latest PRL/USD reference: 2.45' in text
                 assert b'PRODUCTION AND REFERENCE VALUATION' not in text and b'Estimated net' not in text
+                assert resolver.encode('ascii') not in text
                 until(b'TWAP approximation | candidate data, finality unverified')
                 until(b'MEXC PEARLUSDT: 60/60')
                 until(b'Coinbase USDT-USD: 60/60')
                 until(b'1h UTC seconds [')
-                checks += 5
+                checks += 6
                 send(b'q')
 
             state = root / 'hour'
-            counts = session(state, public_hour, hour=True)
+            counts = session(state, public_hour, hour=True, resolver=resolver)
             payloads = (state / 'installed' / 'candle-requests').read_text().splitlines()
             assert len(payloads) == 2 and payloads[0].startswith('4 ') and payloads[1] == '5 ' + payloads[0][2:]
             assert (state / 'installed' / 'ticker-requests').read_text().splitlines() == ['0', '2']
+            assert (state / 'installed' / 'resolver-requests').read_text().splitlines() == [resolver] * 4
             assert counts['factories'] == counts['starts'] == counts['joins'] == 1 and counts['views'] > 0
-            checks += 3
+            checks += 4
 
         manual = {
             'schema_version': 1, 'asset': 'pearl-mainnet-native-prl', 'token_quote': 'USDT', 'fx_base': 'USDT', 'fx_quote': 'USD',

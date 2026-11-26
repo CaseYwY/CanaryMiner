@@ -19,7 +19,7 @@ struct PublicJsonRequest {
 struct PublicHttpsLimits {
     unsigned connectMs = 5000, totalMs = 15000;
     size_t bodyBytes = 1024 * 1024, headerBytes = 32 * 1024;
-    std::string dnsServer{};  // optional one-shot resolver address, never a payload destination
+    std::string dnsServer{};  // optional resolver for this request, never a payload destination
 };
 enum class PublicHttpsStatus {
     Ok, Unavailable, InvalidRequest, Busy, Cancelled, Timeout, DestinationBlocked,

@@ -72,6 +72,12 @@ The path uses only the Gate `api.gateio.ws` ticker for `PEARL_USDT` and the Krak
 for refresh, timeout and retry. The ticker path excludes minute candles and economic scheduling. The default
 CMake build and current release policy keep the HTTPS capability off.
 
+### Choose a resolver for one Dashboard launch
+
+Add `--market-dns-server IP` alongside `--allow-public-tickers` on an ordinary parent launch. Use the IPv4 or unscoped IPv6 address of your approved DNS server on port 53. The selected resolver is fixed for that Dashboard session, including refreshes and retries. If the launch separately allows public candles, those requests use the same resolver.
+
+The saved ticker request and all the usual Dashboard admission checks still apply. The option lives in the parent process and goes only to the public data helper. It is consumed before mining workers are launched. It is absent from Settings, provider reports and public stats. The resolver address remains visible to users who can inspect the parent's command line. The helper continues to require a public destination and normal HTTPS certificate and hostname verification.
+
 ### Show a public hour in the Dashboard
 
 In an opt-in build, save the public ticker request and launch the ordinary Dashboard with both
@@ -201,7 +207,7 @@ canary-miner market-hour --allow-public-candles --dns-server IP --save-review ca
 
 The flag applies only to the one-shot public invocation and requires the public consent flag. If
 omitted, the helper uses its usual resolver configuration. The option does not enter Settings,
-saved reviews, offline replay or Dashboard polling. A DNS answer must still resolve to an allowed
+saved reviews or offline replay. The Dashboard has its own [per-launch flag](#choose-a-resolver-for-one-dashboard-launch). A DNS answer must still resolve to an allowed
 public destination, and HTTPS still verifies the provider name and certificate. The selected
 resolver address is visible to users with access to the command line.
 
