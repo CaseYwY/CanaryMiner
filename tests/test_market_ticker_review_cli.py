@@ -1,5 +1,6 @@
 """Offline ticker review through the ordinary miner commands on either build profile."""
 from copy import deepcopy
+from hashlib import sha256
 import json
 from pathlib import Path
 import subprocess
@@ -99,6 +100,71 @@ def run_suite(cli):
         path.write_bytes(b"x" * (64 * 1024 + 1))
         assert "oversized" in call(3, "--file", path).stderr
         assert not call(3, "--file", root).stdout
+
+        def report_at(cutoff, gate_clock, fx_clock):
+            gate_sent, gate_observed, gate_received = gate_clock[:3]
+            fx_sent, fx_observed, fx_received = fx_clock[:3]
+            return (
+                "Historical public ticker capture (ages at capture)\n"
+                f"Capture UTC {cutoff} | no trade-event timestamps or current freshness claim\n"
+                f"Gate Pearl mainnet PRL/USDT: 2.5 | observed UTC {gate_observed} | age at capture {cutoff - gate_observed} s\n"
+                f"  Request start UTC {gate_sent} | receipt UTC {gate_received}\n"
+                f"Kraken USDT/USD: 0.98 | observed UTC {fx_observed} | age at capture {cutoff - fx_observed} s\n"
+                f"  Request start UTC {fx_sent} | receipt UTC {fx_received}\n"
+                "PRL/USD reference at capture: 2.45\n"
+            )
+
+        archived_report = report_at(CUTOFF + 2, (CUTOFF, CUTOFF, CUTOFF + 1),
+                                    (CUTOFF + 1, CUTOFF + 1, CUTOFF + 2))
+        gate_body = json.dumps(gate).encode("ascii")
+        fx_body = json.dumps(fx).encode("ascii")
+        archive = root / "private \u03a9 capture.cmt"
+
+        def serialize(start=CUTOFF, end=CUTOFF + 2, elapsed=2000,
+                      gate_receipt=(CUTOFF, CUTOFF, CUTOFF + 1, 1000),
+                      fx_receipt=(CUTOFF + 1, CUTOFF + 1, CUTOFF + 2, 2000),
+                      original_gate=gate_body, summary=archived_report):
+            def record(clock, payload):
+                sent, observed, received, ms = clock
+                return f"{sent}\n{observed}\n{received}\n{ms + 1}\n{len(payload)}\n".encode() + payload
+            report = summary.encode("ascii")
+            source = (f"CANARY-MARKET-TICKER-REVIEW-1\n{start}\n{end}\n{elapsed + 1}\n".encode() +
+                      record(gate_receipt, original_gate) + record(fx_receipt, fx_body) +
+                      f"{len(report)}\n".encode() + report)
+            return source + sha256(source).hexdigest().encode() + b"\n"
+
+        archive.write_bytes(serialize())
+        assert call(0, "--open-review", archive).stdout == archived_report
+        assert call(0, "--open-review", archive).stdout == archived_report
+        assert archive.read_bytes() == serialize()
+        boundary_gate = (CUTOFF, CUTOFF + 1, CUTOFF + 1, 1000)
+        boundary_fx = (CUTOFF + 31, CUTOFF + 31, CUTOFF + 31, 31000)
+        boundary_report = report_at(CUTOFF + 31, boundary_gate, boundary_fx)
+        archive.write_bytes(serialize(end=CUTOFF + 31, elapsed=31000,
+                                      gate_receipt=boundary_gate, fx_receipt=boundary_fx, summary=boundary_report))
+        assert call(0, "--open-review", archive).stdout == boundary_report
+        for invalid in (
+            serialize()[:-4], serialize().replace(b"2.500", b"3.500", 1),
+            serialize(summary=archived_report.replace("2.45", "2.46")),
+            serialize(original_gate=gate_body.replace(b"2.500", b"3.500")),
+            serialize(original_gate=gate_body.replace(b"PEARL_USDT", b"OTHER_USDT")),
+            serialize(fx_receipt=(CUTOFF - 1, CUTOFF + 1, CUTOFF + 2, 2000)),
+            serialize(gate_receipt=(CUTOFF, CUTOFF - 1, CUTOFF + 1, 1000)),
+            serialize(fx_receipt=(CUTOFF + 1, CUTOFF + 1, CUTOFF + 2, 900)),
+            serialize(elapsed=40000),
+            serialize(end=CUTOFF + 32, elapsed=32000,
+                      fx_receipt=(CUTOFF + 31, CUTOFF + 31, CUTOFF + 32, 32000)),
+            serialize(end=CUTOFF + 31, elapsed=31001, gate_receipt=boundary_gate,
+                      fx_receipt=(*boundary_fx[:3], 31001), summary=boundary_report),
+            serialize(end=253402300799),
+            serialize().replace(b"REVIEW-1", b"REVIEW-2", 1),
+            b"x" * (2 * 1024 * 1024 + 8192 + 1025),
+        ):
+            archive.write_bytes(invalid)
+            failed = call(3, "--open-review", archive)
+            assert not failed.stdout and failed.stderr, failed
+            assert archive.read_bytes() == invalid
+        assert not call(3, "--open-review", root).stdout
         print(f"Declared ticker file review passed {used} command cases")
 
 

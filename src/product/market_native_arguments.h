@@ -1,5 +1,6 @@
 #pragma once
 
+#include "market_sample_options.h"
 #include <algorithm>
 #include <initializer_list>
 #include <string_view>
@@ -41,6 +42,16 @@ inline bool nativeMarketArguments(int argc, const char *const *argv,
 inline bool nativeMarketArgumentPair(int argc, const char *const *argv, int firstIndex, std::string_view first,
                                      int secondIndex, std::string_view second) {
     return firstIndex != secondIndex && nativeMarketArguments(argc, argv, {{firstIndex, first}, {secondIndex, second}});
+}
+
+inline bool nativePublicTickerInvocation(const MarketTickerOptions &options, int argc, const char *const *argv) {
+    return options.action == MarketTickerAction::PublicSample &&
+        argc == 3 + (options.dnsFlag ? 2 : 0) + (options.saveFlag ? 2 : 0) &&
+        nativeMarketArgumentPair(argc, argv, 1, "market-tickers", 2, "--allow-public-tickers") &&
+        (!options.dnsFlag || nativeMarketArgumentPair(argc, argv, options.dnsFlag, "--dns-server",
+                                                      options.dnsFlag + 1, options.dnsServer)) &&
+        (!options.saveFlag || nativeMarketArgumentPair(argc, argv, options.saveFlag, "--save-review",
+                                                       options.saveFlag + 1, options.archiveName));
 }
 
 inline bool validDashboardMarketArguments(int argc, const char *const *argv, int tickerIndex, int hourIndex,

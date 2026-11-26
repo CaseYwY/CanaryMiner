@@ -127,6 +127,14 @@ int main(int argc, char **argv) {
         if (mode == "foreign")
             response.body = R"({"error":[],"result":{"private-sentinel":{"c":["87213","1"]}}})";
     }
+    if (!candles && !reward && mode == "archive") {
+        response.body = "\t" + response.body + "\r\n  ";
+        std::ofstream original(dir / ("ticker-body-" + std::string(feed)), std::ios::binary);
+        original << response.body;
+        if (!original) return 4;
+    }
+    if (!candles && !reward && mode == "clock-rollback")
+        response.observedUtc = feed == "0" ? 1760000061 : 1760000062;
     std::string wire;
     if (!om::encodePublicJsonResponse(response, &wire)) return 5;
 #if defined(_WIN32)

@@ -43,7 +43,6 @@
 #include "market_hour.h"
 #include "market_reward.h"
 #include "market_sample_options.h"
-#include "market_ticker_review.h"
 #include "meter_bill.h"
 #include "energy_periods_cli.h"
 
@@ -106,7 +105,7 @@ struct CliParse {
     MeterBillOptions meterBill;
     MarketHourOptions marketHour;
     MarketRewardOptions marketReward;
-    bool reviewTickerFile = false;
+    MarketTickerOptions marketTicker;
     EnergyPeriodsOptions energyPeriods;
     std::string poolTlsCheckUrl;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
@@ -217,14 +216,11 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         return true;
     }
     if (r.command == Command::MarketTickers) {
-        const auto option = argc == i + 1 ? std::string_view(argv[i]) : std::string_view();
-        r.help = option == "--help" || option == "-h";
-        r.reviewTickerFile = argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0];
-        std::string dnsServer;
-        if (!r.help && !r.reviewTickerFile && !parsePublicMarketSampleCli(argc, argv, i, "--allow-public-tickers", dnsServer)) {
+        if (!parseMarketTickerCli(argc, argv, i, r.marketTicker)) {
             if (error) *error = "market-tickers: invalid options; use market-tickers --help";
             return false;
         }
+        r.help = r.marketTicker.action == MarketTickerAction::Help;
         *out = std::move(r);
         return true;
     }

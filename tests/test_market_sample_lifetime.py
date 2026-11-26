@@ -17,14 +17,16 @@ def main(cli, worker):
         cases = (
             ("market-tickers", ["--allow-public-tickers"], "ticker-requests", ["0", "2"],
              "Latest PRL/USD reference: 2.45"),
+            ("market-tickers", ["--allow-public-tickers", "--save-review", "capture.cmt"], "ticker-requests", ["0", "2"],
+             "PRL/USD reference at capture: 2.45"),
             ("market-hour", ["--allow-public-candles"], "candle-requests", ["4", "5"],
              "Mean USD per PRL (exact sum / minutes): 210 / 60"),
             ("market-hour", ["--allow-public-candles", "--save-review", "capture.cmh"], "candle-requests", ["4", "5"],
              "Mean USD per PRL (exact sum / minutes): 210 / 60"),
         )
-        archive = root / "capture.cmh"
         for command, args, log, feeds, expected_report in cases:
             requests = root / log
+            archive = root / (args[-1] if "--save-review" in args else "unexpected.cmt")
             modes = ("fresh", "stale", "first", "second") if sys.platform.startswith("linux") else ("fresh", "stale")
             for mode in modes:
                 requests.unlink(missing_ok=True)
@@ -46,6 +48,16 @@ def main(cli, worker):
                 if not valid:
                     failures.append((command, mode, launched, result.returncode, result.stdout, result.stderr))
                 assert archive.exists() == ("--save-review" in args and mode == "fresh"), result
+        if sys.platform.startswith("linux"):
+            (root / "sample-lifetime-mode").write_text("clock-rollback", encoding="ascii")
+            (root / "ticker-scenario").write_text("clock-rollback", encoding="ascii")
+            requests = root / "ticker-requests"
+            requests.unlink(missing_ok=True)
+            result = subprocess.run([fixture, "market-tickers", "--allow-public-tickers", "--save-review", "rollback.cmt"],
+                                    cwd=root, capture_output=True, text=True, timeout=8)
+            assert result.returncode == 3 and not result.stdout and "local clock unavailable or changed" in result.stderr, result
+            assert requests.read_text().splitlines() == ["0"]
+            assert not (root / "rollback.cmt").exists() and not (root / "rollback.cmt.tmp").exists()
     for failure in failures:
         print(repr(failure))
     if failures:
