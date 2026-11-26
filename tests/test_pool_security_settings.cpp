@@ -10,12 +10,14 @@ PoolSecurityRule rule(){return {PoolSecurityMode::PreferTls,"stratum+ssl://pool-
 void urls(){
     PoolSecurityEndpoint out;CHECK(parsePoolSecurityUrl("stratum+ssl://POOL-Fixture.test:8048",&out)&&out.tls&&out.host=="pool-fixture.test"&&out.port==8048);
     CHECK(poolSecurityUrl(out)=="stratum+ssl://pool-fixture.test:8048");
-    for(const char *good:{"stratum+ssl://localhost:1","stratum+ssl://xn--bcher-kva.test:65535","stratum+tcp://pool.test:2"})CHECK(parsePoolSecurityUrl(good,&out));
+    for(const char *good:{"stratum+ssl://localhost:1","stratum+ssl://xn--bcher-kva.test:65535","stratum+tcp://pool.test:2",
+                         "stratum+ssl://0x7f.001.pool.test:1"})CHECK(parsePoolSecurityUrl(good,&out));
     for(const std::string &bad:std::vector<std::string>{"","pool.test:1234","https://pool.test:443","stratum+ssl://pool.test","stratum+SSL://pool.test:1",
         "stratum+ssl://user:pass@pool.test:1","stratum+ssl://user@pool.test:1","stratum+ssl://pool.test:0","stratum+ssl://pool.test:65536",
         "stratum+ssl://pool.test:01","stratum+ssl://pool.test:12345678901234567890","stratum+ssl://pool.test:1/path","stratum+ssl://pool.test:1?x",
         "stratum+ssl://pool.test:1#x","stratum+ssl://pool.test.:1","stratum+ssl://pool..test:1","stratum+ssl://-pool.test:1","stratum+ssl://pool-.test:1",
         "stratum+ssl://pool%2etest:1","stratum+ssl://pool\\test:1","stratum+ssl://pool_test:1","stratum+ssl://[::1]:1","stratum+ssl://127.0.0.1:1",
+        "stratum+ssl://0x7f000001:1","stratum+ssl://0X7f.0.0.1:1","stratum+ssl://0x7f.1:1","stratum+ssl://0177.0.0.1:1",
         "stratum+ssl://pool.test:1\n",std::string("stratum+ssl://pool\0.test:1",26),"stratum+ssl://"+std::string(64,'a')+".test:1"}){
         out={"unchanged",9,true};CHECK(!parsePoolSecurityUrl(bad,&out)&&out.host=="unchanged"&&out.port==9&&out.tls);}
 }

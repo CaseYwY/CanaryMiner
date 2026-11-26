@@ -1,5 +1,6 @@
 // Explicit synthetic connection implementation behind the REAL duplex service. Never linked into a native worker.
 #include "product/pool_tls_stream_service.h"
+#include "product/executable_path.h"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -67,7 +68,10 @@ PoolTlsOpenResult open(const PoolTlsCheckRequest &r,bool plain){
     result.connection=std::make_unique<Connection>(r.host,r.host=="wrong-mode.test"?!plain:plain);return result;
 }
 }
-int main(int argc,char **argv){fixtureDirectory=std::filesystem::absolute(std::filesystem::u8path(argv[0])).parent_path();
+int main(int argc,char **argv){
+    const auto executable=om::selfExecutablePath();
+    if(executable.empty())return 2;
+    fixtureDirectory=std::filesystem::u8path(executable).parent_path();
     return om::runPoolTlsStreamService(argc,argv,
     [](const om::PoolTlsCheckRequest &r,const std::atomic<bool> &){return open(r,false);},
     [](const om::PoolTlsCheckRequest &r,const std::atomic<bool> &){return open(r,true);});}

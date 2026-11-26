@@ -1,4 +1,5 @@
 #include "pool_tls_runtime_transport.h"
+#include "executable_path.h"
 #include "pool_security_preferences.h"
 #include <chrono>
 
@@ -46,6 +47,18 @@ PoolFallbackFailure fallbackEvidence(const PoolTlsCheckReply &reply, uint64_t at
     return evidence;
 }
 }
+std::filesystem::path poolTlsRuntimeWorkerPath() {
+    const auto executable = selfExecutablePath();
+    if (executable.empty()) return {};
+    // Keep the full worker filename in the native miner for the candidate verifier.
+#if defined(_WIN32)
+    const char *volatile sibling = "canary_pool_tls_stream_worker.exe";
+#else
+    const char *volatile sibling = "canary_pool_tls_stream_worker";
+#endif
+    return std::filesystem::u8path(executable).parent_path() / sibling;
+}
+
 PoolTlsRuntimeTransport::PoolTlsRuntimeTransport(std::filesystem::path helper, PoolTlsCheckRequest request,
                                                volatile sig_atomic_t *stop, std::string authorizedPlaintextUrl)
     : helper_(std::move(helper)), request_(std::move(request)), fallbackUrl_(std::move(authorizedPlaintextUrl)), stop_(stop) {

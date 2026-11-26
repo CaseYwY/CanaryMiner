@@ -3,6 +3,7 @@
 #include "runtime_preferences.h"
 #include "local_preferences_store.h"
 #include "../core/http.h"
+#include "../core/pool_dns_name.h"
 #include <vector>
 namespace om {
 enum class PoolSecurityMode { Unchanged, StrictTls, PreferTls };
@@ -13,18 +14,11 @@ inline bool parsePoolSecurityUrl(const std::string &url,PoolSecurityEndpoint *ou
     PoolSecurityEndpoint endpoint;std::size_t begin=0;
     if(url.rfind("stratum+ssl://",0)==0){endpoint.tls=true;begin=14;}
     else if(url.rfind("stratum+tcp://",0)==0)begin=14;else return false;
-    const auto colon=url.find(':',begin);if(colon==url.npos||colon==begin||colon-begin>253||colon+1==url.size())return false;
-    endpoint.host=url.substr(begin,colon-begin);bool numeric=true;std::size_t label=0;
-    for(std::size_t i=0;i<=endpoint.host.size();++i){
-        if(i==endpoint.host.size()||endpoint.host[i]=='.'){
-            if(i==label||i-label>63||endpoint.host[label]=='-'||endpoint.host[i-1]=='-')return false;
-            label=i+1;continue;}
-        auto &ch=endpoint.host[i];if(ch>='A'&&ch<='Z')ch=static_cast<char>(ch-'A'+'a');
-        if(!((ch>='a'&&ch<='z')||(ch>='0'&&ch<='9')||ch=='-'))return false;
-        if(ch<'0'||ch>'9')numeric=false;
-    }
-    // This declaration slice is DNS-only: literal identity needs a separately qualified native IP policy.
-    if(numeric)return false;
+    const auto colon=url.find(':',begin);if(colon==url.npos||colon+1==url.size())return false;
+    const auto host=std::string_view(url).substr(begin,colon-begin);
+    if(!validPoolDnsName(host))return false;
+    endpoint.host=host;
+    for(auto &ch:endpoint.host)if(ch>='A'&&ch<='Z')ch=static_cast<char>(ch-'A'+'a');
     const auto digits=url.size()-colon-1;if(digits>5||(digits>1&&url[colon+1]=='0'))return false;
     for(std::size_t i=colon+1;i<url.size();++i){const auto ch=url[i];if(ch<'0'||ch>'9')return false;endpoint.port=endpoint.port*10+static_cast<unsigned>(ch-'0');}
     if(!endpoint.port||endpoint.port>65535)return false;
