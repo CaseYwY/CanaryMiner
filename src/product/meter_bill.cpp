@@ -348,11 +348,17 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     return true;
 }
 
+struct CompletedSupplyCycle {
+    InvoicePeriod period;
+    ElectricityAmount charge;
+};
+
 template<class Interval>
 const char *reviewReadings(const std::vector<Interval> &readings, const TariffDeclaration &declaration, int64_t cutoff,
                            const std::function<bool()> &stopped, std::string &report, std::string &exactResults,
                            const MeterInvoice *invoice, std::string *exactInvoice,
-                           std::string *meterOnlyExact = nullptr) {
+                           std::string *meterOnlyExact = nullptr,
+                           std::vector<CompletedSupplyCycle> *completedSupply = nullptr) {
     constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
     using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
     auto opening = declaration.opening;
@@ -391,6 +397,8 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
         if (!appendPeriod(report, cycle, declaration, opening, accrual, exactResults, seasonal))
             return "amount exceeds the display range";
         if (meterOnlyExact) meterOnlyExact->append(exactResults, exactStart);
+        if (completedSupply && accrual.settledTotal && opening.throughUtcMs == opening.cycleBeginUtcMs)
+            completedSupply->push_back({{opening.cycleBeginUtcMs, opening.cycleEndUtcMs}, *accrual.settledTotal});
         if (invoice) {
             if (const auto *problem = appendInvoiceComparison(*invoice, cycle - 1, opening, accrual,
                                                               declaration.plan.currency, report, exactInvoice))
@@ -406,6 +414,73 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
     }
     if (invoice && cycle - 1 != invoice->cycles.size())
         return "invoice must list one charge for each reviewed cycle";
+    return nullptr;
+}
+
+template<class Interval>
+const char *reviewExportStatement(const std::vector<Interval> &readings, const TariffDeclaration &declaration,
+                                 const InvoicePeriod &period, int64_t cutoff, const std::function<bool()> &stopped,
+                                 ExportPeriodEstimate &estimate) {
+    constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
+    using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
+    if (period.begin < readings.front().beginUtcMs || period.end > readings.back().endUtcMs)
+        return "export statement period lies outside the reviewed meter readings";
+    auto reading = std::upper_bound(readings.begin(), readings.end(), period.begin,
+        [](int64_t at, const Interval &interval) { return at < interval.endUtcMs; });
+    Trace trace{declaration.opening.evidence, {}};
+    for (auto cursor = period.begin; cursor < period.end && reading != readings.end(); ++reading) {
+        if (stopped()) return "review cancelled";
+        const auto begin = (std::max)(cursor, reading->beginUtcMs);
+        const auto end = (std::min)(reading->endUtcMs, period.end);
+        if (end <= begin) break;
+        if constexpr (isRegister) {
+            if (!reading->exportedKwh) return electricityStatusName(ElectricityStatus::ExportEvidenceMissing);
+            if ((begin != reading->beginUtcMs || end != reading->endUtcMs) && !reading->exportedKwh->numerator.zero())
+                return "export register needs a reading at a statement boundary";
+            trace.intervals.push_back({begin, end, {}, {}, reading->exportedKwh});
+        } else {
+            trace.intervals.push_back({begin, end, reading->watts, {}, reading->exportWatts});
+        }
+        cursor = end;
+    }
+    estimate = estimateExportPeriod(*declaration.plan.exportPayment, trace, period.begin, period.end, cutoff, stopped);
+    return estimate.status == ElectricityStatus::Ok ? nullptr : electricityStatusName(estimate.status);
+}
+
+template<class Interval>
+const char *reviewIndependentInvoice(const IndependentInvoice &invoice, const std::vector<CompletedSupplyCycle> &completed,
+                                     const std::vector<Interval> &readings, const TariffDeclaration &declaration,
+                                     int64_t cutoff, const std::function<bool()> &stopped,
+                                     std::string &report, std::string *exact) {
+    const auto &currency = declaration.plan.currency;
+    const auto netPeriod = commonStatementPeriod(invoice);
+    InvoiceTotals supply, exported;
+    report += "Independent supply and export statements\n";
+    for (const auto &statement : invoice.supply.periods) {
+        if (stopped()) return "review cancelled";
+        const auto found = std::find_if(completed.begin(), completed.end(), [&](const auto &cycle) {
+            return cycle.period.begin == statement.period.begin && cycle.period.end == statement.period.end;
+        });
+        if (found == completed.end()) return "supply statement must match a complete reviewed billing cycle from a zero opening";
+        if (!appendStatement("supply charge", "supply_statement", invoice.supply.precision, statement, found->charge,
+                             currency, netPeriod ? &supply : nullptr, report, exact))
+            return "invoice comparison amount exceeds arithmetic capacity";
+    }
+    for (const auto &statement : invoice.exported.periods) {
+        ExportPeriodEstimate estimate;
+        if (const auto *problem = reviewExportStatement(readings, declaration, statement.period, cutoff, stopped, estimate))
+            return problem;
+        std::string quantity;
+        if (!estimate.exportedKwh.format(6, &quantity) ||
+            !appendStatement("export payment", "export_statement", invoice.exported.precision, statement, estimate.payment,
+                             currency, netPeriod ? &exported : nullptr, report, exact))
+            return "invoice comparison amount exceeds arithmetic capacity";
+        report += "  Exported usage for statement " + quantity + " kWh\n";
+        if (exact) *exact += "[\"statement_exported_kwh\"," + jsonQuote(estimate.exportedKwh.numerator.text()) + "]\n";
+    }
+    const auto places = (std::max)(invoice.supply.precision.places, invoice.exported.precision.places);
+    if (!appendStatementNet(netPeriod, places, supply, exported, currency, report, exact))
+        return "invoice comparison amount exceeds arithmetic capacity";
     return nullptr;
 }
 
@@ -515,17 +590,27 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
     if (!original.invoice.empty()) {
         if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice.emplace()))
             return problem;
-        review.report += invoice->kind == MeterInvoiceKind::Annual ? "Annual reconciliation uses " :
-                         invoice->kind == MeterInvoiceKind::Export ? "Export invoice reconciliation uses " :
-                                                                    "Invoice comparison uses ";
-        review.report += std::to_string(invoice->places) + " decimal places with ties ";
-        review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
+        if (!invoice->independent) {
+            review.report += invoice->kind == MeterInvoiceKind::Annual ? "Annual reconciliation uses " :
+                             invoice->kind == MeterInvoiceKind::Export ? "Export invoice reconciliation uses " :
+                                                                        "Invoice comparison uses ";
+            review.report += std::to_string(invoice->places) + " decimal places with ties ";
+            review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
+        }
     }
     return std::visit([&](const auto &series) {
+        const auto *independent = invoice && invoice->independent ? &*invoice->independent : nullptr;
+        std::vector<CompletedSupplyCycle> completed;
+        auto *exactInvoice = includeInvoiceInExact ? &review.exact : nullptr;
         const auto *problem=reviewReadings(series, review.declaration, original.cutoff, stopped, review.report, review.exact,
-                                           invoice ? &*invoice : nullptr, includeInvoiceInExact ? &review.exact : nullptr,
-                                           meterOnlyExact);
-        if (problem || !review.prepaid) return problem;
+                                           invoice && !independent ? &*invoice : nullptr, exactInvoice, meterOnlyExact,
+                                           independent ? &completed : nullptr);
+        if (problem) return problem;
+        if (independent) {
+            if (const auto *invoiceProblem = reviewIndependentInvoice(*independent, completed, series, review.declaration,
+                    original.cutoff, stopped, review.report, exactInvoice)) return invoiceProblem;
+        }
+        if (!review.prepaid) return static_cast<const char *>(nullptr);
         const auto start=review.exact.size();
         if (const auto *prepaidProblem=addPrepaidReview(review.prepaid,series,original.cutoff,stopped,review.report,review.exact))
             return prepaidProblem;
@@ -614,7 +699,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Demand requires complete aligned windows. Add a register reading wherever a demand boundary splits nonzero import.\n"
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
-                  "Use --invoice to compare supply charges, reconcile separate export payments, or review interim annual charges.\n"
+                  "Use --invoice to compare supply charges, reconcile independent export statements, or review interim annual charges.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
                   "Open rechecks the saved inputs and results at their original cutoff without writing files.\n"
                   "Extend verifies the saved review and requires the complete interval history with additional readings.");

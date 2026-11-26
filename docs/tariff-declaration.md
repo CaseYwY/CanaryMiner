@@ -785,6 +785,59 @@ the extension. The original archive remains available for its own statement. Ear
 readers need an update to open an archive with this invoice format. This format
 requires both monetary components to share a billing cycle.
 
+### Compare independent supply and export statements
+
+Use invoice schema version 4 when the supply and export providers close their
+statements on different dates. Each group has its own precision and rounding.
+Use `half_even` or `half_away_from_zero` with zero to six decimal places.
+Supply and export must refer to the meter scope and currency in the tariff.
+
+```json
+{
+  "schema_version": 4,
+  "scope": "synthetic-whole-meter-scenario",
+  "currency": "USD",
+  "supply": {
+    "decimal_places": 2,
+    "rounding": "half_even",
+    "periods": [
+      {"begin_utc_ms": 1704067200000, "end_utc_ms": 1706745600000, "supply_charge": "18.55"}
+    ]
+  },
+  "export": {
+    "decimal_places": 3,
+    "rounding": "half_away_from_zero",
+    "periods": [
+      {"begin_utc_ms": 1705276800000, "end_utc_ms": 1707955200000, "export_payment": "-1.250"}
+    ]
+  }
+}
+```
+
+List periods in time order within each group. They may have gaps. Either group
+can have an empty list if you only have one kind of statement. Each supply
+statement must match a complete reviewed tariff cycle from a zero opening.
+Export statements require a declared export payment. Each export statement
+must fit within the supplied readings and can cross a supply reset. The review
+prices export at the tariff's fixed rate or by its effective UTC rate intervals.
+The tariff and meter data must support the ordinary estimate over the
+submitted readings. Signed average-power intervals can be split at statement
+boundaries. For an increasing cumulative export register, provide a reading
+at each statement boundary. A constant export register establishes zero export
+throughout the interval.
+
+The report shows a difference for each statement. It shows a net statement
+difference only when both groups cover the same continuous period. It sums
+their individually rounded amounts before subtracting export from supply.
+The ordinary meter estimate uses its original supply cycles and precision.
+
+Use `--invoice FILE` with new readings or a meter-only archive. The maximum
+invoice size is 16 KiB, with up to 12 supply and 128 export statements. A saved
+comparison retains the original invoice and exact per-period calculation.
+Earlier versions of the miner require an update to reopen a saved schema 4
+invoice. To compare an extended archive, provide the statements you want to
+compare with the extended readings.
+
 ### Save and reopen a local meter review
 
 Add `--save-review NAME.cmr` to a successful `meter-bill` review to save a new archive in the current directory. Use an ASCII basename ending in `.cmr`. Run the command from a private, trusted local directory. The archive contains the original tariff declaration and all supplied meter readings, so it carries the same privacy considerations as those files.

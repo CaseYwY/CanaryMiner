@@ -46,6 +46,16 @@ def paired(*rows):
     ]}
 
 
+def statement_period(begin, end, **amount):
+    return {"begin_utc_ms": begin, "end_utc_ms": end, **amount}
+
+
+def independent_invoice(supply, exported, export_places=2):
+    return {"schema_version": 4, "scope": SCOPE, "currency": "USD",
+            "supply": {"decimal_places": 2, "rounding": "half_even", "periods": supply},
+            "export": {"decimal_places": export_places, "rounding": "half_away_from_zero", "periods": exported}}
+
+
 def main(cli, bundle=None):
     with TemporaryDirectory(prefix="canary-export-meter-") as temp:
         root = Path(temp)
@@ -112,6 +122,15 @@ def main(cli, bundle=None):
             assert "Calculated net electricity cost at invoice precision -2.00 USD" in result
             assert result.count("0.00 USD (match)") == 3
             assert run("--open-review", "named-invoice.cmr") == result
+            write(invoice, independent_invoice([statement_period(begin, end, supply_charge="0.00")], [
+                statement_period(begin, cut, export_payment="-2.00"),
+                statement_period(cut, end, export_payment="4.00"),
+            ]))
+            result = review(policy, net_power((begin, end, "-1000")), end,
+                            "--invoice", invoice, "--save-review", "named-independent.cmr")
+            assert "Calculated net electricity cost at invoice precision -2.00 USD" in result
+            assert result.count("0.00 USD (match)") == 4
+            assert run("--open-review", "named-independent.cmr") == result
         else:
             begin = utc("2024-01-01")
             end, half = begin + HOUR, begin + HOUR // 2
@@ -400,6 +419,140 @@ def main(cli, bundle=None):
             assert "Invoice net electricity cost -696.00 USD" in continuation
             assert run("--open-review", "two-month-invoice.cmr") == continuation
             assert run("--open-review", "january-invoice.cmr") == january_report
+
+            # Sum each rounded export statement. Rounding the unsplit -0.0025 would give -0.003.
+            two_hours, three_hours, four_hours = (begin + h * HOUR for h in (2, 3, 4))
+            divided = scheduled_tariff(begin, four_hours, (begin, two_hours, "-0.005"),
+                                       (two_hours, four_hours, "0.0075"))
+            power = net_power((begin, three_hours, "-1000"), (three_hours, four_hours, "1000"))
+            supply = statement_period(begin, four_hours, supply_charge="3.00")
+            first = statement_period(begin, end, export_payment="-0.005")
+            second = statement_period(end, four_hours, export_payment="0.003")
+            separated = independent_invoice([supply], [first, second], export_places=3)
+            write(invoice, separated)
+            result = review(divided, power, four_hours, "--invoice", invoice, "--save-review", "independent.cmr")
+            assert "Calculated export payment at invoice precision -0.005 USD" in result
+            assert "Calculated export payment at invoice precision 0.003 USD" in result
+            assert "Calculated net electricity cost at invoice precision 3.002 USD" in result
+            assert result.count("(match)") == 4 and "(mismatch)" not in result
+            archive = root / "independent.cmr"
+            original = archive.read_bytes()
+            assert invoice.read_bytes() in original
+            for path in (invoice, tariff, meter):
+                path.unlink()
+            assert run("--open-review", archive.name) == result
+            changed = original[:-65].replace(b'"export_payment":"0.003"', b'"export_payment":"0.004"')
+            assert changed != original[:-65]
+            archive.write_bytes(changed + sha256(changed).hexdigest().encode("ascii") + b"\n")
+            run("--open-review", archive.name, error="differ from the recalculated amounts")
+            archive.write_bytes(original)
+
+            for rows in ([first], [first, {**second, "begin_utc_ms": three_hours}]):
+                write(invoice, independent_invoice([supply], rows, export_places=3))
+                result = review(divided, power, four_hours, "--invoice", invoice)
+                assert "Statement net comparison unavailable" in result
+                assert "Difference for net electricity cost" not in result
+            for doc, error in (
+                (independent_invoice([supply], [first, first], export_places=3), "invalid export statement periods"),
+                (independent_invoice([supply, supply], []), "invalid supply statement periods"),
+                (independent_invoice([], []), "requires at least one statement period"),
+                (independent_invoice([{**supply, "end_utc_ms": three_hours}], []), "match a complete reviewed billing cycle"),
+                (independent_invoice([], [{**second, "end_utc_ms": four_hours + 1}], export_places=3),
+                 "outside the reviewed meter readings"),
+                (independent_invoice([], [{**first, "begin_utc_ms": begin - 1}], export_places=3),
+                 "outside the reviewed meter readings"),
+                ({**separated, "currency": "CAD"}, "scope or currency differs"),
+                ({**separated, "export": {**separated["export"], "rounding": "default"}}, "invalid export statement"),
+            ):
+                write(invoice, doc)
+                review(divided, power, four_hours, "--invoice", invoice, "--save-review", "invalid-statement.cmr", error=error)
+                assert not (root / "invalid-statement.cmr").exists()
+
+            # The export statement crosses a supply reset and a signed rate change. Only February supply is stated.
+            a, b = feb - 12 * HOUR, feb + 6 * HOUR
+            offset = independent_invoice([statement_period(feb, mar, supply_charge="0.00")],
+                                         [statement_period(a, b, export_payment="-6.00")])
+            source = paired((begin, "0", "0"), (a, "0", "732"), (feb, "0", "744"),
+                            (b, "0", "750"), (mar, "0", "1440"))
+            write(invoice, offset)
+            result = review(recurring, source, mar, "--invoice", invoice, "--save-review", "offset-statement.cmr")
+            assert "Calculated export payment at invoice precision -6.00 USD" in result
+            assert "Exported usage for statement 18.000000 kWh" in result
+            assert "Statement net comparison unavailable" in result
+            assert result.count("(match)") == 2
+            assert run("--open-review", "offset-statement.cmr") == result
+            review(recurring, paired((begin, "0", "0"), (feb, "0", "744"), (mar, "0", "1440")), mar,
+                   "--invoice", invoice, error="export register needs a reading at a statement boundary")
+            review(recurring, source, mar, "--save-review", "offset-meter-only.cmr")
+            assert run("--open-review", "offset-meter-only.cmr", "--invoice", invoice) == result
+
+            january_supply = statement_period(begin, feb, supply_charge="0.00")
+            write(invoice, independent_invoice([january_supply], [statement_period(a, feb, export_payment="-12.00")]))
+            early = paired((begin, "0", "0"), (a, "0", "732"), (feb, "0", "744"))
+            previous = review(recurring, early, feb, "--invoice", invoice, "--save-review", "early-statement.cmr")
+            write(invoice, offset)
+            write(meter, source)
+            extended = run("--extend-review", "early-statement.cmr", "--intervals", meter, "--as-of-utc-ms", mar,
+                           "--invoice", invoice, "--save-review", "updated-statement.cmr")
+            assert "Calculated export payment at invoice precision -6.00 USD" in extended
+            assert run("--open-review", "updated-statement.cmr") == extended
+            assert run("--open-review", "early-statement.cmr") == previous
+
+            write(invoice, independent_invoice([january_supply, offset["supply"]["periods"][0]], [
+                statement_period(begin, b, export_payment="-738.00"),
+                statement_period(b, mar, export_payment="690.00"),
+            ]))
+            multi = review(recurring, source, mar, "--invoice", invoice)
+            assert "Calculated net electricity cost at invoice precision 48.00 USD" in multi
+            assert multi.count("(match)") == 5
+
+            # An unchanged export register proves zero over every subinterval of the measured span.
+            write(invoice, independent_invoice([], [statement_period(half, end, export_payment="0.00")]))
+            result = review(divided, paired((begin, "0", "80"), (two_hours, "2", "80")), two_hours, "--invoice", invoice)
+            assert "Provisional cycle estimate" in result
+            assert "Calculated export payment at invoice precision 0.00 USD" in result
+            assert "Exported usage for statement 0.000000 kWh" in result
+            assert "Statement net comparison unavailable" in result
+
+            write(invoice, independent_invoice([], [statement_period(half, end, export_payment="1.00")]))
+            result = review(declaration, net_power((begin, end, "-2000")), end, "--invoice", invoice)
+            assert "Calculated export payment at invoice precision 1.00 USD" in result
+            assert "Exported usage for statement 1.000000 kWh" in result
+            review(unpriced, interval(begin, end), end, "--invoice", invoice,
+                   error="requires a declared export payment")
+            write(invoice, independent_invoice([statement_period(begin, end, supply_charge="1.00")], []))
+            result = review(unpriced, interval(begin, end), end, "--invoice", invoice)
+            assert "Calculated supply charge at invoice precision 1.00 USD" in result
+            assert "Statement net comparison unavailable" in result
+
+            # Archive the complete supported statement shape with wide, valid exact amounts.
+            months = [utc(f"2024-{month:02d}-01") for month in range(1, 13)] + [utc("2025-01-01")]
+            maximum = export_tariff(months[0], months[1], reset={"monthly_day": 1, "clock": UTC}, rates_end=months[-1])
+            export_rate = int("9" * 38)
+            maximum["plan"]["export_payment"]["rate_per_kwh"] = str(export_rate)
+            maximum["plan"]["revisions"][0]["base_rate_per_kwh"] = "8" * 38
+            maximum["plan"]["subtotal_multiplier"] = "999999999"
+            summed_kwh = 0
+            increment = int("6" * 36)
+            points, supply_periods, export_periods = [(months[0], "0", "0")], [], []
+            for index, (left, right) in enumerate(zip(months, months[1:])):
+                supply_periods.append(statement_period(left, right, supply_charge="0"))
+                steps = 11 if index < 8 else 10
+                for step in range(1, steps + 1):
+                    boundary = left + (right - left) * step // steps
+                    export_periods.append(statement_period(points[-1][0], boundary, export_payment="0"))
+                    summed_kwh += increment
+                    points.append((boundary, str(summed_kwh), str(summed_kwh)))
+            statement = independent_invoice(supply_periods, export_periods, export_places=6)
+            statement["supply"]["decimal_places"] = 6
+            write(invoice, statement)
+            wide = review(maximum, paired(*points), months[-1], "--invoice", invoice, "--save-review", "wide-statement.cmr")
+            assert wide.count("export payment statement [") == 128
+            assert f"Calculated export payment at invoice precision {increment * export_rate}.000000 USD" in wide
+            assert run("--open-review", "wide-statement.cmr") == wide
+            export_periods.append(statement_period(months[-1], months[-1] + HOUR, export_payment="0"))
+            write(invoice, statement)
+            review(maximum, paired(*points), months[-1], "--invoice", invoice, error="invalid export statement periods")
 
         print(f"Export payment: {checked} ordinary meter-bill invocations passed")
 

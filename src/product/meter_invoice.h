@@ -3,6 +3,7 @@
 #include "meter_bill.h"
 #include "tariff_declaration.h"
 
+#include <algorithm>
 #include <variant>
 
 namespace om::meter_bill_detail {
@@ -11,13 +12,13 @@ struct InvoicePeriod {
     int64_t begin = 0, end = 0;
 };
 
-struct InterimSupplyCharge {
+struct InvoiceAmount {
     InvoicePeriod period;
     ExactDecimal amount;
 };
 
 struct AnnualInvoice {
-    std::vector<InterimSupplyCharge> interim;
+    std::vector<InvoiceAmount> interim;
     std::optional<ExactDecimal> statedAdjustment;
 };
 
@@ -32,11 +33,24 @@ struct InvoiceCycle {
 
 enum class MeterInvoiceKind { Supply, Annual, Export };
 
-struct MeterInvoice {
+struct InvoicePrecision {
     unsigned places = 0;
     DecimalTies ties = DecimalTies::ToEven;
+};
+
+struct StatementSeries {
+    InvoicePrecision precision;
+    std::vector<InvoiceAmount> periods;
+};
+
+struct IndependentInvoice {
+    StatementSeries supply, exported;
+};
+
+struct MeterInvoice : InvoicePrecision {
     MeterInvoiceKind kind = MeterInvoiceKind::Supply;
     std::vector<InvoiceCycle> cycles;
+    std::optional<IndependentInvoice> independent;
 };
 
 inline bool decodeInvoicePeriod(const JsonValue &row, InvoicePeriod &period) {
@@ -54,6 +68,34 @@ inline bool decodeInvoiceCharge(const JsonValue *value, unsigned places, ExactDe
            amount.digits() <= 38 && amount.scale() <= places;
 }
 
+inline bool decodeInvoicePrecision(const JsonValue &row, InvoicePrecision &precision) {
+    const auto *places = row.find("decimal_places");
+    const auto *rounding = row.find("rounding");
+    uint64_t digits = 0;
+    if (!places || !places->asUint64(&digits) || digits > 6 || !rounding || !rounding->isString() ||
+        (rounding->text != "half_even" && rounding->text != "half_away_from_zero")) return false;
+    precision = {static_cast<unsigned>(digits),
+                 rounding->text == "half_even" ? DecimalTies::ToEven : DecimalTies::AwayFromZero};
+    return true;
+}
+
+inline bool decodeStatementSeries(const JsonValue *group, const char *amountField, size_t limit, StatementSeries &series) {
+    if (!group || !group->isObject() || group->members.size() != 3 || !decodeInvoicePrecision(*group, series.precision))
+        return false;
+    const auto *periods = group->find("periods");
+    if (!periods || !periods->isArray() || periods->items.size() > limit) return false;
+    int64_t previousEnd = 0;
+    for (const auto &row : periods->items) {
+        InvoiceAmount amount;
+        if (!row.isObject() || row.members.size() != 3 || !decodeInvoicePeriod(row, amount.period) ||
+            amount.period.begin < previousEnd ||
+            !decodeInvoiceCharge(row.find(amountField), series.precision.places, amount.amount)) return false;
+        previousEnd = amount.period.end;
+        series.periods.push_back(std::move(amount));
+    }
+    return true;
+}
+
 inline const char *decodeAnnualInvoice(const JsonValue &row, const InvoicePeriod &year, unsigned places,
                                        AnnualInvoice &annual) {
     const auto *interim = row.find("interim_supply_charges");
@@ -65,7 +107,7 @@ inline const char *decodeAnnualInvoice(const JsonValue &row, const InvoicePeriod
         return "invalid stated annual adjustment";
     auto cursor = year.begin;
     for (const auto &item : interim->items) {
-        InterimSupplyCharge charge;
+        InvoiceAmount charge;
         if (!item.isObject() || item.members.size() != 3 || !decodeInvoicePeriod(item, charge.period) ||
             !decodeInvoiceCharge(item.find("supply_charge"), places, charge.amount))
             return "invalid interim invoice period or supply charge";
@@ -82,23 +124,34 @@ inline const char *decodeMeterInvoice(const std::string &bytes, const TariffDecl
                                      MeterInvoice &invoice) {
     JsonValue root;
     if (!parseJsonStrict(bytes, &root, nullptr, {maxInvoiceBytes, 6}) ||
-        !root.isObject() || root.members.size() != 6)
+        !root.isObject())
         return "invalid invoice comparison document";
     const auto *schema = root.find("schema_version");
     const auto *scope = root.find("scope");
     const auto *currency = root.find("currency");
-    const auto *precision = root.find("decimal_places");
-    const auto *rounding = root.find("rounding");
+    uint64_t version = 0;
+    if (!schema || !schema->asUint64(&version) || version < 1 || version > 4 || !scope || !scope->isString() ||
+        !currency || !currency->isString() || root.members.size() != (version == 4 ? 5u : 6u))
+        return "invalid invoice comparison document";
     const auto *cycles = root.find("cycles");
-    uint64_t version = 0, places = 0;
-    if (!schema || !schema->asUint64(&version) || version < 1 || version > 3 || !scope || !scope->isString() ||
-        !currency || !currency->isString() || !precision || !precision->asUint64(&places) || places > 6 ||
-        !rounding || !rounding->isString() ||
-        (rounding->text != "half_even" && rounding->text != "half_away_from_zero") ||
-        !cycles || !cycles->isArray() || cycles->items.empty() || cycles->items.size() > maxTariffComparisonCycles)
+    if (version != 4 && (!decodeInvoicePrecision(root, invoice) || !cycles || !cycles->isArray() ||
+        cycles->items.empty() || cycles->items.size() > maxTariffComparisonCycles))
         return "invalid invoice comparison document";
     if (scope->text != declaration.opening.evidence.scope || currency->text != declaration.plan.currency)
         return "invoice scope or currency differs from the saved tariff";
+
+    if (version == 4) {
+        auto &independent = invoice.independent.emplace();
+        if (!decodeStatementSeries(root.find("supply"), "supply_charge", maxTariffComparisonCycles, independent.supply))
+            return "invalid supply statement periods or precision";
+        if (!decodeStatementSeries(root.find("export"), "export_payment", 128, independent.exported))
+            return "invalid export statement periods or precision";
+        if (independent.supply.periods.empty() && independent.exported.periods.empty())
+            return "independent invoice requires at least one statement period";
+        if (!independent.exported.periods.empty() && !declaration.plan.exportPayment)
+            return "export invoice comparison requires a declared export payment";
+        return nullptr;
+    }
 
     invoice.kind = version == 2 ? MeterInvoiceKind::Annual :
                    version == 3 ? MeterInvoiceKind::Export : MeterInvoiceKind::Supply;
@@ -106,8 +159,6 @@ inline const char *decodeMeterInvoice(const std::string &bytes, const TariffDecl
         return "annual invoice comparison requires an annual tariff reset";
     if (invoice.kind == MeterInvoiceKind::Export && !declaration.plan.exportPayment)
         return "export invoice comparison requires a declared export payment";
-    invoice.places = static_cast<unsigned>(places);
-    if (rounding->text == "half_away_from_zero") invoice.ties = DecimalTies::AwayFromZero;
     invoice.cycles.reserve(cycles->items.size());
     for (const auto &row : cycles->items) {
         InvoiceCycle cycle;
@@ -199,6 +250,63 @@ inline bool appendExportInvoiceLine(const char *label, const ExactDecimal &calcu
         (difference.zero() ? " (match)\n" : " (mismatch)\n");
     if (exact)
         *exact += ",[" + jsonQuote(estimate) + "," + jsonQuote(amount) + "," + jsonQuote(change) + "]";
+    return true;
+}
+
+struct InvoiceTotals {
+    ExactDecimal calculated, stated;
+};
+
+inline bool appendStatement(const char *label, const char *record, const InvoicePrecision &precision,
+                            const InvoiceAmount &statement, const ElectricityAmount &estimated,
+                            const std::string &currency, InvoiceTotals *totals, std::string &report, std::string *exact) {
+    ExactDecimal rounded;
+    std::string amount;
+    if (!estimated.numerator.formatRatio(wattMsPerKwh, precision.places, precision.ties, &amount) ||
+        !ExactDecimal::parse(amount, &rounded) || (totals && (!totals->calculated.add(rounded, &totals->calculated) ||
+        !totals->stated.add(statement.amount, &totals->stated)))) return false;
+    const auto begin = std::to_string(statement.period.begin), end = std::to_string(statement.period.end);
+    const char *ties = precision.ties == DecimalTies::ToEven ? "half_even" : "half_away_from_zero";
+    report += std::string(label) + " statement [" + begin + ", " + end + ") UTC ms | " +
+        std::to_string(precision.places) + " decimal places | " + ties + "\n";
+    if (exact)
+        *exact += '[' + jsonQuote(record) + ',' + begin + ',' + end + ',' + std::to_string(precision.places) + ',' +
+            jsonQuote(ties) + ',' + jsonQuote(estimated.numerator.text());
+    if (!appendExportInvoiceLine(label, rounded, statement.amount, precision.places, currency, report, exact)) return false;
+    if (exact) *exact += "]\n";
+    return true;
+}
+
+inline bool continuousStatements(const std::vector<InvoiceAmount> &rows) {
+    return !rows.empty() && std::adjacent_find(rows.begin(), rows.end(), [](const auto &a, const auto &b) {
+        return a.period.end != b.period.begin;
+    }) == rows.end();
+}
+
+inline std::optional<InvoicePeriod> commonStatementPeriod(const IndependentInvoice &invoice) {
+    const auto &a = invoice.supply.periods;
+    const auto &b = invoice.exported.periods;
+    if (!continuousStatements(a) || !continuousStatements(b) || a.front().period.begin != b.front().period.begin ||
+        a.back().period.end != b.back().period.end) return std::nullopt;
+    return InvoicePeriod{a.front().period.begin, a.back().period.end};
+}
+
+inline bool appendStatementNet(const std::optional<InvoicePeriod> &period, unsigned places, const InvoiceTotals &supply,
+                               const InvoiceTotals &exported, const std::string &currency,
+                               std::string &report, std::string *exact) {
+    if (!period) {
+        report += "Statement net comparison unavailable. Supply and export statements must cover the same continuous period.\n";
+        if (exact) *exact += "[\"statement_net\",null]\n";
+        return true;
+    }
+    const auto begin = std::to_string(period->begin), end = std::to_string(period->end);
+    ExactDecimal calculated, stated;
+    if (!supply.calculated.subtract(exported.calculated, &calculated) || !supply.stated.subtract(exported.stated, &stated))
+        return false;
+    report += "Statement net for [" + begin + ", " + end + ") UTC ms\n";
+    if (exact) *exact += "[\"statement_net\"," + begin + ',' + end + ',' + std::to_string(places);
+    if (!appendExportInvoiceLine("net electricity cost", calculated, stated, places, currency, report, exact)) return false;
+    if (exact) *exact += "]\n";
     return true;
 }
 
