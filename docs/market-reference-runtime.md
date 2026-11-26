@@ -127,6 +127,41 @@ Source-use and capability approval, native helper deployment/trust/auxiliary egr
 sources, archives, actual credit/reward collection, economic/forecast source wiring and production/physical qualification
 remain unfinished. P-06 and the affected requirements remain partial.
 
+### Check public trade event times
+
+In a build with public HTTPS enabled, run:
+
+```text
+canary-miner market-tickers --allow-public-trades
+canary-miner market-tickers --allow-public-trades --save-review fills.cmt
+canary-miner market-tickers --open-review fills.cmt
+```
+
+The explicit flag permits one request each for up to 20 Gate Pearl mainnet
+`PEARL_USDT` trades and Kraken `USDTUSD` trades. These are public market-data
+requests. The optional `--dns-server IP` applies to the sample. The command
+selects the newest timestamp present in each returned batch. It shows the
+provider's event time, the local receipt time, and their separate ages at the
+cutoff. If equal newest event times give different prices, the source remains
+unavailable. Gate's pair and any supplied trade quote must agree with the
+requested market. Kraken must return the documented internal pair key
+`USDTZUSD`. [Gate spot trades](https://www.gate.com/docs/developers/apiv4/en/spot/#query-market-transaction-records) · [Kraken recent trades](https://docs.kraken.com/api-reference/market-data/get-recent-trades)
+
+Both receipts and events must be at most 120 seconds old at the cutoff. A
+difference of more than 30 seconds between either the two event times or the
+two receipts withholds the USD product. The product is an exact decimal
+multiplication. A stale price can still appear with its age and an explicit
+stale label. The command returns 0 for a complete pair, 3 for an unavailable
+pair, and 130 for cancellation after confirmed cleanup.
+
+Saving requires a complete pair. The local archive retains the original
+responses and clocks. Reopening recalculates the capture offline at its
+original cutoff. Earlier readers need an update to open the trade archive.
+The returned batches establish only which entries the providers returned.
+The reference carries no global completeness, candle coverage or execution
+guarantee. It is independent of the opt-in Dashboard and economic-mode
+settings.
+
 ### Archive and replay one public ticker sample
 
 ```sh

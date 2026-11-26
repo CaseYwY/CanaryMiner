@@ -43,6 +43,16 @@ bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
         case PublicFeed::KrakenUsdtTicker:
             if (r.fromUtc || r.toUtc) return false;
             result = "https://api.kraken.com/0/public/Ticker?pair=USDTUSD"; break;
+        case PublicFeed::GatePearlTrades:
+            if (r.fromUtc || r.toUtc) return false;
+            result = "https://api.gateio.ws/api/v4/spot/trades?currency_pair=PEARL_USDT&limit=" +
+                std::to_string(maxPublicTradeRows);
+            break;
+        case PublicFeed::KrakenUsdtTrades:
+            if (r.fromUtc || r.toUtc) return false;
+            result = "https://api.kraken.com/0/public/Trades?pair=USDTUSD&count=" +
+                std::to_string(maxPublicTradeRows);
+            break;
         case PublicFeed::PearlMainnetTip:
             if (r.fromUtc || r.toUtc) return false;
             result = "https://blockbook.pearlresearch.ai/api/status"; break;

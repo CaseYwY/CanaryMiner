@@ -21,6 +21,7 @@ constexpr size_t tickerArchiveBytes=2*tickerBodyBytes+tickerReportBytes+1024;
 constexpr uint64_t maxCaptureMs=120000;
 constexpr MarketFreshnessPolicy tickerCaptureV1Policy{120000,30000,false};
 constexpr std::string_view tickerArchiveHeader="CANARY-MARKET-TICKER-REVIEW-1\n";
+constexpr std::string_view tradeArchiveHeader="CANARY-MARKET-TRADE-REVIEW-1\n";
 
 std::optional<std::filesystem::path> reviewFile(MarketTickerAction action, int argc, const char *const *argv) {
     if (argc!=4) return {};
@@ -114,34 +115,44 @@ bool renderTickerCapture(const PublicTickerCapture &capture, std::string &report
     return true;
 }
 
+bool renderCapture(const PublicTickerCapture &capture,std::string &report) {
+    return capture.trades ? renderPublicTradeSample(capture,report)==PublicTradeReport::Complete :
+                            renderTickerCapture(capture,report);
+}
+
 void encodeTickerReceipt(std::string &bytes,const PublicTickerReceipt &receipt) {
     bytes+=std::to_string(receipt.sentUtc)+'\n'+std::to_string(receipt.response.observedUtc)+'\n'+
         std::to_string(receipt.receivedUtc)+'\n'+std::to_string(receipt.elapsedMs+1)+'\n'+
         std::to_string(receipt.response.body.size())+'\n'+receipt.response.body;
 }
 
-bool decodeTickerReceipt(const std::string &bytes,size_t &offset,PublicTickerReceipt &receipt) {
+bool decodeTickerReceipt(const std::string &bytes,size_t &offset,PublicTickerReceipt &receipt,bool trades) {
     using local_review_archive::readArchiveNumber;
     int64_t sent=0, observed=0, received=0, elapsed=0;
     std::string body;
-    if (!readArchiveNumber(bytes,offset,maxUtc,sent) || !readArchiveNumber(bytes,offset,maxUtc,observed) ||
-        !readArchiveNumber(bytes,offset,maxUtc,received) || !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
-        !local_review_archive::readArchivePart(bytes,offset,tickerBodyBytes,body)) return false;
+    const auto clockLimit=trades ? market_detail::maxMarketUtcMs : maxUtc;
+    if (!readArchiveNumber(bytes,offset,clockLimit,sent) || !readArchiveNumber(bytes,offset,maxUtc,observed) ||
+        !readArchiveNumber(bytes,offset,clockLimit,received) || !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
+        !local_review_archive::readArchivePart(bytes,offset,trades?maxPublicTradeBodyBytes:tickerBodyBytes,body)) return false;
     receipt={static_cast<uint64_t>(sent),static_cast<uint64_t>(received),static_cast<uint64_t>(elapsed-1),
              {PublicHttpsStatus::Ok,200,std::move(body),static_cast<uint64_t>(observed)}};
     return true;
 }
 
-const char *replayTickerCapture(const std::string &bytes,uint64_t now,std::string &report) {
+const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::string &report) {
     using local_review_archive::readArchiveNumber;
-    size_t offset=tickerArchiveHeader.size();
+    const bool trades=std::string_view(bytes).substr(0,tradeArchiveHeader.size())==tradeArchiveHeader;
+    const auto header=trades ? tradeArchiveHeader : tickerArchiveHeader;
+    auto offset=header.size();
+    const auto clockLimit=trades ? market_detail::maxMarketUtcMs : maxUtc;
     int64_t started=0, cutoff=0, elapsed=0;
     PublicTickerCapture capture;
+    capture.trades=trades;
     std::string savedReport;
-    if (std::string_view(bytes).substr(0,offset)!=tickerArchiveHeader ||
-        !readArchiveNumber(bytes,offset,maxUtc,started) || !readArchiveNumber(bytes,offset,maxUtc,cutoff) ||
+    if (std::string_view(bytes).substr(0,offset)!=header ||
+        !readArchiveNumber(bytes,offset,clockLimit,started) || !readArchiveNumber(bytes,offset,clockLimit,cutoff) ||
         !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
-        !decodeTickerReceipt(bytes,offset,capture.gate) || !decodeTickerReceipt(bytes,offset,capture.kraken) ||
+        !decodeTickerReceipt(bytes,offset,capture.gate,trades) || !decodeTickerReceipt(bytes,offset,capture.kraken,trades) ||
         !local_review_archive::readArchivePart(bytes,offset,tickerReportBytes,savedReport) ||
         bytes.size()-offset!=65 || bytes.back()!='\n' ||
         bytes.compare(offset,64,sha256Hex(bytes.substr(0,offset)))!=0)
@@ -149,8 +160,10 @@ const char *replayTickerCapture(const std::string &bytes,uint64_t now,std::strin
     capture.startedUtc=static_cast<uint64_t>(started);
     capture.cutoffUtc=static_cast<uint64_t>(cutoff);
     capture.elapsedMs=static_cast<uint64_t>(elapsed-1);
-    if (!now || now>maxUtc || capture.cutoffUtc>now || !renderTickerCapture(capture,report))
-        return "invalid times or incomplete fresh ticker pair at capture";
+    const auto now=trades ? nowMs : nowMs/1000;
+    if (!now || now>clockLimit || capture.cutoffUtc>now || !renderCapture(capture,report))
+        return trades ? "invalid times or incomplete fresh trade pair at capture" :
+                        "invalid times or incomplete fresh ticker pair at capture";
     return report==savedReport?nullptr:"saved ticker report differs from the recalculated report";
 }
 
@@ -169,11 +182,13 @@ int savePublicTickerReview(const std::string &name, const PublicTickerCapture &c
     };
     if (stopped()) return interrupted();
     std::string report;
-    const bool valid=capture.gate.response.body.size()<=tickerBodyBytes && capture.kraken.response.body.size()<=tickerBodyBytes &&
-        renderTickerCapture(capture,report) && report.size()<=tickerReportBytes;
+    const auto bodyLimit=capture.trades ? maxPublicTradeBodyBytes : tickerBodyBytes;
+    const bool valid=capture.gate.response.body.size()<=bodyLimit && capture.kraken.response.body.size()<=bodyLimit &&
+        renderCapture(capture,report) && report.size()<=tickerReportBytes;
     if (stopped()) return interrupted();
-    if (!valid) return reportError("could not save ticker review: both valid, fresh, aligned observations required");
-    std::string bytes(tickerArchiveHeader);
+    if (!valid) return reportError(capture.trades ? "could not save trade review: both valid, fresh, aligned trades required" :
+        "could not save ticker review: both valid, fresh, aligned observations required");
+    std::string bytes(capture.trades?tradeArchiveHeader:tickerArchiveHeader);
     bytes+=std::to_string(capture.startedUtc)+'\n'+std::to_string(capture.cutoffUtc)+'\n'+
         std::to_string(capture.elapsedMs+1)+'\n';
     encodeTickerReceipt(bytes,capture.gate);
@@ -200,11 +215,10 @@ int commandTickerFile(MarketTickerAction action,int argc,const char *const *argv
         const auto read=readLocalReviewInput(*path,open?tickerArchiveBytes:maxTickerFileBytes,text);
         if (stopped()) return cancelled();
         if (!read) return reportError("input file unavailable, oversized or unsuitable");
-        const auto now=std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto nowMs=market_detail::marketUtcClockMs();
         if (open) {
             std::string report;
-            const auto *problem=replayTickerCapture(text,now>0?static_cast<uint64_t>(now):0,report);
+            const auto *problem=replayTickerCapture(text,nowMs,report);
             if (stopped()) return cancelled();
             if (problem) return reportError(problem);
             return writeTickerReport(report);
@@ -220,7 +234,8 @@ int commandTickerFile(MarketTickerAction action,int argc,const char *const *argv
             !cutoff || cutoff>maxUtc || (!gate && !kraken) ||
             root.members.size()!=2u+static_cast<unsigned>(gate!=nullptr)+static_cast<unsigned>(kraken!=nullptr))
             return reportError("invalid ticker review document");
-        if (now<1 || static_cast<uint64_t>(now)>maxUtc || cutoff>static_cast<uint64_t>(now))
+        const auto now=nowMs/1000;
+        if (!now || now>maxUtc || cutoff>now)
             return reportError("declared review cutoff is in the future or local UTC is unavailable");
         MarketDataResult<MarketQuote> pearl,fx;
         if (!readQuote(gate,PublicFeed::GatePearlTicker,cutoff,pearl))

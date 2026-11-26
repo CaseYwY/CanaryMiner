@@ -262,9 +262,11 @@ int main(int argc, char **argv) {
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
             std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP] [--save-review NAME.cmt]\n"
+                      "canary-miner market-tickers --allow-public-trades [--dns-server IP] [--save-review NAME.cmt]\n"
                       "canary-miner market-tickers --file FILE\n"
                       "canary-miner market-tickers --open-review FILE\n"
                       "Sample Gate PEARL_USDT and Kraken USDTUSD with the installed HTTPS helper, or review saved JSON offline.\n"
+                      "Trade sampling uses public fills and checks their event times separately from receipt.\n"
                       "Open recalculates the original capture offline. Public sampling requires a public-HTTPS-enabled build.");
             return kExitOk;
         }
@@ -277,7 +279,7 @@ int main(int argc, char **argv) {
         if (cli.marketTicker.saveFlag || cli.marketTicker.action == MarketTickerAction::OpenReview)
             signal(SIGPIPE, SIG_IGN);
 #endif
-        if (cli.marketTicker.action != MarketTickerAction::PublicSample)
+        if (!isPublicTickerSample(cli.marketTicker.action))
             return commandTickerFile(cli.marketTicker.action, argc, argv, &g_stop);
         if constexpr (kPublicTickerRuntimeBuilt) {
             return commandPublicTickers(cli.marketTicker, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);

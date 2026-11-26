@@ -48,15 +48,16 @@ int main(int argc, char **argv) {
     const std::string_view feed(argv[1]);
     const bool candles = feed == "4" || feed == "5";
     const bool reward = feed == "6";
-    if (!candles && !reward && feed != "0" && feed != "2") return 3;
+    const bool trades = feed == "7" || feed == "8";
+    if (!candles && !reward && !trades && feed != "0" && feed != "2") return 3;
     int64_t from = 0, to = 0;
     if (!readTime(argv[2], from) || !readTime(argv[3], to) ||
         (candles ? from < 60 || from % 60 || to - from != 3600 || to > 253402300799LL : from || to)) return 2;
-    if (candles && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
+    if ((candles || trades) && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
                     std::string_view(argv[6]) != "65536")) return 2;
     if (reward && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
                    std::string_view(argv[6]) != "16384")) return 2;
-    const char *family = candles ? "candle" : reward ? "reward" : "ticker";
+    const char *family = candles ? "candle" : reward ? "reward" : trades ? "trade" : "ticker";
     const auto dir = std::filesystem::u8path(om::selfExecutablePath()).parent_path();
     std::string mode;
     {
@@ -113,6 +114,18 @@ int main(int argc, char **argv) {
             response.body.assign(std::istreambuf_iterator<char>(source), std::istreambuf_iterator<char>());
             if (mode == "future") response.observedUtc += 3600;
         }
+    } else if (trades) {
+        if (mode == "limited" && feed == "8") {
+            response = {};
+            response.status = om::PublicHttpsStatus::HttpStatus;
+            response.httpStatus = 429;
+            response.retryAfterSeconds = 1;
+        } else {
+            std::ifstream source(dir / ("trade-response-" + std::string(feed) + ".json"), std::ios::binary);
+            if (!source) return 4;
+            response.body.assign(std::istreambuf_iterator<char>(source), std::istreambuf_iterator<char>());
+            if (mode == "future") response.observedUtc += 60;
+        }
     } else if (feed == "0") {
         response.body = R"([{"currency_pair":"PEARL_USDT","last":"2.50"}])";
         if (mode == "future") response.observedUtc += 3600;
@@ -127,13 +140,13 @@ int main(int argc, char **argv) {
         if (mode == "foreign")
             response.body = R"({"error":[],"result":{"private-sentinel":{"c":["87213","1"]}}})";
     }
-    if (!candles && !reward && mode == "archive") {
+    if (!candles && !reward && !trades && mode == "archive") {
         response.body = "\t" + response.body + "\r\n  ";
         std::ofstream original(dir / ("ticker-body-" + std::string(feed)), std::ios::binary);
         original << response.body;
         if (!original) return 4;
     }
-    if (!candles && !reward && mode == "clock-rollback")
+    if (!candles && !reward && !trades && mode == "clock-rollback")
         response.observedUtc = feed == "0" ? 1760000061 : 1760000062;
     std::string wire;
     if (!om::encodePublicJsonResponse(response, &wire)) return 5;

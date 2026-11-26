@@ -1,4 +1,4 @@
-// Bounded, unauthenticated public JSON transport. No wallets, arbitrary URLs, pool I/O or trades.
+// Bounded, unauthenticated public JSON transport. No wallets, arbitrary URLs, pool I/O or trading.
 #pragma once
 
 #include <cstddef>
@@ -10,8 +10,10 @@ namespace om {
 
 enum class PublicFeed {
     GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles,
-    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip
+    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip, GatePearlTrades, KrakenUsdtTrades
 };
+inline constexpr size_t maxPublicTradeRows=20;
+inline constexpr size_t maxPublicTradeBodyBytes=64*1024;
 struct PublicJsonRequest {
     PublicFeed feed = PublicFeed::GatePearlTicker;
     int64_t fromUtc = 0, toUtc = 0;  // minute bounds for candles; zero otherwise

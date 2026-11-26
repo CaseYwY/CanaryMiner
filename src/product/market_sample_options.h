@@ -6,7 +6,10 @@
 
 namespace om {
 
-enum class MarketTickerAction { Help, PublicSample, LocalReview, OpenReview };
+enum class MarketTickerAction { Help, PublicSample, LocalReview, OpenReview, PublicTradeSample };
+inline bool isPublicTickerSample(MarketTickerAction action) {
+    return action==MarketTickerAction::PublicSample || action==MarketTickerAction::PublicTradeSample;
+}
 inline constexpr std::string_view tickerReviewExtension = ".cmt";
 struct MarketTickerOptions {
     MarketTickerAction action = MarketTickerAction::Help;
@@ -23,8 +26,10 @@ inline bool parseMarketTickerCli(int argc, const char *const *argv, int begin, M
         options.action = MarketTickerAction::Help;
     } else if (count == 2 && (flag == "--file" || flag == "--open-review") && argv[begin + 1][0]) {
         options.action = flag == "--file" ? MarketTickerAction::LocalReview : MarketTickerAction::OpenReview;
-    } else if (flag == "--allow-public-tickers" && (count == 1 || count == 3 || count == 5)) {
-        options.action = MarketTickerAction::PublicSample;
+    } else if ((flag == "--allow-public-tickers" || flag == "--allow-public-trades") &&
+               (count == 1 || count == 3 || count == 5)) {
+        options.action = flag == "--allow-public-trades" ? MarketTickerAction::PublicTradeSample :
+                                                           MarketTickerAction::PublicSample;
         for (int i = begin + 1; i < argc; i += 2) {
             const std::string_view option(argv[i]);
             if (!options.dnsFlag && option == "--dns-server" && validPublicDnsServer(argv[i + 1])) {
