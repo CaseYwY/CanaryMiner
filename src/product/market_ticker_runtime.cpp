@@ -19,10 +19,11 @@ MarketReferenceFactory installedPublicTickerFactory(const std::filesystem::path 
     const auto helper = installedPublicTickerHelper(module);
     if (helper.empty()) return {};
     // A caller may bind a path before startup. Only the owned background worker launches the helper.
-    return [helper, enableHour = launch.hourPermitted, dns = std::move(launch.dnsServer)] {
+    return [helper, enableHour = launch.hourPermitted, enableTrades = launch.tradesPermitted, dns = std::move(launch.dnsServer)] {
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.publicHour = enableHour;
+        policy.publicTrades = enableTrades;
         policy.https.dnsServer = dns;
         return makeMarketReferenceRuntime(marketProcessFetch(helper), policy);
     };

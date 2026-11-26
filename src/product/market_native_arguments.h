@@ -55,12 +55,13 @@ inline bool nativePublicTickerInvocation(const MarketTickerOptions &options, int
                                                        options.saveFlag + 1, options.archiveName));
 }
 
-inline bool validDashboardMarketArguments(int argc, const char *const *argv, int tickerIndex, int hourIndex,
+inline bool validDashboardMarketArguments(int argc, const char *const *argv, int latestIndex, bool trades, int hourIndex,
                                           int dnsIndex, std::string_view dnsServer) {
+    const char *permission=trades ? "--allow-public-trades" : "--allow-public-tickers";
     if (hourIndex) {
-        if (!nativeMarketArgumentPair(argc, argv, tickerIndex, "--allow-public-tickers", hourIndex, "--allow-public-candles"))
+        if (!nativeMarketArgumentPair(argc, argv, latestIndex, permission, hourIndex, "--allow-public-candles"))
             return false;
-    } else if (!nativeMarketArguments(argc, argv, {{tickerIndex, "--allow-public-tickers"}})) {
+    } else if (!nativeMarketArguments(argc, argv, {{latestIndex, permission}})) {
         return false;
     }
     return !dnsIndex || (dnsIndex < argc - 1 &&

@@ -1,5 +1,6 @@
 #include "market_owner.h"
 #include "market_hour_payload.h"
+#include "market_public_sample.h"
 #include "public_json_process.h"
 #include "native_process_admission.h"
 #include <algorithm>
@@ -19,7 +20,13 @@ using namespace market_detail;
 constexpr auto pearlHourFeed = static_cast<unsigned>(PublicFeed::MexcPearlHour);
 constexpr auto fxHourFeed = static_cast<unsigned>(PublicFeed::CoinbaseUsdtHour);
 uint64_t later(uint64_t now, uint64_t delay) { return delay > UINT64_MAX - now ? UINT64_MAX : now + delay; }
-unsigned index(PublicFeed feed) { return static_cast<unsigned>(feed); }
+bool tradeFeed(PublicFeed feed) { return feed==PublicFeed::GatePearlTrades || feed==PublicFeed::KrakenUsdtTrades; }
+unsigned index(PublicFeed feed) {
+    if (feed==PublicFeed::GatePearlTrades) return 0;
+    if (feed==PublicFeed::KrakenUsdtTrades) return 2;
+    return static_cast<unsigned>(feed);
+}
+uint64_t utcSeconds(const MarketPollingPolicy &policy,uint64_t utc) { return policy.publicTrades ? utc/1000 : utc; }
 unsigned provider(unsigned feed) { return feed < pearlHourFeed ? feed / 2 : feed - 2; }
 bool fixtureCandles(unsigned feed) { return feed == 1 || feed == 3; }
 bool publicHourFeed(unsigned feed) { return feed == pearlHourFeed || feed == fxHourFeed; }
@@ -44,7 +51,7 @@ std::pair<uint64_t, uint64_t> marketSystemClock() {
 }
 
 bool validMarketPollingPolicy(const MarketPollingPolicy &p) {
-    return p.quoteRefreshMs >= 1000 && p.quoteRefreshMs <= 86400000 && p.candleRefreshMs >= 1000 && p.candleRefreshMs <= 86400000 &&
+    return !(p.publicTrades && p.scheduleEconomicRequests) && p.quoteRefreshMs >= 1000 && p.quoteRefreshMs <= 86400000 && p.candleRefreshMs >= 1000 && p.candleRefreshMs <= 86400000 &&
         p.retryBaseMs >= 1000 && p.retryBaseMs <= p.retryMaxMs && p.retryMaxMs <= 3600000 && p.failedCycleCooldownMs >= p.retryMaxMs &&
         p.failedCycleCooldownMs <= 86400000 && p.maxAttempts >= 1 && p.maxAttempts <= 5 && p.economicsMinutes >= 1 && p.economicsMinutes <= 719 &&
         p.settlementGuardSeconds <= 60 && p.economicIntervalMs >= 1000 && p.economicIntervalMs <= 86400000 &&
@@ -59,8 +66,9 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
     };
 }
 bool MarketPollingPlan::start(uint64_t generation, uint64_t ms, uint64_t utc, const MarketPollingPolicy &policy, bool fixture) {
-    if (active_ || helperFault_ || !generation || generation <= generation_ || !utc || utc > marketUtcLimit ||
-        (fixture && policy.publicHour) || !validMarketPollingPolicy(policy)) return false;
+    if (active_ || helperFault_ || !generation || generation <= generation_ ||
+        !utcSeconds(policy,utc) || utc>(policy.publicTrades ? maxMarketUtcMs : marketUtcLimit) ||
+        (fixture && (policy.publicHour || policy.publicTrades)) || !validMarketPollingPolicy(policy)) return false;
     generation_ = generation; policy_ = policy; fixtureCandles_ = fixture; baseMs_ = lastMs_ = ms; baseUtc_ = lastUtc_ = utc;
     economicDue_ = ms; providerDue_.fill(ms); health_ = {}; current_.reset(); clockFault_ = false; active_ = true;
     pendingHourFeeds_ = 0; pendingHourEnd_ = 0;
@@ -77,26 +85,28 @@ void MarketPollingPlan::helperUnreaped() {
     stop();
     for (auto &h : health_) { h.latched = true; h.nextDueMs = UINT64_MAX; }
 }
-bool MarketPollingPlan::clock(uint64_t ms, uint64_t utc) {
+bool MarketPollingPlan::observeClock(uint64_t ms, uint64_t utc) {
     if (!active_) return false;
-    const uint64_t elapsed = ms >= baseMs_ ? (ms - baseMs_) / 1000 : 0;
+    const uint64_t elapsed = ms >= baseMs_ ? (ms - baseMs_) / (policy_.publicTrades ? 1 : 1000) : 0;
     const uint64_t wall = utc >= baseUtc_ ? utc - baseUtc_ : 0;
     const auto drift = wall > elapsed ? wall - elapsed : elapsed - wall;
-    if (!utc || utc > 253402300799ULL || ms < lastMs_ || ms < baseMs_ || utc < lastUtc_ || drift > 5) {
+    if (!utc || utc>(policy_.publicTrades ? maxMarketUtcMs : marketUtcLimit) || ms<lastMs_ ||
+        ms<baseMs_ || utc<lastUtc_ || drift>(policy_.publicTrades ? 5000u : 5u)) {
         stop(); clockFault_ = true; return false;
     }
     lastMs_ = ms; lastUtc_ = utc; return true;
 }
 std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t utc) {
-    if (!clock(ms, utc) || current_) return std::nullopt;
+    if (!observeClock(ms, utc) || current_) return std::nullopt;
     auto due = [&](unsigned i) {
         const auto &h = health_[i];
         return !h.latched && ms >= h.nextDueMs && ms >= providerDue_[provider(i)];
     };
+    const auto seconds=utcSeconds(policy_,utc);
     unsigned hourFeeds = pendingHourFeeds_;
     auto hourEnd = pendingHourEnd_;
     if (policy_.publicHour && !hourFeeds) {
-        hourEnd = eligibleHourEnd(utc, policy_.settlementGuardSeconds);
+        hourEnd = eligibleHourEnd(seconds, policy_.settlementGuardSeconds);
         if (hourEnd) {
             for (const auto i : {pearlHourFeed, fxHourFeed})
                 if (due(i)) hourFeeds |= hourBit(i);
@@ -112,6 +122,8 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
         auto &h = health_[i];
         if (!due(i) || (fixtureCandles(i) && !fixtureCandles_)) continue;
         PublicJsonRequest request{static_cast<PublicFeed>(i)};
+        if (policy_.publicTrades && (i==0 || i==2))
+            request.feed=i==0 ? PublicFeed::GatePearlTrades : PublicFeed::KrakenUsdtTrades;
         if (publicHourFeed(i)) {
             if (!(hourFeeds & hourBit(i))) continue;
             request.fromUtc = static_cast<int64_t>(hourEnd - marketHourSeconds);
@@ -129,7 +141,7 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
     auto &h = health_[choice];
     if (h.attempts >= policy_.maxAttempts) h.attempts = 0;  // a new, separately cooled-down periodic cycle
     if (serial_ == UINT64_MAX) { stop(); return std::nullopt; }
-    MarketFetchTicket ticket{chosen, generation_, ++serial_, utc, ms};
+    MarketFetchTicket ticket{chosen, generation_, ++serial_, seconds, ms};
     if (publicHourFeed(choice)) {
         pendingHourFeeds_ = hourFeeds & ~hourBit(choice);
         pendingHourEnd_ = hourEnd;
@@ -140,7 +152,7 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
 }
 bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJsonResponse &r, MarketDataStatus data, uint64_t ms, uint64_t utc) {
     if (r.status == PublicHttpsStatus::Unreaped && current_ && sameTicket(*current_, ticket)) { helperUnreaped(); return true; }
-    if (!clock(ms, utc) || !current_ || !sameTicket(*current_, ticket)) return false;
+    if (!observeClock(ms, utc) || !current_ || !sameTicket(*current_, ticket)) return false;
     auto &h = health_[index(ticket.request.feed)];
     current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
     const auto feed = index(ticket.request.feed);
@@ -161,7 +173,7 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
     h.nextDueMs = later(ms, delay); return true;
 }
 bool MarketPollingPlan::takeEconomicRequest(uint64_t ms, uint64_t utc) {
-    if (!clock(ms, utc) || !policy_.scheduleEconomicRequests || ms < economicDue_) return false;
+    if (!observeClock(ms, utc) || !policy_.scheduleEconomicRequests || ms < economicDue_) return false;
     economicDue_ = later(ms, policy_.economicIntervalMs); return true;  // coalesce missed intervals; no catch-up loop
 }
 
@@ -209,6 +221,9 @@ struct MarketDataOwner::Impl {
                     const auto feed = index(ticket->request.feed);
                     auto limits = policy.https;
                     if (publicHourFeed(feed)) limits.bodyBytes = (std::min)(limits.bodyBytes, marketHourBodyBytes);
+                    const bool trades=tradeFeed(ticket->request.feed);
+                    if (trades) limits.bodyBytes=(std::min)(limits.bodyBytes,maxPublicTradeBodyBytes);
+                    const auto sentUtc=now.second;
                     PublicJsonResponse response;
                     try { response = fetch(ticket->request, cancel, limits); } catch (...) { response.status = PublicHttpsStatus::Unavailable; }
                     if (response.status == PublicHttpsStatus::Unreaped) {
@@ -220,11 +235,15 @@ struct MarketDataOwner::Impl {
                     {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                     now = clock();
                     if (cancel.load()) break;
+                    if (policy.publicTrades && !plan.observeClock(now.first,now.second)) break;
                     const MarketParseContext context{ticket->request, ticket->startedUtc, now.first, ticket->generation, origin,
-                        fixture ? MarketMinuteConvention::FixtureMinuteStart : MarketMinuteConvention::Unqualified, now.second};
+                        fixture ? MarketMinuteConvention::FixtureMinuteStart : MarketMinuteConvention::Unqualified,
+                        utcSeconds(policy,now.second)};
                     MarketDataResult<MarketQuote> quote;
                     MarketDataResult<MarketCandles> minutes;
                     std::shared_ptr<PublicHourObservation> hour;
+                    MarketDataResult<MarketTradeObservation> trade;
+                    bool conflictingTrade=false;
                     MarketDataStatus status;
                     if (publicHourFeed(feed)) {
                         hour = std::make_shared<PublicHourObservation>();
@@ -233,11 +252,25 @@ struct MarketDataOwner::Impl {
                         hour->observedUtc = response.observedUtc;
                         hour->receivedMonoMs = now.first;
                         status = decodePublicHourPayload(response, feed == pearlHourFeed ? HourFeed::MexcPearl : HourFeed::CoinbaseFx,
-                            hour->start, hour->end, ticket->startedUtc, now.second, hour->minutes);
+                            hour->start, hour->end, ticket->startedUtc, context.receivedUtc, hour->minutes);
                         if (status != MarketDataStatus::Ok) hour.reset();
                     } else if (fixtureCandles(feed)) {
                         minutes = parseMarketCandles(response, context);
                         status = minutes.status;
+                    } else if (trades) {
+                        std::optional<MarketTradeTime> conflictingEvent;
+                        trade=parsePublicTrade(response,ticket->request.feed,sentUtc,now.second,now.first,&conflictingEvent);
+                        const auto &previous=feed==0 ? current.pearlTrade : current.fxTrade;
+                        conflictingTrade=previous && conflictingEvent && *conflictingEvent>=previous->time;
+                        if (trade.value && previous) {
+                            conflictingTrade=trade.value->time==previous->time &&
+                                trade.value->price.compare(previous->price)!=0;
+                            if (conflictingTrade || trade.value->time<previous->time) {
+                                trade.value.reset();
+                                trade.status=conflictingTrade ? MarketDataStatus::Coverage : MarketDataStatus::Timestamp;
+                            }
+                        }
+                        status=trade.status;
                     } else {
                         quote = parseMarketQuote(response, context);
                         status = quote.status;
@@ -257,6 +290,8 @@ struct MarketDataOwner::Impl {
                                 else current.fxCandles = std::move(minutes.value);
                             }
                             if (hour) (feed == pearlHourFeed ? current.pearlHour : current.fxHour) = std::move(hour);
+                            if (trade.value || conflictingTrade)
+                                (feed==0 ? current.pearlTrade : current.fxTrade)=std::move(trade.value);
                         }
                         publish();
                     }
@@ -269,15 +304,16 @@ struct MarketDataOwner::Impl {
         try { publish(); } catch (...) {}
     }
 };
-MarketDataOwner::MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy, MarketOrigin origin, bool fixture, MarketClock clock) : impl_(new Impl()) {
+MarketDataOwner::MarketDataOwner(MarketFetch fetch, MarketPollingPolicy policy, MarketOrigin origin, bool fixture,
+                                 MarketClock clock) : impl_(new Impl()) {
     impl_->fetch = std::move(fetch); impl_->policy = policy; impl_->origin = origin; impl_->fixture = fixture;
-    impl_->clock = clock ? std::move(clock) : MarketClock(marketSystemClock);
+    impl_->clock=clock ? std::move(clock) : MarketClock(policy.publicTrades ? marketTradeClock : marketSystemClock);
 }
 MarketDataOwner::~MarketDataOwner() { stop(); }
 bool MarketDataOwner::start(uint64_t generation) {
     std::lock_guard<std::mutex> life(impl_->lifecycle);
     if (impl_->thread.joinable() || !impl_->fetch || (impl_->fixture && impl_->origin != MarketOrigin::SyntheticFixture) ||
-        (impl_->policy.publicHour && impl_->origin != MarketOrigin::ProviderResponse) ||
+        ((impl_->policy.publicHour || impl_->policy.publicTrades) && impl_->origin != MarketOrigin::ProviderResponse) ||
         (impl_->origin != MarketOrigin::SyntheticFixture && impl_->origin != MarketOrigin::ProviderResponse)) return false;
     try {
         {std::lock_guard<std::mutex> commit(impl_->commitMutex);if(!impl_->nativeLife.begin()){impl_->nativeCurrent();return false;}}
@@ -334,6 +370,34 @@ std::vector<std::string> marketTickerLines(const MarketSnapshot &s, const Market
 }
 
 namespace {
+std::vector<std::string> dashboardTradeLines(const MarketSnapshot &s,uint64_t utc,uint64_t ms) {
+    // Dashboard receives whole UTC seconds. The upper end avoids overstating freshness by a partial second.
+    const auto cutoff=utc && utc<=marketUtcLimit ? utc*1000+999 : 0;
+    const bool current=s.running && !s.clockFault && !s.helperFault;
+    const auto *pearl=current && s.pearlTrade ? &*s.pearlTrade : nullptr;
+    const auto *fx=current && s.fxTrade ? &*s.fxTrade : nullptr;
+    const auto reference=publicTradeReference(pearl,fx,cutoff,ms,TradeEventAge::WallAndMonotonic);
+    std::vector<std::string> lines;
+    const auto add=[&](const char *label,const MarketTradeObservation *trade,const MarketFeedHealth &health,bool fresh) {
+        const std::string source(label);
+        lines.push_back(source+": "+(fresh ? trade->price.text() : "N/A"));
+        if (trade) {
+            const auto ages=marketTradeAges(*trade,cutoff,ms,TradeEventAge::WallAndMonotonic);
+            lines.push_back("  Event UTC "+marketTradeUtc(trade->time)+
+                (ages ? " | age "+std::to_string(ages->eventMs)+" ms" : " | age unavailable"));
+            lines.push_back("  Receipt UTC ms "+std::to_string(trade->receivedUtcMs)+
+                (ages ? " | age "+std::to_string(ages->receiptMs)+" ms" : " | age unavailable"));
+        }
+        lines.push_back("  Source: "+std::string(marketTradeStatusName(health.data,health.transport))+
+                        (trade && !fresh ? " | stale/invalid observation" : ""));
+    };
+    add("Gate PRL/USDT trade",pearl,s.health[0],reference.pearlFresh);
+    add("Kraken USDT/USD trade",fx,s.health[2],reference.fxFresh);
+    lines.push_back("PRL/USD trade reference: "+(reference.usd ? reference.usd->text() :
+                    "N/A ("+std::string(reference.unavailable)+")"));
+    return lines;
+}
+
 std::string displayedMean(const std::optional<MarketExactMean> &value) {
     std::string text;
     if (!value || !value->sum.formatRatio(value->count, 6, &text)) return "N/A";
@@ -385,7 +449,7 @@ void appendPublicHour(std::vector<std::string> &lines, const MarketSnapshot &s, 
 }  // namespace
 
 std::vector<std::string> marketSnapshotLines(const MarketSnapshot &s, const MarketPollingPolicy &policy, uint64_t utc, uint64_t ms) {
-    auto lines = marketTickerLines(s, policy.freshness, utc, ms);
+    auto lines=policy.publicTrades ? dashboardTradeLines(s,utc,ms) : marketTickerLines(s,policy.freshness,utc,ms);
     lines.insert(lines.begin(), std::string("Market references: ") + (s.helperFault ? "helper ownership fault" : s.clockFault ? "clock fault" : s.running ? "active" : "stopped") +
         (s.origin == MarketOrigin::SyntheticFixture ? " | SYNTHETIC FIXTURE - NOT LIVE" : " | public provider observations"));
     if (policy.publicHour) {

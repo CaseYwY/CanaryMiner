@@ -377,7 +377,7 @@ int main(int argc, char **argv) {
     std::string batchText, intervalText, benchHeightText;
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
-    int publicTickerPermissionArg = 0, publicHourPermissionArg = 0, publicDnsArg = 0;
+    int publicTickerPermissionArg = 0, publicTradePermissionArg = 0, publicHourPermissionArg = 0, publicDnsArg = 0;
     std::string publicDnsServer;
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
@@ -414,6 +414,17 @@ int main(int argc, char **argv) {
         }
         else if (a.rfind("--allow-public-tickers=", 0) == 0) {
             fprintf(stderr, "--allow-public-tickers takes no value\n");
+            return kExitUsage;
+        }
+        else if (a == "--allow-public-trades") {
+            if (cli.command != Command::Run || publicTradePermissionArg) {
+                fprintf(stderr, "--allow-public-trades is accepted once, for run only\n");
+                return kExitUsage;
+            }
+            publicTradePermissionArg = cli.restArgIndices[i];
+        }
+        else if (a.rfind("--allow-public-trades=", 0) == 0) {
+            fprintf(stderr, "--allow-public-trades takes no value\n");
             return kExitUsage;
         }
         else if (a == "--allow-public-candles") {
@@ -635,7 +646,8 @@ int main(int argc, char **argv) {
                 "  --no-dashboard    plain timestamped lines instead of the live dashboard\n"
                 "  --no-history      disable local accepted history this run; existing data stays\n"
                 "  --no-market       suppress manual and public references for this run\n"
-                "  --allow-public-tickers  allow saved public tickers in an opt-in dashboard build\n"
+                "  --allow-public-tickers  allow public tickers for a saved Dashboard market request\n"
+                "  --allow-public-trades   allow trade-time references for a saved Dashboard market request\n"
                 "  --allow-public-candles  also allow public hourly candles for this dashboard run\n"
                 "  --market-dns-server IP  use this resolver for the authorized Dashboard feeds on this run\n"
                 "  --no-energy       disable optional session board-energy recording this run\n"
@@ -699,16 +711,21 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (publicHourPermissionArg && !publicTickerPermissionArg) {
-        fprintf(stderr, "Dashboard candles require --allow-public-tickers as well\n");
+    if (publicTradePermissionArg && (publicTickerPermissionArg || workerChild)) {
+        fprintf(stderr, "--allow-public-trades requires the Dashboard parent and cannot be combined with --allow-public-tickers\n");
         return kExitUsage;
     }
-    if (publicDnsArg && (!publicTickerPermissionArg || workerChild)) {
-        fprintf(stderr, "--market-dns-server requires --allow-public-tickers at the Dashboard parent\n");
+    const int publicLatestArg=publicTradePermissionArg ? publicTradePermissionArg : publicTickerPermissionArg;
+    if (publicHourPermissionArg && !publicLatestArg) {
+        fprintf(stderr, "Dashboard candles require --allow-public-tickers as well, or --allow-public-trades\n");
         return kExitUsage;
     }
-    if (publicTickerPermissionArg && !market_detail::validDashboardMarketArguments(argc, argv, publicTickerPermissionArg,
-            publicHourPermissionArg, publicDnsArg, publicDnsServer)) {
+    if (publicDnsArg && (!publicLatestArg || workerChild)) {
+        fprintf(stderr, "--market-dns-server requires --allow-public-tickers at the Dashboard parent, or --allow-public-trades\n");
+        return kExitUsage;
+    }
+    if (publicLatestArg && !market_detail::validDashboardMarketArguments(argc, argv, publicLatestArg,
+            publicTradePermissionArg!=0, publicHourPermissionArg, publicDnsArg, publicDnsServer)) {
         fprintf(stderr, "Dashboard market access requires the exact public-feed arguments\n");
         return kExitUsage;
     }
@@ -1279,7 +1296,7 @@ int main(int argc, char **argv) {
             return kExitRuntime;
         }
         so.userArgs = supervisorUserArguments(argc, argv, cli,
-            {publicTickerPermissionArg, publicHourPermissionArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0});
+            {publicLatestArg, publicHourPermissionArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0});
         for (const DeviceIdentity &d : chosenAll) {
             WorkerSeed seed;
             seed.index = d.index;
@@ -1328,8 +1345,8 @@ int main(int argc, char **argv) {
         so.noMarket = cli.ov.noMarket;
         if constexpr (kPublicTickerRuntimeBuilt) {
             const PublicTickerLaunch launch{kPublicTickerRuntimeBuilt, so.runtimeContext.effective.publicTickersRequested,
-                publicTickerPermissionArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket,
-                publicHourPermissionArg != 0, std::move(publicDnsServer)};
+                publicLatestArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket,
+                publicHourPermissionArg != 0, std::move(publicDnsServer), publicTradePermissionArg != 0};
             so.marketReferenceFactory = installedPublicTickerFactory(std::filesystem::u8path(so.exe), launch);
         }
         so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();

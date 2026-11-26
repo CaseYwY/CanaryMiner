@@ -72,16 +72,39 @@ The path uses only the Gate `api.gateio.ws` ticker for `PEARL_USDT` and the Krak
 for refresh, timeout and retry. The ticker path excludes minute candles and economic scheduling. The default
 CMake build and current release policy keep the HTTPS capability off.
 
+### Show trade event times in the Dashboard
+
+Save **Public ticker request**, then use `--allow-public-trades` on an ordinary
+Dashboard launch of an HTTPS-enabled build. Choose one latest-price source flag
+per launch. The trade mode selects the newest timestamp in each returned Gate
+and Kraken batch. It shows separate event and receipt times. PRL/USD requires
+fresh observations on both sides and no more than 30 seconds between their
+events or between their receipts. The view estimates ages from the end of the
+current local UTC second and uses elapsed monotonic time to prevent a wall clock
+rollback from making an expired trade current again. The worker records receipt
+times in milliseconds.
+
+The existing background owner applies its refresh, timeout and retry policy.
+During a session, earlier trade times cannot move a source's cached event
+backward or renew its receipt. Conflicting prices for a cached or newer event
+withhold that source. A receipt clock fault stops the owner and withholds the
+current values. Cached prices expire as either their event or receipt age
+exceeds two minutes. `--no-market`, active manual source conflict,
+missing launch permission and stop follow the same admission rules as tickers.
+
+The launch can also include `--allow-public-candles` for the same separate
+one-hour view. This trade reference is for display. Economic mode defaults off.
+
 ### Choose a resolver for one Dashboard launch
 
-Add `--market-dns-server IP` alongside `--allow-public-tickers` on an ordinary parent launch. Use the IPv4 or unscoped IPv6 address of your approved DNS server on port 53. The selected resolver is fixed for that Dashboard session, including refreshes and retries. If the launch separately allows public candles, those requests use the same resolver.
+Add `--market-dns-server IP` alongside `--allow-public-tickers` or `--allow-public-trades` on an ordinary parent launch. Use the IPv4 or unscoped IPv6 address of your approved DNS server on port 53. The selected resolver is fixed for that Dashboard session, including refreshes and retries. If the launch separately allows public candles, those requests use the same resolver.
 
 The saved ticker request and all the usual Dashboard admission checks still apply. The option lives in the parent process and goes only to the public data helper. It is consumed before mining workers are launched. It is absent from Settings, provider reports and public stats. The resolver address remains visible to users who can inspect the parent's command line. The helper continues to require a public destination and normal HTTPS certificate and hostname verification.
 
 ### Show a public hour in the Dashboard
 
-In an opt-in build, save the public ticker request and launch the ordinary Dashboard with both
-`--allow-public-tickers` and `--allow-public-candles`. The second permission is per launch and covers
+In an opt-in build, save the public ticker request and launch the ordinary Dashboard with `--allow-public-candles` and one latest-price source flag
+(`--allow-public-tickers` or `--allow-public-trades`). The candle permission is per launch and covers
 MEXC `PEARLUSDT` and Coinbase `USDT-USD` minute candles. A ticker-only launch keeps its existing request set.
 Plain output, automatic tuning, `--no-market`, and a conflicting manual request suppress the public Dashboard path.
 

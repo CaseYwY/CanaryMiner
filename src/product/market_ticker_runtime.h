@@ -11,6 +11,7 @@ struct PublicTickerLaunch {
     bool available = false, requested = false, permitted = false, dashboard = false, suppressed = false;
     bool hourPermitted = false;
     std::string dnsServer{};
+    bool tradesPermitted = false;
 };
 std::filesystem::path installedPublicTickerHelper(const std::filesystem::path &module);
 MarketReferenceFactory installedPublicTickerFactory(const std::filesystem::path &module, PublicTickerLaunch launch);

@@ -10,6 +10,8 @@ import sys
 import tempfile
 import time
 
+from test_market_trade_review_cli import gate_body, gate_row, kraken_body
+
 
 def main():
     if os.name != 'posix':
@@ -22,7 +24,7 @@ def main():
     preference_fixture = Path(sys.argv[3]).resolve()
     checks = 0
 
-    def session(root, work, disabled=False, hour=False, resolver=None):
+    def session(root, work, disabled=False, hour=False, resolver=None, trades=False):
         nonlocal checks
         executable = fixture
         if hour:
@@ -31,7 +33,11 @@ def main():
             executable = Path(shutil.copy2(fixture, installed / fixture.name))
             shutil.copy2(helper_fixture, installed / 'canary_public_json_worker')
             shutil.copy2(preference_fixture, installed / 'canary_preferences_worker')
-        options = ['--hour-fixture'] if hour else ['--no-market'] if disabled else []
+        if trades:
+            now = int(time.time())
+            (installed / 'trade-response-7.json').write_bytes(gate_body(gate_row(now - 3)))
+            (installed / 'trade-response-8.json').write_bytes(kraken_body(('0.98', f'{now - 4}.25', 4)))
+        options = ['--trade-hour-fixture'] if trades else ['--hour-fixture'] if hour else ['--no-market'] if disabled else []
         if resolver:
             assert hour
             options.append(resolver)
@@ -142,6 +148,25 @@ def main():
             payloads = (state / 'installed' / 'candle-requests').read_text().splitlines()
             assert len(payloads) == 2 and payloads[0].startswith('4 ') and payloads[1] == '5 ' + payloads[0][2:]
             assert (state / 'installed' / 'ticker-requests').read_text().splitlines() == ['0', '2']
+            assert (state / 'installed' / 'resolver-requests').read_text().splitlines() == [resolver] * 4
+            assert counts['factories'] == counts['starts'] == counts['joins'] == 1 and counts['views'] > 0
+            checks += 4
+
+            def live_trades(send, until):
+                nonlocal checks
+                text = until(b'PRL/USD trade reference: 2.45')
+                assert b'Gate PRL/USDT trade: 2.5' in text and b'Kraken USDT/USD trade: 0.98' in text
+                assert b'Event UTC ' in text and b'Receipt UTC ms ' in text
+                text = until(b'1h mean of minute closes: 3.000000 USDT/PRL | 3.500000 USD/PRL')
+                assert b'Latest PRL/USD reference' not in text and b'Estimated net' not in text
+                assert resolver.encode('ascii') not in text
+                checks += 4
+                send(b'q')
+
+            state = root / 'trades'
+            counts = session(state, live_trades, hour=True, resolver=resolver, trades=True)
+            assert (state / 'installed' / 'trade-requests').read_text().splitlines() == ['7', '8']
+            assert not (state / 'installed' / 'ticker-requests').exists()
             assert (state / 'installed' / 'resolver-requests').read_text().splitlines() == [resolver] * 4
             assert counts['factories'] == counts['starts'] == counts['joins'] == 1 and counts['views'] > 0
             checks += 4

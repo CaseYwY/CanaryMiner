@@ -23,7 +23,7 @@ inline LocalizedMessage marketTickerSettingsMessage(std::string_view locale, Mar
         "Ticker: {before} -> {after}", "Latest refs only", "Manual+public clash", "Polling unavailable",
         "Session req: {request}", "CLI: --no-market", "Next explicit run", "Gate PRL/USDT", "Kraken USDT/USD",
         "Space V Esc Q", "Arrows Enter Esc Q",
-        "Opt-in build. Launch with --allow-public-tickers.", "Launch opt-in"
+        "Launch with --allow-public-tickers or --allow-public-trades.", "Launch opt-in"
     }};
     const auto index=static_cast<size_t>(key);
     if(index>=messages.size())return {};
