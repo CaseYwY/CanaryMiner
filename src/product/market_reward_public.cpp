@@ -16,12 +16,8 @@ int sampleError(const char *message, int code = 3) {
 }  // namespace
 
 int commandPublicMarketReward(const MarketRewardOptions &options, const std::filesystem::path &module,
-                              int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
+                              const volatile sig_atomic_t *stop) {
     using namespace market_detail;
-    if (argc != (options.dnsServer.empty() ? 3 : 5) ||
-        !nativeMarketArgumentPair(argc, argv, 1, "market-reward", 2, "--allow-public-reward") ||
-        (!options.dnsServer.empty() && !nativeMarketArgumentPair(argc, argv, 3, "--dns-server", 4, options.dnsServer)))
-        return sampleError("exact --allow-public-reward required", 2);
     if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
     NativeProcessLifetime lifetime;
     if (!lifetime.begin()) return sampleError("helper ownership uncertain");
@@ -46,6 +42,9 @@ int commandPublicMarketReward(const MarketRewardOptions &options, const std::fil
         const auto result = parsePearlBlockbookTip(response.body, response.observedUtc, PearlRewardCutoff::WholeObservationSecond);
         if (!lifetime.permitted()) return sampleError("helper ownership uncertain");
         if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
+        if (options.saveFlag)
+            return savePublicMarketRewardReview(options.archiveName, response, initial.second, received.second,
+                                                result, lifetime, stop);
         return reportPearlSubsidy(result, response.observedUtc, true);
     } catch (...) {
         if (!lifetime.permitted()) return sampleError("helper ownership uncertain");

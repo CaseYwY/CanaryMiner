@@ -231,6 +231,12 @@ int main(int argc, char **argv) {
         return kExitConfig;
     }
     if (cli.command == Command::MarketReward) {
+        const bool localReview = cli.marketReward.action == MarketRewardAction::LocalReview ||
+                                 cli.marketReward.action == MarketRewardAction::OpenReview;
+        if (!localReview && !nativeMarketRewardInvocation(cli.marketReward, argc, argv)) {
+            std::fputs("market-reward: invalid options. See market-reward --help\n", stderr);
+            return kExitUsage;
+        }
         if (cli.help) {
             std::puts(marketRewardHelp);
             return kExitOk;
@@ -240,10 +246,13 @@ int main(int argc, char **argv) {
 #if defined(SIGBREAK)
         signal(SIGBREAK, onSignal);
 #endif
-        if (cli.marketReward.action == MarketRewardAction::LocalReview)
+#if defined(SIGPIPE)
+        signal(SIGPIPE, SIG_IGN); // Let the command report stdout failure, including after publication.
+#endif
+        if (localReview)
             return commandMarketRewardFile(cli.marketReward, argc, argv, &g_stop);
         if constexpr (kPublicTickerRuntimeBuilt) {
-            return commandPublicMarketReward(cli.marketReward, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
+            return commandPublicMarketReward(cli.marketReward, std::filesystem::u8path(selfExecutablePath()), &g_stop);
         }
         std::fputs("market-reward: public HTTPS unavailable in this build\n", stderr);
         return kExitConfig;

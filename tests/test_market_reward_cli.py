@@ -1,5 +1,8 @@
 """Production reward command with saved status and a socket-free installed helper."""
+from concurrent.futures import ThreadPoolExecutor
+import ctypes
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -14,6 +17,7 @@ import time
 ALLOW = "--allow-public-reward"
 TIP_HASH = "ab" * 32
 MAX_TIP = (1 << 31) - 2
+ARCHIVE_HEADER = b"CMR1 PearlMainnetTip\n"
 
 
 def run(cli, cwd, *args):
@@ -46,6 +50,67 @@ def assert_reward(result, height):
     assert f"Next block height: {height + 1}\n" in result.stdout, result
     assert f"Next block subsidy: {expected_subsidy(height)}" in result.stdout, result
     assert "scheduled consensus subsidy, excluding fees" in result.stdout, result
+
+
+def with_checksum(payload):
+    return payload + sha256(payload).hexdigest().encode("ascii") + b"\n"
+
+
+def run_with_closed_stdout(cli, cwd, *args):
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        result = subprocess.run([cli, "market-reward", *args], cwd=cwd, stdout=write_end,
+                                stderr=subprocess.PIPE, timeout=10)
+        assert result.returncode == 1 and not result.stderr, result
+    finally:
+        os.close(write_end)
+
+
+def offline_archive(cli, root, cutoff):
+    file = root / "\u00adcapture 主网.cmr"
+    body = json.dumps(status(42, cutoff), indent=2).encode("ascii") + b"\n"
+    report = (
+        "Pearl mainnet subsidy [historical Blockbook capture]\n"
+        f"Indexed height: 42\nBackend tip hash: {TIP_HASH}\nIndexer update UTC: {cutoff}\n"
+        f"Observation UTC: {cutoff}\nNext block height: 43\n"
+        f"Next block subsidy: {expected_subsidy(42)} (scheduled consensus subsidy, excluding fees)\n"
+        f"Request start UTC: {cutoff - 1}\nCapture completed UTC: {cutoff + 1}\n"
+    ).encode("ascii")
+
+    def encode(sent, observed, received, raw, shown):
+        return with_checksum(ARCHIVE_HEADER + f"{sent}\n{observed}\n{received}\n{len(raw)}\n".encode("ascii") +
+                             raw + f"{len(shown)}\n".encode("ascii") + shown)
+
+    original = encode(cutoff - 1, cutoff, cutoff + 1, body, report)
+    file.write_bytes(original)
+    result = run(cli, root, "--open-review", file.name)
+    assert_reward(result, 42)
+    assert result.stdout.encode("ascii") == report and file.read_bytes() == original, result
+    if os.name != "nt":
+        run_with_closed_stdout(cli, root, "--open-review", file.name)
+        assert file.read_bytes() == original
+    reject = (
+        (original[:-1], "archive unavailable or invalid"),
+        (original + b"extra", "archive unavailable or invalid"),
+        (original.replace(b"PearlMainnetTip", b"ForeignFeed"), "archive unavailable or invalid"),
+        (with_checksum(original[:-65].replace(b"CMR1 ", b"CMR2 ", 1)), "archive unavailable or invalid"),
+        (with_checksum(original[:-65].replace(b"\n" + str(cutoff - 1).encode(), b"\n0" + str(cutoff - 1).encode(), 1)),
+         "archive unavailable or invalid"),
+        (encode(cutoff + 1, cutoff, cutoff + 1, body, report), "observation times"),
+        (encode(cutoff - 1, cutoff, cutoff - 1, body, report), "observation times"),
+        (encode(cutoff - 1, cutoff, cutoff + 3600, body, report), "observation times"),
+        (encode(cutoff - 1, cutoff, cutoff + 1, body.replace(b'"mainnet"', b'"testnet"'), report), "invalid or stale"),
+        (encode(cutoff - 1, cutoff, cutoff + 1, body, report.replace(b"height: 43", b"height: 44")),
+         "differs from the recalculated report"),
+        (encode(cutoff - 1, cutoff, cutoff + 1, body, b"X" * 1025), "archive unavailable or invalid"),
+    )
+    for data, error in reject:
+        file.write_bytes(data)
+        result = run(cli, root, "--open-review", file.name)
+        assert result.returncode == 3 and not result.stdout and error in result.stderr, result
+        assert file.read_bytes() == data
+    file.unlink()
 
 
 def offline(cli, root):
@@ -116,6 +181,7 @@ def offline(cli, root):
         result = run(cli, root, *args)
         assert result.returncode == 2 and not result.stdout, result
     assert {x.name for x in root.iterdir()} == {file.name}
+    offline_archive(cli, root, cutoff)
     print("Pearl subsidy review checks exact consensus floor, historical cutoff, identity, sync and input limits")
 
 
@@ -131,11 +197,20 @@ def public(cli_path, fixture, enabled, root):
     scenario = installed / "reward-scenario"
     config = root / "config.json"
     config.write_text("private-sentinel", encoding="ascii")
+    archive = root / "review.cmr"
+    temporary_archive = archive.with_suffix(".cmr.tmp")
     resolver = "192.168.50.53"
     for args in ((), ("--dns-server", resolver), (ALLOW, ALLOW), (ALLOW, "--dns-server"),
                  (ALLOW, "--dns-server", "host.example"),
                  (ALLOW, "--dns-server", f"{resolver}:53"),
-                 ("--allow-public-rewar\uff44",), (ALLOW, "--dn\uff53-server", resolver)):
+                 ("--allow-public-rewar\uff44",), (ALLOW, "--dn\uff53-server", resolver),
+                 ("--save-review", archive.name), (ALLOW, "--save-review", "../escape.cmr"),
+                 (ALLOW, "--save-review", "review.cmh"), (ALLOW, "--save-review", "NUL.cmr"),
+                 (ALLOW, "--save-review", archive.name, "--save-review", archive.name),
+                 (ALLOW, "--save-revie\uff57", archive.name), (ALLOW, "--save-review", "revie\uff57.cmr"),
+                 (ALLOW, "--sav\u00f0-review", archive.name), (ALLOW, "\u00ad-save-review", archive.name),
+                 ("--open-review", archive.name, ALLOW), ("--open-review",), ("--open-review", "--help"),
+                 ("--h\u00f0lp",)):
         result = run(cli, root, *args)
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
     for flag in ("-h", "--help"):
@@ -149,9 +224,10 @@ def public(cli_path, fixture, enabled, root):
     body.write_text(json.dumps(status(148_569, int(time.time()) - 1)), encoding="utf-8")
     default = run(cli, root, ALLOW)
     if not enabled:
-        for attempt in (default, run(cli, root, ALLOW, "--dns-server", resolver)):
+        for attempt in (default, run(cli, root, ALLOW, "--dns-server", resolver),
+                        run(cli, root, ALLOW, "--save-review", archive.name)):
             assert attempt.returncode == 3 and "HTTPS unavailable in this build" in attempt.stderr, attempt
-        assert not requests.exists() and not resolver_requests.exists()
+        assert not requests.exists() and not resolver_requests.exists() and not archive.exists()
         print("Default-off reward command started no helper")
         return 0
     if sys.platform == "linux" and not requests.exists() and "backend unavailable" in default.stderr:
@@ -168,16 +244,70 @@ def public(cli_path, fixture, enabled, root):
     assert requests.read_text().splitlines() == ["6"] and resolver_requests.read_text().splitlines() == [resolver]
     requests.unlink()
     resolver_requests.unlink()
+    original_response = json.dumps(status(148_569, int(time.time()) - 1), indent=2).encode("ascii") + b"\n"
+    body.write_bytes(original_response)
+    saved = run(cli, root, ALLOW, "--save-review", archive.name, "--dns-server", resolver)
+    assert_reward(saved, 148_569)
+    assert "historical Blockbook capture" in saved.stdout and resolver not in saved.stdout, saved
+    assert requests.read_text().splitlines() == ["6"] and resolver_requests.read_text().splitlines() == [resolver]
+    requests.unlink()
+    resolver_requests.unlink()
+    original_archive = archive.read_bytes()
+    assert original_archive.startswith(ARCHIVE_HEADER) and original_response in original_archive
+    assert with_checksum(original_archive[:-65]) == original_archive
+    reopened = run(cli, root, "--open-review", archive.name)
+    assert reopened.returncode == 0 and reopened.stdout == saved.stdout and not reopened.stderr, reopened
+    assert not requests.exists() and not resolver_requests.exists() and archive.read_bytes() == original_archive
+    existing = run(cli, root, ALLOW, "--save-review", archive.name)
+    assert existing.returncode == 3 and not existing.stdout and "existing archive was preserved" in existing.stderr, existing
+    assert archive.read_bytes() == original_archive and not temporary_archive.exists()
+    assert requests.read_text().splitlines() == ["6"]
+    requests.unlink()
+    archive.unlink()
+    temporary_archive.write_bytes(b"existing temporary")
+    collision = run(cli, root, ALLOW, "--dns-server", resolver, "--save-review", archive.name)
+    assert collision.returncode == 3 and not collision.stdout and not archive.exists(), collision
+    assert temporary_archive.read_bytes() == b"existing temporary"
+    temporary_archive.unlink()
+    requests.unlink()
+    resolver_requests.unlink()
+    with tempfile.TemporaryDirectory(dir=root) as other_dir:
+        other = Path(other_dir)
+        rival = Path(shutil.copy2(cli_path, other / cli_path.name))
+        shutil.copy2(fixture, other / name)
+        (other / body.name).write_bytes(original_response)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            submissions = [pool.submit(run, contender, root, ALLOW, "--save-review", archive.name)
+                           for contender in (cli, rival)]
+            simultaneous = [submission.result() for submission in submissions]
+        assert (other / requests.name).read_text().splitlines() == ["6"]
+    assert sorted(result.returncode for result in simultaneous) == [0, 3], simultaneous
+    winner = next(result for result in simultaneous if result.returncode == 0)
+    loser = next(result for result in simultaneous if result.returncode == 3)
+    assert not loser.stdout and "existing archive was preserved" in loser.stderr, loser
+    assert run(cli, root, "--open-review", archive.name).stdout == winner.stdout
+    assert archive.is_file() and not temporary_archive.exists() and requests.read_text().splitlines() == ["6"]
+    archive.unlink()
+    requests.unlink()
+    if os.name != "nt":
+        run_with_closed_stdout(cli, root, ALLOW, "--save-review", archive.name)
+        assert requests.read_text().splitlines() == ["6"] and not temporary_archive.exists()
+        assert_reward(run(cli, root, "--open-review", archive.name), 148_569)
+        archive.unlink()
+        requests.unlink()
     for mode, expected in (("future", "invalid response observation time"), ("timeout", "deadline exceeded")):
         scenario.write_text(mode, encoding="ascii")
-        result = run(cli, root, ALLOW)
+        result = run(cli, root, ALLOW, "--save-review", archive.name)
         assert result.returncode == 3 and expected in result.stderr and not result.stdout, result
+        assert not archive.exists() and not temporary_archive.exists()
         assert requests.read_text().splitlines() == ["6"] and not resolver_requests.exists()
         requests.unlink()
-    if os.name != "nt":
+    can_signal = os.name != "nt" or ctypes.windll.kernel32.GetConsoleCP() != 0
+    if can_signal:
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         scenario.write_text("slow", encoding="ascii")
-        with subprocess.Popen([cli, "market-reward", ALLOW], cwd=root, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, text=True) as child:
+        with subprocess.Popen([cli, "market-reward", ALLOW, "--save-review", archive.name], cwd=root, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, creationflags=flags, text=True) as child:
             try:
                 deadline = time.monotonic() + 4
                 while child.poll() is None and time.monotonic() < deadline:
@@ -186,9 +316,10 @@ def public(cli_path, fixture, enabled, root):
                     time.sleep(0.02)
                 else:
                     raise AssertionError("reward helper did not start")
-                child.send_signal(signal.SIGINT)
+                child.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
                 out, error = child.communicate(timeout=4)
                 assert child.returncode == 130 and not out and "sample cancelled" in error
+                assert not archive.exists() and not temporary_archive.exists()
             finally:
                 if child.poll() is None:
                     child.kill()
@@ -196,7 +327,7 @@ def public(cli_path, fixture, enabled, root):
         requests.unlink()
     assert config.read_text() == "private-sentinel"
     assert {x.name for x in root.iterdir()} == {config.name, installed.name}
-    print("Public reward checks consent, one fixed request, DNS forwarding, clock bound and cancellation")
+    print("Public reward checks consent, original bytes, exclusive capture, replay, clock bound and cancellation")
     return 0
 
 

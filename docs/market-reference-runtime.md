@@ -235,6 +235,19 @@ Exit code 0 means a valid subsidy reference. Exit code 1 means a report write fa
 source or review, and 130 means a cancelled sample or review. A public sample with unconfirmed helper
 cleanup returns 3. A rejected response never supplies a subsidy or changes financial settings.
 
+### Archive and replay the subsidy query
+
+Run these commands from a trusted private local directory. The save name must be a new ASCII basename ending in `.cmr`.
+
+```text
+canary-miner market-reward --allow-public-reward --save-review capture.cmr
+canary-miner market-reward --open-review capture.cmr
+```
+
+A save records the original response bytes, the request start, observation and completion seconds, and the exact report in a version 1 archive. The SHA-256 checksum covers the entire record and detects local corruption. The response's origin depends on the original HTTPS request. Treat the archive as a local record. The optional resolver flag applies to the live request only. Capture publishes a new file after the response passes the same checks as the live report. It preserves an existing archive or temporary sibling. If stdout fails after publication, the command returns 1 and the archive remains available for replay. After an uncertain publication, inspect both files before retrying.
+
+Replay works without public HTTPS support. It validates the archive, checks the ordering and range of the recorded times, and recomputes the historical report from the response at the recorded whole observation second. The recomputed report must match the saved report. A valid capture remains reviewable as it ages. The live, captured and manually declared modes label the basis of their report. Capture and replay have no access to account payouts or income settings.
+
 ### Native ownership during one-shot ticker and hour sampling
 
 Each ticker or hour invocation gives both of its requests one native ownership lifetime. The request threads carry that original lifetime when they start. A helper fault in the same application invalidates the sample even if the fault is settled before the next request. The command withholds its report, including any earlier successful observation, and returns 3. An in-flight helper receives cancellation and retains its existing bounded cleanup behavior.
