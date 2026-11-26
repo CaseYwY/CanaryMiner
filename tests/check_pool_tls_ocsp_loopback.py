@@ -19,7 +19,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from test_pool_tls_check_process import packet
 
 
-def certificate(now, name, issuer=None, *, must_staple=False, responder=False, intermediate=False, invalid_feature=False):
+def certificate(now, name, issuer=None, *, features=(), responder=False, intermediate=False, invalid_feature=False):
     key = ec.generate_private_key(ec.SECP256R1())
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
     issuer_name = issuer[0].subject if issuer else subject
@@ -32,8 +32,8 @@ def certificate(now, name, issuer=None, *, must_staple=False, responder=False, i
         cert = cert.add_extension(x509.ExtendedKeyUsage([purpose]), critical=False)
         if not responder:
             cert = cert.add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
-        if must_staple:
-            cert = cert.add_extension(x509.TLSFeature([x509.TLSFeatureType.status_request]), critical=False)
+        if features:
+            cert = cert.add_extension(x509.TLSFeature(features), critical=False)
         if invalid_feature:
             cert = cert.add_extension(x509.UnrecognizedExtension(ExtensionOID.TLS_FEATURE,
                                       b"\x30\x03\x02\x01\x05\x00"), critical=False)
@@ -133,17 +133,23 @@ def main(args):
     issuer = certificate(now, "canary-ocsp-fixture")
     alternate = certificate(now, "canary-ocsp-fixture")
     plain = certificate(now, "optional-staple", issuer)
-    must = certificate(now, "must-staple", issuer, must_staple=True)
+    status_request = x509.TLSFeatureType.status_request
+    status_request_v2 = x509.TLSFeatureType.status_request_v2
+    must = certificate(now, "must-staple", issuer, features=[status_request])
+    unsupported = certificate(now, "unsupported-status-request", issuer, features=[status_request_v2])
+    mixed = certificate(now, "mixed-status-request", issuer, features=[status_request, status_request_v2])
     malformed = certificate(now, "malformed-tls-feature", issuer, invalid_feature=True)
     signer = certificate(now, "delegated-ocsp", issuer, responder=True)
     issuing_ca = certificate(now, "issuing-ocsp-fixture", issuer, intermediate=True)
-    issued_leaf = certificate(now, "intermediate-issued-must-staple", issuing_ca, must_staple=True)
+    issued_leaf = certificate(now, "intermediate-issued-must-staple", issuing_ca, features=[status_request])
     issued_status = staple(issued_leaf[0], issuing_ca, past, future)
     good = staple(must[0], issuer, past, future)
     cases = [
         ("optional absent", plain, None, True),
         ("required good", must, good, True),
         ("required absent", must, None, False),
+        ("unsupported required feature", unsupported, None, False),
+        ("unsupported feature despite valid staple", mixed, staple(mixed[0], issuer, past, future), False),
         ("malformed feature", malformed, staple(malformed[0], issuer, past, future), False),
         ("trailing basic response data", must, staple_with_trailing_basic_data(good), False),
         ("unsupported critical response extension", must, staple(must[0], issuer, past, future,

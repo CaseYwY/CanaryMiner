@@ -50,9 +50,9 @@ bool requiresOcspStaple(X509 *leaf, bool &required) {
     for (int i = 0; i < count; ++i) {
         int64_t feature = 0;
         if (!ASN1_INTEGER_get_int64(&feature, sk_ASN1_INTEGER_value(features.get(), i)) ||
-            feature < 0 || feature > 65535) return false;
-        if (feature == TLSEXT_TYPE_status_request) required = true;
+            feature != TLSEXT_TYPE_status_request) return false;
     }
+    required = true;
     return true;
 }
 
