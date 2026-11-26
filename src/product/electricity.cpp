@@ -719,11 +719,10 @@ ElectricityStatus validateTaxEnergy(const TariffPlan &plan, const BillOpening &o
         if (!rated.zero()) {
             // Segment totals omit the distribution of energy across rate changes.
             // Bound the possible charge using every published marginal rate.
-            const TariffRevision *previous = nullptr;
             ExactDecimal lowest, highest;
             std::vector<TariffBand> lowBands, highBands;
             const auto end = (std::min)(slices[i].end, opening.throughUtcMs);
-            bool covered = true;
+            bool covered = true, seenRate = false;
             for (auto cursor = slices[i].begin; cursor < end;) {
                 if (++cuts > maxCuts) return ElectricityStatus::Capacity;
                 while (plan.revisions[revision].endUtcMs <= cursor) ++revision;
@@ -738,30 +737,31 @@ ElectricityStatus validateTaxEnergy(const TariffPlan &plan, const BillOpening &o
                 }
                 if (status != ElectricityStatus::Ok) return status;
                 if (next <= cursor) return ElectricityStatus::Invalid;
-                if (!previous || rate.compare(lowest) < 0) lowest = rate;
-                if (!previous || rate.compare(highest) > 0) highest = std::move(rate);
-                if (plan.tiers == TierMode::Progressive && previous != &entry) {
-                    if (!previous) {
+                if (plan.tiers == TierMode::Progressive) {
+                    if (!seenRate)
                         lowBands = highBands = entry.bands;
-                    } else {
-                        for (size_t j = 0; j < entry.bands.size(); ++j) {
-                            const auto &bandRate = entry.bands[j].ratePerKwh;
-                            if (bandRate.compare(lowBands[j].ratePerKwh) < 0) lowBands[j].ratePerKwh = bandRate;
-                            if (bandRate.compare(highBands[j].ratePerKwh) > 0) highBands[j].ratePerKwh = bandRate;
-                        }
+                    // The tariff's energy rate and tier surcharge apply at the same time.
+                    for (size_t j = 0; j < entry.bands.size(); ++j) {
+                        ExactDecimal marginalRate;
+                        if (!rate.add(entry.bands[j].ratePerKwh, &marginalRate)) return ElectricityStatus::Capacity;
+                        if (!seenRate || marginalRate.compare(lowBands[j].ratePerKwh) < 0)
+                            lowBands[j].ratePerKwh = marginalRate;
+                        if (!seenRate || marginalRate.compare(highBands[j].ratePerKwh) > 0)
+                            highBands[j].ratePerKwh = std::move(marginalRate);
                     }
+                } else {
+                    if (!seenRate || rate.compare(lowest) < 0) lowest = rate;
+                    if (!seenRate || rate.compare(highest) > 0) highest = std::move(rate);
                 }
-                previous = &entry;
+                seenRate = true;
                 cursor = next;
             }
             if (covered) {
                 const auto amountAt = [&](const ExactDecimal &rate, const std::vector<TariffBand> &bands,
                                           ExactDecimal &amount) {
+                    if (plan.tiers == TierMode::Progressive)
+                        return progressiveTierChange(bands, cumulative, nextCumulative, amount);
                     if (!rated.multiply(rate, &amount)) return false;
-                    if (plan.tiers == TierMode::Progressive) {
-                        ExactDecimal extra;
-                        return progressiveTierChange(bands, cumulative, nextCumulative, extra) && accumulate(amount, extra);
-                    }
                     return plan.tiers != TierMode::AllUnits ||
                         productAdd(amount, rated, allUnitsRate(plan.revisions.front().bands, opening.importedKwh.numerator));
                 };

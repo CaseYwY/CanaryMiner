@@ -157,6 +157,26 @@ def main(cli, bundle=None):
             dynamic["opening"]["tax_segments"][0]["energy"] = "4"
             review(dynamic, interval(end, later), later, error="invalid")
 
+            finish = later + HOUR
+            progressive = segmented(plan(begin, begin, finish, UTC),
+                period(begin, end, fraction("vat", "0", ("energy",))),
+                period(end, finish, fraction("vat", "1", ("energy",))))
+            progressive["plan"]["tiers"] = "progressive"
+            revisions = progressive["plan"]["revisions"]
+            second_rate = copy.deepcopy(revisions[0])
+            revisions[0].update(end_utc_ms=middle, base_rate_per_kwh="5",
+                                bands=[dict(through_kwh=None, rate_per_kwh="1")])
+            second_rate.update(key="adjusted", begin_utc_ms=middle, base_rate_per_kwh="1",
+                               bands=[dict(through_kwh=None, rate_per_kwh="5")])
+            revisions.append(second_rate)
+            progressive["opening"].update(through_utc_ms=later, imported_kwh="2", accrued_subtotal="12",
+                tax_segments=[segment(begin, "1", "6"), segment(end, "1", "6")])
+            report = review(progressive, interval(later, finish), finish)
+            assert "Cycle estimate at closing 30.000000 USD" in report
+            progressive["opening"]["tax_segments"][0]["energy"] = "9"
+            progressive["opening"]["accrued_subtotal"] = "15"
+            review(progressive, interval(later, finish), finish, error="invalid")
+
             gap = copy.deepcopy(policy)
             gap["plan"]["tax_periods"][1]["begin_utc_ms"] += 1
             review(gap, readings, end, error="saved tariff declaration unavailable or invalid")
