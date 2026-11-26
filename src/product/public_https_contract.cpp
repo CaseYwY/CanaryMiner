@@ -43,6 +43,9 @@ bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
         case PublicFeed::KrakenUsdtTicker:
             if (r.fromUtc || r.toUtc) return false;
             result = "https://api.kraken.com/0/public/Ticker?pair=USDTUSD"; break;
+        case PublicFeed::PearlMainnetTip:
+            if (r.fromUtc || r.toUtc) return false;
+            result = "https://blockbook.pearlresearch.ai/api/status"; break;
         case PublicFeed::GatePearlCandles:
         case PublicFeed::KrakenUsdtCandles: {
             const int64_t maximum = r.feed == PublicFeed::GatePearlCandles ? 900 * 60 : 719 * 60;

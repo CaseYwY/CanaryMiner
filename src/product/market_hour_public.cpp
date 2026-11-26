@@ -9,16 +9,6 @@ namespace om {
 namespace {
 
 using namespace market_detail;
-using ClockReading = std::pair<uint64_t, uint64_t>;
-
-bool clockContinuous(const ClockReading &initial, const ClockReading &previous, const ClockReading &current) {
-    if (current.first < previous.first || current.second < previous.second ||
-        current.first < initial.first || current.second < initial.second || current.second > marketUtcLimit)
-        return false;
-    const auto steadySeconds = (current.first - initial.first) / 1000;
-    const auto utcSeconds = current.second - initial.second;
-    return (std::max)(steadySeconds, utcSeconds) - (std::min)(steadySeconds, utcSeconds) <= 5;
-}
 
 HourSample decodeHourReply(const PublicJsonResponse &reply, HourFeed feed, uint64_t start, uint64_t end,
                           uint64_t sentUtc, uint64_t receivedUtc) {
@@ -81,7 +71,7 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
             if (!lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
             const auto sent = marketSystemClock();
-            if (!clockContinuous(initial, previous, sent))
+            if (!marketSampleClockContinuous(initial, previous, sent))
                 return hourError("local clock changed during sampling");
             const bool token = feed == HourFeed::MexcPearl;
             const PublicJsonRequest request{token ? PublicFeed::MexcPearlHour : PublicFeed::CoinbaseUsdtHour,
@@ -90,7 +80,7 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
             if (reply.status == PublicHttpsStatus::Unreaped || !lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
             const auto received = marketSystemClock();
-            if (!clockContinuous(initial, sent, received))
+            if (!marketSampleClockContinuous(initial, sent, received))
                 return hourError("local clock changed during sampling");
             previous = received;
             (token ? pearl : fx) = decodeHourReply(reply, feed, start, end, sent.second, received.second);

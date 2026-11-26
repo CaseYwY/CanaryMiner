@@ -36,6 +36,18 @@ inline bool nativeMarketArgumentPair(int argc, const char *const *argv, int firs
 #endif
 }
 
+using MarketSampleClock = std::pair<uint64_t, uint64_t>;
+
+inline bool marketSampleClockContinuous(const MarketSampleClock &initial, const MarketSampleClock &previous,
+                                        const MarketSampleClock &current) {
+    if (current.first < previous.first || current.second < previous.second ||
+        current.first < initial.first || current.second < initial.second || current.second > 253402300799ULL)
+        return false;
+    const auto steadySeconds = (current.first - initial.first) / 1000;
+    const auto utcSeconds = current.second - initial.second;
+    return (std::max)(steadySeconds, utcSeconds) - (std::min)(steadySeconds, utcSeconds) <= 5;
+}
+
 inline bool marketSampleStopped(const volatile sig_atomic_t *stop) { return stop && *stop; }
 
 inline PublicJsonResponse marketSampleFailure(PublicHttpsStatus status) {

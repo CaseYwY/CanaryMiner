@@ -39,13 +39,14 @@
 #include "diagnostic_cli.h"
 #include "language_preferences.h"
 #include "market_hour.h"
+#include "market_reward.h"
 #include "market_ticker_review.h"
 #include "meter_bill.h"
 #include "energy_periods_cli.h"
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods, MarketReward };
 
 /** Process exit codes of the product commands (the research option paths keep their historical 1). */
 enum ExitCode : int {
@@ -96,6 +97,7 @@ struct CliParse {
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     MeterBillOptions meterBill;
     MarketHourOptions marketHour;
+    MarketRewardOptions marketReward;
     bool reviewTickerFile = false;
     EnergyPeriodsOptions energyPeriods;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
@@ -141,6 +143,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "meter-bill") r.command = Command::MeterBill;
         else if (c == "market-hour") r.command = Command::MarketHour;
         else if (c == "market-tickers") r.command = Command::MarketTickers;
+        else if (c == "market-reward") r.command = Command::MarketReward;
         else if (c == "energy-periods") r.command = Command::EnergyPeriods;
         else {
             if (error) *error = "unknown command (run, list-devices, selftest, status, version, settings, diagnostics, meter-bill; or start with an option, e.g. --pool); rejected original omitted";
@@ -180,12 +183,21 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         *out = std::move(r);
         return true;
     }
+    if (r.command == Command::MarketReward) {
+        if (!parseMarketRewardCli(argc, argv, i, r.marketReward)) {
+            if (error) *error = "market-reward: invalid options. See market-reward --help";
+            return false;
+        }
+        r.help = r.marketReward.action == MarketRewardAction::Help;
+        *out = std::move(r);
+        return true;
+    }
     if (r.command == Command::MarketTickers) {
         const auto option = argc == i + 1 ? std::string_view(argv[i]) : std::string_view();
         r.help = option == "--help" || option == "-h";
         r.reviewTickerFile = argc == i + 2 && std::string_view(argv[i]) == "--file" && argv[i + 1][0];
         std::string dnsServer;
-        if (!r.help && !r.reviewTickerFile && !parsePublicTickerCli(argc,argv,i,dnsServer)) {
+        if (!r.help && !r.reviewTickerFile && !parsePublicMarketSampleCli(argc, argv, i, "--allow-public-tickers", dnsServer)) {
             if (error) *error = "market-tickers: invalid options; use market-tickers --help";
             return false;
         }
