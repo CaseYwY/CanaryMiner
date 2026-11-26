@@ -1,6 +1,7 @@
 #pragma once
 
-#include "market_sample_options.h"
+#include "local_export_name.h"
+#include "public_https.h"
 
 #include <charconv>
 #include <csignal>
@@ -12,17 +13,21 @@ namespace om {
 
 inline constexpr uint64_t rewardUtcLimit = 253402300799ULL;
 inline constexpr size_t marketRewardBodyBytes = 16 * 1024;
+inline constexpr std::string_view rewardReviewExtension = ".cmr";
 inline constexpr char marketRewardHelp[] =
-    "canary-miner market-reward --allow-public-reward [--dns-server IP]\n"
+    "canary-miner market-reward --allow-public-reward [--dns-server IP] [--save-review NAME.cmr]\n"
     "canary-miner market-reward --file FILE --as-of UTC_SECONDS\n"
+    "canary-miner market-reward --open-review FILE\n"
     "Calculate the next Pearl mainnet block subsidy from live or saved Blockbook indexer status.\n"
     "Public sampling requires a public-HTTPS-enabled build. A block subsidy excludes transaction fees.";
 
-enum class MarketRewardAction { Help, PublicSample, LocalReview };
+enum class MarketRewardAction { Help, PublicSample, LocalReview, OpenReview };
 struct MarketRewardOptions {
     MarketRewardAction action = MarketRewardAction::Help;
-    std::string dnsServer;
+    std::string dnsServer, archiveName;
     uint64_t cutoffUtc = 0;
+    int dnsFlag = 0;
+    int saveFlag = 0;
 };
 
 inline bool parseMarketRewardCli(int argc, const char *const *argv, int begin, MarketRewardOptions &out) {
@@ -32,7 +37,7 @@ inline bool parseMarketRewardCli(int argc, const char *const *argv, int begin, M
     const int count = argc - begin;
     if (count == 1 && (flag == "-h" || flag == "--help")) {
         options.action = MarketRewardAction::Help;
-    } else if (count == 4 && flag == "--file" && argv[begin + 1][0] && argv[begin + 1][0] != '-' &&
+    } else if (count == 4 && flag == "--file" && argv[begin + 1][0] &&
                std::string_view(argv[begin + 2]) == "--as-of") {
         const std::string_view time(argv[begin + 3]);
         const auto end = time.data() + time.size();
@@ -40,8 +45,21 @@ inline bool parseMarketRewardCli(int argc, const char *const *argv, int begin, M
         if (parsed.ec != std::errc() || parsed.ptr != end || !options.cutoffUtc ||
             options.cutoffUtc > rewardUtcLimit || time.front() == '0') return false;
         options.action = MarketRewardAction::LocalReview;
-    } else if (parsePublicMarketSampleCli(argc, argv, begin, "--allow-public-reward", options.dnsServer)) {
+    } else if (count == 2 && flag == "--open-review" && argv[begin + 1][0]) {
+        options.action = MarketRewardAction::OpenReview;
+    } else if (flag == "--allow-public-reward" && (count == 1 || count == 3 || count == 5)) {
         options.action = MarketRewardAction::PublicSample;
+        for (int i = begin + 1; i < argc; i += 2) {
+            const std::string_view option(argv[i]);
+            if (!options.dnsFlag && option == "--dns-server" && validPublicDnsServer(argv[i + 1])) {
+                options.dnsFlag = i;
+                options.dnsServer = argv[i + 1];
+            } else if (!options.saveFlag && option == "--save-review" &&
+                       localExportName(argv[i + 1], rewardReviewExtension)) {
+                options.saveFlag = i;
+                options.archiveName = argv[i + 1];
+            } else return false;
+        }
     } else return false;
     out = std::move(options);
     return true;
@@ -63,9 +81,14 @@ std::optional<uint64_t> pearlMainnetSubsidyGrains(uint32_t height);
 enum class PearlRewardCutoff { ExactSecond, WholeObservationSecond };
 PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutoffUtc, PearlRewardCutoff precision);
 int reportPearlSubsidy(const PearlRewardResult &result, uint64_t cutoffUtc, bool live);
+class NativeProcessLifetime;
+int savePublicMarketRewardReview(const std::string &name, const PublicJsonResponse &response,
+                                 uint64_t sentUtc, uint64_t receivedUtc, const PearlRewardResult &result,
+                                 const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop);
 int commandMarketRewardFile(const MarketRewardOptions &options, int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop);
+bool nativeMarketRewardInvocation(const MarketRewardOptions &options, int argc, const char *const *argv);
 int commandPublicMarketReward(const MarketRewardOptions &options, const std::filesystem::path &module,
-                              int argc, const char *const *argv, const volatile sig_atomic_t *stop);
+                              const volatile sig_atomic_t *stop);
 
 }  // namespace om

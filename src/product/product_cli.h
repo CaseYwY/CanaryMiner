@@ -40,6 +40,7 @@
 #include "language_preferences.h"
 #include "market_hour.h"
 #include "market_reward.h"
+#include "market_sample_options.h"
 #include "market_ticker_review.h"
 #include "meter_bill.h"
 #include "energy_periods_cli.h"
