@@ -29,7 +29,77 @@ The decoder calls `validateTariffOpening`, not a fake zero-power bill. This prov
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Unsupported families include contracted capacity, reactive power, export netting and supplier-specific restricted export credits, live prepaid enrollment and debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions, other provider rounding rules and ordered/selective taxes. Synthetic examples are not official supplier certification.
+Version 15 adds [ordered supply taxes](#apply-ordered-supply-taxes). Unsupported families include contracted capacity, reactive power, export netting and supplier-specific restricted export credits, live prepaid enrollment and debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions and other provider rounding rules. Supplier-specific tax rules require their own qualification.
+
+## Apply ordered supply taxes
+
+In the combined tariff editor, select Plan and press **T** to add tax periods to
+the draft. Set `subtotal_multiplier` to `"1"` to use ordered taxes. Use **A** to add
+periods, rules, components or prior tax keys. Enter on a rule's Kind cycles
+through fraction, measured import kWh and billed import kWh. Review and save the
+complete draft with the existing controls.
+
+One period must cover each complete supply cycle. Periods use non-overlapping
+UTC ranges in time order, plus an explicit publication instant. The cutoff
+must be at or after the selected period's publication. Use separate periods
+when rules change at supply reset. A rule change inside a supply cycle
+requires a separate settlement model.
+
+For example, this fragment under `plan` adds an excise of 1 per measured
+import kWh. The VAT rate is 0.1 on the energy charge plus that excise.
+
+```json
+{
+  "tax_periods": [{
+    "begin_utc_ms": 1704067200000,
+    "end_utc_ms": 1706745600000,
+    "published_utc_ms": 1704067200000,
+    "rules": [
+      {"key": "excise", "kind": "imported_kwh", "rate": "1", "included": false},
+      {"key": "vat", "kind": "fraction", "rate": "0.1",
+       "components": ["energy"], "included_in": [], "prior_taxes": ["excise"]}
+    ]
+  }]
+}
+```
+
+At 2 kWh and a pre-tax energy charge of 10, the excise is 2 and the VAT is
+1.20. The closing supply estimate is 13.20. Selecting only energy for VAT
+would produce 13.00.
+
+- `imported_kwh` uses exact measured energy. `billed_kwh` uses the half-hour
+  rounded quantity when that tariff rule applies and measured energy otherwise.
+  Set `included` to true when the unit charge is already included in energy.
+- A fraction selects `energy`, `daily_fee`, `cycle_fee`, `demand` or
+  `minimum_adjustment`. The closing minimum is applied before ordered taxes.
+  Each prior tax key must name a distinct earlier rule with a separate charge.
+  A signed energy credit produces a signed result on a selected fractional base.
+- If a fractional tax is already in the price, put those components in
+  `included_in` and leave them out of `components`. A fully included tax has
+  empty `components` and `prior_taxes` arrays. To review a rate already inclusive
+  of both example taxes, enter the inclusive energy price, mark the excise
+  included and declare VAT included in energy. A 13.20 inclusive charge then
+  stays 13.20.
+
+Version 15 requires `opening.tax_bases` with `energy`, `daily_fee`,
+`cycle_fee`, `demand` and `billed_kwh`. Use zeros at cycle start. A mid-cycle
+opening uses the independently reviewed amounts before added taxes. The first
+three bases sum to the declared opening `accrued_subtotal`. The demand base
+matches the charge on the established billable peak, including any declared
+historical floor. Use zero for `billed_kwh` unless the half-hour rounding rule
+is selected. For that rule, enter the exact cumulative billed kWh to two
+decimal places. The opening must be compatible with the measured quantity
+and elapsed half-hours. When billed kWh is zero, the energy charge is zero.
+Ordinary and extended meter archives preserve the declared
+opening and verify the exact tax bases and charges on replay.
+
+`meter-bill` displays each tax base, amount added and any included components.
+The closing estimate includes ordered taxes. Supply invoice comparisons use
+that estimate. Separate export payments keep their own pricing and are
+subtracted afterward. Ordered taxes and restricted closing credits cannot
+share a declaration. Rate imports with VAT-inclusive prices refuse added
+tax rules. The declarations use local source evidence and display-only
+rounding for tax amounts.
 
 ## Use named tariff and reset clocks
 

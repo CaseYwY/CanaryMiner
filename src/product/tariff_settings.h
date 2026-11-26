@@ -161,6 +161,7 @@ class TariffSettingsPanel {
         else if((key=='e'||key=='E')&&path()=="plan.export_payment")toggleExportSchedule();
         else if((key=='e'||key=='E')&&onExportToggle())toggleExportPayment();
         else if((key=='u'||key=='U')&&onRestrictedCreditToggle())toggleRestrictedCredit();
+        else if((key=='t'||key=='T')&&onTaxToggle())toggleTaxPeriods();
         else if((key=='k'||key=='K')&&onRatchetToggle())toggleDemandUnit();
         else if((key=='f'||key=='F')&&onCyclePolicy()&&recurring()&&!bimonthly())toggleDailyFeeAllocation();
         else if((key=='z'||key=='Z')&&onTariffClock())toggleNamedClock();
@@ -169,11 +170,14 @@ class TariffSettingsPanel {
         else if(key==kKeyUp||key==kKeyBackTab){const auto n=count();if(n)field=(field+n-1)%n;}
         else if((key=='a'||key=='A')&&node()->isArray()){
             const auto collection=collectionName();
-            const size_t bound=collection=="lots"?maxRestrictedCreditLots:collection=="demand_history"?12:collection=="revisions"||collection=="seasons"?16:collection=="dynamic"?256:32;
+            const size_t bound=collection=="lots"?maxRestrictedCreditLots:collection=="demand_history"?12:
+                collection=="tax_periods"?maxTaxPeriods:collection=="rules"||collection=="prior_taxes"?maxTaxRules:
+                collection=="components"||collection=="included_in"?taxComponentCount:
+                collection=="revisions"||collection=="seasons"?16:collection=="dynamic"?256:32;
             if(count()>=bound||tariffJson(draft).size()>tariffDeclarationMaxBytes-1024)message=i18n::tariffNoticeEnglish(NoticeKey::Capacity);
             else{
                 auto value=tariffRowTemplate(collection,componentRevision(),apparentDemand());
-                if(value.isObject()){
+                if(value.isObject()||value.isString()){
                     node()->items.push_back(std::move(value));
                     field=count()-1;
                     message=i18n::tariffNoticeEnglish(NoticeKey::AddedBlank);
@@ -186,6 +190,7 @@ class TariffSettingsPanel {
             auto *v=selected();if(!v)return TariffSettingsResult::None;
             if(v->isObject()||v->isArray()){route.push_back(field);field=0;message.clear();}
             else if(path()=="plan"&&selectedName()=="rounding")toggleMeterRounding(*v);
+            else if(taxRuleRow()&&selectedName()=="kind")toggleTaxKind();
             else if(readOnly(selectedName()))message=i18n::tariffNoticeEnglish(NoticeKey::FixedContract);
             else if(v->isBool())v->boolean=!v->boolean;
             else{input=v->type==JsonValue::Type::Null?"":v->text;replaceInput=true;inputRejected=false;page=TariffSettingsPage::Edit;message.clear();}
@@ -212,6 +217,7 @@ class TariffSettingsPanel {
             if(onExportToggle())shortcuts+="[E] Export payment ";
             if(path()=="plan.export_payment")shortcuts+="[E] Fixed/scheduled export ";
             if(onRestrictedCreditToggle())shortcuts+="[U] Restricted credit ";
+            if(onTaxToggle())shortcuts+="[T] Ordered taxes ";
             if(onRatchetToggle())shortcuts+="[R] Historical demand floor [K] kW/kVA ";
             if(recurring())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
             if(onTariffClock()&&civilNamedTimeAvailable())shortcuts+="[Z] Named/UTC clock ";
@@ -297,6 +303,14 @@ class TariffSettingsPanel {
         return (route.empty()&&selectedName()=="plan")||(path()=="plan"&&selectedName()=="export_payment");
     }
     static bool restrictedCredit(const JsonValue &value){return value.find("restricted_credit")!=nullptr;}
+    static bool hasTaxes(const JsonValue &value){
+        const auto *plan=value.find("plan");
+        return plan&&plan->find("tax_periods");
+    }
+    bool onTaxToggle()const{
+        return (route.empty()&&selectedName()=="plan")||(path()=="plan"&&selectedName()=="tax_periods");
+    }
+    bool taxRuleRow()const{return route.size()==5&&path().rfind("plan.tax_periods[",0)==0&&path().find(".rules[")!=std::string::npos;}
     bool onRestrictedCreditToggle()const{
         return route.empty()&&(selectedName()=="plan"||selectedName()=="restricted_credit");
     }
@@ -304,7 +318,7 @@ class TariffSettingsPanel {
     bool onDemandToggle()const{return onCyclePolicy()||(route.empty()&&selectedName()=="demand_charge");}
     bool requiresPricedOpeningReview()const{
         return demand()||active.find("demand_charge")||hasComponents(active)||hasComponents(draft)||exports(active)||exports(draft)||
-            restrictedCredit(active)||restrictedCredit(draft);
+            restrictedCredit(active)||restrictedCredit(draft)||hasTaxes(active)||hasTaxes(draft);
     }
     const JsonValue *revision()const{
         if(route.size()<3||draft.members[route[0]].first!="plan")return nullptr;
@@ -346,7 +360,7 @@ class TariffSettingsPanel {
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
         const auto *payment=exportRule(draft);
-        schema->text=restrictedCredit(draft)?"13":payment?(payment->find("dynamic")?"14":"12"):apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        schema->text=hasTaxes(draft)?"15":restrictedCredit(draft)?"13":payment?(payment->find("dynamic")?"14":"12"):apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -491,6 +505,10 @@ class TariffSettingsPanel {
         refreshClockContract();
     }
     void toggleRestrictedCredit(){
+        if(hasTaxes(draft)){
+            message="Remove ordered taxes to add restricted credit.";
+            return;
+        }
         if(exports(draft)||apparentDemand()){
             message="Restricted credit requires a plan without separate export payments or kVA demand.";
             return;
@@ -509,6 +527,56 @@ class TariffSettingsPanel {
             message="Enter the opening import subtotal and unused credit lots.";
         }
         refreshClockContract();
+    }
+    static void clearTaxBases(JsonValue &opening){
+        if(auto *bases=member(opening,"tax_bases"))
+            for(auto &field:bases->members)field.second.text.clear();
+    }
+    void toggleTaxPeriods(){
+        if(restrictedCredit(draft)){
+            message="Remove restricted credit to add ordered taxes.";
+            return;
+        }
+        auto &plan=*member(draft,"plan");
+        auto &opening=*member(draft,"opening");
+        if(hasTaxes(draft)){
+            plan.members.erase(std::remove_if(plan.members.begin(),plan.members.end(),[](const auto &entry){
+                return entry.first=="tax_periods";
+            }),plan.members.end());
+            opening.members.erase(std::remove_if(opening.members.begin(),opening.members.end(),[](const auto &entry){
+                return entry.first=="tax_bases";
+            }),opening.members.end());
+            focus("plan");
+            message="Ordered taxes removed from the draft.";
+        }else{
+            JsonValue periods,bases;
+            parseJsonStrict("[]",&periods,nullptr);
+            parseJsonStrict(R"({"energy":"0","daily_fee":"0","cycle_fee":"0","demand":"0","billed_kwh":"0"})",&bases,nullptr);
+            plan.members.emplace_back("tax_periods",std::move(periods));
+            opening.members.emplace_back("tax_bases",std::move(bases));
+            const bool midcycle=opening.find("cycle_begin_utc_ms")->text!=opening.find("through_utc_ms")->text;
+            if(midcycle)clearTaxBases(opening);
+            focus("plan.tax_periods");
+            message=midcycle?"Enter the tax periods and the reviewed opening tax bases. Use a subtotal multiplier of 1.":
+                "Enter the tax periods. Use a subtotal multiplier of 1 with ordered taxes.";
+        }
+        refreshClockContract();
+    }
+    void toggleTaxKind(){
+        auto &row=*node();
+        auto &kind=*member(row,"kind");
+        if(kind.text=="imported_kwh"){
+            kind.text="billed_kwh";
+        }else{
+            JsonValue replacement;
+            if(kind.text=="fraction")
+                parseJsonStrict(R"({"key":"","kind":"imported_kwh","rate":"","included":false})",&replacement,nullptr);
+            else replacement=tariffRowTemplate("rules");
+            *member(replacement,"key")=*row.find("key");
+            *member(replacement,"rate")=*row.find("rate");
+            row=std::move(replacement);
+        }
+        message="Review the tax rate and bases for this tax kind.";
     }
     void toggleExportPayment(){
         if(restrictedCredit(draft)){
@@ -655,6 +723,7 @@ class TariffSettingsPanel {
         if(auto *opening=member(draft,"opening")){
             for(const auto *amount:{"imported_kwh","accrued_subtotal","exported_kwh","accrued_export_payment",openingPeakField()})
                 if(auto *value=member(*opening,amount))value->text.clear();
+            clearTaxBases(*opening);
         }
         if(auto *credit=member(draft,"restricted_credit"))member(*credit,"accrued_import_subtotal")->text.clear();
     }
@@ -686,6 +755,7 @@ class TariffSettingsPanel {
         auto *subtotal=opening?member(*opening,"accrued_subtotal"):nullptr;
         if(!begin||!through||!subtotal||begin->text==through->text)return false;
         subtotal->text.clear();
+        clearTaxBases(*opening);
         if(auto *credit=member(draft,"restricted_credit"))member(*credit,"accrued_import_subtotal")->text.clear();
         return true;
     }
@@ -718,6 +788,10 @@ class TariffSettingsPanel {
         const auto *exportPayment=opening->find("accrued_export_payment");
         const auto *credit=draft.find("restricted_credit");
         const auto *creditSubtotal=credit?credit->find("accrued_import_subtotal"):nullptr;
+        const auto *tax=opening->find("tax_bases");
+        const bool retainedTax=tax&&std::any_of(tax->members.begin(),tax->members.end(),[](const auto &entry){
+            return !entry.second.text.empty();
+        });
         if(!begin||!end||!through||!quantity||!subtotal)return;
         TariffCycleBounds bounds;
         TariffProblem error;
@@ -729,14 +803,16 @@ class TariffSettingsPanel {
         if(begin->text!=beginText&&(!quantity->text.empty()||!subtotal->text.empty()||(peak&&!peak->text.empty())||
                                   (exported&&!exported->text.empty())||
                                   (exportPayment&&!exportPayment->text.empty())||
-                                  (creditSubtotal&&!creditSubtotal->text.empty()))){
+                                  (creditSubtotal&&!creditSubtotal->text.empty())||retainedTax)){
             if(!quantity->text.empty())focus("opening.imported_kwh");
             else if(!subtotal->text.empty())focus("opening.accrued_subtotal");
             else if(exported&&!exported->text.empty())focus("opening.exported_kwh");
             else if(exportPayment&&!exportPayment->text.empty())focus("opening.accrued_export_payment");
             else if(creditSubtotal&&!creditSubtotal->text.empty())focus("restricted_credit.accrued_import_subtotal");
+            else if(retainedTax)focus("opening.tax_bases");
             else focus(std::string("opening.")+openingPeakField());
-            message=credit?"Clear the opening amounts, including the import energy subtotal, before changing the cycle start.":
+            message=tax?"Clear the opening amounts and tax bases before changing the cycle start.":
+                credit?"Clear the opening amounts, including the import energy subtotal, before changing the cycle start.":
                 exported?"Clear the opening amounts, including accrued export, before changing the cycle start.":
                 peak?"Clear the opening import, subtotal and demand peak before changing the cycle start.":
                 i18n::tariffMonthlyEnglish(Key::RetainAmounts);
@@ -849,6 +925,7 @@ class TariffSettingsPanel {
             i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),recurring()?i18n::tariffMonthlyEnglish(cycleReview):i18n::tariffPanelEnglish(PanelKey::ResetLimit),
             exports(draft)?"Restricted export credits, eligibility and rollover are outside this separate-payment rule.":
                 demand()?"Demand uses complete UTC-grid windows. Capacity, export, prepaid and independent demand resets are excluded.":
+                hasTaxes(draft)?"Each supply cycle needs one published tax period. Restricted closing credits use a separate declaration.":
                 prorated?i18n::tariffMonthlyEnglish(MonthlyKey::ProratedExclusions):i18n::tariffPanelEnglish(PanelKey::Excludes),
             i18n::tariffPanelEnglish(PanelKey::NoZeroFill),
             i18n::tariffPanelEnglish(PanelKey::FullCycle),i18n::tariffPanelEnglish(PanelKey::ChangesHeading)};
@@ -866,6 +943,8 @@ class TariffSettingsPanel {
             "Peak demand is charged once per cycle. The opening subtotal excludes it. Review the plan and opening keys.");
         if(hasComponents(draft))review.insert(review.begin()+4,
             "Unit rate = unscaled part + multiplied part x factor. Use new plan and opening keys after a rate change.");
+        if(hasTaxes(draft))review.insert(review.begin()+4,
+            "Ordered taxes use the declared charge bases and prior added taxes. Included components keep their entered amounts.");
         if(prorated)review.insert(review.begin()+4,i18n::tariffMonthlyEnglish(MonthlyKey::FeeReview));
         const auto *plan=draft.find("plan");
         const auto *rounding=plan?plan->find("rounding"):nullptr;

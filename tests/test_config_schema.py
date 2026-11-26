@@ -564,6 +564,31 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['plan']['export_payment'] = {'rate_per_kwh': '1', 'published_utc_ms': 0}
         self.assertTrue(validate(example, schema, schema))
 
+    def test_ordered_tax_periods_require_v15_and_explicit_opening_bases(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 15
+        plan, opening = example['plan'], example['opening']
+        self.assertTrue(validate(example, schema, schema))
+        plan['subtotal_multiplier'] = '1'
+        vat = dict(key='vat', kind='fraction', rate='0.1', components=['energy'], included_in=[], prior_taxes=['excise'])
+        plan['tax_periods'] = [dict(begin_utc_ms=1800000000000, end_utc_ms=1800086400000, published_utc_ms=0,
+            rules=[dict(key='excise', kind='imported_kwh', rate='1', included=False), vat])]
+        self.assertTrue(validate(example, schema, schema))
+        opening['tax_bases'] = dict(energy='0', daily_fee='0', cycle_fee='0', demand='0', billed_kwh='0')
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 1}, schema, schema))
+        plan['subtotal_multiplier'] = '1.1'
+        self.assertTrue(validate(example, schema, schema))
+        plan['subtotal_multiplier'] = '1'
+        vat['components'].append('future_rule')
+        self.assertTrue(validate(example, schema, schema))
+        vat['components'].pop()
+        plan['export_payment'] = dict(rate_per_kwh='1', published_utc_ms=0)
+        self.assertTrue(validate(example, schema, schema))
+        opening.update(exported_kwh='0', accrued_export_payment='0')
+        self.assertEqual(validate(example, schema, schema), [])
+
     def test_example_and_strict_nested_contract(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -594,8 +619,8 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'revision': {'component_multiplier'},
                     'calendar': {'multiplier'},
                     'dynamic': {'multiplier'},
-                    'plan': {'export_payment'},
-                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh', 'accrued_export_payment'},
+                    'plan': {'export_payment', 'tax_periods'},
+                    'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh', 'accrued_export_payment', 'tax_bases'},
                     'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
                 }.get(name, set())

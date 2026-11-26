@@ -358,6 +358,92 @@ BillRestrictedCreditOpening decodeRestrictedCredit(const JsonValue &value,const 
     return result;
 }
 
+unsigned decodeTaxComponents(const JsonValue &value, const std::string &path) {
+    if (!value.isArray() || value.items.size() > taxComponentCount)
+        bad(path, "Enter an array of distinct taxable components.", TariffProblemKind::Unknown);
+    unsigned mask = 0;
+    for (const auto &field : value.items) {
+        const auto text = label(field, path);
+        const auto it = std::find(taxComponentNames.begin(), taxComponentNames.end(), text);
+        if (it == taxComponentNames.end())
+            bad(path, "Unknown tax component.", TariffProblemKind::Unknown);
+        const auto bit = 1u << (it - taxComponentNames.begin());
+        if (mask & bit) bad(path, "Tax components must be distinct.", TariffProblemKind::DuplicateField);
+        mask |= bit;
+    }
+    return mask;
+}
+
+std::vector<TariffTaxPeriod> decodeTaxPeriods(const JsonValue &value, int64_t confirmed, size_t &total) {
+    const std::string path = "plan.tax_periods";
+    boundedArray(value, path, maxTaxPeriods, total);
+    if (value.items.empty())
+        bad(path, "Enter at least one tax period.", TariffProblemKind::Unknown);
+    std::vector<TariffTaxPeriod> periods;
+    for (const auto &row : value.items) {
+        const auto at = path + "[" + std::to_string(periods.size()) + "]";
+        keys(row, at, {"begin_utc_ms", "end_utc_ms", "published_utc_ms", "rules"});
+        TariffTaxPeriod period;
+        period.beginUtcMs = integer(*row.find("begin_utc_ms"), at + ".begin_utc_ms");
+        period.endUtcMs = integer(*row.find("end_utc_ms"), at + ".end_utc_ms");
+        period.publishedUtcMs = integer(*row.find("published_utc_ms"), at + ".published_utc_ms");
+        if (period.publishedUtcMs > confirmed)
+            bad(at + ".published_utc_ms", "Publication cannot be after local confirmation.", TariffProblemKind::FuturePublication);
+        const auto &rules = *row.find("rules");
+        boundedArray(rules, at + ".rules", maxTaxRules, total);
+        for (const auto &entry : rules.items) {
+            const auto field = at + ".rules[" + std::to_string(period.rules.size()) + "]";
+            const auto *kindField = entry.find("kind");
+            if (!kindField) bad(field, "Choose a tax kind.", TariffProblemKind::MissingFields);
+            const auto kind = choice(*kindField, field + ".kind", {"imported_kwh", "billed_kwh", "fraction"});
+            OrderedTaxRule rule;
+            rule.kind = kind == "fraction" ? TaxKind::Fraction : kind == "imported_kwh" ? TaxKind::ImportedKwh : TaxKind::BilledKwh;
+            if (rule.kind == TaxKind::Fraction) {
+                keys(entry, field, {"key", "kind", "rate", "components", "included_in", "prior_taxes"});
+                rule.taxable = decodeTaxComponents(*entry.find("components"), field + ".components");
+                rule.included = decodeTaxComponents(*entry.find("included_in"), field + ".included_in");
+                const auto &prior = *entry.find("prior_taxes");
+                if (!prior.isArray() || prior.items.size() > period.rules.size())
+                    bad(field + ".prior_taxes", "Select distinct earlier added taxes.", TariffProblemKind::Unknown);
+                for (const auto &name : prior.items) {
+                    const auto key = label(name, field + ".prior_taxes");
+                    const auto found = std::find_if(period.rules.begin(), period.rules.end(),
+                        [&](const auto &previous) { return previous.key == key && previous.addsCharge(); });
+                    if (found == period.rules.end())
+                        bad(field + ".prior_taxes", "Use earlier tax keys that add a separate charge.", TariffProblemKind::Unknown);
+                    rule.priorTaxes.push_back(static_cast<size_t>(found - period.rules.begin()));
+                }
+            } else {
+                keys(entry, field, {"key", "kind", "rate", "included"});
+                const auto &included = *entry.find("included");
+                if (!included.isBool()) bad(field + ".included", "Declare whether the unit charge is included in energy.", TariffProblemKind::Unknown);
+                if (included.boolean) rule.included = taxComponentBit(TaxComponent::Energy);
+            }
+            rule.key = label(*entry.find("key"), field + ".key");
+            rule.rate = decimal(*entry.find("rate"), field + ".rate");
+            period.rules.push_back(std::move(rule));
+        }
+        periods.push_back(std::move(period));
+    }
+    return periods;
+}
+
+BillTaxOpening decodeTaxOpening(const JsonValue &value, const ExactDecimal &denominator) {
+    const std::string path = "opening.tax_bases";
+    keys(value, path, {"energy", "daily_fee", "cycle_fee", "demand", "billed_kwh"});
+    BillTaxOpening opening;
+    for (size_t i = 0; i < opening.components.size(); ++i) {
+        const auto *name = taxComponentNames[i];
+        const auto at = child(path, name);
+        if (!decimal(*value.find(name), at).multiply(denominator, &opening.components[i].numerator))
+            bad(at, "Arithmetic capacity exceeded.", TariffProblemKind::ArithmeticCapacity);
+    }
+    const auto quantity = electricityKwh(decimal(*value.find("billed_kwh"), path + ".billed_kwh"));
+    if (!quantity) bad(path + ".billed_kwh", "Use a nonnegative billed quantity.", TariffProblemKind::OpeningQuantity);
+    opening.billedKwh = *quantity;
+    return opening;
+}
+
 bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const TariffPlan &plan){
     if(plan.demandCharge&&plan.demandCharge->ratchet){
         auto &history=opening.demandHistory;
@@ -374,6 +460,7 @@ bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const Tar
     if(opening.peakDemand)opening.peakDemand=ElectricityAmount{};
     if(opening.exports)opening.exports=BillExportOpening{};
     if(opening.restrictedCredit)opening.restrictedCredit->accruedImportSubtotal={};
+    if(opening.tax)opening.tax=BillTaxOpening{};
     return true;
 }
 void changes(const JsonValue &a,const JsonValue &b,const std::string &path,std::vector<TariffDeclarationChange> &out){
@@ -408,6 +495,9 @@ std::string tariffJson(const JsonValue &v){
     return "null";
 }
 JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier,bool apparentDemand){
+    if(name=="tax_periods")return literal(R"({"begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"rules":[]})");
+    if(name=="rules")return literal(R"({"key":"","kind":"fraction","rate":"","components":[],"included_in":[],"prior_taxes":[]})");
+    if(name=="components"||name=="included_in"||name=="prior_taxes")return literal("\"\"");
     if(name=="revisions")return literal(R"({"key":"","begin_utc_ms":0,"end_utc_ms":0,"published_utc_ms":0,"time_mode":"constant","base_rate_per_kwh":"","charge_per_civil_day":"","calendar":[],"dynamic":[],"bands":[]})");
     if(name=="calendar"||name=="dynamic"){
         auto row=literal(name=="calendar"?
@@ -598,13 +688,16 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         const auto &plan=*root.find("plan");
         const auto *exportRule=plan.find("export_payment");
-        const bool scheduledExport=version==14;
-        if((version==12||scheduledExport)!=static_cast<bool>(exportRule))
-            bad("schema_version","Export payment requires version 12 or 14.",TariffProblemKind::SchemaVersion);
+        const auto *taxPeriods=plan.find("tax_periods");
+        if((version==15)!=static_cast<bool>(taxPeriods))
+            bad("schema_version","Ordered tax periods require version 15.",TariffProblemKind::SchemaVersion);
+        const bool scheduledExport=version==14||(version==15&&exportRule&&exportRule->find("dynamic"));
+        if(version!=15&&((version==12||version==14)!=static_cast<bool>(exportRule)))
+            bad("schema_version","Export payment requires version 12, 14 or 15.",TariffProblemKind::SchemaVersion);
         if(version<12&&(version>=9)!=static_cast<bool>(demand))
             bad("schema_version","Demand charge requires version 9.",TariffProblemKind::SchemaVersion);
         const auto *ratchet=demand?demand->find("ratchet"):nullptr;
-        const bool apparent=version==11;
+        const bool apparent=version==11||(version==15&&demand&&demand->find("power_factor_va_places"));
         if(version<11&&(version==10)!=static_cast<bool>(ratchet))
             bad("schema_version","Historical kW demand requires version 10.",TariffProblemKind::SchemaVersion);
         const char *openingPeak=apparent?"peak_demand_kva":"peak_demand_kw";
@@ -628,8 +721,9 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(demand)p.demandCharge=decodeDemandCharge(*demand,confirmedMs,apparent);
         p.restrictedCreditAtClose=restrictedCredit!=nullptr;
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"},
-             exportRule?Fields{"export_payment"}:Fields{});
+             exportRule?Fields{"export_payment"}:Fields{},taxPeriods?Fields{"tax_periods"}:Fields{});
         size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0;
+        if(taxPeriods)p.taxPeriods=decodeTaxPeriods(*taxPeriods,confirmedMs,total);
         if(scheduledExport){
             const std::string path="plan.export_payment.dynamic";
             keys(*exportRule,"plan.export_payment",{"dynamic"});
@@ -734,7 +828,8 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
              exportRule?(ratchet?Fields{openingPeak,"demand_history","exported_kwh","accrued_export_payment"}:
                                    demand?Fields{openingPeak,"exported_kwh","accrued_export_payment"}:
                                           Fields{"exported_kwh","accrued_export_payment"}):
-                        (ratchet?Fields{openingPeak,"demand_history"}:demand?Fields{openingPeak}:Fields{}));
+                        (ratchet?Fields{openingPeak,"demand_history"}:demand?Fields{openingPeak}:Fields{}),
+             taxPeriods?Fields{"tax_bases"}:Fields{});
         choice(*opening.find("basis"),"opening.basis",{"whole_meter_import"});choice(*opening.find("origin"),"opening.origin",{"declared_forecast"});
         s.declared=true;s.planKey=p.key;s.evidence={PowerBasis::WholeMeterImport,PowerOrigin::DeclaredForecast,label(*opening.find("scope"),"opening.scope"),label(*opening.find("adapter"),"opening.adapter")};
         d.openingKey=label(*opening.find("key"),"opening.key");
@@ -761,6 +856,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         auto quantity=electricityKwh(decimal(*opening.find("imported_kwh"),"opening.imported_kwh"));if(!quantity)bad("opening.imported_kwh","Nonnegative whole-meter quantity required.",TariffProblemKind::OpeningQuantity);s.importedKwh=*quantity;
         ExactDecimal denominator;ExactDecimal::parse("3600000000",&denominator);
         if(!decimal(*opening.find("accrued_subtotal"),"opening.accrued_subtotal").multiply(denominator,&s.accruedSubtotal.numerator))bad("opening.accrued_subtotal","Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+        if(taxPeriods)s.tax=decodeTaxOpening(*opening.find("tax_bases"),denominator);
         if(exportRule){
             constexpr char path[]="opening.exported_kwh";
             auto exported=electricityKwh(decimal(*opening.find("exported_kwh"),path));
