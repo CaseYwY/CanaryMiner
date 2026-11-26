@@ -383,15 +383,19 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
 
 }  // namespace
 
+std::string market_detail::publicHourCoverage(uint64_t end,uint64_t cutoff,const HourSample &pearl,const HourSample &fx) {
+    std::string details="UTC seconds ["+std::to_string(end-marketHourSeconds)+", "+std::to_string(end)+
+        "); window ended "+std::to_string(cutoff-end)+" s ago\n";
+    appendPublicCoverage(details,"MEXC Pearl mainnet PRL/USDT",pearl,cutoff);
+    appendPublicCoverage(details,"Coinbase USDT/USD",fx,cutoff);
+    return details;
+}
+
 bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &fx,
                                     std::string &report) {
-    const auto start = end - marketHourSeconds;
-    const auto window = calculateMarketHour(start, end, pearl.minutes, fx.minutes);
+    const auto window = calculateMarketHour(end-marketHourSeconds,end,pearl.minutes,fx.minutes);
     report = "One public candle sample; candle finality is unverified.\n";
-    report += "UTC seconds [" + std::to_string(start) + ", " + std::to_string(end) + "); window ended " +
-        std::to_string(cutoff - end) + " s ago\n";
-    appendPublicCoverage(report, "MEXC Pearl mainnet PRL/USDT", pearl, cutoff);
-    appendPublicCoverage(report, "Coinbase USDT/USD", fx, cutoff);
+    report += publicHourCoverage(end,cutoff,pearl,fx);
     report += "Mean USDT per PRL (exact sum / minutes): ";
     report += window.tokenUsdt ? exactHourMean(*window.tokenUsdt) :
         window.status == MarketDataStatus::Arithmetic ? "N/A (exact arithmetic limit exceeded)" :

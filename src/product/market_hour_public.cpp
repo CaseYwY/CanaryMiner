@@ -99,8 +99,14 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
         if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
         if (saving) {
             using local_review_archive::ReviewSave;
-            if (!complete)
-                return hourError("could not save public review: complete aligned minute coverage and exact means required");
+            if (!complete) {
+                const auto details=publicHourCoverage(end,previous.second,pearl,fx);
+                if (!lifetime.permitted()) return ownershipUncertain();
+                if (marketSampleStopped(stop)) return hourError("sample cancelled",130);
+                hourError("could not save public review: complete aligned minute coverage and exact means required");
+                std::fputs(details.c_str(),stderr);
+                return 3;
+            }
             report += publicHourCaptureTime(previous.second);
             const auto state = savePublicHourReview(options.archiveName, original, report, [&] {
                 return marketSampleStopped(stop) || !lifetime.permitted();

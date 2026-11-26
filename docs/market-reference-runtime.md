@@ -121,6 +121,40 @@ Source-use and capability approval, native helper deployment/trust/auxiliary egr
 sources, archives, actual credit/reward collection, economic/forecast source wiring and production/physical qualification
 remain unfinished. P-06 and the affected requirements remain partial.
 
+### Review saved ticker payloads
+
+Use `canary-miner market-tickers --file FILE` to review a local document on either
+build profile. Use a regular JSON file of at most 64 KiB in a trusted local directory.
+Each supplied source
+contains its declared observation UTC second and the original JSON response encoded
+as a string. Supply either source or both. The cutoff must be at or before the local
+clock, and each observation must be at or before the cutoff.
+
+```json
+{
+  "schema_version": 1,
+  "as_of_utc": 1760000060,
+  "gate": {
+    "observed_utc": 1760000058,
+    "response_json": "[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.5\"}]"
+  },
+  "kraken": {
+    "observed_utc": 1760000060,
+    "response_json": "{\"error\":[],\"result\":{\"USDTZUSD\":{\"c\":[\"0.98\",\"1\"]}}}"
+  }
+}
+```
+
+The command uses the provider price parsers. A source qualifies for this historical
+calculation if its declared observation is within 120 seconds of the cutoff. The
+USD value is the exact product of the two eligible last prices when the observations
+are at most 30 seconds apart. The same file produces the same report at that cutoff.
+Exit code 0 means the pair produced a USD reference, 3 means it was unavailable
+or the file failed validation, and 130 means the review was cancelled. The output
+identifies the figures as declared and historical. The saved file supplies no
+authenticated source, trade-event time, credentials or permission to activate
+Dashboard or economic mode.
+
 ### Check a public hour without mining
 
 Run `canary-miner market-hour --allow-public-candles` from a public-HTTPS-enabled installation. The permission applies to this invocation. Use the approved helper installed beside the miner in a protected directory. The helper requests one minute series per fixed market, MEXC `PEARLUSDT` and Coinbase `USDT-USD`, for the same 60-minute window. The exclusive end is a UTC minute boundary at least five seconds before the initial local time. Each request has a 15-second budget and a 64 KiB response-body limit. The command makes no retries. [MEXC candle format](https://www.mexc.com/api-docs/spot-v3/market-data-endpoints/klinecandlestick-data) · [Coinbase candle format](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product-candles)
@@ -139,7 +173,11 @@ canary-miner market-hour --open-review capture.cmh
 ```
 
 A save requires all 60 aligned minutes from both providers and both exact means. A failed or incomplete sample
-returns an error and publishes no review. The version 2 archive holds both original response bodies byte for byte,
+returns an error and publishes no review. If a sample finishes with incomplete coverage, stderr shows
+the UTC window and both provider outcomes from that attempt. Stdout is reserved for a saved report.
+A source marked `non-public destination refused` reached the address check before HTTPS.
+Check the DNS response for that provider. Benchmark, private and other non-public
+ranges remain refused. The version 2 archive holds both original response bodies byte for byte,
 the selected window, command start and per-request times, the calculated report, and a SHA-256 checksum.
 The save preserves any existing archive or temporary sibling. If the command reports uncertain publication or cleanup,
 check the archive and its temporary sibling. Reopen any published archive to verify it.

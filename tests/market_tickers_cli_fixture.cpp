@@ -82,6 +82,10 @@ int main(int argc, char **argv) {
         if (!pearl && mode == "malformed") response.body = R"({"private-sentinel":"untrusted"})";
         if (!pearl && mode == "future") response.observedUtc += 3600;
         if (!pearl && mode == "stale") response.observedUtc -= 120;
+        if (!pearl && mode == "blocked") {
+            response = {};
+            response.status = om::PublicHttpsStatus::DestinationBlocked;
+        }
         if (!pearl && mode == "limited") {
             response = {};
             response.status = om::PublicHttpsStatus::HttpStatus;

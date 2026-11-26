@@ -125,6 +125,24 @@ int main() {
     auto wrongTime = response(pearlTicker); wrongTime.observedUtc = E;
     CHECK(parseMarketQuote(wrongTime, gt).status == MarketDataStatus::Timestamp);
     wrongTime.observedUtc = E + 11; CHECK(parseMarketQuote(wrongTime, gt).status == MarketDataStatus::Timestamp);
+    auto declaredGate=gt,declaredFx=kt;
+    for (auto *input:{&declaredGate,&declaredFx}) {
+        input->origin=MarketOrigin::DeclaredPayload;
+        input->requestStartedUtc=0;
+        input->receivedMonoMs=0;
+    }
+    const auto reviewedGate=parseMarketQuote(response(pearlTicker),declaredGate);
+    const auto reviewedFx=parseMarketQuote(response(fxTicker),declaredFx);
+    CHECK(reviewedGate.value && reviewedFx.value);
+    if (reviewedGate.value && reviewedFx.value) {
+        const auto reviewed=declaredMarketReference(&*reviewedGate.value,&*reviewedFx.value,E+130);
+        CHECK(reviewed.tokenUsd && reviewed.tokenUsd->text()=="2.45" && reviewed.tokenObservationAgeMs==120000);
+        CHECK(!declaredMarketReference(&*reviewedGate.value,&*reviewedFx.value,E+131).tokenUsd);
+        CHECK(!latestMarketReference(&*reviewedGate.value,&*reviewedFx.value,E+10,100000).tokenUsd);
+    }
+    CHECK(!declaredMarketReference(&*pq.value,&*fq.value,E+10).tokenUsd);
+    declaredGate.requestStartedUtc=E;
+    CHECK(parseMarketQuote(response(pearlTicker),declaredGate).status==MarketDataStatus::Timestamp);
     auto changed = *p.value; changed.minutes.push_back(changed.minutes.back());
     CHECK(!marketWindow(changed, nullptr, E - 3600, E).tokenUsdt);
     changed = *p.value; std::reverse(changed.minutes.begin(), changed.minutes.end());

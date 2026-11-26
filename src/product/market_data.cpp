@@ -46,10 +46,14 @@ MarketDataStatus envelope(const PublicJsonResponse &r, const MarketParseContext 
     if (r.status != PublicHttpsStatus::Ok || r.httpStatus != 200) return MarketDataStatus::Transport;
     std::string ignored;
     if (!publicFeedUrl(c.request, &ignored)) return MarketDataStatus::Identity;
-    if (!r.observedUtc || !c.requestStartedUtc || r.observedUtc < c.requestStartedUtc || r.observedUtc > 253402300799ULL ||
-        !c.receivedUtc || r.observedUtc > c.receivedUtc) return MarketDataStatus::Timestamp;
+    const bool declared=c.origin==MarketOrigin::DeclaredPayload;
+    if (!r.observedUtc || r.observedUtc>253402300799ULL || !c.receivedUtc || r.observedUtc>c.receivedUtc ||
+        (declared ? (c.requestStartedUtc || c.receivedMonoMs) :
+                    (!c.requestStartedUtc || r.observedUtc<c.requestStartedUtc)))
+        return MarketDataStatus::Timestamp;
     if (!c.generation) return MarketDataStatus::Identity;
-    if (c.origin != MarketOrigin::ProviderResponse && c.origin != MarketOrigin::SyntheticFixture) return MarketDataStatus::Schema;
+    if (!declared && c.origin!=MarketOrigin::ProviderResponse && c.origin!=MarketOrigin::SyntheticFixture)
+        return MarketDataStatus::Schema;
     if (!boundedPublicJson(r.body) || !parseJsonStrict(r.body, root, nullptr)) return MarketDataStatus::Schema;
     observation->series = (c.request.feed == PublicFeed::GatePearlTicker || c.request.feed == PublicFeed::GatePearlCandles) ?
         MarketSeries::GatePearlMainnetUsdtV1 : MarketSeries::KrakenUsdtUsdV1;
@@ -94,17 +98,22 @@ bool validSeries(const MarketCandles &s) {
     }
     return true;
 }
-MarketFreshness freshness(const MarketQuote *q, MarketSeries series, uint64_t utc, uint64_t mono, const MarketFreshnessPolicy &policy) {
+MarketFreshness freshness(const MarketQuote *q,MarketSeries series,uint64_t utc,
+                          std::optional<uint64_t> mono,const MarketFreshnessPolicy &policy) {
     if (!q) return MarketFreshness::Missing;
     if (q->observation.series != series) return MarketFreshness::WrongIdentity;
     const auto &o = q->observation;
-    if (!o.observedUtc || !o.requestStartedUtc || !o.generation || o.requestStartedUtc > o.observedUtc || o.observedUtc > utc || mono < o.receivedMonoMs || utc > 253402300799ULL)
+    const bool allowedOrigin=mono ? (o.origin==MarketOrigin::ProviderResponse || o.origin==MarketOrigin::SyntheticFixture)
+                                  : o.origin==MarketOrigin::DeclaredPayload;
+    if (!o.observedUtc || !o.generation || o.observedUtc>utc || utc>253402300799ULL ||
+        (mono && (!o.requestStartedUtc || o.requestStartedUtc>o.observedUtc || *mono<o.receivedMonoMs)) ||
+        (!mono && (o.requestStartedUtc || o.receivedMonoMs)))
         return MarketFreshness::InvalidClock;
-    // Both clocks constrain age. A wall rollback cannot renew a cached quote by resetting its duration.
-    if (mono - o.receivedMonoMs > policy.maxObservationAgeMs || utc - o.observedUtc > policy.maxObservationAgeMs / 1000)
+    // Live checks require both clocks. A declared replay uses only the stated UTC times.
+    if ((mono && *mono-o.receivedMonoMs>policy.maxObservationAgeMs) || utc-o.observedUtc>policy.maxObservationAgeMs/1000)
         return MarketFreshness::Stale;
-    if (q->last.negative() || q->last.zero() || q->last.digits() > 38 || q->last.scale() > 18 ||
-        (o.origin != MarketOrigin::ProviderResponse && o.origin != MarketOrigin::SyntheticFixture)) return MarketFreshness::WrongIdentity;
+    if (!allowedOrigin || q->last.negative() || q->last.zero() || q->last.digits()>38 || q->last.scale()>18)
+        return MarketFreshness::WrongIdentity;
     if (policy.requireEventTime && !q->sourceEventUtc) return MarketFreshness::EventTimeUnavailable;
     // No timestamp-bearing adapter is qualified yet. Callers cannot turn an injected event time into policy eligibility.
     if (q->sourceEventUtc) return MarketFreshness::WrongIdentity;
@@ -212,12 +221,20 @@ MarketWindow marketWindow(const MarketCandles &pearl, const MarketCandles *fx, u
     return market_detail::accumulateMinuteWindow(result, pearl.minutes, fxEligible ? &fx->minutes : nullptr);
 }
 
-MarketLatest latestMarketReference(const MarketQuote *pearl, const MarketQuote *fx, uint64_t utc, uint64_t mono, MarketFreshnessPolicy policy) {
+static MarketLatest referenceAt(const MarketQuote *pearl,const MarketQuote *fx,uint64_t utc,
+                                std::optional<uint64_t> mono,const MarketFreshnessPolicy &policy) {
     MarketLatest result;
     result.tokenStatus = freshness(pearl, MarketSeries::GatePearlMainnetUsdtV1, utc, mono, policy);
     const auto fxStatus = freshness(fx, MarketSeries::KrakenUsdtUsdV1, utc, mono, policy);
-    if (pearl && mono >= pearl->observation.receivedMonoMs) result.tokenObservationAgeMs = mono - pearl->observation.receivedMonoMs;
-    if (fx && mono >= fx->observation.receivedMonoMs) result.fxObservationAgeMs = mono - fx->observation.receivedMonoMs;
+    const auto age=[&](const MarketQuote *quote)->std::optional<uint64_t> {
+        if (!quote) return {};
+        const auto &o=quote->observation;
+        if (mono) return *mono>=o.receivedMonoMs ? std::optional<uint64_t>(*mono-o.receivedMonoMs) : std::nullopt;
+        if (o.observedUtc && utc>=o.observedUtc && utc<=253402300799ULL) return (utc-o.observedUtc)*1000;
+        return {};
+    };
+    result.tokenObservationAgeMs=age(pearl);
+    result.fxObservationAgeMs=age(fx);
     result.usdStatus = result.tokenStatus != MarketFreshness::Available ? result.tokenStatus : fxStatus;
     if (result.tokenStatus == MarketFreshness::Available) result.tokenUsdt = pearl->last;
     if (fxStatus == MarketFreshness::Available) result.usdtUsd = fx->last;
@@ -226,9 +243,17 @@ MarketLatest latestMarketReference(const MarketQuote *pearl, const MarketQuote *
     const auto gap = p.receivedMonoMs > f.receivedMonoMs ? p.receivedMonoMs - f.receivedMonoMs : f.receivedMonoMs - p.receivedMonoMs;
     const auto utcGap = p.observedUtc > f.observedUtc ? p.observedUtc - f.observedUtc : f.observedUtc - p.observedUtc;
     if (p.generation != f.generation || p.origin != f.origin) { result.usdStatus = MarketFreshness::WrongIdentity; return result; }
-    if (gap > policy.maxCrossFeedSkewMs || utcGap > policy.maxCrossFeedSkewMs / 1000) { result.usdStatus = MarketFreshness::Skew; return result; }
+    if ((mono && gap>policy.maxCrossFeedSkewMs) || utcGap>policy.maxCrossFeedSkewMs/1000) { result.usdStatus = MarketFreshness::Skew; return result; }
     ExactDecimal product;
     if (!pearl->last.multiply(fx->last, &product)) { result.usdStatus = MarketFreshness::WrongIdentity; return result; }
     result.tokenUsd = product; return result;
+}
+
+MarketLatest latestMarketReference(const MarketQuote *pearl,const MarketQuote *fx,uint64_t utc,
+                                  uint64_t mono,MarketFreshnessPolicy policy) {
+    return referenceAt(pearl,fx,utc,mono,policy);
+}
+MarketLatest declaredMarketReference(const MarketQuote *pearl,const MarketQuote *fx,uint64_t asOfUtc) {
+    return referenceAt(pearl,fx,asOfUtc,std::nullopt,declaredTickerV1Policy);
 }
 }  // namespace om
