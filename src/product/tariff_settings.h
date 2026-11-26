@@ -158,6 +158,7 @@ class TariffSettingsPanel {
         else if((key=='c'||key=='C')&&onComponentToggle())toggleComponentMultiplier();
         else if((key=='d'||key=='D')&&onDemandToggle())toggleDemandCharge();
         else if((key=='r'||key=='R')&&onRatchetToggle())toggleRatchet();
+        else if((key=='e'||key=='E')&&path()=="plan.export_payment")toggleExportSchedule();
         else if((key=='e'||key=='E')&&onExportToggle())toggleExportPayment();
         else if((key=='u'||key=='U')&&onRestrictedCreditToggle())toggleRestrictedCredit();
         else if((key=='k'||key=='K')&&onRatchetToggle())toggleDemandUnit();
@@ -209,6 +210,7 @@ class TariffSettingsPanel {
             if(onComponentToggle())shortcuts+="[C] Component multiplier ";
             if(onDemandToggle())shortcuts+="[D] Demand charge ";
             if(onExportToggle())shortcuts+="[E] Export payment ";
+            if(path()=="plan.export_payment")shortcuts+="[E] Fixed/scheduled export ";
             if(onRestrictedCreditToggle())shortcuts+="[U] Restricted credit ";
             if(onRatchetToggle())shortcuts+="[R] Historical demand floor [K] kW/kVA ";
             if(recurring())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
@@ -286,10 +288,11 @@ class TariffSettingsPanel {
         return rule&&rule->find("power_factor_va_places");
     }
     const char *openingPeakField()const{return apparentDemand()?"peak_demand_kva":"peak_demand_kw";}
-    static bool exports(const JsonValue &value){
+    static const JsonValue *exportRule(const JsonValue &value){
         const auto *plan=value.find("plan");
-        return plan&&plan->find("export_payment");
+        return plan?plan->find("export_payment"):nullptr;
     }
+    static bool exports(const JsonValue &value){return exportRule(value)!=nullptr;}
     bool onExportToggle()const{
         return (route.empty()&&selectedName()=="plan")||(path()=="plan"&&selectedName()=="export_payment");
     }
@@ -342,7 +345,8 @@ class TariffSettingsPanel {
         if(!schema||!opening||!plan||!policy)return;
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
-        schema->text=restrictedCredit(draft)?"13":exports(draft)?"12":apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        const auto *payment=exportRule(draft);
+        schema->text=restrictedCredit(draft)?"13":payment?(payment->find("dynamic")?"14":"12"):apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -537,6 +541,18 @@ class TariffSettingsPanel {
             message="Enter the export rate, opening export quantity and payment already earned.";
         }
         refreshClockContract();
+    }
+    void toggleExportSchedule(){
+        auto *payment=node();
+        const bool wasScheduled=payment->find("dynamic")!=nullptr;
+        JsonValue replacement;
+        parseJsonStrict(wasScheduled?R"({"rate_per_kwh":"","published_utc_ms":0})":R"({"dynamic":[]})",
+                        &replacement,nullptr);
+        *payment=std::move(replacement);
+        field=0;
+        refreshClockContract();
+        message=wasScheduled?"Enter a new fixed export rate and publication time.":
+            "Add export rate rows in UTC order and enter their publication times.";
     }
     void toggleDemandUnit(){
         if(restrictedCredit(draft)){
@@ -768,7 +784,9 @@ class TariffSettingsPanel {
         if(s=="amount"&&path().rfind("restricted_credit.lots[",0)==0)
             return "Enter the positive unused balance at the opening, in the plan currency.";
         if(s=="exported_kwh")return "Enter nonnegative exported energy since the cycle start. Enter zero at the start.";
-        if(s=="accrued_export_payment")return "Enter export payment already earned, in the plan currency. Enter zero without prior exports.";
+        if(s=="accrued_export_payment")return "Enter the accrued export payment in the plan currency. Use a negative amount for a net export charge under scheduled rates. Enter zero without prior exports.";
+        if(s=="rate_per_kwh"&&path().rfind("plan.export_payment.dynamic[",0)==0)
+            return "Enter the amount per exported kWh in the plan currency. A negative rate charges for exports.";
         if(path()=="plan.export_payment"&&s=="rate_per_kwh")return "Enter the separate payment per exported kWh in the plan currency.";
         if(s=="rate_per_kw")return "Enter the price per kW of the billable demand for this cycle.";
         if(s=="rate_per_kva")return "Enter the price per kVA of the billable demand for this cycle.";
@@ -839,7 +857,8 @@ class TariffSettingsPanel {
             "Billable demand is the larger of this month's actual peak and the fraction of the prior maximum.");
         if(restrictedCredit(draft))review.insert(review.begin()+4,
             "Restricted credit offsets import energy at closing. Balances expire at their absolute UTC instants.");
-        if(exports(draft))review.insert(review.begin()+4,
+        if(const auto *payment=exportRule(draft))review.insert(review.begin()+4,payment->find("dynamic")?
+            "Export uses declared UTC rates. A negative rate charges for exports. Supply charges use imported energy.":
             "Export is paid separately. The declared rate applies after the opening. Supply charges use imported energy.");
         if(apparentDemand())review.insert(review.begin()+4,
             "Demand uses kVA and requires whole-meter apparent-power evidence. Energy uses active import in kWh.");

@@ -6,7 +6,7 @@
 namespace om {
 namespace {
 constexpr int64_t lastUtcMs = 253402300799999LL, minuteMs = 60000, dayMs = 1440 * minuteMs;
-constexpr size_t maxTrace = 100000, maxCuts = 200000;
+constexpr size_t maxTrace = 100000, maxCuts = 200000, maxExportRates = 256;
 bool instant(int64_t t) { return t >= 0 && t <= lastUtcMs; }
 ExactDecimal number(int64_t n) { ExactDecimal value; ExactDecimal::parse(std::to_string(n),&value); return value; }
 bool accumulate(ExactDecimal &a, const ExactDecimal &b) { return a.add(b,&a); }
@@ -36,8 +36,10 @@ ElectricityStatus validateTrace(const Trace &trace, int64_t begin, int64_t end) 
     return cursor == end ? ElectricityStatus::Ok : ElectricityStatus::Unavailable;
 }
 template<class Trace>
-ElectricityStatus sumExport(const Trace &trace, ElectricityAmount &amount,
-                            const std::atomic<bool> *cancel, const std::function<bool()> &stop) {
+ElectricityStatus priceExport(const ExportPaymentRule &rule, const Trace &trace, int64_t decision,
+                              ElectricityAmount &amount, ElectricityAmount &payment,
+                              const std::atomic<bool> *cancel, const std::function<bool()> &stop) {
+    size_t rateIndex=0;
     for (const auto &interval : trace.intervals) {
         if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
             return ElectricityStatus::Unavailable;
@@ -55,7 +57,36 @@ ElectricityStatus sumExport(const Trace &trace, ElectricityAmount &amount,
                 return ElectricityStatus::Capacity;
         }
         if (!accumulate(amount.numerator,energy)) return ElectricityStatus::Capacity;
+        if (rule.dynamic.empty()) continue;
+
+        const ExactDecimal *registerRate=nullptr;
+        bool differentRates=false;
+        for (auto cursor=interval.beginUtcMs;cursor<interval.endUtcMs;) {
+            while (rateIndex<rule.dynamic.size() && rule.dynamic[rateIndex].endUtcMs<=cursor) ++rateIndex;
+            if (rateIndex==rule.dynamic.size() || rule.dynamic[rateIndex].beginUtcMs>cursor)
+                return ElectricityStatus::MissingPrice;
+            const auto &rate=rule.dynamic[rateIndex];
+            if (rate.publishedUtcMs>decision) return ElectricityStatus::NotYetKnown;
+            const auto next=std::min(interval.endUtcMs,rate.endUtcMs);
+            if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+                if (!registerRate) registerRate=&rate.ratePerKwh;
+                differentRates=differentRates || registerRate->compare(rate.ratePerKwh)!=0;
+            } else {
+                ExactDecimal pricedEnergy;
+                if (!interval.exportWatts->multiply(number(next-cursor),&pricedEnergy) ||
+                    !productAdd(payment.numerator,pricedEnergy,rate.ratePerKwh))
+                    return ElectricityStatus::Capacity;
+            }
+            cursor=next;
+        }
+        if constexpr (std::is_same_v<Trace,MeterImportTrace>) {
+            // The energy register has no information about how much was exported on either side.
+            if (differentRates && !energy.zero()) return ElectricityStatus::ExportRateBoundary;
+            if (!productAdd(payment.numerator,energy,*registerRate)) return ElectricityStatus::Capacity;
+        }
     }
+    if (rule.dynamic.empty() && !amount.numerator.multiply(rule.ratePerKwh,&payment.numerator))
+        return ElectricityStatus::Capacity;
     return ElectricityStatus::Ok;
 }
 constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
@@ -217,11 +248,24 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
         const auto &exportRule=*p.exportPayment;
         const auto &exported=s.exports->exportedKwh.numerator;
         const auto &earned=s.exports->accruedPayment.numerator;
-        if (!instant(exportRule.publishedUtcMs) || exportRule.ratePerKwh.negative() || exported.negative() ||
-            earned.negative() || (exported.zero() && !earned.zero()) ||
+        if (exported.negative() || (exported.zero() && !earned.zero()) ||
             (s.throughUtcMs==s.cycleBeginUtcMs && !exported.zero()))
             return ElectricityStatus::Invalid;
-        if (exportRule.publishedUtcMs>decision) return ElectricityStatus::NotYetKnown;
+        if (exportRule.dynamic.empty()) {
+            if (!instant(exportRule.publishedUtcMs) || exportRule.ratePerKwh.negative() || earned.negative())
+                return ElectricityStatus::Invalid;
+            if (exportRule.publishedUtcMs>decision) return ElectricityStatus::NotYetKnown;
+        } else {
+            if (exportRule.publishedUtcMs!=0 || !exportRule.ratePerKwh.zero()) return ElectricityStatus::Invalid;
+            if (exportRule.dynamic.size()>maxExportRates) return ElectricityStatus::Capacity;
+            int64_t previousEnd=0;
+            for (const auto &rate:exportRule.dynamic) {
+                if (!instant(rate.beginUtcMs) || !instant(rate.endUtcMs) || !instant(rate.publishedUtcMs) ||
+                    rate.beginUtcMs>=rate.endUtcMs) return ElectricityStatus::Invalid;
+                if (rate.beginUtcMs<previousEnd) return ElectricityStatus::Conflict;
+                previousEnd=rate.endUtcMs;
+            }
+        }
     }
     const auto demandStatus=validateDemand(p,s,end,decision);
     if (demandStatus!=ElectricityStatus::Ok) return demandStatus;
@@ -392,6 +436,7 @@ const char *electricityStatusName(ElectricityStatus s) {
         case ElectricityStatus::DemandHistoryNotYetKnown: return "demand history extends beyond the decision instant";
         case ElectricityStatus::DemandApparentEvidence: return "apparent demand needs whole-meter VA, an allowed power factor, or paired kWh/kVAh readings";
         case ElectricityStatus::ExportEvidenceMissing: return "export payment needs signed whole-meter power or both cumulative energy registers";
+        case ElectricityStatus::ExportRateBoundary: return "export register needs a reading at an export-rate boundary";
     }
     return "unknown electricity status";
 }
@@ -538,10 +583,9 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     std::optional<ElectricityAmount> exportPayment;
     if (p.exportPayment) {
         ElectricityAmount newExport;
-        result.status=sumExport(trace,newExport,cancel,stop);
+        result.status=priceExport(*p.exportPayment,trace,decision,newExport,exportPayment.emplace(),cancel,stop);
         if (result.status!=ElectricityStatus::Ok) return result;
-        if (!p.exportPayment->payment(newExport,exportPayment.emplace()) ||
-            !accumulate(state.exports->exportedKwh.numerator,newExport.numerator) ||
+        if (!accumulate(state.exports->exportedKwh.numerator,newExport.numerator) ||
             !accumulate(state.exports->accruedPayment.numerator,exportPayment->numerator)) {
             result.status=ElectricityStatus::Capacity;
             return result;

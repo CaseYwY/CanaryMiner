@@ -273,6 +273,16 @@ When changing the rate mid-cycle, carry forward the amount already earned and us
 plan and opening keys. A change in plan currency requires re-entering the earned
 payment in the new currency. The import quantity and accrued supply subtotal retain their meanings.
 
+To price exports by time, open the export rule and press **E** to switch it to a
+schedule. Enter one to 256 rows under `plan.export_payment.dynamic` in UTC
+order. Each row has `begin_utc_ms`, `end_utc_ms`, `published_utc_ms` and a
+signed decimal string `rate_per_kwh`. Version 14 uses the rate from the start
+instant up to the end instant. A negative rate charges for exporting. A net
+export charge already incurred goes in `accrued_export_payment` as a negative
+amount. The schedule must cover the reviewed period, including intervals with
+zero exports. Each rate must have been published by the review cutoff and the
+local confirmation time. Gaps and overlaps stop the review.
+
 A local meter review requires explicit export evidence even when export is zero.
 
 - Input version 6 uses `intervals` with `begin_utc_ms`, `end_utc_ms` and
@@ -285,6 +295,11 @@ A local meter review requires explicit export evidence even when export is zero.
   strings. Each can increase during the same interval. Take paired readings at
   billing-cycle boundaries.
 
+With scheduled rates, the review splits constant power at each rate boundary.
+For cumulative readings, supply a paired reading at any crossed rate change
+when the interval contains exports. Equal rates and intervals with zero export
+can be priced from a single register difference.
+
 The report gives supply charges, export payment and net electricity cost. Active imports
 alone count toward tiers, demand windows and supply floors. The separate payment does
 not enter supply multipliers or supply-invoice matching. A negative net cost means the
@@ -296,7 +311,7 @@ one hour, moving from -2,000 W to -1,000 W loses 1 kWh of export. At 1 USD/kWh t
 costs 1 USD. Moving from -1,000 W to +1,000 W loses the same payment and adds 1 kWh of
 import. At 3 USD/kWh for import, the difference is 4 USD. These examples cover T28 and T29.
 
-This rule models a separate payment using a fixed price. [Restricted opening credits](#apply-restricted-credit-at-cycle-close) use their own declaration. Time-varying export pricing, supplier-specific settlement and the combination with apparent-power demand require additional rules.
+[Restricted opening credits](#apply-restricted-credit-at-cycle-close) use their own declaration. Supplier-specific settlement and the combination with apparent-power demand require additional rules.
 [Example of provider-specific export credits](https://www.pge.com/en/clean-energy/solar/getting-started-with-solar/solar-billing-plan.html)
 
 ### Apply restricted credit at cycle close

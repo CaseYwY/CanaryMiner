@@ -522,6 +522,25 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['plan']['export_payment']['rate_per_kwh'] = '-1'
         self.assertTrue(validate(example, schema, schema))
 
+    def test_scheduled_export_payment_requires_v14_and_signed_rate_intervals(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 14
+        example['opening'].update(exported_kwh='1', accrued_export_payment='-1')
+        rate = {'begin_utc_ms': 0, 'end_utc_ms': 3600000, 'published_utc_ms': 0, 'rate_per_kwh': '-1'}
+        export = {'dynamic': [rate]}
+        example['plan']['export_payment'] = export
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 12}, schema, schema))
+        rate['multiplier'] = '1'
+        self.assertTrue(validate(example, schema, schema))
+        rate.pop('multiplier')
+        export['dynamic'] = []
+        self.assertTrue(validate(example, schema, schema))
+        example['plan']['export_payment'] = {'rate_per_kwh': '1', 'published_utc_ms': 0}
+        self.assertTrue(validate(example, schema, schema))
+        self.assertTrue(validate({**example, 'schema_version': 12}, schema, schema))
+
     def test_restricted_credit_requires_v13_and_a_strict_credit_record(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')

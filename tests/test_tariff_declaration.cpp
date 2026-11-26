@@ -596,6 +596,50 @@ void exportPayment(JsonValue draft,const std::filesystem::path &target) {
 
     panel.open(saved);
     enter(panel,"plan");
+    enter(panel,"export_payment");
+    CHECK(panel.render(120,25,ColorLevel::None).find("[E] Fixed/scheduled export")!=std::string::npos);
+    panel.key('e',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="14");
+    enter(panel,"dynamic");
+    const auto middle=T+1800000;
+    const auto addExportRate=[&](uint64_t from,uint64_t to,const char *rate){
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        enter(panel,"begin_utc_ms");type(panel,std::to_string(from));
+        enter(panel,"end_utc_ms");type(panel,std::to_string(to));
+        enter(panel,"published_utc_ms");type(panel,std::to_string(T));
+        enter(panel,"rate_per_kwh");type(panel,rate);
+        panel.key(27,{},T/1000);
+    };
+    addExportRate(T,middle,"-3");
+    addExportRate(middle,close,"1");
+    panel.key(27,{},T/1000);
+    panel.key(27,{},T/1000);
+    enter(panel,"key");type(panel,"new-export-schedule");
+    panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"key");type(panel,"new-export-opening");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,25,ColorLevel::None).find("Export uses declared UTC rates")!=std::string::npos);
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    JsonValue scheduled;
+    const bool scheduledSaved=store.load(&scheduled,&reason)&&scheduled.find("schema_version")->text=="14";
+    CHECK(scheduledSaved);
+    if(scheduledSaved){
+        TariffDeclaration parsed;
+        CHECK(decodeTariffDeclaration(scheduled,&parsed));
+        checkComparison(compareTariffCycles(parsed,{dec("-2000"),dec("-1000")},1,T),
+                        "2.000000","1.000000","-1.000000");
+    }
+    panel.open(panel.draft);
+    enter(panel,"plan");
+    enter(panel,"export_payment");
+    panel.key('e',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="12");
+    CHECK(panel.draft.find("opening")->find("accrued_export_payment")->text=="0");
+
+    panel.open(saved);
+    enter(panel,"plan");
     panel.key(27,{},T/1000);
     panel.key('e',{},T/1000);
     CHECK(panel.draft.find("schema_version")->text=="1");
