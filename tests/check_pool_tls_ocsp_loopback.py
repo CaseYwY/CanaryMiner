@@ -25,7 +25,7 @@ def certificate(now, name, issuer=None, *, must_staple=False, responder=False, i
     issuer_name = issuer[0].subject if issuer else subject
     cert = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer_name)
             .public_key(key.public_key()).serial_number(x509.random_serial_number())
-            .not_valid_before(now - timedelta(days=4)).not_valid_after(now + timedelta(days=3))
+            .not_valid_before(now - timedelta(days=14)).not_valid_after(now + timedelta(days=3))
             .add_extension(x509.BasicConstraints(ca=issuer is None or intermediate, path_length=None), critical=True))
     if issuer and not intermediate:
         purpose = ExtendedKeyUsageOID.OCSP_SIGNING if responder else ExtendedKeyUsageOID.SERVER_AUTH
@@ -40,7 +40,8 @@ def certificate(now, name, issuer=None, *, must_staple=False, responder=False, i
     return cert.sign(issuer[1] if issuer else key, hashes.SHA256()), key
 
 
-def staple(cert, issuer, this_update, next_update, *, state=ocsp.OCSPCertStatus.GOOD, signer=None, digest=None):
+def staple(cert, issuer, this_update, next_update, *, state=ocsp.OCSPCertStatus.GOOD,
+           signer=None, digest=None, extension=None):
     delegate = signer
     signer = signer or issuer
     revoked_at = this_update if state is ocsp.OCSPCertStatus.REVOKED else None
@@ -51,6 +52,8 @@ def staple(cert, issuer, this_update, next_update, *, state=ocsp.OCSPCertStatus.
                 .responder_id(ocsp.OCSPResponderEncoding.NAME, signer[0]))
     if delegate:
         response = response.certificates([delegate[0]])
+    if extension is not None:
+        response = response.add_extension(extension, critical=True)
     return response.sign(signer[1], hashes.SHA256()).public_bytes(serialization.Encoding.DER)
 
 
@@ -143,6 +146,8 @@ def main(args):
         ("required absent", must, None, False),
         ("malformed feature", malformed, staple(malformed[0], issuer, past, future), False),
         ("trailing basic response data", must, staple_with_trailing_basic_data(good), False),
+        ("unsupported critical response extension", must, staple(must[0], issuer, past, future,
+            extension=x509.UnrecognizedExtension(x509.ObjectIdentifier("1.3.6.1.4.1.32473.1"), b"\x05\x00")), False),
         ("try later", must, ocsp.OCSPResponseBuilder.build_unsuccessful(
             ocsp.OCSPResponseStatus.TRY_LATER).public_bytes(serialization.Encoding.DER), False),
         ("revoked", plain, staple(plain[0], issuer, past, future, state=ocsp.OCSPCertStatus.REVOKED), False),
@@ -154,6 +159,8 @@ def main(args):
         ("delegated good", must, staple(must[0], issuer, past, future, signer=signer, digest=hashes.SHA256()), True),
         ("expired", must, staple(must[0], issuer, past, now - timedelta(minutes=15)), False),
         ("future", must, staple(must[0], issuer, now + timedelta(minutes=15), future), False),
+        ("fresh with next", must, staple(must[0], issuer, now - timedelta(days=4), future), True),
+        ("stale with next", must, staple(must[0], issuer, now - timedelta(days=11), future), False),
         ("fresh without next", must, staple(must[0], issuer, past, None), True),
         ("stale without next", must, staple(must[0], issuer, now - timedelta(days=2), None), False),
     ]

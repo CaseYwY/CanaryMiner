@@ -25,10 +25,13 @@ Empty CA bytes select native OpenSSL default trust paths. Explicit bounded PEM b
 The OpenSSL pool worker requests one stapled OCSP response for the leaf. It
 matches the response to the leaf and issuer in the verified chain. It accepts
 a signature from that issuer or its directly authorized OCSP responder. The worker
-refuses duplicate matches, revoked or unknown status, and invalid or stale
-responses before making the connection available to Stratum. It accepts up to
-five minutes of clock skew. A response without a next-update time has a
-24-hour maximum age. [RFC 6960](https://www.rfc-editor.org/rfc/rfc6960) ·
+refuses duplicate matches, revoked or unknown status, unsupported critical
+extensions and invalid or stale responses before making the connection
+available to Stratum. It allows up to
+five minutes of clock skew for the validity window. The status observation is
+at most ten days old when a next-update time is present, or 24 hours when it
+is absent. [RFC 6960](https://www.rfc-editor.org/rfc/rfc6960) ·
+[CA/Browser Forum TLS baseline requirements](https://cabforum.org/working-groups/server/baseline-requirements/requirements/) ·
 [OpenSSL OCSP API](https://docs.openssl.org/3.5/man3/OCSP_resp_find_status/)
 
 If the leaf requires the `status_request` feature, the worker also refuses an

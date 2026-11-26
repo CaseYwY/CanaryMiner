@@ -17,6 +17,7 @@ namespace {
 using K=PearlTlsEngineStatus;using E=PearlTlsError;
 constexpr std::size_t bufferLimit=65536;
 constexpr long ocspClockSkewSeconds = 300;
+constexpr long ocspWithNextUpdateMaxAgeSeconds = 10 * 86400;
 constexpr long ocspWithoutNextUpdateMaxAgeSeconds = 86400;
 constexpr int maximumOcspEntries = 64;
 constexpr int maximumTlsFeatures = 64;
@@ -96,7 +97,9 @@ bool verifyOcspStaple(SSL *ssl, X509 *leaf, X509_STORE *trust) {
         OCSP_response_get1_basic(response.get()), OCSP_BASICRESP_free);
     if (!basic) return false;
     const int responses = OCSP_resp_count(basic.get());
-    if (responses < 1 || responses > maximumOcspEntries || !exactOcspEncoding(basic.get(), encoded, size)) return false;
+    if (responses < 1 || responses > maximumOcspEntries ||
+        OCSP_BASICRESP_get_ext_by_critical(basic.get(), 1, -1) >= 0 ||
+        !exactOcspEncoding(basic.get(), encoded, size)) return false;
     auto *chain = SSL_get0_verified_chain(ssl);
     auto *issuer = chain ? sk_X509_value(chain, 1) : nullptr;
     if (!issuer) return false;
@@ -116,7 +119,8 @@ bool verifyOcspStaple(SSL *ssl, X509 *leaf, X509_STORE *trust) {
         if (match) return false;
         match = entry;
     }
-    if (!match || OCSP_basic_verify(basic.get(), chain, trust, OCSP_NOEXPLICIT) != 1) return false;
+    if (!match || OCSP_SINGLERESP_get_ext_by_critical(match, 1, -1) >= 0 ||
+        OCSP_basic_verify(basic.get(), chain, trust, OCSP_NOEXPLICIT) != 1) return false;
 
     const auto *produced = OCSP_resp_get0_produced_at(basic.get());
     auto latest = std::time(nullptr);
@@ -127,7 +131,7 @@ bool verifyOcspStaple(SSL *ssl, X509 *leaf, X509_STORE *trust) {
     const int status = OCSP_single_get0_status(match, nullptr, nullptr, &thisUpdate, &nextUpdate);
     return status == V_OCSP_CERTSTATUS_GOOD && thisUpdate &&
         OCSP_check_validity(thisUpdate, nextUpdate, ocspClockSkewSeconds,
-                            nextUpdate ? -1 : ocspWithoutNextUpdateMaxAgeSeconds) == 1;
+                            nextUpdate ? ocspWithNextUpdateMaxAgeSeconds : ocspWithoutNextUpdateMaxAgeSeconds) == 1;
 }
 
 struct OpenSslEngine final:PearlTlsEngine {
