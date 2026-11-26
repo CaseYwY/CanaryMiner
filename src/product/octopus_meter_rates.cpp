@@ -133,6 +133,9 @@ const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffD
     if (declaration.componentMultipliers || plan.demandCharge || !compatiblePlan(plan))
         return error("tariff declaration is unsuitable for an Octopus Agile rate import",
                      "tariff declaration is unsuitable for an Octopus Go rate import");
+    for (const auto &period : plan.taxPeriods)
+        if (std::any_of(period.rules.begin(), period.rules.end(), [](const auto &rule) { return rule.addsCharge(); }))
+            return "Octopus rate imports already include VAT and cannot be used with added tax rules";
 
     JsonValue root;
     if (!parseJsonStrict(bytes, &root, nullptr, {maxOctopusRateFileBytes, 7}) ||

@@ -1490,5 +1490,69 @@ int main(int argc,char **argv){
         CHECK(compareTariffCycles(revised,{dec("0"),dec("1")},1,T+1800000).status==
               ElectricityStatus::Unsupported);
     }
+    {
+        auto original=fixture();
+        auto &base=member(original,"plan");
+        set(base,"tiers","\"none\"");
+        set(base,"cycle_charge","\"0\"");
+        set(base,"subtotal_multiplier","\"1\"");
+        auto &revision=member(base,"revisions").items.front();
+        set(revision,"time_mode","\"constant\"");
+        set(revision,"base_rate_per_kwh","\"1\"");
+        set(revision,"charge_per_civil_day","\"0\"");
+        set(revision,"bands","[]");
+        set(revision,"calendar","[]");
+        TariffSettingsPanel panel;
+        panel.open(original);
+        enter(panel,"plan");
+        panel.key(27,{},T/1000);
+        panel.key('t',{},T/1000);
+        CHECK(panel.draft.find("schema_version")->text=="15");
+        CHECK(panel.path()=="plan");
+        panel.key('\r',{},T/1000);
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        enter(panel,"begin_utc_ms");type(panel,std::to_string(T));
+        enter(panel,"end_utc_ms");type(panel,std::to_string(T+86400000));
+        enter(panel,"published_utc_ms");type(panel,std::to_string(T));
+        enter(panel,"rules");
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        enter(panel,"kind");
+        enter(panel,"key");type(panel,"excise");
+        enter(panel,"rate");type(panel,"1");
+        panel.key(27,{},T/1000);
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        enter(panel,"key");type(panel,"vat");
+        enter(panel,"rate");type(panel,"0.1");
+        enter(panel,"components");
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        type(panel,"energy");
+        panel.key(27,{},T/1000);
+        enter(panel,"prior_taxes");
+        panel.key('a',{},T/1000);
+        panel.key('\r',{},T/1000);
+        type(panel,"excise");
+        CHECK(tariffJson(panel.active)==tariffJson(original));
+        TariffDeclaration checked;
+        CHECK(decodeTariffDeclaration(panel.draft,&checked));
+        checkComparison(compareTariffCycles(checked,{dec("0"),dec("1000")},1,T),
+                        "0.000000","52.800000","52.800000");
+        unsigned saves=0;
+        panel.key('v',{},T/1000);
+        CHECK(panel.page==TariffSettingsPage::Review);
+        CHECK(std::any_of(panel.review.begin(),panel.review.end(),[](const auto &line){
+            return line.find("Ordered taxes use the declared charge bases")!=std::string::npos;
+        }));
+        CHECK(std::none_of(panel.review.begin(),panel.review.end(),[](const auto &line){
+            return line.find("/ordered taxes/")!=std::string::npos;
+        }));
+        panel.key('\r',[&](const auto &document,std::string *){
+            ++saves;return decodeTariffDeclaration(document,&checked);
+        },T/1000);
+        CHECK(saves==1&&!panel.dirty()&&panel.active.find("schema_version")->text=="15");
+    }
     return finishTests("tariff declaration");
 }

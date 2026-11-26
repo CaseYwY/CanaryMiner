@@ -2,6 +2,7 @@
 #pragma once
 #include "civil_time.h"
 #include "exact_decimal.h"
+#include <array>
 #include <atomic>
 #include <functional>
 #include <optional>
@@ -9,7 +10,7 @@
 
 namespace om {
 constexpr uint32_t wattMsPerKwh = 3600000000U;
-enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing, ExportRateBoundary };
+enum class ElectricityStatus { Ok, Partial, Unavailable, Invalid, Unsupported, MissingPrice, Conflict, NotYetKnown, ClockFault, Capacity, MeterBoundary, MeterRoundingBoundary, SeasonalDayBoundary, DemandWindowBoundary, DemandHistoryNotYetKnown, DemandApparentEvidence, ExportEvidenceMissing, ExportRateBoundary, TaxPeriodBoundary };
 const char *electricityStatusName(ElectricityStatus status);
 // Exact amount = numerator / 3,600,000,000. Used for quantities and currency without intermediate rounding.
 struct ElectricityAmount {
@@ -109,6 +110,26 @@ struct ExportPaymentRule {
     ExactDecimal ratePerKwh;
     std::vector<DynamicRate> dynamic{};  // when present, replaces the flat rate
 };
+enum class TaxComponent { Energy, DailyFee, CycleFee, Demand, MinimumAdjustment, Count };
+inline constexpr unsigned taxComponentCount = static_cast<unsigned>(TaxComponent::Count);
+inline constexpr unsigned taxComponentBit(TaxComponent component) { return 1u << static_cast<unsigned>(component); }
+inline constexpr std::array<const char *, taxComponentCount> taxComponentNames{
+    "energy", "daily_fee", "cycle_fee", "demand", "minimum_adjustment"
+};
+inline constexpr size_t maxTaxPeriods = 16, maxTaxRules = 16;
+enum class TaxKind { ImportedKwh, BilledKwh, Fraction };
+struct OrderedTaxRule {
+    std::string key;
+    TaxKind kind = TaxKind::Fraction;
+    ExactDecimal rate;
+    unsigned taxable = 0, included = 0;
+    std::vector<size_t> priorTaxes;
+    bool addsCharge() const { return kind == TaxKind::Fraction ? taxable || !priorTaxes.empty() : !included; }
+};
+struct TariffTaxPeriod {
+    int64_t beginUtcMs = 0, endUtcMs = 0, publishedUtcMs = 0;
+    std::vector<OrderedTaxRule> rules;
+};
 struct TariffPlan {
     bool declared = false;
     TariffOrigin origin = TariffOrigin::Unknown;
@@ -125,6 +146,21 @@ struct TariffPlan {
     std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter demand windows
     std::optional<ExportPaymentRule> exportPayment{};  // independent payout, outside the supply subtotal
     bool restrictedCreditAtClose = false;
+    std::vector<TariffTaxPeriod> taxPeriods{};
+};
+struct BillTaxOpening {
+    std::array<ElectricityAmount, taxComponentCount - 1> components;
+    ElectricityAmount billedKwh;  // independent from measured import only for rounded tariffs
+};
+struct BillTaxLine {
+    std::string key;
+    TaxKind kind = TaxKind::Fraction;
+    unsigned included = 0;
+    ElectricityAmount base, added;
+};
+struct BillTaxTotal {
+    std::vector<BillTaxLine> lines;
+    ElectricityAmount minimumAdjustment, added, total;
 };
 struct BillExportOpening {
     ElectricityAmount exportedKwh, accruedPayment;
@@ -153,6 +189,7 @@ struct BillOpening {
     bool apparentDemand = false;  // binds the opening peak and history to the demand rule's unit
     std::optional<BillExportOpening> exports{};  // earned through the opening, before the current trace
     std::optional<BillRestrictedCreditOpening> restrictedCredit{};
+    std::optional<BillTaxOpening> tax{};
 };
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
@@ -173,6 +210,7 @@ struct BillEstimate {
     std::optional<ElectricityAmount> billedKwh;  // current trace only, when interval rounding is selected
     std::optional<ElectricityAmount> exportPayment{};  // payout from this trace only
     std::optional<BillRestrictedCreditAccrual> restrictedCredit{};
+    std::optional<BillTaxTotal> tax{};
     bool netChange(ElectricityAmount &out) const {
         if (!charge) return false;
         if (exportPayment) return charge->numerator.subtract(exportPayment->numerator,&out.numerator);
@@ -181,10 +219,11 @@ struct BillEstimate {
         return true;
     }
 };
-// Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
-ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening);
 // The opt-in rule splits the fee selected at civil midnight by each cycle's share of that day.
 enum class DailyFeeAllocation { WholeDay, ProrateByCycleMinutes };
+// Structural/opening/time-data validation only; does not promise dynamic-price or trace coverage.
+ElectricityStatus validateTariffOpening(const TariffPlan &plan, const BillOpening &opening,
+                                        DailyFeeAllocation allocation=DailyFeeAllocation::WholeDay);
 // Full coverage only. Horizon stays within one explicitly supplied cycle (<=370 elapsed days).
 // All-units/floor require the remainder through cycle end.
 BillEstimate evaluateBill(const TariffPlan &plan, const BillOpening &opening, const PowerTrace &trace,
@@ -204,6 +243,7 @@ struct BillAccrual {
     std::optional<ElectricityAmount> billedKwh;  // current trace only; ending.importedKwh retains physical usage
     std::optional<BillExportAccrual> exportAccrual{};
     std::optional<BillRestrictedCreditAccrual> restrictedCredit{};
+    std::optional<BillTaxTotal> tax{};
 };
 BillAccrual accrueBill(const TariffPlan &plan,const BillOpening &opening,const PowerTrace &trace,
                       int64_t endUtcMs,int64_t observedUtcMs,const std::function<bool()> &stop={},

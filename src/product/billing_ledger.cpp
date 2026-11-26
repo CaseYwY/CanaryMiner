@@ -35,6 +35,7 @@ bool receiptText(const BillingChunk::Receipt &receipt,std::string &request,std::
         receipt.reply.status==EnergyHistoryStatus::Ok&&receipt.reply.anchorStatus==EnergyHistoryStatus::Ok&&receipt.reply.completeTrace.has_value();
 }
 bool boundedPlan(const TariffPlan &p){
+    if(!p.taxPeriods.empty())return false;  // The fixture ledger codec has no ordered-tax state.
     if(!key(p.key)||!key(p.territory)||!key(p.supplier)||!key(p.product)||p.currency.size()!=3||p.clock.zone.size()>128||p.revisions.size()>128)return false;
     size_t rows=0;
     for(const auto &r:p.revisions){

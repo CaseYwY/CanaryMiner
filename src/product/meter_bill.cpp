@@ -280,6 +280,40 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (opening.throughUtcMs != opening.cycleBeginUtcMs) report += " (includes declared opening)";
     report += '\n';
     if (accrual.settlementDependent) report += "  Closing charges depend on full-cycle usage.\n";
+    std::string taxDigest;
+    if (const auto &tax = accrual.tax) {
+        std::string subtotal, minimum, added;
+        if (!accrual.ending->accruedSubtotal.format(6, &subtotal) ||
+            !tax->minimumAdjustment.format(6, &minimum) || !tax->added.format(6, &added)) return false;
+        report += "  Declared supply subtotal before added taxes " + subtotal + " " + currency + "\n";
+        if (!tax->minimumAdjustment.numerator.zero())
+            report += "  Minimum-charge adjustment " + minimum + " " + currency + "\n";
+        report += "  Ordered taxes through " + std::to_string(accrual.ending->throughUtcMs) + " UTC ms\n";
+        std::string record;
+        for (const auto &part : accrual.ending->tax->components)
+            record += part.numerator.text() + '\n';
+        record += accrual.ending->tax->billedKwh.numerator.text() + '\n' +
+            tax->minimumAdjustment.numerator.text() + '\n';
+        for (const auto &line : tax->lines) {
+            std::string base, charge;
+            if (!line.base.format(6, &base) || !line.added.format(6, &charge)) return false;
+            report += "  Tax " + line.key + " added " + charge + " " + currency;
+            if (!line.base.numerator.zero())
+                report += " on " + base + (line.kind == TaxKind::Fraction ? " " + currency : " kWh");
+            bool first = true;
+            for (unsigned i = 0; i < taxComponentCount; ++i) {
+                if (!(line.included & (1u << i))) continue;
+                report += first ? " | included in " : ", ";
+                report += taxComponentNames[i];
+                first = false;
+            }
+            report += '\n';
+            record += line.key + '\n' + std::to_string(line.included) + '\n' +
+                line.base.numerator.text() + '\n' + line.added.numerator.text() + '\n';
+        }
+        report += "  Added supply taxes to date " + added + " " + currency + "\n";
+        taxDigest = sha256Hex(record);
+    }
     if (const auto &exported=accrual.exportAccrual) {
         std::string quantity, payment, cyclePayment, netChange, netTotal;
         if (!exported->newKwh.format(6,&quantity) || !exported->paymentChange.format(6,&payment) ||
@@ -321,6 +355,7 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (declaration.plan.demandCharge && declaration.plan.demandCharge->ratchet)
         exact += "," + jsonQuote(ratchetFloor.numerator.text()) + "," + jsonQuote(billablePeak.numerator.text());
     if (ending.apparentDemand) exact += ",\"kVA\"";
+    if (!taxDigest.empty()) exact += ",\"ordered_tax_digest\"," + jsonQuote(taxDigest);
     if (const auto &exported=accrual.exportAccrual)
         exact += ",\"export_payment\"," + jsonQuote(exported->newKwh.numerator.text()) +
                  "," + jsonQuote(ending.exports->exportedKwh.numerator.text()) +
