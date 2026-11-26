@@ -217,6 +217,44 @@ int main(){
     }
 
     {
+        const std::pair<const char *, const char *> regions[] = {
+            {"kryptex-global-tls", "prl.kryptex.network"},
+            {"kryptex-eu-tls", "prl-eu.kryptex.network"},
+            {"kryptex-br-tls", "prl-br.kryptex.network"},
+            {"kryptex-sg-tls", "prl-sg.kryptex.network"},
+            {"kryptex-ru-tls", "prl-ru.kryptex.network"},
+            {"kryptex-ae-tls", "prl-ae.kryptex.network"},
+        };
+        for (const auto &[alias, host] : regions) {
+            PoolEntry preset;
+            CHECK(parsePoolSpec(alias, &preset, &error) && preset.tls && preset.host == host &&
+                  preset.port == 8048 && preset.policyKnown && preset.preset == "kryptex");
+            const std::string source = std::string("stratum+tcp://") + host + ":7048";
+            const std::string target = std::string("stratum+ssl://") + host + ":8048";
+            ProductConfig regional;
+            regional.donation = false;
+            regional.pools.resize(1);
+            CHECK(parsePoolSpec(source, &regional.pools.front(), &error));
+            const auto candidate = poolTlsMigrationCandidate(regional);
+            const auto *shownSource = poolTlsMigrationSource(candidate);
+            const auto *shownTarget = poolTlsMigrationTarget(candidate);
+            CHECK(shownSource && shownTarget && source == shownSource && target == shownTarget);
+            PoolSecurityPreferences migration;
+            migration.users[0] = {PoolSecurityMode::StrictTls, target, {}, false};
+            PoolTlsRuntimePolicy resolved;
+            CHECK(resolvePoolTlsRuntimePolicy(regional, migration, true, true, &resolved, &error) &&
+                  resolved.frozenUrl == target && resolved.fallbackUrl.empty());
+            regional.pools.front().port = 8048;
+            CHECK(poolTlsMigrationCandidate(regional) == PoolTlsMigrationCandidate::None);
+            regional.pools.front().port = 7048;
+            regional.pools.front().host += ".invalid";
+            CHECK(poolTlsMigrationCandidate(regional) == PoolTlsMigrationCandidate::None);
+            regional.pools.front() = preset;
+            CHECK(poolTlsMigrationCandidate(regional) == PoolTlsMigrationCandidate::None);
+        }
+    }
+
+    {
         using Candidate = PoolTlsMigrationCandidate;
         ProductConfig legacy;
         legacy.donation = false;

@@ -21,10 +21,20 @@ def main():
     import termios
 
     executable = str(Path(sys.argv[1]).resolve(strict=True))
+    regional_hosts = {
+        "global": "prl.kryptex.network",
+        "eu": "prl-eu.kryptex.network",
+        "br": "prl-br.kryptex.network",
+        "sg": "prl-sg.kryptex.network",
+        "ru": "prl-ru.kryptex.network",
+        "ae": "prl-ae.kryptex.network",
+    }
     pool, host, tcp_port, tls_port = {
         "us": ("kryptex", "prl-us.kryptex.network", 7048, 8048),
         "hk": ("stratum+tcp://prl-hk.kryptex.network:7048", "prl-hk.kryptex.network", 7048, 8048),
         "hero": ("herominers", "us2.pearl.herominers.com", 1200, 1200),
+        **{region: (f"stratum+tcp://{host}:7048", host, 7048, 8048)
+           for region, host in regional_hosts.items()},
     }[sys.argv[2] if len(sys.argv) > 2 else "us"]
     source = f"stratum+tcp://{host}:{tcp_port}"
     target = f"stratum+ssl://{host}:{tls_port}"

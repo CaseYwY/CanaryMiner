@@ -92,9 +92,9 @@ int main(int argc, char **argv) {
     CHECK(contains(errorOf("[1]"), "must be a JSON object"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"worker\":5}"), "must be a string"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[]}"), "non-empty"));
-    CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[\"nonsense\"]}"), "neither a preset"));
-    CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[\"host:0\"]}"), "neither a preset"));
-    CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[\"-h:1\"]}"), "neither a preset"));
+    CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[\"nonsense\"]}"), "pool must be a known preset"));
+    CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[\"host:0\"]}"), "pool must be a known preset"));
+    CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[\"-h:1\"]}"), "pool must be a known preset"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[{\"url\":\"kryptex\",\"network\":\"testnet\"}]}"), "mainnet only"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"pools\":[{\"url\":\"kryptex\",\"target_semantics\":\"x\"}]}"), "target_semantics"));
     CHECK(contains(errorOf("{\"schema_version\":1,\"api\":{\"port\":70000}}"), "between 1 and 65535"));
@@ -217,7 +217,7 @@ int main(int argc, char **argv) {
         CliParse off = parseArgs({"--api-port", "0"});
         CHECK(applyOverrides(off.ov, &base, &e) && !base.api.enabled);
         CliParse bad = parseArgs({"--pool", "no-port"});
-        CHECK(!applyOverrides(bad.ov, &base, &e) && contains(e, "neither a preset"));
+        CHECK(!applyOverrides(bad.ov, &base, &e) && contains(e, "pool must be a known preset"));
     }
 
     // effective configuration never shows the wallet or (optionally) the worker

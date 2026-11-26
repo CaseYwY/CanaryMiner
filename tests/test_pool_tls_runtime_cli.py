@@ -99,6 +99,25 @@ def main():
         assert marker in result.stderr
         case('Hong Kong migration cannot redirect a US source', config=migrated_source, prefs=hk_migrated)
         case('US declaration conflicts with Hong Kong preset', config=hk_preset, prefs=migrated)
+        for region, host in (
+            ('global', 'prl.kryptex.network'), ('eu', 'prl-eu.kryptex.network'),
+            ('br', 'prl-br.kryptex.network'), ('sg', 'prl-sg.kryptex.network'),
+            ('ru', 'prl-ru.kryptex.network'), ('ae', 'prl-ae.kryptex.network'),
+        ):
+            alias = f'kryptex-{region}-tls'
+            source_uri = f'stratum+tcp://{host}:7048'
+            target_uri = f'stratum+ssl://{host}:8048'
+            saved = {**migrated, 'user_pools': [{**migrated_rule, 'tls_url': target_uri}]}
+            consented = {**migrated, 'user_pools': [dict(mode='prefer_tls', tls_url=target_uri,
+                                                        plaintext_url=source_uri, plaintext_consent=True)]}
+            result = case(f'{region} alias stays strict with saved fallback consent',
+                          config={**base, 'pools': [dict(url=alias)]}, prefs=consented, admitted=True)
+            assert marker in result.stderr
+            case(f'{region} CLI alias', args=['--pool', alias], admitted=True)
+            result = case(f'{region} saved migration', config={**base, 'pools': [source_uri]},
+                          prefs=saved, admitted=True)
+            assert marker in result.stderr
+            case(f'{region} declaration cannot redirect a US source', config=migrated_source, prefs=saved)
         hero_url = 'stratum+ssl://us2.pearl.herominers.com:1200'
         hero_plain = 'stratum+tcp://us2.pearl.herominers.com:1200'
         hero_preset = {**base, 'pools': [dict(url='herominers-tls')]}
