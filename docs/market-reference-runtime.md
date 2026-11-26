@@ -79,9 +79,10 @@ Dashboard launch of an HTTPS-enabled build. Choose one latest-price source flag
 per launch. The trade mode selects the newest timestamp in each returned Gate
 and Kraken batch. It shows separate event and receipt times. PRL/USD requires
 fresh observations on both sides and no more than 30 seconds between their
-events or between their receipts. The view estimates ages conservatively from
-the end of the current local UTC second. The worker records receipt times in
-milliseconds.
+events or between their receipts. The view estimates ages from the end of the
+current local UTC second and uses elapsed monotonic time to prevent a wall clock
+rollback from making an expired trade current again. The worker records receipt
+times in milliseconds.
 
 The existing background owner applies its refresh, timeout and retry policy.
 During a session, earlier trade times cannot move a source's cached event

@@ -14,6 +14,7 @@ struct MarketTradeObservation {
 };
 
 struct MarketTradeAges { uint64_t eventMs, receiptMs; };
+enum class TradeEventAge { Wall, WallAndMonotonic };
 
 struct MarketTradeReference {
     bool pearlFresh=false, fxFresh=false;
@@ -25,9 +26,10 @@ MarketDataResult<MarketTradeObservation> parsePublicTrade(const PublicJsonRespon
     uint64_t sentUtcMs,uint64_t receivedUtcMs,uint64_t receivedMonoMs,
     std::optional<MarketTradeTime> *conflictingEvent=nullptr);
 MarketTradeReference publicTradeReference(const MarketTradeObservation *pearl,const MarketTradeObservation *fx,
-    uint64_t nowUtcMs,uint64_t nowMonoMs);
+    uint64_t nowUtcMs,uint64_t nowMonoMs,TradeEventAge eventAge=TradeEventAge::Wall);
 std::string marketTradeUtc(const MarketTradeTime &time);
-std::optional<MarketTradeAges> marketTradeAges(const MarketTradeObservation &trade,uint64_t nowUtcMs,uint64_t nowMonoMs);
+std::optional<MarketTradeAges> marketTradeAges(const MarketTradeObservation &trade,uint64_t nowUtcMs,uint64_t nowMonoMs,
+    TradeEventAge eventAge);
 const char *marketTradeStatusName(MarketDataStatus status,PublicHttpsStatus transport);
 
 } // namespace om

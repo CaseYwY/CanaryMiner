@@ -141,14 +141,17 @@ std::string eventUtc(const MarketTradeTime &time) {
     return std::to_string(time.first/1000)+"."+subsecond;
 }
 
-std::optional<MarketTradeAges> tradeAges(const MarketTradeObservation &trade,uint64_t utcMs,uint64_t monoMs) {
+std::optional<MarketTradeAges> tradeAges(const MarketTradeObservation &trade,uint64_t utcMs,uint64_t monoMs,TradeEventAge eventAge) {
     if (!utcMs || utcMs>market_detail::maxMarketUtcMs || utcMs<trade.receivedUtcMs ||
         monoMs<trade.receivedMonoMs || trade.time>MarketTradeTime{trade.receivedUtcMs,0}) return {};
-    return MarketTradeAges{utcMs-trade.time.first,(std::max)(utcMs-trade.receivedUtcMs,monoMs-trade.receivedMonoMs)};
+    const auto receiptAge=(std::max)(utcMs-trade.receivedUtcMs,monoMs-trade.receivedMonoMs);
+    const auto ageAtReceipt=trade.receivedUtcMs-trade.time.first;
+    const auto elapsed=eventAge==TradeEventAge::WallAndMonotonic ? receiptAge : utcMs-trade.receivedUtcMs;
+    return MarketTradeAges{ageAtReceipt+(std::min)(elapsed,UINT64_MAX-ageAtReceipt),receiptAge};
 }
 
-bool tradeFresh(const MarketTradeObservation *trade,uint64_t utcMs,uint64_t monoMs) {
-    const auto age=trade ? tradeAges(*trade,utcMs,monoMs) : std::nullopt;
+bool tradeFresh(const MarketTradeObservation *trade,uint64_t utcMs,uint64_t monoMs,TradeEventAge eventAge) {
+    const auto age=trade ? tradeAges(*trade,utcMs,monoMs,eventAge) : std::nullopt;
     return age && age->eventMs<=maxAgeMs && age->receiptMs<=maxAgeMs;
 }
 
@@ -162,7 +165,7 @@ void appendTrade(std::string &report,const char *name,const MarketDataResult<Mar
         return;
     }
     const auto &value=*trade.value;
-    const auto ages=tradeAges(value,capture.cutoffUtc,capture.elapsedMs);
+    const auto ages=tradeAges(value,capture.cutoffUtc,capture.elapsedMs,TradeEventAge::Wall);
     report+=value.price.text()+" | event UTC "+eventUtc(value.time)+
         " | receipt UTC ms "+std::to_string(value.receivedUtcMs);
     if (ages) {
@@ -186,10 +189,10 @@ MarketDataResult<MarketTradeObservation> parsePublicTrade(const PublicJsonRespon
 }
 
 MarketTradeReference publicTradeReference(const MarketTradeObservation *pearl,const MarketTradeObservation *fx,
-    uint64_t nowUtcMs,uint64_t nowMonoMs) {
+    uint64_t nowUtcMs,uint64_t nowMonoMs,TradeEventAge eventAge) {
     MarketTradeReference result;
-    result.pearlFresh=tradeFresh(pearl,nowUtcMs,nowMonoMs);
-    result.fxFresh=tradeFresh(fx,nowUtcMs,nowMonoMs);
+    result.pearlFresh=tradeFresh(pearl,nowUtcMs,nowMonoMs,eventAge);
+    result.fxFresh=tradeFresh(fx,nowUtcMs,nowMonoMs,eventAge);
     if (!result.pearlFresh || !result.fxFresh) return result;
     if (tradeSkewMs(pearl->time,fx->time)>maxSkewMs ||
         gap(pearl->receivedUtcMs,fx->receivedUtcMs)>maxSkewMs || gap(pearl->receivedMonoMs,fx->receivedMonoMs)>maxSkewMs) {
@@ -204,8 +207,8 @@ MarketTradeReference publicTradeReference(const MarketTradeObservation *pearl,co
 
 std::string marketTradeUtc(const MarketTradeTime &time) { return eventUtc(time); }
 
-std::optional<MarketTradeAges> marketTradeAges(const MarketTradeObservation &trade,uint64_t nowUtcMs,uint64_t nowMonoMs) {
-    return tradeAges(trade,nowUtcMs,nowMonoMs);
+std::optional<MarketTradeAges> marketTradeAges(const MarketTradeObservation &trade,uint64_t nowUtcMs,uint64_t nowMonoMs,TradeEventAge eventAge) {
+    return tradeAges(trade,nowUtcMs,nowMonoMs,eventAge);
 }
 
 const char *marketTradeStatusName(MarketDataStatus status,PublicHttpsStatus transport) {

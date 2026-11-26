@@ -377,13 +377,13 @@ std::vector<std::string> dashboardTradeLines(const MarketSnapshot &s,uint64_t ut
     const bool current=s.running && !s.clockFault && !s.helperFault;
     const auto *pearl=current && s.pearlTrade ? &*s.pearlTrade : nullptr;
     const auto *fx=current && s.fxTrade ? &*s.fxTrade : nullptr;
-    const auto reference=publicTradeReference(pearl,fx,cutoff,ms);
+    const auto reference=publicTradeReference(pearl,fx,cutoff,ms,TradeEventAge::WallAndMonotonic);
     std::vector<std::string> lines;
     const auto add=[&](const char *label,const MarketTradeObservation *trade,const MarketFeedHealth &health,bool fresh) {
         const std::string source(label);
         lines.push_back(source+": "+(fresh ? trade->price.text() : "N/A"));
         if (trade) {
-            const auto ages=marketTradeAges(*trade,cutoff,ms);
+            const auto ages=marketTradeAges(*trade,cutoff,ms,TradeEventAge::WallAndMonotonic);
             lines.push_back("  Event UTC "+marketTradeUtc(trade->time)+
                 (ages ? " | age "+std::to_string(ages->eventMs)+" ms" : " | age unavailable"));
             lines.push_back("  Receipt UTC ms "+std::to_string(trade->receivedUtcMs)+

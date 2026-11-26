@@ -141,6 +141,9 @@ void tradeOwner(){
               text.find("Receipt UTC ms "+std::to_string(epoch*1000+1000))!=text.npos);
         CHECK(joined(marketDashboardView(*original,policy,epoch+121,121000)).find(
             "PRL/USD trade reference: N/A")!=text.npos);
+        const auto rolledBack=joined(marketDashboardView(*original,policy,epoch+116,120000));
+        CHECK(rolledBack.find("Gate PRL/USDT trade: N/A")!=text.npos &&
+              rolledBack.find("PRL/USD trade reference: N/A")!=text.npos);
         mono=2000;
         CHECK(waitUntil([&]{return owner.snapshot()->health[0].latched;}));
         const auto updated=owner.snapshot();

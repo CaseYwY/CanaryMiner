@@ -51,9 +51,9 @@ The cache retains a last good observation with its original times through failur
 
 ## Native terminal seam and preview
 
-`PublicMarketView` is independent of `FinancialView`: latest PRL/USDT, USDT/USD, USD reference, source health, observation time/age, absent trade-event time, 1h means and actual coverage/end/lag are projected from validated snapshots. A default/unstarted owner does not enable a section. Stopped/stale/missing-FX/clock-fault values have textual unavailable reasons, not color-only status. No credited-income or net-profit rows are enabled as a side effect.
+`PublicMarketView` is independent of `FinancialView`. It projects latest PRL/USDT, USDT/USD, the USD reference, source health, observation time and age, and one-hour means with coverage and window timing. Ticker mode reports that trade-event time is unavailable. Trade mode projects separate event and receipt times. An unstarted owner leaves the section disabled, and unavailable values have textual reasons. The public view does not enable credited-income or net-profit rows.
 
-The existing dashboard has a `PUBLIC MARKET REFERENCES` section only when supplied that projection. **The supervisor does not supply provider projections yet.** P-06c instead uses a separately headed manual-declaration section. CPU-only `canary_market_preview` supplies conspicuously labelled synthetic fixtures to exercise the provider seam without a GPU, mining, credentials or network:
+The supervisor supplies `PUBLIC MARKET REFERENCES` to the ordinary Dashboard only with the saved request and the [explicit launch permission](market-reference-runtime.md). Manual declarations have a separate section. CPU-only `canary_market_preview` supplies labelled synthetic fixtures to exercise the provider seam without a GPU, mining, credentials or network.
 
 ```sh
 cmake --preset tests -B build/market-check

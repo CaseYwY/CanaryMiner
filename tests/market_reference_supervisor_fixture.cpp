@@ -3,6 +3,7 @@
 #include "product/supervisor.h"
 #include "product/manual_market.h"
 #include "product/market_reference_runtime.h"
+#include "product/market_owner.h"
 #include "product/market_ticker_runtime.h"
 #include <csignal>
 #include <fstream>
@@ -18,7 +19,9 @@ class Counted final:public MarketReferenceSink {
     explicit Counted(Counts &counts, std::unique_ptr<MarketReferenceSink> installed):counts_(counts),runtime_(std::move(installed)){
         if(runtime_)return;
         runtime_=makeMarketReferenceRuntime([&counts](const PublicJsonRequest &request,const std::atomic<bool> &,PublicHttpsLimits){
-            ++counts.fetches;PublicJsonResponse response;response.status=PublicHttpsStatus::Ok;response.httpStatus=200;response.observedUtc=static_cast<uint64_t>(time(nullptr));
+            ++counts.fetches;PublicJsonResponse response;response.status=PublicHttpsStatus::Ok;response.httpStatus=200;
+            // Use the same UTC clock as the ticker owner across a second boundary.
+            response.observedUtc=marketSystemClock().second;
             response.body=request.feed==PublicFeed::GatePearlTicker?"[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]":"{\"error\":[],\"result\":{\"USDTZUSD\":{\"c\":[\"0.98\",\"1\"]}}}";return response;
         },{},MarketOrigin::SyntheticFixture,false);
     }
