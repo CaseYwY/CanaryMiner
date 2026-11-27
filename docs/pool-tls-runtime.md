@@ -34,6 +34,8 @@ An explicit `stratum+ssl://` URL must contain an ASCII DNS name and port. The ch
 
 DNS, TCP and TLS setup share the ordinary ten-second budget, including the [bounded selection of a resolved address](pool-tls-check.md#native-connection-and-verification). The command retires its worker before reporting. Exit status 0 records verified TLS, 2 indicates invalid arguments, and 3 indicates an unavailable build or a connection failure. It prints a bounded failure category such as `dns`, `connect`, `verification` or `timeout`. Status 130 indicates cancellation with confirmed cleanup. Status 8 indicates that worker cleanup could not be confirmed.
 
+If a connected address stalls during TLS, the worker can continue on another address from the same DNS lookup within that deadline. The alternate verifies the same DNS identity. A certificate or protocol failure ends the attempt.
+
 ### Check a saved TLS configuration
 
 After [reviewing and saving a migration](pool-tls-migration.md), use a TLS-enabled installation:

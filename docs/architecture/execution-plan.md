@@ -113,6 +113,10 @@ The [Linux TLS worker](../pool-native-tls.md#linux-certificate-status-in-the-han
 
 The [strict HeroMiners presets](../pool-tls-presets.md#herominers-regional-presets) cover all eleven official Pearl regions on port 1200. The [legacy first-pool review](../pool-tls-migration.md) proposes TLS on that region's exact DNS host and port, and saves only through the existing confirmation. The same preset drives normal startup and preflight. Donation TLS still depends on a separately verified F2Pool Pearl endpoint.
 
+## P-12w Recover from a stalled TLS address
+
+The [native connection path](../pool-tls-check.md#native-connection-and-verification) can move a waiting handshake to a ready address from the same DNS lookup under the original deadline. It preserves the DNS identity and trust policy across attempts. TLS errors and cancellation stop the check. After the TLS phase starts, later socket failures cannot authorize plaintext fallback.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

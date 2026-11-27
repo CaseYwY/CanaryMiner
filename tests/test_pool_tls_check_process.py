@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from test_forecast_lifecycle import process_identity, wait
 
 
@@ -135,6 +136,119 @@ def lifecycle(args):
     print('TLS check lifecycle: success/malformed/overflow, three labelled phases plus delayed startup, live-child-triggered cancel/reap, pre-ready total timeout, monitor completion, parent death and artifact separation passed')
 
 
+def alternate_loopback(args, context, ca, crl):
+    # Match the helper's native lookup order, and keep all traffic on owned loopback sockets.
+    resolved = socket.getaddrinfo('localhost', '1', socket.AF_UNSPEC, socket.SOCK_STREAM,
+                                  socket.IPPROTO_TCP, socket.AI_NUMERICSERV)
+    selected = list(dict.fromkeys((family, address[0]) for family, _, _, _, address in resolved))
+    assert set(selected) == {(socket.AF_INET, '127.0.0.1'), (socket.AF_INET6, '::1')}, selected
+    context.num_tickets = 0
+
+    for mode, total in (('recover', 5000), ('untrusted', 5000), ('protocol', 5000), ('cancel', 5000),
+                        ('total-timeout', 3000), ('only-first-slow', 3600)):
+        first_family, first_address = selected[0]
+        other_family, other_address = selected[1]
+        stop = threading.Event()
+        hellos = [threading.Event(), threading.Event()]
+        completed = [threading.Event(), threading.Event()]
+        first_closed = threading.Event()
+        errors = []
+
+        def serve(listener, index, behavior):
+            try:
+                while not stop.is_set():
+                    try:
+                        channel, _ = listener.accept()
+                    except socket.timeout:
+                        continue
+                    break
+                else:
+                    return
+                with channel:
+                    channel.settimeout(7)
+                    if behavior == 'silent':
+                        assert channel.recv(1) == b'\x16', 'expected a TLS handshake record'
+                        hellos[index].set()
+                        try:
+                            while channel.recv(4096):
+                                pass
+                        except ConnectionResetError:
+                            pass  # owned helper cancellation can reset the socket on Windows
+                        if index == 0:
+                            first_closed.set()
+                        return
+                    if behavior == 'protocol':
+                        assert channel.recv(4096).startswith(b'\x16'), 'expected ClientHello'
+                        channel.sendall(b'\x15\x03\x03\x00\x02\x02\x28')  # fatal handshake_failure
+                        stop.wait(6)
+                        return
+                    if behavior == 'slow':
+                        time.sleep(2.1)
+                    if index == 1:
+                        assert first_closed.wait(0.75), 'stalled first connection was not retired'
+                    try:
+                        with context.wrap_socket(channel, server_side=True) as peer:
+                            completed[index].set()
+                            assert not peer.recv(1), 'preflight sent an application byte'
+                    except (ssl.SSLError, ConnectionError):
+                        if behavior != 'untrusted' and not completed[index].is_set():
+                            raise
+            except Exception as error:
+                errors.append((index, type(error).__name__, str(error)))
+
+        with socket.socket(first_family, socket.SOCK_STREAM) as first, \
+             socket.socket(other_family, socket.SOCK_STREAM) as alternate:
+            for listener in (first, alternate):
+                if listener.family == socket.AF_INET6:
+                    listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                listener.settimeout(0.1)
+            first.bind((first_address, 0))
+            port = first.getsockname()[1]
+            alternate.bind((other_address, port))
+            first.listen(1)
+            threads = []
+            behavior = {'only-first-slow': 'slow', 'untrusted': 'untrusted', 'protocol': 'protocol'}.get(mode, 'silent')
+            threads.append(threading.Thread(target=serve, args=(first, 0, behavior), daemon=True))
+            if mode != 'only-first-slow':
+                alternate.listen(1)
+                later = 'trusted' if mode == 'recover' else 'silent'
+                threads.append(threading.Thread(target=serve, args=(alternate, 1, later), daemon=True))
+            for thread in threads:
+                thread.start()
+            try:
+                private = ([ca], [], [crl]) if os.name == 'nt' and mode != 'untrusted' else None
+                pem = ssl.DER_cert_to_PEM_cert(ca).encode('ascii') if os.name != 'nt' and mode != 'untrusted' else b''
+                reply = run(args.probe, args.native, packet('localhost', port, total, pem, private),
+                            cancel=800 if mode == 'cancel' else None)
+            finally:
+                stop.set()
+                for thread in threads:
+                    thread.join(timeout=8)
+            assert not any(thread.is_alive() for thread in threads) and not errors, (mode, errors)
+            if mode in ('recover', 'only-first-slow'):
+                assert (reply['transport'], reply['status'], reply['stage']) == (0, 9, 4), (mode, reply)
+                assert completed[1 if mode == 'recover' else 0].is_set(), (mode, reply)
+                assert hellos[0].is_set() == (mode == 'recover'), (mode, reply)
+            elif mode == 'untrusted':
+                assert (reply['transport'], reply['status'], reply['stage'], reply['tls']) == (0, 8, 3, 4), reply
+                assert not hellos[1].is_set(), 'trust failure admitted another ClientHello'
+            elif mode == 'protocol':
+                # Schannel reports this fatal alert as verification failure.
+                expected_error = 4 if os.name == 'nt' else 5
+                assert (reply['transport'], reply['status'], reply['stage'], reply['tls']) == (0, 8, 3, expected_error), reply
+                assert not hellos[1].is_set(), 'protocol failure admitted another ClientHello'
+            elif mode == 'cancel':
+                assert reply['transport'] == 4 and reply['status'] == -1 and reply['elapsedMs'] < 1800, reply
+                assert hellos[0].is_set() and not hellos[1].is_set(), reply
+            else:
+                assert reply['elapsedMs'] < total + 600, reply
+                assert (reply['transport'] == 5 and reply['status'] == -1) or (
+                    reply['transport'] == 0 and reply['status'] == 4 and reply['stage'] == 3), reply
+                assert hellos[0].is_set() and hellos[1].is_set(), reply
+
+    print('TLS address recovery: alternate opens after a stall, trust, protocol and cancel stop, one slow peer stays, original deadline holds')
+
+
 def loopback(args):
     command = [sys.executable] if not args.wsl_distro else ['wsl', '-d', args.wsl_distro, '--exec', 'python3']
     # The returned JSON contains an ephemeral SYNTHETIC key. Never print subprocess output/material.
@@ -206,6 +320,7 @@ def loopback(args):
                 assert result['transport'] == 4 and result['status'] == -1 and result['elapsedMs'] < 1500, (mode, result)
             else:
                 assert result['transport'] == 5 and result['status'] == -1 and result['elapsedMs'] < 1500, (mode, result)
+        alternate_loopback(args, context, ca, crl)
     print('TLS check loopback: no-ticket peer completion, ticket local-verification scope, normal untrusted refusal, stalled handshake timeout/cancel; no application bytes or public endpoints')
 
 
