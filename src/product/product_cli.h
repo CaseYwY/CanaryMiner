@@ -464,8 +464,11 @@ inline std::vector<std::string> supervisorUserArguments(int argc, const char *co
         if (std::find(parentOnlyIndices.begin(), parentOnlyIndices.end(), i) != parentOnlyIndices.end() ||
             std::find(cli.gpuIdArgIndices.begin(), cli.gpuIdArgIndices.end(), i) != cli.gpuIdArgIndices.end())
             continue;
-        if (i == cli.configArg) result.push_back(cli.ov.configPath);
-        else result.emplace_back(argv[i]);
+        if (i == cli.configArg) {
+            // Keep an option-shaped relative filename distinct from worker options.
+            const auto &path = cli.ov.configPath;
+            result.push_back(path.rfind("--", 0) == 0 ? "./" + path : path);
+        } else result.emplace_back(argv[i]);
     }
     return result;
 }

@@ -1,6 +1,7 @@
 // Synthetic policy, frozen worker arguments and donation isolation. No device, network, helper or store access.
 #include "../src/product/pool_tls_runtime_policy.h"
 #include "../src/product/pool_tls_migration.h"
+#include "../src/product/product_cli.h"
 #include "../src/product/supervisor.h"
 #include "../src/product/fee_session.h"
 #include "product_test_util.h"
@@ -114,6 +115,16 @@ int main(){
         CHECK(mode==0?changed.pools.empty():changed.pools[0].port==config.pools[0].port);
     }
     WorkerSeed seed;seed.index=2;seed.uuid="GPU-synthetic-fixture";
+    for (const char *filename : {"--api-port", "--no-dashboard"}) {
+        const char *command[] = {"canary-miner", "run", "--config", filename, "--api-port", "8765"};
+        constexpr int count = sizeof(command) / sizeof(command[0]);
+        CliParse launch;
+        CHECK(parseProductCli(count, command, &launch, nullptr));
+        const auto child = workerArgs(supervisorUserArguments(count, command, launch, {}), seed, 9000);
+        CHECK(child.size() >= 3 && child[1] == "--config" && child[2] == "./" + std::string(filename));
+        CHECK(std::find(child.begin(), child.end(), "8765") == child.end());
+        CHECK(std::find(child.begin(), child.end(), "9000") != child.end());
+    }
     const std::vector<std::string> rawArgs={"run","--config","fixture.json","--worker-pool-tls","stratum+ssl://old.invalid:1",
         "--worker-pool-fallback","stratum+tcp://old.invalid:1","--work-wait-ms","4"};
     const auto args=workerArgs(rawArgs,seed,9000,7,frozen);
