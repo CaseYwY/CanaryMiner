@@ -289,7 +289,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert captured.returncode == 0 and not captured.stderr, captured
         assert "Coinbase USDT/USD: 59/60" in captured.stdout
         assert "Kraken USDT/USD fallback: 60/60" in captured.stdout
-        assert "FX source for USD mean: Kraken USDT/USD" in captured.stdout
+        assert "FX source for USD mean: Kraken USDT/USD (candidate, minute starts inferred at receipt)" in captured.stdout
         assert "180 / 60" in captured.stdout and "480 / 60" in captured.stdout
         _, fallback_end = launched(["4", "5", "3"])
         assert resolver_requests.read_text(encoding="ascii").splitlines() == [resolver] * 3

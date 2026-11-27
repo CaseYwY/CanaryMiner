@@ -134,8 +134,10 @@ identifies the last row as provisional and leaves the other rows' timestamps uns
 
 The [2026-11-06 primary-source recheck](research/market-source-qualification-2026-11.md) does not settle Gate's REST candle
 shape or either REST minute time anchor. Public-feed use rights, regional/deployment/trust approval and any required
-trade-event-age basis remain separate. Gate and Kraken `ProviderResponse` candles still return `UnsupportedConvention`; only explicit
-synthetic fixture minute starts are accepted. Ticker receipt age is never a fabricated trade-event age, one-hour coverage,
+trade-event-age basis remain separate. The generic candle adapter used by the background owner accepts explicit fixture minute starts
+and returns `UnsupportedConvention` for Gate and Kraken provider candles. The [standalone hourly review](#check-a-public-hour-without-mining)
+can test Kraken's receipt-minute alignment as a candidate source on explicit request.
+Ticker receipt age is never a fabricated trade-event age, one-hour coverage,
 credited income, reward calibration, net estimate or economic/mining permission.
 
 The injected tests exercise synthetic quote responses, missing/invalid/one-use admission, frozen policies,
@@ -251,8 +253,9 @@ response with fewer than 60 in-window minutes. It uses the same requested hour, 
 15-second per-request budget and 64 KiB body limit. Kraken must supply its own 60 aligned minutes.
 The command checks that the timestamp of Kraken's uncommitted last row matches the current UTC
 minute at receipt, then excludes that row. A mismatch, including one caused by a UTC minute rollover
-during delivery, makes the Kraken response unusable for the sample. The report identifies the source
-used for the USD mean and shows both FX outcomes. Use is subject to the terms and source limits in
+during delivery, makes the Kraken response unusable for the sample. Kraken's published REST format
+does not define the historical timestamp anchor. A USD mean using Kraken is labeled as a candidate that
+infers minute starts from the receipt check. The report shows both FX outcomes. Use is subject to the terms and source limits in
 the [provider review](research/market-source-qualification-2026-11.md).
 [Kraken Spot REST OHLC](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
 

@@ -453,7 +453,7 @@ bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSa
     report = "One public candle sample; candle finality is unverified.\n";
     report += publicHourCoverage(end, cutoff, pearl, coinbase, kraken);
     if (kraken && window.tokenUsd)
-        report += "FX source for USD mean: Kraken USDT/USD\n";
+        report += "FX source for USD mean: Kraken USDT/USD (candidate, minute starts inferred at receipt)\n";
     report += "Mean USDT per PRL (exact sum / minutes): ";
     report += window.tokenUsdt ? exactHourMean(*window.tokenUsdt) :
         window.status == MarketDataStatus::Arithmetic ? "N/A (exact arithmetic limit exceeded)" :

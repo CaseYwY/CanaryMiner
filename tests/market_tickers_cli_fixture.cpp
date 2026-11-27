@@ -47,7 +47,9 @@ std::string krakenHourBody(int64_t start, int64_t observed, std::string_view mod
     for (int i = 0; i <= terminal; ++i) {
         if (mode == "kraken-gap" && i == 12) continue;
         if (i) body += ',';
-        const auto minute = mode == "kraken-disordered" && i == 15 ? 13 : i;
+        auto minute = i;
+        if (mode == "kraken-disordered" && (i == 13 || i == 15))
+            minute = 28 - i;
         const auto time = start + minute * 60;
         const std::string price = i == terminal ? "\"999\"" : i < 30 ? "\"2\"" : "\"3\"";
         body += '[' + std::to_string(time) + ',' + price + ',' + price + ',' + price + ',' +
