@@ -94,6 +94,24 @@ Set `schema_version` to `2` in the same local document. The hour still uses `end
 
 The review validates prices and volumes as decimals, rejects inconsistent OHLC values, duplicate minute starts and starts after the stated observation, and sorts by UTC minute. Valid rows outside the requested hour are skipped, including an open row at the hour's exclusive end. The limits are 500 MEXC rows and 350 Coinbase rows within the same 64 KiB document. Missing Pearl minutes withhold the report. Incomplete aligned FX withholds the USD mean. Version 2 reports elapsed minute buckets and labels candle finality as unverified. Source identity and observation time are user declarations.
 
+### Supply a local Kraken fallback for a Coinbase gap
+
+Set `schema_version` to `3` to add a required `kraken_fallback` series to the MEXC and Coinbase
+document. Both original series are required. The Coinbase payload must be valid and have fewer than
+60 in-window minutes. A complete Coinbase hour can use version 2.
+
+Set the fallback `series` to `kraken-usdt-usd-v1`, `observed_utc` to the declared capture time in Unix
+seconds, and `candles` to the raw Kraken REST OHLC response for one-minute `USDTZUSD`. The response
+must include its current, uncommitted terminal row. Its timestamp must match the UTC minute of
+the declared observation. The review excludes this row and infers minute starts for earlier rows.
+It then requires all 60 aligned Kraken minutes for the USD calculation. The report shows each
+source's coverage and observation age. A valid but incomplete Kraken hour still shows the PRL mean
+in USDT and withholds the USD mean. [Kraken Spot REST OHLC](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
+
+The same 64 KiB document limit applies. Request only the needed history when obtaining the input
+payloads. These are local declarations. The review makes no provider requests and preserves all
+three original payloads when saving.
+
 ### Save and reopen a local hour review
 
 ```sh
@@ -101,6 +119,6 @@ canary-miner market-hour --file candles.json --save-review hour.cmh
 canary-miner market-hour --open-review hour.cmh
 ```
 
-Both input versions can be saved. Run the save command in a trusted private local folder. It creates a new archive with a simple ASCII `.cmh` name and preserves any existing file or temporary sibling. The archive contains the exact input bytes, original review UTC second, calculated report and SHA-256 checksum. It contains financial input in readable form, protected by the folder's access controls.
+All three input versions can be saved. Run the save command in a trusted private local folder. It creates a new archive with a simple ASCII `.cmh` name and preserves any existing file or temporary sibling. The archive contains the exact input bytes, original review UTC second, calculated report and SHA-256 checksum. It contains financial input in readable form, protected by the folder's access controls.
 
 Opening reads the archive without writing files. It verifies the checksum and recalculates the report at the saved UTC second, including the ages and exact means. The saved report must match the calculation before anything is printed. Version 1 archives bind the report format as well as the values. A renamed or removed source document has no effect on replay. The checksum detects corruption, while the source and its observation time remain user declarations. The archive supplies a historical offline review. Settings, Dashboard polling and economic mode keep their existing inputs.

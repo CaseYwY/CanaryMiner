@@ -183,12 +183,11 @@ bool market_detail::readMarketHourPayload(const JsonValue &payload, HourFeed fee
 
 namespace {
 
-bool readCandleSeries(const JsonValue &object, bool pearl, uint64_t start, uint64_t end,
-                      uint64_t now, LocalSeries &series) {
+bool readCandleSeries(const JsonValue &object, const char *identity, HourFeed feed,
+                      uint64_t start, uint64_t end, uint64_t now, LocalSeries &series) {
     const auto *payload = object.find("candles");
-    return declaredSeries(object, pearl ? mexcSeriesId : coinbaseSeriesId, end, now, series) && payload &&
-        market_detail::readMarketHourPayload(*payload, pearl ? HourFeed::MexcPearl : HourFeed::CoinbaseFx,
-                                            start, end, series.observedUtc, series.minutes);
+    return declaredSeries(object, identity, end, now, series) && payload &&
+        market_detail::readMarketHourPayload(*payload, feed, start, end, series.observedUtc, series.minutes);
 }
 
 int refuse(const char *message, int code = 3) {
@@ -230,24 +229,34 @@ const char *makeHourReport(const std::string &text, uint64_t now, std::string &r
         return "invalid hour document";
     const auto *pearlJson = root.find("pearl");
     const auto *fxJson = root.find("fx");
-    if (root.members.size() != (fxJson ? 4u : 3u) || !integer(root, "schema_version", version) ||
-        (version != 1 && version != 2) || !integer(root, "end_utc", end) || !pearlJson)
+    const auto *krakenJson = root.find("kraken_fallback");
+    if (!integer(root, "schema_version", version) || version < 1 || version > 3 ||
+        !integer(root, "end_utc", end) || !pearlJson)
+        return "invalid hour document";
+    if (version == 3 ? (!fxJson || !krakenJson || root.members.size() != 5)
+                     : (krakenJson || root.members.size() != (fxJson ? 4u : 3u)))
         return "invalid hour document";
     if (end <= marketHourSeconds || end % 60 || end > now)
         return "end_utc must be a completed UTC minute boundary";
 
     const uint64_t start = end - marketHourSeconds;
-    LocalSeries pearl, fx;
-    const bool vendor = version == 2;
+    LocalSeries pearl, fx, kraken;
+    const bool vendor = version >= 2;
     const auto read = [&](const JsonValue &json, bool token, LocalSeries &series) {
-        return vendor ? readCandleSeries(json, token, start, end, now, series) :
-            readSeries(json, token ? pearlSeriesId : fxSeriesId, start, end, now, series);
+        return vendor ? readCandleSeries(json, token ? mexcSeriesId : coinbaseSeriesId,
+                                         token ? HourFeed::MexcPearl : HourFeed::CoinbaseFx, start, end, now, series)
+                      : readSeries(json, token ? pearlSeriesId : fxSeriesId, start, end, now, series);
     };
     if (!read(*pearlJson, true, pearl)) return "invalid Pearl mainnet minute series";
     if (fxJson && !read(*fxJson, false, fx)) return "invalid USDT/USD minute series";
+    if (krakenJson) {
+        if (fx.minutes.size() == marketHourMinutes) return "Kraken fallback requires incomplete Coinbase coverage";
+        if (!readCandleSeries(*krakenJson, fxSeriesId, HourFeed::KrakenFx, start, end, now, kraken))
+            return "invalid Kraken fallback minute series";
+    }
 
-    const auto fxCovered = static_cast<unsigned>(fx.minutes.size());
-    const auto window = market_detail::calculateMarketHour(start, end, pearl.minutes, fx.minutes);
+    const auto &fxForMean = krakenJson ? kraken : fx;
+    const auto window = market_detail::calculateMarketHour(start, end, pearl.minutes, fxForMean.minutes);
     if (window.status == MarketDataStatus::Arithmetic) return "exact PRL arithmetic limit exceeded";
     if (!window.tokenUsdt)
         return vendor ? "Pearl mainnet requires all 60 elapsed minute buckets" :
@@ -265,10 +274,16 @@ const char *makeHourReport(const std::string &text, uint64_t now, std::string &r
         report += "Mean USD per PRL unavailable (no FX series)\n";
     } else {
         appendCoverage(report, vendor ? "Declared Coinbase USDT/USD" : "Declared Kraken USDT/USD",
-                       fx, fxCovered, window.expected, now, vendor);
+                       fx, static_cast<unsigned>(fx.minutes.size()), window.expected, now, vendor);
+        if (krakenJson) {
+            appendCoverage(report, "Declared Kraken USDT/USD fallback", kraken,
+                           static_cast<unsigned>(kraken.minutes.size()), window.expected, now, true);
+            report += "Kraken minute starts inferred from declared observation.\n";
+            if (window.tokenUsd) report += "The USD mean uses the declared Kraken series.\n";
+        }
         if (window.tokenUsd)
             appendMean(report, "USD per PRL", *window.tokenUsd);
-        else if (fxCovered != marketHourMinutes)
+        else if (fxForMean.minutes.size() != marketHourMinutes)
             report += "Mean USD per PRL unavailable (incomplete aligned FX coverage)\n";
         else
             report += "Mean USD per PRL unavailable (exact arithmetic limit exceeded)\n";
@@ -527,6 +542,7 @@ int commandMarketHour(const MarketHourOptions &options, int argc, const char *co
                         "Review an hour of user-declared UTC minute prices, offline.\n"
                         "Save a new archive in your trusted local folder. Open recalculates the original review.\n"
                         "JSON (up to 64 KiB): schema_version, end_utc, pearl, optional fx.\n"
+                        "Local schema 3 requires fx (incomplete Coinbase) and kraken_fallback.\n"
                         "Version 1 accepts normalized minutes. Version 2 accepts declared MEXC and Coinbase candle payloads.\n"
                         "Version 1 series have series, observed_utc and minutes. Use %s for pearl\n"
                         "and %s for fx. UTC times are Unix seconds.\n"

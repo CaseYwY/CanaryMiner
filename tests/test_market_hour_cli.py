@@ -59,6 +59,22 @@ def vendor_sample(pearl_begin=-1, fx_begin=-1):
     }
 
 
+def fallback_sample():
+    def kraken(i):
+        price = "1.25" if i < 30 else "2" if i < 60 else "99"
+        return [START + i * 60, price, price, price, price, price, "1", 1]
+
+    doc = vendor_sample(fx_begin=1)
+    doc["schema_version"] = 3
+    doc["kraken_fallback"] = {
+        "series": "kraken-usdt-usd-v1",
+        "observed_utc": END + 7,
+        "candles": {"error": [], "result": {"USDTZUSD": [kraken(i) for i in range(-1, 61)],
+                                           "last": END - 60}},
+    }
+    return doc
+
+
 @unittest.skipUnless(MINER is not None, "run directly with the built miner CLI")
 class MarketHourCli(unittest.TestCase):
     def setUp(self):
@@ -179,6 +195,61 @@ class MarketHourCli(unittest.TestCase):
                 self.assertEqual((result.returncode, result.stderr), (0, ""), result)
                 self.assertIn("236.25 / 60", result.stdout)
                 self.assert_refusal(self.run_review(vendor_sample(**{key: lower_bound-1})), "invalid")
+
+    def test_vendor_hour_uses_a_complete_independent_fallback(self):
+        doc = fallback_sample()
+        result = self.run_review(doc)
+        self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+        self.assertIn("offline; freshness unverified", result.stdout)
+        self.assertIn("Declared Coinbase USDT/USD: 59/60 elapsed minute buckets", result.stdout)
+        self.assertIn("Declared Kraken USDT/USD fallback: 60/60 elapsed minute buckets", result.stdout)
+        self.assertIn("minute starts inferred from declared observation", result.stdout)
+        self.assertIn("The USD mean uses the declared Kraken series.", result.stdout)
+        self.assertIn("Mean USDT per PRL (exact sum / minutes): 202.5 / 60", result.stdout)
+        self.assertIn("Mean USD per PRL (exact sum / minutes): 354.375 / 60", result.stdout)
+
+        rows = doc["kraken_fallback"]["candles"]["result"]["USDTZUSD"]
+        del rows[18]  # Coinbase covers this minute, but the two incomplete FX series cannot be merged.
+        result = self.run_review(doc)
+        self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+        self.assertIn("Declared Kraken USDT/USD fallback: 59/60 elapsed minute buckets", result.stdout)
+        self.assertIn("Mean USDT per PRL (exact sum / minutes): 202.5 / 60", result.stdout)
+        self.assertIn("incomplete aligned FX coverage", result.stdout)
+        self.assertNotIn("Mean USD per PRL (exact", result.stdout)
+
+    def test_vendor_fallback_requires_a_valid_primary_gap_and_kraken_payload(self):
+        for label, mutate, expected in (
+            ("no Coinbase declaration", lambda d: d.pop("fx"), "invalid hour document"),
+            ("no Kraken declaration", lambda d: d.pop("kraken_fallback"), "invalid hour document"),
+            ("old schema with extra source", lambda d: d.update(schema_version=2), "invalid hour document"),
+            ("complete Coinbase", lambda d: d.update(fx=vendor_sample()["fx"]), "incomplete Coinbase"),
+            ("malformed Coinbase", lambda d: d["fx"].update(candles=[]), "invalid USDT/USD minute series"),
+            ("wrong Kraken series", lambda d: d["kraken_fallback"].update(series="private-foreign"), "invalid Kraken"),
+            ("terminal row missing", lambda d: d["kraken_fallback"]["candles"]["result"]["USDTZUSD"].pop(), "invalid Kraken"),
+            ("observed after current row", lambda d: d["kraken_fallback"].update(observed_utc=END + 60), "invalid Kraken"),
+            ("incomplete Pearl", lambda d: d["pearl"]["candles"].pop(1), "requires all 60"),
+        ):
+            with self.subTest(case=label):
+                doc = fallback_sample()
+                mutate(doc)
+                self.assert_refusal(self.run_review(doc), expected)
+
+        doc = fallback_sample()
+        pairs = doc["kraken_fallback"]["candles"]["result"]
+        pairs["OTHER"] = pairs.pop("USDTZUSD")
+        self.assert_refusal(self.run_review(doc), "invalid Kraken")
+
+    def test_vendor_fallback_saves_and_replays_with_the_declared_original(self):
+        original = json.dumps(fallback_sample(), separators=(",", ":")).encode()
+        self.file.write_bytes(original)
+        archive = self.stage / "fallback.cmh"
+        result = self.run_miner("market-hour", "--file", self.file.name, "--save-review", archive.name)
+        self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+        self.assertIn("354.375 / 60", result.stdout)
+        self.assertIn(original, archive.read_bytes())
+        self.file.unlink()
+        replay = self.run_miner("market-hour", "--open-review", archive.name)
+        self.assertEqual((replay.returncode, replay.stderr, replay.stdout), (0, "", result.stdout))
 
     def test_missing_or_partial_fx(self):
         doc = sample()
