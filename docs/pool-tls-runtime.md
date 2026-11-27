@@ -22,9 +22,15 @@ A TLS-enabled build can check a documented endpoint through the installed TLS st
 
 ```text
 canary-miner pool-tls-check --pool stratum+ssl://prl-hk.kryptex.network:8048
+canary-miner pool-tls-check --pool kryptex-hk-tls
 ```
 
-Supply one explicit `stratum+ssl://` URL with an ASCII DNS name and port. The check runs before loading mining configuration or starting GPU work. It uses system trust and the same DNS reference, SNI and certificate validation as a strict mining connection. It sends no Stratum messages and never attempts plaintext. The result describes that one completed handshake. A later mining run performs its own TLS handshake and pool login.
+The checker resolves strict aliases from the same table as `run`. It accepts
+one alias or one explicit TLS URL. TCP aliases and URLs are refused before
+the TLS worker starts. In builds without the runtime, a valid alias returns
+the same unavailable result as a TLS URL.
+
+An explicit `stratum+ssl://` URL must contain an ASCII DNS name and port. The check runs before loading mining configuration or starting GPU work. It uses system trust and the same DNS reference, SNI and certificate validation as a strict mining connection. It sends no Stratum messages and never attempts plaintext. The result describes that one completed handshake. A later mining run performs its own TLS handshake and pool login.
 
 DNS, TCP and TLS setup share the ordinary ten-second budget, including the [bounded selection of a resolved address](pool-tls-check.md#native-connection-and-verification). The command retires its worker before reporting. Exit status 0 records verified TLS, 2 indicates invalid arguments, and 3 indicates an unavailable build or a connection failure. It prints a bounded failure category such as `dns`, `connect`, `verification` or `timeout`. Status 130 indicates cancellation with confirmed cleanup. Status 8 indicates that worker cleanup could not be confirmed.
 

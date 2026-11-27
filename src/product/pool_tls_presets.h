@@ -48,4 +48,10 @@ inline constexpr PoolTlsPreset kPoolTlsPresets[] = {
      "stratum+tcp://us2.pearl.herominers.com:1200", "stratum+ssl://us2.pearl.herominers.com:1200", kHeroMinersPoolPort},
 };
 
+inline constexpr const PoolTlsPreset *findPoolTlsPreset(std::string_view alias) {
+    for (const auto &preset : kPoolTlsPresets)
+        if (alias == preset.alias) return &preset;
+    return nullptr;
+}
+
 } // namespace om

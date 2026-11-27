@@ -47,6 +47,7 @@
 #include "../product/market_ticker_runtime.h"
 #include "../product/market_ticker_review.h"
 #include "../product/market_native_arguments.h"
+#include "../product/native_cli_arguments.h"
 #include "../product/octopus_meter_rates.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
@@ -150,8 +151,11 @@ int main(int argc, char **argv) {
             return kExitOk;
         }
         PoolSecurityEndpoint endpoint;
-        if (!parsePoolSecurityUrl(cli.poolTlsCheckUrl, &endpoint) || !endpoint.tls) {
-            std::fputs("pool-tls-check: supply one explicit TLS URL with a DNS name and port. See pool-tls-check --help\n", stderr);
+        const auto &spec = cli.poolTlsCheckSpec;
+        const auto *preset = findPoolTlsPreset(spec);
+        if (!nativeCliArguments(argc, argv, {{1, "pool-tls-check"}, {2, "--pool"}, {3, spec}}) ||
+            !parsePoolSecurityUrl(preset ? preset->tlsUrl : spec, &endpoint) || !endpoint.tls) {
+            std::fputs("pool-tls-check: supply one TLS URL with a DNS name and port or a strict TLS preset. See pool-tls-check --help\n", stderr);
             return kExitUsage;
         }
 #if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME

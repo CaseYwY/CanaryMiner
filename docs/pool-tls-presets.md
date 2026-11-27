@@ -17,7 +17,7 @@ The other Kryptex Pearl regions use the same strict policy and port 8048.
 | Russia | `kryptex-ru-tls` | `prl-ru.kryptex.network` |
 | Middle East | `kryptex-ae-tls` | `prl-ae.kryptex.network` |
 
-To check any of these endpoints before mining, pass `stratum+ssl://DNS:8048` with the host from the table to `canary-miner pool-tls-check --pool`. The check verifies the certificate and hostname and closes the connection. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en)
+To check a preset before mining, run `canary-miner pool-tls-check --pool kryptex-hk-tls` or pass another strict alias from the table. The same preset selects the same peer for the check and the miner. The check verifies the certificate and hostname with system trust, then closes the connection. Explicit `stratum+ssl://DNS:PORT` URLs are also supported. [Official Kryptex endpoint table](https://pool.kryptex.com/articles/pearl-miners-en)
 
 Use `herominers-tls` for the Pearl US East endpoint `stratum+ssl://us2.pearl.herominers.com:1200`. The pool publishes both transports on port 1200. The preset uses the existing HeroMiners protocol rules and requires donation off. To upgrade the legacy `herominers` preset, review and save the same host and port in Settings. [HeroMiners Pearl regions](https://pearl.herominers.com/) · [Official TCP/TLS instructions](https://pearl.herominers.com/help/) · [Migration instructions](pool-tls-migration.md)
 

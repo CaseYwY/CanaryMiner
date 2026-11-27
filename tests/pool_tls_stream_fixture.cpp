@@ -42,6 +42,13 @@ struct Connection final:PoolTlsConnection {
     void abort()override{closed=true;}
 };
 PoolTlsOpenResult open(const PoolTlsCheckRequest &r,bool plain){
+    const auto preflightTarget = fixtureDirectory / "preflight-target";
+    if (std::filesystem::is_regular_file(preflightTarget)) {
+        std::ofstream marker(preflightTarget, std::ios::binary | std::ios::app);
+        marker << r.host << ' ' << r.port << ' ' << (plain ? "plain" : "tls") << '\n';
+        marker.close();
+        if (!marker) throw std::runtime_error("synthetic preflight target could not be recorded");
+    }
     const bool budget=r.host.rfind("budget-fallback-",0)==0;
     const bool cancelFallback=r.host.rfind("cancel-fallback-",0)==0;
     const bool observeReconnect=r.host.rfind("observe-reconnect-",0)==0;
