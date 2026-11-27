@@ -3,11 +3,12 @@
 #include "meter_bill_input.h"
 #include "meter_prepaid.h"
 #include "meter_invoice.h"
+#include "market_public_sample.h"
 #include "octopus_meter_consumption.h"
+#include "octopus_meter_rates.h"
 #include "public_https.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <stdexcept>
 #include <string_view>
@@ -40,8 +41,10 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         options.nextCycleArg ? options.nextCycleArg : options.extendArg;
     for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
                       options.saveArg, options.ratesArg, options.invoiceArg, options.prepaidArg, options.previousCycleArg,
-                      options.saveTariffArg, options.saveRegisterArg})
+                      options.saveTariffArg, options.saveRegisterArg, options.dnsServerArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
+    if (options.allowPublicRatesArg && (options.allowPublicRatesArg < 2 || options.allowPublicRatesArg >= argc))
+        return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
     // The narrow CRT argv may lose path characters and best-fit non-ASCII option spellings.
@@ -66,6 +69,11 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     if (options.reviewCutoffArg &&
         (!matches(options.reviewCutoffArg, L"--as-of-utc-ms") ||
          std::wstring_view(args.values[options.reviewCutoffArg]) != std::to_wstring(options.reviewCutoffUtcMs)))
+        return std::nullopt;
+    if (options.allowPublicRatesArg && std::wstring_view(args.values[options.allowPublicRatesArg]) != L"--allow-public-rates")
+        return std::nullopt;
+    if (options.dnsServerArg && (!matches(options.dnsServerArg, L"--dns-server") ||
+        std::wstring_view(args.values[options.dnsServerArg]) != std::wstring(options.dnsServer.begin(), options.dnsServer.end())))
         return std::nullopt;
     const auto matchesOutput = [&](int index, std::wstring_view flag) {
         return !index || (matches(index, flag) &&
@@ -753,13 +761,13 @@ const char *cycleClockToken(CivilClockKind kind) {
 
 // The plan key and public price window can advance. These fields identify the continuing provider,
 // meter alias, input representation, time database and reset rule.
-std::optional<std::string> completeOctopusCycleBinding(const MeterReview &review) {
+std::optional<std::string> completeOctopusCycleBinding(const MeterReview &review, const std::string &paymentMethod) {
     const auto &declaration = review.declaration;
     const auto &plan = declaration.plan;
     const auto &opening = declaration.opening;
     const auto &meter = opening.evidence;
     const auto *series = std::get_if<std::vector<MeterImportInterval>>(&review.readings.series);
-    if (!review.supplier || !declaration.resetSchedule || review.prepaid || plan.exportPayment ||
+    if (!declaration.resetSchedule || review.prepaid || plan.exportPayment ||
         plan.restrictedCreditAtClose ||
         (review.readings.version != 2 && review.readings.version != 3) ||
         !series || series->empty() || opening.throughUtcMs != opening.cycleBeginUtcMs ||
@@ -778,7 +786,7 @@ std::optional<std::string> completeOctopusCycleBinding(const MeterReview &review
     binding += meterHalfHourRounding;
     binding += '\n';
     for (const auto *field : {&declaration.country, &plan.territory, &plan.supplier, &plan.product,
-                             &plan.currency, &review.supplier->paymentMethod, &meter.scope, &meter.adapter,
+                             &plan.currency, &paymentMethod, &meter.scope, &meter.adapter,
                              &opening.timeDatabaseVersion})
         binding += jsonQuote(*field) + '\n';
     const auto appendClock = [&](const CivilClock &clock, const char *token) {
@@ -800,7 +808,8 @@ std::optional<std::string> completeOctopusCycleBinding(const MeterReview &review
 
 std::optional<PreviousMeterCycle> bindPreviousCycle(const ReviewOriginal &original, const MeterReview &review,
                                                    std::string archiveSha256) {
-    auto binding = completeOctopusCycleBinding(review);
+    if (!review.supplier) return std::nullopt;
+    auto binding = completeOctopusCycleBinding(review, review.supplier->paymentMethod);
     if (!binding) return std::nullopt;
     const auto &end = review.readings.registerEnd;
     std::string registerEnd = end ? end->text() : "-";
@@ -809,10 +818,13 @@ std::optional<PreviousMeterCycle> bindPreviousCycle(const ReviewOriginal &origin
                               std::move(*binding), std::move(registerEnd)};
 }
 
-const char *verifyCycleLink(const ReviewOriginal &original, const MeterReview &review) {
+const char *verifyCycleLink(const ReviewOriginal &original, const MeterReview &review,
+                            const std::string *expectedPayment = nullptr) {
     if (!original.previousCycle) return nullptr;
     const auto &previous = *original.previousCycle;
-    const auto binding = completeOctopusCycleBinding(review);
+    const auto *payment = review.supplier ? &review.supplier->paymentMethod : expectedPayment;
+    if (!payment) return "next-cycle review requires a matching Octopus rate capture";
+    const auto binding = completeOctopusCycleBinding(review, *payment);
     if (!binding) return "next-cycle review requires one complete recurring Octopus cycle and matching rate window";
     if (previous.closedAt != review.declaration.opening.cycleBeginUtcMs)
         return "the new cycle does not start at the previous closing time";
@@ -932,6 +944,43 @@ const char *prepareNextOctopusCycle(const ReviewOriginal &original, const MeterR
     return nullptr;
 }
 
+const char *checkLiveCycleInputs(const ReviewOriginal &original, const MeterReview &review,
+                                 const std::string &payment, const std::string &output) {
+    if (!original.previousCycle) return "previous Octopus cycle is missing";
+    if (const auto *problem = verifyCycleLink(original, review, &payment)) return problem;
+    const auto &series = std::get<std::vector<MeterImportInterval>>(review.readings.series);
+    if (std::any_of(series.begin(), series.end(), [](const auto &interval) {
+        return interval.beginUtcMs % octopus_detail::halfHourMs ||
+               interval.endUtcMs - interval.beginUtcMs != octopus_detail::halfHourMs;
+    })) return electricityStatusName(ElectricityStatus::MeterRoundingBoundary);
+    if (!original.invoice.empty()) {
+        MeterInvoice invoice;
+        if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice)) return problem;
+        const auto &opening = review.declaration.opening;
+        const auto matches = [&](const InvoicePeriod &period) {
+            return period.begin == opening.cycleBeginUtcMs && period.end == opening.cycleEndUtcMs;
+        };
+        if (invoice.independent) {
+            const auto &rows = invoice.independent->supply.periods;
+            if (rows.size() != 1 || !matches(rows.front().period))
+                return "supply statement must match a complete reviewed billing cycle from a zero opening";
+        } else {
+            if (invoice.cycles.size() != 1) return "invoice must list one charge for each reviewed cycle";
+            if (!matches(invoice.cycles.front().period)) return "invoice cycle bounds differ from the reviewed cycle";
+        }
+    }
+    const auto target = localReviewPath(output);
+    if (!target) return "review output path is unavailable";
+    std::error_code error;
+    auto temporary = *target;
+    temporary += ".tmp";
+    for (const auto &path : {*target, temporary}) {
+        if (std::filesystem::symlink_status(path, error).type() != std::filesystem::file_type::not_found)
+            return "review output path is unavailable or already exists";
+    }
+    return nullptr;
+}
+
 int refuse(const char *reason) {
     std::fprintf(stderr, "meter-bill: %s\n", reason);
     return 3;
@@ -939,14 +988,17 @@ int refuse(const char *reason) {
 
 }  // namespace
 
-int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv, const volatile sig_atomic_t *stop) {
+int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv,
+                     const volatile sig_atomic_t *stop, const OctopusRateCaptureSource *publicRates) {
     if (options.help) {
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
                   "    [--invoice FILE] [--prepaid FILE] [--save-review NAME.cmr]\n"
                   "canary-miner meter-bill --open-review FILE [--invoice FILE] [--previous-cycle ARCHIVE]\n"
                   "canary-miner meter-bill --prepare-next-cycle ARCHIVE (--save-tariff NAME.json | --save-register NAME.json)\n"
-                  "canary-miner meter-bill --next-cycle-review ARCHIVE --tariff FILE --intervals FILE\n"
-                  "    --octopus-rates FILE --save-review NAME.cmr [--as-of-utc-ms MS] [--invoice FILE]\n"
+                  "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
+                  "    --octopus-rates FILE [--tariff FILE] [--as-of-utc-ms MS] [--invoice FILE]\n"
+                  "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
+                  "    --allow-public-rates [--dns-server IP] [--invoice FILE]\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
                   "    [--as-of-utc-ms MS] [--invoice FILE] [--prepaid FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
@@ -961,6 +1013,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
                   "Use --prepare-next-cycle to write a tariff declaration or a starting register from a verified Octopus review.\n"
                   "Use --next-cycle-review for a complete adjacent Octopus billing cycle with a new rate capture.\n"
+                  "Omit --tariff to derive it from the archive. Live capture requires --allow-public-rates.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Use --invoice to compare supply charges, reconcile independent export statements, or review interim annual charges.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
@@ -968,7 +1021,11 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Extend verifies the saved review and requires the complete interval history with additional readings.");
         return 0;
     }
-    const std::function<bool()> stopped = [stop] { return stop && *stop; };
+    const bool live = options.allowPublicRatesArg != 0;
+    NativeProcessLifetime captureLifetime;
+    const std::function<bool()> stopped = [&] {
+        return market_detail::marketSampleStopped(stop) || (captureLifetime.bound() && !captureLifetime.permitted());
+    };
     const auto stopResult = [&]() {
         if (!options.saveArg && !options.archiveArg && !options.invoiceArg && !options.prepareCycleArg) return 0;
         std::fputs(options.prepareCycleArg ? "meter-bill: next-cycle preparation stopped before publication\n" :
@@ -977,15 +1034,22 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                                         "meter-bill: invoice comparison stopped\n", stderr);
         return 130;
     };
-    const auto fail = [&](const char *reason) { return stopped() ? stopResult() : refuse(reason); };
+    const auto fail = [&](const char *reason) {
+        if (captureLifetime.bound() && !captureLifetime.permitted()) return refuse("helper ownership uncertain");
+        return stopped() ? stopResult() : refuse(reason);
+    };
     try {
-        const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto started = live ? market_detail::marketTradeClock() : market_detail::MarketSampleClock{};
+        auto now = static_cast<int64_t>(live ? started.second : market_detail::marketUtcClockMs());
         if (stopped()) return stopResult();
         const auto paths = meterBillPaths(options, argc, argv);
         if (!paths) return fail(options.reviewCutoffArg ? "invalid review cutoff or input file arguments" :
                                                          "could not resolve input file arguments");
+        if (live && !publicRates) return fail("public HTTPS unavailable in this build");
+        if (live && (!publicRates->fetch || publicRates->module.empty()))
+            return fail("installed helper path unavailable");
         ReviewOriginal original;
+        std::string inheritedPayment;
         const bool reopening = options.archiveArg != 0;
         const bool extending = options.extendArg != 0;
         const bool nextCycle = options.nextCycleArg != 0;
@@ -1044,7 +1108,15 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                 if (nextCycle) {
                     auto link = bindPreviousCycle(original, earlier, sha256Hex(bytes));
                     if (!link) return fail("previous review must be a complete recurring Octopus cycle and matching rate window");
+                    PreparedOctopusCycle draft;
+                    if (!options.tariffArg) {
+                        if (const auto *problem = prepareNextOctopusCycle(original, earlier, *link, false, draft))
+                            return fail(problem);
+                        if (live && !draft.publicCapture) return fail("next cycle exceeds the installed public rate capture bounds");
+                    }
+                    if (live) inheritedPayment = earlier.supplier->paymentMethod;
                     original = {};
+                    original.tariff = std::move(draft.bytes);
                     original.previousCycle = std::move(link);
                 } else {
                     auto &previous = original.previous.emplace();
@@ -1060,7 +1132,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             }
         }
         if (!reopening) original.cutoff = cutoff;
-        if (!reopening && !extending && !readLocalReviewInput(paths->tariff, tariffDeclarationMaxBytes, original.tariff))
+        if (!reopening && !extending && options.tariffArg &&
+            !readLocalReviewInput(paths->tariff, tariffDeclarationMaxBytes, original.tariff))
             return fail("saved tariff declaration unavailable or invalid");
         if (stopped()) return stopResult();
         if (!reopening && !readLocalReviewInput(paths->intervals, maxMeterFileBytes, original.intervals))
@@ -1073,6 +1146,32 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (options.prepaidArg &&
             (!readLocalReviewInput(paths->prepaid,maxPrepaidFileBytes,original.prepaid) || original.prepaid.empty()))
             return fail("prepaid file unavailable, empty, oversized or not a regular file");
+
+        if (live) {
+            if (options.invoiceArg &&
+                (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty()))
+                return fail("invoice file unavailable, empty, oversized or not a regular file");
+            MeterReview preview;
+            if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, preview))
+                return fail(problem);
+            if (const auto *problem = checkLiveCycleInputs(original, preview, inheritedPayment, options.outputName))
+                return fail(problem);
+            if (!market_detail::marketTradeClockContinuous(started, started, market_detail::marketTradeClock()))
+                return fail("local clock changed during the billing review");
+            if (stopped() || !captureLifetime.begin()) return fail("helper ownership uncertain");
+
+            OctopusRateCapture captured;
+            if (const auto *problem = publicRates->fetch(std::move(preview.declaration), inheritedPayment,
+                    options.dnsServer, publicRates->module, captureLifetime, stop, captured)) return fail(problem);
+            const auto finished = market_detail::marketTradeClock();
+            if (!market_detail::marketTradeClockContinuous(started, started, finished) ||
+                captured.summary.observedUtcMs < now ||
+                captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
+                return fail("local clock changed during the billing review");
+            now = static_cast<int64_t>(finished.second);
+            original.cutoff = captured.summary.observedUtcMs;
+            original.supplierRates = std::move(captured.bytes);
+        }
 
         MeterReview review;
         if (const auto *problem = prepareMeterReview(original, now, options.reviewCutoffArg || reopening || archiving,
@@ -1090,22 +1189,22 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (original.previousCycle)
             review.report += "Previous Octopus cycle closed at " + std::to_string(original.previousCycle->closedAt) +
                              " UTC ms (archive SHA-256 " + original.previousCycle->archiveSha256 + ")\n";
-        const bool retainedInvoice = !original.invoice.empty();
-        if (options.invoiceArg) {
+        const bool retainedInvoice = !live && !original.invoice.empty();
+        if (options.invoiceArg && !live) {
             if (retainedInvoice) return fail("saved review already contains an invoice comparison");
             if (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty())
                 return fail("invoice file unavailable, empty, oversized or not a regular file");
         }
         if (const auto *problem = calculateMeterReview(original, archiving || retainedInvoice, stopped, review))
             return fail(problem);
-        if (stopped()) return stopResult();
+        if (stopped()) return fail("review cancelled");
         if (reopening && original.results != review.exact) return fail("saved review amounts differ from the recalculated amounts");
         if (archiving) {
             if (review.exact.size() > maxExactResultsBytes) return fail("exact results exceed the archive bound");
             original.results = std::move(review.exact);
-            const auto state = local_review_archive::save(options.outputName, ".cmr", encodeReviewOriginal(original),
-                                                          maxArchiveBytes, stop);
-            if (state == local_review_archive::ReviewSave::Stopped) return stopResult();
+            const auto state = local_review_archive::saveWhileActive(options.outputName, ".cmr", encodeReviewOriginal(original),
+                                                                     maxArchiveBytes, stopped);
+            if (state == local_review_archive::ReviewSave::Stopped) return fail("review cancelled");
             if (state == local_review_archive::ReviewSave::Uncertain)
                 return refuse("archive publication or cleanup is uncertain; inspect the review and its temporary file");
             if (state != local_review_archive::ReviewSave::Written)

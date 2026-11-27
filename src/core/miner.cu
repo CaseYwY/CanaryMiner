@@ -47,6 +47,7 @@
 #include "../product/market_ticker_runtime.h"
 #include "../product/market_ticker_review.h"
 #include "../product/market_native_arguments.h"
+#include "../product/octopus_meter_rates.h"
 #include "../product/gpu_tuning.h"
 #if defined(CANARY_ENABLE_WORKER_CONTROL_RUNTIME) && CANARY_ENABLE_WORKER_CONTROL_RUNTIME
 #include "../product/worker_process.h"
@@ -222,6 +223,19 @@ int main(int argc, char **argv) {
     if (cli.command == Command::MeterBill) {
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
+        if constexpr (kPublicTickerRuntimeBuilt) {
+            if (cli.meterBill.allowPublicRatesArg) {
+#if defined(SIGBREAK)
+                signal(SIGBREAK, onSignal);
+#endif
+#if defined(SIGPIPE)
+                signal(SIGPIPE, SIG_IGN);
+#endif
+                const OctopusRateCaptureSource publicRates{std::filesystem::u8path(selfExecutablePath()),
+                                                           capturePublicOctopusRates};
+                return commandMeterBill(cli.meterBill, argc, argv, &g_stop, &publicRates);
+            }
+        }
         return commandMeterBill(cli.meterBill, argc, argv, &g_stop);
     }
     if (cli.command == Command::EnergyPeriods) {

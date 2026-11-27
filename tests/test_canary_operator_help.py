@@ -54,6 +54,16 @@ class CanaryOperatorHelpTests(unittest.TestCase):
         self.assertEqual(long.stdout, short.stdout)
         self.assertEqual(long.stderr + short.stderr, b'')
 
+    def test_offline_only_billing_rejects_explicit_public_capture(self):
+        name = 'disabled-public-rates.cmr'
+        result = self.cli('meter-bill', '--allow-public-rates', '--next-cycle-review',
+                          'unused.cmr', '--intervals', 'unused.json', '--save-review', name)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn(b'public HTTPS unavailable in this build', result.stderr)
+        self.assertFalse(result.stdout)
+        for candidate in (name, name + '.tmp'):
+            self.assertFalse((Path(self.stage.name) / candidate).exists())
+
     def test_standard_help_is_short_and_grouped(self):
         help_text = self.cli('--help').stdout.decode()
         for text in ('NVIDIA Blackwell (RTX 50-series) only', '--pool', '--wallet', '--gpu-id', '--api-enable',

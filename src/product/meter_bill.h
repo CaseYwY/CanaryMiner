@@ -2,6 +2,7 @@
 #pragma once
 
 #include "local_export_name.h"
+#include "public_https.h"
 
 #include <charconv>
 #include <cstddef>
@@ -20,7 +21,8 @@ struct MeterBillOptions {
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
     int nextCycleArg = 0, previousCycleArg = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
-    std::string outputName;
+    int allowPublicRatesArg = 0, dnsServerArg = 0;
+    std::string outputName, dnsServer;
     int64_t reviewCutoffUtcMs = 0;
     bool help = false;
 };
@@ -32,15 +34,23 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
         options.help = true;
     } else {
         const int operands = argc - begin;
-        if (operands < 2 || operands > 14 || operands % 2) return false;
-        for (int i = begin; i < argc; i += 2) {
+        if (operands < 2 || operands > 14) return false;
+        for (int i = begin; i < argc;) {
             const std::string name = argv[i];
+            if (name == "--allow-public-rates" && !options.allowPublicRatesArg) {
+                options.allowPublicRatesArg = i++;
+                continue;
+            }
+            if (i + 1 >= argc) return false;
             const std::string value = argv[i+1];
             if (value.empty() || value.front() == '-') return false;
             if (name == "--tariff" && !options.tariffArg) options.tariffArg = i+1;
             else if (name == "--intervals" && !options.intervalsArg) options.intervalsArg = i+1;
             else if (name == "--octopus-rates" && !options.ratesArg) options.ratesArg = i+1;
-            else if (name == "--invoice" && !options.invoiceArg) options.invoiceArg = i+1;
+            else if (name == "--dns-server" && !options.dnsServerArg && validPublicDnsServer(value)) {
+                options.dnsServerArg = i+1;
+                options.dnsServer = value;
+            } else if (name == "--invoice" && !options.invoiceArg) options.invoiceArg = i+1;
             else if (name == "--prepaid" && !options.prepaidArg) options.prepaidArg = i+1;
             else if (name == "--open-review" && !options.archiveArg) options.archiveArg = i+1;
             else if (name == "--prepare-next-cycle" && !options.prepareCycleArg) options.prepareCycleArg = i+1;
@@ -61,7 +71,11 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
                     parsed.ptr != end || options.reviewCutoffUtcMs > meterBillMaxUtcMs) return false;
                 options.reviewCutoffArg = i+1;
             } else return false;
+            i += 2;
         }
+        if (options.allowPublicRatesArg && (!options.nextCycleArg || options.archiveArg || options.prepareCycleArg ||
+                                          options.tariffArg || options.ratesArg || options.reviewCutoffArg)) return false;
+        if (options.dnsServerArg && !options.allowPublicRatesArg) return false;
         if (options.prepareCycleArg) {
             if (operands != 4 || (!options.saveTariffArg && !options.saveRegisterArg)) return false;
         } else if (options.saveTariffArg || options.saveRegisterArg) return false;
@@ -69,8 +83,8 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             if (operands != 2 + (options.invoiceArg ? 2 : 0) + (options.previousCycleArg ? 2 : 0)) return false;
         } else if (options.previousCycleArg) return false;
         else if (options.nextCycleArg) {
-            if (options.extendArg || options.prepaidArg || !options.tariffArg || !options.intervalsArg ||
-                !options.ratesArg || !options.saveArg) return false;
+            if (options.extendArg || options.prepaidArg || !options.intervalsArg || !options.saveArg ||
+                (!options.ratesArg && !options.allowPublicRatesArg)) return false;
         } else if (options.extendArg) {
             if (options.tariffArg || options.ratesArg || !options.intervalsArg || !options.saveArg) return false;
         } else if (!options.tariffArg || !options.intervalsArg) return false;
@@ -79,6 +93,9 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
     return true;
 }
 
-int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv, const volatile sig_atomic_t *stop);
+struct OctopusRateCaptureSource;
+
+int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv,
+                     const volatile sig_atomic_t *stop, const OctopusRateCaptureSource *publicRates = nullptr);
 
 }  // namespace om

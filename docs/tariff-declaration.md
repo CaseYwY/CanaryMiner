@@ -661,6 +661,21 @@ canary-miner meter-bill --next-cycle-review march.cmr --tariff april-tariff.json
 canary-miner meter-bill --open-review april.cmr --previous-cycle march.cmr
 ```
 
+Omit `--tariff` to derive the new declaration in memory from the prior review. You can apply
+an existing capture or explicitly authorize a public rate fetch in the same command.
+
+```text
+canary-miner meter-bill --next-cycle-review march.cmr --intervals april-usage.json --octopus-rates april-rates.json --save-review april.cmr
+canary-miner meter-bill --next-cycle-review march.cmr --intervals april-usage.json --allow-public-rates --save-review april.cmr
+```
+
+The installed live capture uses the preceding review's payment method and requests public
+unit rates and standing charges for the derived billing window. It checks complete meter
+coverage before making the requests. It uses the capture time as the review cutoff. Use the
+saved-capture form to specify a historical cutoff or include tax annotations in an explicit
+declaration. The command stores the new declaration, readings, public rate pages and results
+together in a single private archive once the review passes. Existing files are preserved.
+
 The command replays the prior archive at its own cutoff before calculating the new cycle. It
 prices April using April's capture, so March's usage, charges and invoice keep their archived
 figures. Set the new cutoff at or after the previous cutoff and the new capture and reading

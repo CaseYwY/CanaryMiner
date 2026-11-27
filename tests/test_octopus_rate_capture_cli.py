@@ -11,7 +11,7 @@ import tempfile
 
 from test_meter_tax_cli import fraction, period, tax_tariff
 from test_octopus_cycle_review_cli import LONDON, cycle
-from test_meter_bill_named_cli import utc
+from test_meter_bill_named_cli import SCOPE, utc
 from test_octopus_meter_rates_cli import BEGIN, BUNDLE, END, GO_PRODUCT, HOUR, PAYMENT, PRODUCT, SLOTS, inputs, pages as paginate, row
 
 
@@ -166,6 +166,71 @@ def main(cli, fixture, bundle, real_worker):
         assert applied.returncode == 0 and f"Cycle estimate at closing {new_total:.6f} GBP" in applied.stdout, applied
         replay = run("meter-bill", "--open-review", "april.cmr", "--previous-cycle", "march-monthly.cmr")
         assert replay.returncode == 0 and replay.stdout == applied.stdout, replay
+
+        march_bundle = json.loads(rate_file.read_bytes())
+        march_bundle["payment_method"] = "NON_DIRECT_DEBIT"
+        write(root / "march-non-direct.json", march_bundle)
+        prior_archive = "march-non-direct.cmr"
+        prior = run("meter-bill", "--tariff", tariff.name, "--intervals", "meter.json",
+                    "--octopus-rates", "march-non-direct.json", "--save-review", prior_archive)
+        assert prior.returncode == 0 and "NON_DIRECT_DEBIT" in prior.stdout, prior
+
+        live_units = paginate([row(END - HOUR, ends + HOUR, 25, "NON_DIRECT_DEBIT"),
+                               row(END - HOUR, ends + HOUR, 99, PAYMENT)])[0]
+        live_standing = paginate([row(END, None, 40, "NON_DIRECT_DEBIT"), row(END, None, 80, PAYMENT)])[0]
+        write(first, live_units)
+        requests.unlink()
+        live_root = ("meter-bill", "--allow-public-rates", "--next-cycle-review", prior_archive,
+                     "--intervals", "april-meter.json", "--save-review", "april-live.cmr",
+                     "--dns-server", "192.168.50.53")
+        live_output = root / "april-live.cmr"
+        live_temp = root / "april-live.cmr.tmp"
+        for edit_readings, diagnostic in (
+            (lambda points: points.pop(), "requires one complete"),
+            (lambda points: points.pop(1), "meter rounding needs readings"),
+            (lambda points: points[0].update(imported_kwh="0"), "opening register differs"),
+        ):
+            bad_register = copy.deepcopy(new_register)
+            edit_readings(bad_register["register_readings"])
+            write(root / "april-meter.json", bad_register)
+            invalid = run(*live_root)
+            assert invalid.returncode == 3 and diagnostic in invalid.stderr.lower(), invalid
+            assert not requests.exists() and not live_output.exists() and not live_temp.exists()
+        write(root / "april-meter.json", new_register)
+        write(root / "invalid-invoice.json", {})
+        invalid = run(*live_root, "--invoice", "invalid-invoice.json")
+        assert invalid.returncode == 3 and "invalid invoice" in invalid.stderr, invalid
+        assert not requests.exists() and not live_output.exists()
+        invoice = dict(schema_version=1, scope=SCOPE, currency="GBP", decimal_places=2, rounding="half_even",
+                       cycles=[dict(begin_utc_ms=END - HOUR, end_utc_ms=ends, supply_charge=str(new_total))])
+        write(root / "wrong-period.json", invoice)
+        invalid = run(*live_root, "--invoice", "wrong-period.json")
+        assert invalid.returncode == 3 and "invoice cycle bounds differ" in invalid.stderr, invalid
+        assert not requests.exists() and not live_output.exists() and not live_temp.exists()
+        for occupied in (live_output, live_temp):
+            occupied.write_bytes(b"existing")
+            invalid = run(*live_root)
+            assert invalid.returncode == 3 and "already exists" in invalid.stderr, invalid
+            assert not requests.exists() and occupied.read_bytes() == b"existing"
+            occupied.unlink()
+
+        write(fee, {})
+        invalid = run(*live_root)
+        assert invalid.returncode == 3 and not invalid.stdout and requests.exists(), invalid
+        assert not live_output.exists() and not live_temp.exists()
+        requests.unlink()
+        write(fee, live_standing)
+        invoice["cycles"][0]["begin_utc_ms"] = END
+        write(root / "april-invoice.json", invoice)
+        live = run(*live_root, "--invoice", "april-invoice.json")
+        assert live.returncode == 0 and not live.stderr, live
+        assert f"Cycle estimate at closing {new_total:.6f} GBP" in live.stdout and "(match)" in live.stdout, live
+        assert requests.read_text().splitlines() == [
+            f"{feed} {END // 1000} {ends // 1000} {GO_PRODUCT} C 1 192.168.50.53" for feed in (10, 11)]
+        assert live_output.exists() and not live_temp.exists()
+        replay = run("meter-bill", "--open-review", live_output.name, "--previous-cycle", prior_archive)
+        assert replay.returncode == 0 and replay.stdout == live.stdout and not replay.stderr, replay
+        assert len(requests.read_text().splitlines()) == 2
 
         base = ("10", str(BEGIN // 1000), str(END // 1000), "5000", "15000", "65536", "32768")
         for malformed in (("GO-VAR-22-10-14", "I", "1"), ("AGILE-23-02-29", "C", "1"),
