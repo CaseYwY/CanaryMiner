@@ -45,7 +45,7 @@ def cycle(begin, end, product, kwh, pence, standing, days, *, bundle=False):
     return declaration, readings, snapshot, amount
 
 
-def main(cli, bundle):
+def main(cli, bundle, clock_fixture=None):
     with tempfile.TemporaryDirectory(prefix='canary-octopus-cycle-') as directory:
         root = Path(directory)
         installed = root / 'installed'
@@ -63,9 +63,9 @@ def main(cli, bundle):
             for path, doc in zip((tariff, readings, rates), c):
                 write(path, doc)
 
-        def run(*args, code=0, reason='', cwd=root):
+        def run(*args, code=0, reason='', cwd=root, env=None):
             nonlocal count
-            result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=cwd, capture_output=True,
+            result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=cwd, env=env, capture_output=True,
                                     text=True, timeout=20)
             assert result.returncode == code, (args, result)
             private = (tariff.name, rates.name, readings.name, invoice.name, 'FORBIDDEN_DEVICE_SETUP')
@@ -300,6 +300,14 @@ def main(cli, bundle):
                              predecessor_sha256=sha256(successor.read_bytes()).hexdigest())
         assert json.loads(run(*query, cwd=planner)) == expected_plan
         assert json.loads(run(*scheduled, cwd=planner)) == dict(expected_plan, seed_sha256=seed_digest, ready=True)
+        if clock_fixture:
+            past = dict(os.environ, LD_PRELOAD=str(Path(clock_fixture).resolve()),
+                        CANARY_TEST_SUCCESSOR_CUTOFF_MS=str(december + HOUR))
+            past.pop('CANARY_TEST_SUCCESSOR_CLOCK_ADVANCE', None)
+            run(*scheduled, cwd=planner, env=past, code=3, reason='successor archive is newer')
+            advancing = dict(past, CANARY_TEST_SUCCESSOR_CLOCK_ADVANCE='1')
+            assert json.loads(run(*scheduled, cwd=planner, env=advancing)) == dict(
+                expected_plan, seed_sha256=seed_digest, ready=False)
         damaged = successor.read_bytes()
         successor.write_bytes(damaged[:-1])
         run(*query, cwd=planner, code=3, reason='successor archive is invalid')

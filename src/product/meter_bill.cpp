@@ -1225,7 +1225,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         return problem;
 
     const auto refreshClock = [&] {
-        if (!source && !watch) return true;
+        if (!source && !watch && planMode != ReadingsPlanMode::Scheduled) return true;
         const auto current = market_detail::marketTradeClock();
         if (!market_detail::marketTradeClockContinuous(started, started, current) ||
             current.second < static_cast<uint64_t>(now)) return false;
@@ -1283,7 +1283,10 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (!decodeReviewOriginal(bytes, next)) return "recurring review successor archive is invalid";
             if (!next.previousCycle || !sameClosingRecord(*next.previousCycle, *link))
                 return "recurring review successor does not match the previous closing record";
-            if (next.cutoff > cutoff) return "successor archive is newer than the requested cutoff";
+            if (planMode == ReadingsPlanMode::Scheduled && !refreshClock())
+                return "local clock changed while reading the recurring successor";
+            if (next.cutoff > (planMode == ReadingsPlanMode::Scheduled ? now : cutoff))
+                return "successor archive is newer than the requested cutoff";
             if (const auto *problem = replaySavedReview(next, now, lateReadingError, stopped, nextReview))
                 return problem;
             if (nextReview.declaration.opening.cycleEndUtcMs != progress.closing)
@@ -1484,8 +1487,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
     };
     try {
         const bool watching = options.watchArg != 0;
-        const auto started = live || watching ? market_detail::marketTradeClock() : market_detail::MarketSampleClock{};
-        auto now = static_cast<int64_t>(live || watching ? started.second : market_detail::marketUtcClockMs());
+        const bool timed = live || watching || options.scheduledReadingsPlan;
+        const auto started = timed ? market_detail::marketTradeClock() : market_detail::MarketSampleClock{};
+        auto now = static_cast<int64_t>(timed ? started.second : market_detail::marketUtcClockMs());
         if (stopped()) return stopResult();
         const auto paths = meterBillPaths(options, argc, argv);
         if (!paths) return fail(options.reviewCutoffArg ? "invalid review cutoff or input file arguments" :

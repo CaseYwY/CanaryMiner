@@ -263,6 +263,9 @@ def capture_consumption(opener, identity, scope, begin, end, deadline):
             raise CaptureError('invalid or incomplete Octopus consumption pagination')
         append_readings(rows, page['results'], normalize_utc=True)
         if partial:
+            if (any(start < begin or finish > end for start, finish, *_ in rows) or
+                    len({row[0] for row in rows}) != len(rows)):
+                raise CaptureError('partial Octopus readings exceed or overlap the requested window')
             raise CapturePending('Octopus readings are not complete for this cycle')
     limit = MAX_ANNUAL_BYTES if expected > MAX_ROWS else MAX_BYTES
     return encode_bundle(rows, scope, begin, end, byte_limit=limit)

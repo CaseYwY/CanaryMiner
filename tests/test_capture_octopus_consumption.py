@@ -203,6 +203,19 @@ class AuthenticatedCaptureTests(unittest.TestCase):
                                                   from_seed=True, seed_mode='--run-scheduled')[:2], (1, 0))
                 pause.assert_not_called()
                 self.assertFalse(captured.exists())
+                row = page_documents(BEGIN, END)[0]['results'][0]
+                outside = dict(row, interval_start=capture.iso_utc(END),
+                               interval_end=capture.iso_utc(END + capture.HALF_HOUR))
+                for invalid_rows in ([outside], [row, row]):
+                    provider = Provider(account(), dict(count=len(invalid_rows), next=None, previous=None,
+                                                        results=invalid_rows))
+                    with mock.patch.object(capture.time, 'sleep') as pause:
+                        code, entered, error = self.command(provider, seed, consent, '--watch-every-seconds', '60',
+                                                            from_seed=True, seed_mode='--run-scheduled')
+                    self.assertEqual((code, entered), (1, 0))
+                    self.assertIn('exceed or overlap', error)
+                    pause.assert_not_called()
+                    self.assertFalse(captured.exists())
                 provider = Provider(account(), *page_documents(BEGIN, END))
                 self.assertEqual(self.command(provider, seed, consent, from_seed=True,
                                               seed_mode='--run-scheduled')[:2], (0, 0))
