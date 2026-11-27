@@ -24,7 +24,7 @@ def main():
     preference_fixture = Path(sys.argv[3]).resolve()
     checks = 0
 
-    def session(root, work, disabled=False, hour=False, resolver=None, trades=False):
+    def session(root, work, disabled=False, hour=False, resolver=None, trades=False, fallback_mode=None):
         nonlocal checks
         executable = fixture
         if hour:
@@ -37,7 +37,10 @@ def main():
             now = int(time.time())
             (installed / 'trade-response-7.json').write_bytes(gate_body(gate_row(now - 3)))
             (installed / 'trade-response-8.json').write_bytes(kraken_body(('0.98', f'{now - 4}.25', 4)))
-        options = ['--trade-hour-fixture'] if trades else ['--hour-fixture'] if hour else ['--no-market'] if disabled else []
+        if fallback_mode:
+            (installed / 'candle-scenario').write_text(fallback_mode, encoding='ascii')
+        options = ['--kraken-hour-fixture'] if fallback_mode else ['--trade-hour-fixture'] if trades else (
+            ['--hour-fixture'] if hour else ['--no-market'] if disabled else [])
         if resolver:
             assert hour
             options.append(resolver)
@@ -151,6 +154,44 @@ def main():
             assert (state / 'installed' / 'resolver-requests').read_text().splitlines() == [resolver] * 4
             assert counts['factories'] == counts['starts'] == counts['joins'] == 1 and counts['views'] > 0
             checks += 4
+
+            def public_fallback(send, until):
+                nonlocal checks
+                text = until(b'3.000000 USDT/PRL | 8.000000 USD/PRL (Kraken fallback)')
+                assert b'Coinbase USDT-USD: 59/60' in text and resolver.encode('ascii') not in text
+                until(b'Kraken USDT/USD fallback: 60/60')
+                checks += 3
+                send(b'q')
+
+            state = root / 'kraken-hour'
+            counts = session(state, public_fallback, hour=True, resolver=resolver, fallback_mode='gap-fx')
+            payloads = (state / 'installed' / 'candle-requests').read_text().splitlines()
+            assert [line.split()[0] for line in payloads] == ['4', '5', '3']
+            assert len({line.split(' ', 1)[1] for line in payloads}) == 1
+            assert (state / 'installed' / 'resolver-requests').read_text().splitlines() == [resolver] * 5
+            assert counts['factories'] == counts['starts'] == counts['joins'] == 1
+            checks += 4
+
+            slow = root / 'kraken-hour-stop'
+
+            def stop_fallback(send, until):
+                nonlocal checks
+                until(b'Coinbase USDT-USD: 59/60')
+                requests = slow / 'installed' / 'candle-requests'
+                deadline = time.monotonic() + 3
+                while not any(line.startswith('3 ') for line in requests.read_text().splitlines()):
+                    assert time.monotonic() < deadline, 'Kraken fallback did not start'
+                    time.sleep(.01)
+                text = until(b'Kraken USDT/USD fallback:')
+                assert b'8.000000 USD/PRL' not in text
+                checks += 2
+                send(b'q')
+
+            counts = session(slow, stop_fallback, hour=True, resolver=resolver, fallback_mode='slow-kraken')
+            assert counts['factories'] == counts['starts'] == counts['joins'] == 1
+            assert [line.split()[0] for line in
+                    (slow / 'installed' / 'candle-requests').read_text().splitlines()] == ['4', '5', '3']
+            checks += 2
 
             def live_trades(send, until):
                 nonlocal checks

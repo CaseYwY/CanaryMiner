@@ -27,7 +27,7 @@ inline bool nativePublicTickerInvocation(const MarketTickerOptions &options, int
 }
 
 inline bool validDashboardMarketArguments(int argc, const char *const *argv, int latestIndex, bool trades, int hourIndex,
-                                          int dnsIndex, std::string_view dnsServer) {
+                                          int fallbackIndex, int dnsIndex, std::string_view dnsServer) {
     const char *permission=trades ? "--allow-public-trades" : "--allow-public-tickers";
     if (hourIndex) {
         if (!nativeMarketArgumentPair(argc, argv, latestIndex, permission, hourIndex, "--allow-public-candles"))
@@ -35,6 +35,7 @@ inline bool validDashboardMarketArguments(int argc, const char *const *argv, int
     } else if (!nativeMarketArguments(argc, argv, {{latestIndex, permission}})) {
         return false;
     }
+    if (fallbackIndex && !nativeMarketArguments(argc, argv, {{fallbackIndex, "--kraken-fallback"}})) return false;
     return !dnsIndex || (dnsIndex < argc - 1 &&
         nativeMarketArgumentPair(argc, argv, dnsIndex, "--market-dns-server", dnsIndex + 1, dnsServer));
 }

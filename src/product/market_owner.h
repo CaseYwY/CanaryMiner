@@ -18,7 +18,7 @@ struct MarketPollingPolicy {
     MarketFreshnessPolicy freshness;
     PublicHttpsLimits https;
     bool scheduleEconomicRequests = true;
-    bool publicHour = false, publicTrades = false;
+    bool publicHour = false, publicTrades = false, publicHourKrakenFallback = false;
 };
 bool validMarketPollingPolicy(const MarketPollingPolicy &policy);
 struct MarketFetchTicket {
@@ -42,6 +42,7 @@ class MarketPollingPlan {
     bool observeClock(uint64_t nowMs, uint64_t nowUtc);
     std::optional<MarketFetchTicket> next(uint64_t nowMs, uint64_t nowUtc);
     bool complete(const MarketFetchTicket &ticket, const PublicJsonResponse &response, MarketDataStatus data, uint64_t nowMs, uint64_t nowUtc);
+    void setPublicHourFallback(uint64_t end); // set or clear the eligible window after primary observations commit
     bool takeEconomicRequest(uint64_t nowMs, uint64_t nowUtc);
     bool active() const { return active_; }
     bool clockFault() const { return clockFault_; }
@@ -54,6 +55,7 @@ class MarketPollingPlan {
     std::array<uint64_t, 4> providerDue_{};
     uint64_t pendingHourEnd_ = 0;
     unsigned pendingHourFeeds_ = 0;
+    uint64_t pendingFallbackEnd_ = 0, lastFallbackEnd_ = 0;
     std::optional<MarketFetchTicket> current_;
     std::array<MarketFeedHealth, 6> health_{};
 };
@@ -66,7 +68,7 @@ struct MarketSnapshot {
     std::optional<MarketQuote> pearlQuote, fxQuote;
     std::optional<MarketTradeObservation> pearlTrade, fxTrade;
     std::optional<MarketCandles> pearlCandles, fxCandles;
-    std::shared_ptr<const PublicHourObservation> pearlHour, fxHour;
+    std::shared_ptr<const PublicHourObservation> pearlHour, fxHour, krakenHour;
 };
 using MarketFetch = std::function<PublicJsonResponse(const PublicJsonRequest &, const std::atomic<bool> &, PublicHttpsLimits)>;
 // Monotonic milliseconds followed by UTC seconds, or UTC milliseconds for publicTrades.

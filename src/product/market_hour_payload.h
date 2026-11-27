@@ -45,6 +45,10 @@ inline MarketWindow calculateMarketHour(uint64_t start, uint64_t end, const std:
     return window;
 }
 
+inline bool hourFallbackCoverage(size_t pearl, size_t coinbase) {
+    return pearl == marketHourMinutes && coinbase < marketHourMinutes;
+}
+
 inline std::string exactHourMean(const MarketExactMean &mean) {
     return mean.sum.text() + " / " + std::to_string(mean.count);
 }

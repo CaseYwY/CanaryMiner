@@ -421,6 +421,7 @@ int main(int argc, char **argv) {
     // H-032: a worker child is one GPU of a supervised run (the supervisor passes these; they are not in --help).
     bool workerChild = false, noDashboard = false;
     int publicTickerPermissionArg = 0, publicTradePermissionArg = 0, publicHourPermissionArg = 0, publicDnsArg = 0;
+    int publicKrakenFallbackArg = 0;
     std::string publicDnsServer;
     bool workerPoolTlsSeen=false;
     std::string workerPoolTlsUrl;
@@ -480,6 +481,13 @@ int main(int argc, char **argv) {
         else if (a.rfind("--allow-public-candles=", 0) == 0) {
             fprintf(stderr, "--allow-public-candles takes no value\n");
             return kExitUsage;
+        }
+        else if (a == "--kraken-fallback" || a.rfind("--kraken-fallback=", 0) == 0) {
+            if (a != "--kraken-fallback" || cli.command != Command::Run || publicKrakenFallbackArg) {
+                fprintf(stderr, "--kraken-fallback is accepted once without a value, for run only\n");
+                return kExitUsage;
+            }
+            publicKrakenFallbackArg = cli.restArgIndices[i];
         }
         else if (a == "--market-dns-server" || a.rfind("--market-dns-server=", 0) == 0) {
             const int flagIndex = cli.restArgIndices[i];
@@ -693,6 +701,7 @@ int main(int argc, char **argv) {
                 "  --allow-public-tickers  allow public tickers for a saved Dashboard market request\n"
                 "  --allow-public-trades   allow trade-time references for a saved Dashboard market request\n"
                 "  --allow-public-candles  also allow public hourly candles for this dashboard run\n"
+                "  --kraken-fallback       allow Kraken FX candles for an incomplete Coinbase hour\n"
                 "  --market-dns-server IP|cloudflare-doh  choose a resolver for authorized Dashboard feeds\n"
                 "  --no-energy       disable optional session board-energy recording this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
@@ -764,12 +773,16 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Dashboard candles require --allow-public-tickers as well, or --allow-public-trades\n");
         return kExitUsage;
     }
+    if (publicKrakenFallbackArg && (!publicHourPermissionArg || workerChild)) {
+        fprintf(stderr, "--kraken-fallback requires --allow-public-candles at the Dashboard parent\n");
+        return kExitUsage;
+    }
     if (publicDnsArg && (!publicLatestArg || workerChild)) {
         fprintf(stderr, "--market-dns-server requires --allow-public-tickers at the Dashboard parent, or --allow-public-trades\n");
         return kExitUsage;
     }
     if (publicLatestArg && !market_detail::validDashboardMarketArguments(argc, argv, publicLatestArg,
-            publicTradePermissionArg!=0, publicHourPermissionArg, publicDnsArg, publicDnsServer)) {
+            publicTradePermissionArg!=0, publicHourPermissionArg, publicKrakenFallbackArg, publicDnsArg, publicDnsServer)) {
         fprintf(stderr, "Dashboard market access requires the exact public-feed arguments\n");
         return kExitUsage;
     }
@@ -1340,7 +1353,7 @@ int main(int argc, char **argv) {
             return kExitRuntime;
         }
         so.userArgs = supervisorUserArguments(argc, argv, cli,
-            {publicLatestArg, publicHourPermissionArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0});
+            {publicLatestArg, publicHourPermissionArg, publicKrakenFallbackArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0});
         for (const DeviceIdentity &d : chosenAll) {
             WorkerSeed seed;
             seed.index = d.index;
@@ -1390,7 +1403,8 @@ int main(int argc, char **argv) {
         if constexpr (kPublicTickerRuntimeBuilt) {
             const PublicTickerLaunch launch{kPublicTickerRuntimeBuilt, so.runtimeContext.effective.publicTickersRequested,
                 publicLatestArg != 0, ordinaryRuntime && so.dashboard && !opt.plain && !opt.autotune, so.noMarket,
-                publicHourPermissionArg != 0, std::move(publicDnsServer), publicTradePermissionArg != 0};
+                publicHourPermissionArg != 0, std::move(publicDnsServer), publicTradePermissionArg != 0,
+                publicKrakenFallbackArg != 0};
             so.marketReferenceFactory = installedPublicTickerFactory(std::filesystem::u8path(so.exe), launch);
         }
         so.electricityPreferencesPath = (std::filesystem::u8path(cfg.stateDir) / "electricity-preferences.json").u8string();

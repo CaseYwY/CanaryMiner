@@ -131,6 +131,77 @@ int main() {
     CHECK(!hourPlan.takeEconomicRequest(102000, E + 166));
     hourPlan.stop();
 
+    auto fallbackPolicy = hours;
+    fallbackPolicy.publicHourKrakenFallback = true;
+    auto invalidFallback = fallbackPolicy;
+    invalidFallback.publicHour = false;
+    CHECK(!validMarketPollingPolicy(invalidFallback));
+    invalidFallback = fallbackPolicy;
+    invalidFallback.scheduleEconomicRequests = true;
+    CHECK(!validMarketPollingPolicy(invalidFallback));
+    MarketPollingPlan fallbackPlan;
+    CHECK(fallbackPlan.start(1, 0, E + 10, fallbackPolicy, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = fallbackPlan.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && fallbackPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+    }
+    fallbackPlan.setPublicHourFallback(E);
+    CHECK(!fallbackPlan.next(999, E + 10)); // same Kraken endpoint budget as quotes
+    ticket = fallbackPlan.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles &&
+          ticket->request.fromUtc == E - 3600 && ticket->request.toUtc == E);
+    failure.retryAfterSeconds = 100;
+    CHECK(ticket && fallbackPlan.complete(*ticket, failure, MarketDataStatus::Transport, 1000, E + 11));
+    CHECK(!fallbackPlan.next(59000, E + 69));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = fallbackPlan.next(60000, E + 70);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && fallbackPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 60000, E + 70));
+    }
+    CHECK(!fallbackPlan.next(100999, E + 110));
+    ticket = fallbackPlan.next(101000, E + 111);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+    CHECK(ticket && fallbackPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 101000, E + 111));
+    CHECK(!fallbackPlan.next(102000, E + 112));  // a rate-limited hour gets no second attempt
+    fallbackPlan.stop();
+
+    for (const auto &[http, retryAfter] : {std::pair{429, 30u}, std::pair{429, 3600u},
+                                             std::pair{200, 0u}, std::pair{503, 30u}}) {
+        MarketPollingPlan limitedQuote;
+        CHECK(limitedQuote.start(1, 0, E + 10, fallbackPolicy, false));
+        for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                          PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+            ticket = limitedQuote.next(0, E + 10);
+            CHECK(ticket && ticket->request.feed == feed);
+            auto rateLimit = failure;
+            rateLimit.httpStatus = http;
+            rateLimit.retryAfterSeconds = retryAfter;
+            if (http == 200) rateLimit.status = PublicHttpsStatus::Ok;
+            const bool quoteLimited = feed == PublicFeed::KrakenUsdtTicker;
+            const auto data = quoteLimited ? (http == 200 ? MarketDataStatus::RateLimited : MarketDataStatus::Transport) :
+                MarketDataStatus::Ok;
+            CHECK(ticket && limitedQuote.complete(*ticket, quoteLimited ? rateLimit : okay(), data, 0, E + 10));
+        }
+        limitedQuote.setPublicHourFallback(E);
+        CHECK(!limitedQuote.next(1000, E + 11));  // a quote's refusal also holds the Kraken fallback lane
+        if (retryAfter < 3600) {
+            const auto delay = retryAfter ? retryAfter : 5;
+            CHECK(!limitedQuote.next(delay * 1000 - 1, E + 9 + delay));
+            ticket = limitedQuote.next(delay * 1000, E + 10 + delay);
+            CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+        } else {
+            limitedQuote.setPublicHourFallback(E + 3600);
+            for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+                ticket = limitedQuote.next(3600000, E + 3610);
+                CHECK(ticket && ticket->request.feed == feed);
+                CHECK(ticket && limitedQuote.complete(*ticket, okay(), MarketDataStatus::Ok, 3600000, E + 3610));
+            }
+            CHECK(!limitedQuote.next(3600000, E + 3610));  // capped Retry-After latches the provider budget
+        }
+    }
+
     std::atomic<uint64_t> ms{0};
     std::atomic<unsigned> pearlCalls{0}, fxCalls{0};
     auto clock = [&] { const auto t = ms.load(); return std::make_pair(t, E + 10 + t / 1000); };

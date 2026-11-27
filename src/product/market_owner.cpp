@@ -17,6 +17,7 @@ struct PublicHourObservation {
 
 namespace {
 using namespace market_detail;
+constexpr auto krakenHourFeed = static_cast<unsigned>(PublicFeed::KrakenUsdtCandles);
 constexpr auto pearlHourFeed = static_cast<unsigned>(PublicFeed::MexcPearlHour);
 constexpr auto fxHourFeed = static_cast<unsigned>(PublicFeed::CoinbaseUsdtHour);
 uint64_t later(uint64_t now, uint64_t delay) { return delay > UINT64_MAX - now ? UINT64_MAX : now + delay; }
@@ -33,6 +34,20 @@ bool publicHourFeed(unsigned feed) { return feed == pearlHourFeed || feed == fxH
 unsigned hourBit(unsigned feed) { return 1u << (feed - pearlHourFeed); }
 uint64_t eligibleHourEnd(uint64_t utc, unsigned guard) {
     return utc > marketHourSeconds + 60 + guard ? (utc - guard) / 60 * 60 : 0;
+}
+bool hourWindowCurrent(uint64_t windowEnd, uint64_t targetEnd) {
+    return windowEnd && windowEnd <= targetEnd && targetEnd - windowEnd <= 60;
+}
+bool freshPublicHour(const PublicHourObservation &reading, uint64_t utc, uint64_t ms, uint64_t maxAge, uint64_t targetEnd) {
+    return hourWindowCurrent(reading.end, targetEnd) &&
+        utc >= reading.observedUtc && utc - reading.observedUtc <= maxAge / 1000 &&
+        ms >= reading.receivedMonoMs && ms - reading.receivedMonoMs <= maxAge;
+}
+bool alignedHours(const PublicHourObservation *pearl, const PublicHourObservation *fx) {
+    return pearl && fx && pearl->start == fx->start && pearl->end == fx->end;
+}
+bool hourFallbackGap(const PublicHourObservation *pearl, const PublicHourObservation *coinbase) {
+    return alignedHours(pearl, coinbase) && hourFallbackCoverage(pearl->minutes.size(), coinbase->minutes.size());
 }
 bool transient(const PublicJsonResponse &r) {
     return r.status == PublicHttpsStatus::Network || r.status == PublicHttpsStatus::Timeout ||
@@ -53,7 +68,8 @@ std::pair<uint64_t, uint64_t> marketSystemClock() {
 }
 
 bool validMarketPollingPolicy(const MarketPollingPolicy &p) {
-    return !(p.publicTrades && p.scheduleEconomicRequests) && p.quoteRefreshMs >= 1000 && p.quoteRefreshMs <= 86400000 && p.candleRefreshMs >= 1000 && p.candleRefreshMs <= 86400000 &&
+    return !(p.publicTrades && p.scheduleEconomicRequests) &&
+        (!p.publicHourKrakenFallback || (p.publicHour && !p.scheduleEconomicRequests)) && p.quoteRefreshMs >= 1000 && p.quoteRefreshMs <= 86400000 && p.candleRefreshMs >= 1000 && p.candleRefreshMs <= 86400000 &&
         p.retryBaseMs >= 1000 && p.retryBaseMs <= p.retryMaxMs && p.retryMaxMs <= 3600000 && p.failedCycleCooldownMs >= p.retryMaxMs &&
         p.failedCycleCooldownMs <= 86400000 && p.maxAttempts >= 1 && p.maxAttempts <= 5 && p.economicsMinutes >= 1 && p.economicsMinutes <= 719 &&
         p.settlementGuardSeconds <= 60 && p.economicIntervalMs >= 1000 && p.economicIntervalMs <= 86400000 &&
@@ -74,6 +90,7 @@ bool MarketPollingPlan::start(uint64_t generation, uint64_t ms, uint64_t utc, co
     generation_ = generation; policy_ = policy; fixtureCandles_ = fixture; baseMs_ = lastMs_ = ms; baseUtc_ = lastUtc_ = utc;
     economicDue_ = ms; providerDue_.fill(ms); health_ = {}; current_.reset(); clockFault_ = false; active_ = true;
     pendingHourFeeds_ = 0; pendingHourEnd_ = 0;
+    pendingFallbackEnd_ = lastFallbackEnd_ = 0;
     for (auto &h : health_) h.nextDueMs = ms;
     return true;
 }
@@ -122,7 +139,7 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
     PublicJsonRequest chosen;
     for (unsigned i = 0; i < health_.size(); ++i) {
         auto &h = health_[i];
-        if (!due(i) || (fixtureCandles(i) && !fixtureCandles_)) continue;
+        if (!due(i)) continue;
         PublicJsonRequest request{static_cast<PublicFeed>(i)};
         if (policy_.publicTrades && (i==0 || i==2))
             request.feed=i==0 ? PublicFeed::GatePearlTrades : PublicFeed::KrakenUsdtTrades;
@@ -130,7 +147,13 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
             if (!(hourFeeds & hourBit(i))) continue;
             request.fromUtc = static_cast<int64_t>(hourEnd - marketHourSeconds);
             request.toUtc = static_cast<int64_t>(hourEnd);
+        } else if (i == krakenHourFeed && policy_.publicHourKrakenFallback) {
+            if (pendingFallbackEnd_ <= lastFallbackEnd_ ||
+                !hourWindowCurrent(pendingFallbackEnd_, eligibleHourEnd(seconds, policy_.settlementGuardSeconds))) continue;
+            request.fromUtc = static_cast<int64_t>(pendingFallbackEnd_ - marketHourSeconds);
+            request.toUtc = static_cast<int64_t>(pendingFallbackEnd_);
         } else if (fixtureCandles(i)) {
+            if (!fixtureCandles_) continue;
             const auto minutes = (std::max)(60u, policy_.economicsMinutes);
             if (utc <= policy_.settlementGuardSeconds) continue;
             const auto end = (utc - policy_.settlementGuardSeconds) / 60 * 60;
@@ -147,6 +170,8 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
     if (publicHourFeed(choice)) {
         pendingHourFeeds_ = hourFeeds & ~hourBit(choice);
         pendingHourEnd_ = hourEnd;
+    } else if (choice == krakenHourFeed && policy_.publicHourKrakenFallback) {
+        lastFallbackEnd_ = pendingFallbackEnd_;
     }
     h.inFlight = true;
     providerDue_[provider(choice)] = later(ms, 1000);  // shared endpoint/IP budget; never evade with concurrency
@@ -159,6 +184,18 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
     current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
     const auto feed = index(ticket.request.feed);
     const auto refresh = fixtureCandles(feed) || publicHourFeed(feed) ? policy_.candleRefreshMs : policy_.quoteRefreshMs;
+    if (policy_.publicHourKrakenFallback && provider(feed) == provider(krakenHourFeed) &&
+        (r.httpStatus == 429 || (r.retryAfterSeconds && transient(r)) ||
+         (r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::RateLimited))) {
+        auto &krakenDue = providerDue_[provider(feed)];
+        // A capped Retry-After may denote a longer refusal than we can represent.
+        if (r.retryAfterSeconds >= 3600) {
+            krakenDue = UINT64_MAX;
+        } else {
+            const auto delay = (std::max)(policy_.retryBaseMs, static_cast<uint64_t>(r.retryAfterSeconds) * 1000);
+            krakenDue = (std::max)(krakenDue, later(ms, delay));
+        }
+    }
     if (r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::Ok) {
         h.attempts = 0; h.nextDueMs = later(ms, refresh); return true;
     }
@@ -173,6 +210,9 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
     delay = (std::max)(delay, static_cast<uint64_t>(r.retryAfterSeconds) * 1000);
     if (h.attempts >= policy_.maxAttempts) delay = (std::max)(delay, (std::max)(refresh, policy_.failedCycleCooldownMs));
     h.nextDueMs = later(ms, delay); return true;
+}
+void MarketPollingPlan::setPublicHourFallback(uint64_t end) {
+    if (policy_.publicHourKrakenFallback) pendingFallbackEnd_ = end;
 }
 bool MarketPollingPlan::takeEconomicRequest(uint64_t ms, uint64_t utc) {
     if (!observeClock(ms, utc) || !policy_.scheduleEconomicRequests || ms < economicDue_) return false;
@@ -206,6 +246,17 @@ struct MarketDataOwner::Impl {
         auto value = std::make_shared<const MarketSnapshot>(current);
         std::lock_guard<std::mutex> lock(mutex); published = std::move(value);
     }
+    void refreshHourFallback(uint64_t utc, uint64_t ms) {
+        if (!policy.publicHourKrakenFallback) return;
+        const auto *pearl = current.pearlHour.get();
+        const auto *coinbase = current.fxHour.get();
+        const auto end = eligibleHourEnd(utc, policy.settlementGuardSeconds);
+        const auto maxAge = policy.freshness.maxObservationAgeMs;
+        const bool eligible = plan.health()[pearlHourFeed].data == MarketDataStatus::Ok &&
+            plan.health()[fxHourFeed].data == MarketDataStatus::Ok && hourFallbackGap(pearl, coinbase) &&
+            freshPublicHour(*pearl, utc, ms, maxAge, end) && freshPublicHour(*coinbase, utc, ms, maxAge, end);
+        plan.setPublicHourFallback(eligible ? pearl->end : 0);
+    }
     void run() noexcept {
         NativeProcessScope original(nativeLife.epoch());
         try {
@@ -215,6 +266,7 @@ struct MarketDataOwner::Impl {
                 {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                 const bool economicRequest = plan.takeEconomicRequest(now.first, now.second);
                 if (economicRequest) ++current.economicRequests;
+                refreshHourFallback(utcSeconds(policy, now.second), now.first);
                 auto ticket = plan.next(now.first, now.second);
                 if (!plan.active()) break;
                 if (ticket) {
@@ -222,7 +274,8 @@ struct MarketDataOwner::Impl {
                     {std::lock_guard<std::mutex> commit(commitMutex);if(!nativeCurrent()||cancel.load())break;}
                     const auto feed = index(ticket->request.feed);
                     auto limits = policy.https;
-                    if (publicHourFeed(feed)) limits.bodyBytes = (std::min)(limits.bodyBytes, marketHourBodyBytes);
+                    const bool krakenHour = feed == krakenHourFeed && policy.publicHourKrakenFallback;
+                    if (publicHourFeed(feed) || krakenHour) limits.bodyBytes = (std::min)(limits.bodyBytes, marketHourBodyBytes);
                     const bool trades=tradeFeed(ticket->request.feed);
                     if (trades) limits.bodyBytes=(std::min)(limits.bodyBytes,maxPublicTradeBodyBytes);
                     const auto sentUtc=now.second;
@@ -247,14 +300,16 @@ struct MarketDataOwner::Impl {
                     MarketDataResult<MarketTradeObservation> trade;
                     bool conflictingTrade=false;
                     MarketDataStatus status;
-                    if (publicHourFeed(feed)) {
+                    if (publicHourFeed(feed) || krakenHour) {
                         hour = std::make_shared<PublicHourObservation>();
                         hour->start = static_cast<uint64_t>(ticket->request.fromUtc);
                         hour->end = static_cast<uint64_t>(ticket->request.toUtc);
                         hour->observedUtc = response.observedUtc;
                         hour->receivedMonoMs = now.first;
-                        status = decodePublicHourPayload(response, feed == pearlHourFeed ? HourFeed::MexcPearl : HourFeed::CoinbaseFx,
-                            hour->start, hour->end, ticket->startedUtc, context.receivedUtc, hour->minutes);
+                        const auto decoder = krakenHour ? HourFeed::KrakenFx :
+                            feed == pearlHourFeed ? HourFeed::MexcPearl : HourFeed::CoinbaseFx;
+                        status = decodePublicHourPayload(response, decoder, hour->start, hour->end,
+                            ticket->startedUtc, context.receivedUtc, hour->minutes);
                         if (status != MarketDataStatus::Ok) hour.reset();
                     } else if (fixtureCandles(feed)) {
                         minutes = parseMarketCandles(response, context);
@@ -291,7 +346,10 @@ struct MarketDataOwner::Impl {
                                 if (ticket->request.feed == PublicFeed::GatePearlCandles) current.pearlCandles = std::move(minutes.value);
                                 else current.fxCandles = std::move(minutes.value);
                             }
-                            if (hour) (feed == pearlHourFeed ? current.pearlHour : current.fxHour) = std::move(hour);
+                            if (hour) {
+                                if (krakenHour) current.krakenHour = std::move(hour);
+                                else (feed == pearlHourFeed ? current.pearlHour : current.fxHour) = std::move(hour);
+                            }
                             if (trade.value || conflictingTrade)
                                 (feed==0 ? current.pearlTrade : current.fxTrade)=std::move(trade.value);
                         }
@@ -412,20 +470,22 @@ void appendPublicHour(std::vector<std::string> &lines, const MarketSnapshot &s, 
     const auto maxAge = policy.freshness.maxObservationAgeMs;
     const auto fresh = [&](const std::shared_ptr<const PublicHourObservation> &reading) {
         return s.running && !s.clockFault && !s.helperFault && s.origin == MarketOrigin::ProviderResponse &&
-            reading && reading->end <= targetEnd && targetEnd - reading->end <= 60 &&
-            utc >= reading->observedUtc && utc - reading->observedUtc <= maxAge / 1000 &&
-            ms >= reading->receivedMonoMs && ms - reading->receivedMonoMs <= maxAge;
+            reading && freshPublicHour(*reading, utc, ms, maxAge, targetEnd);
     };
     const auto *pearl = fresh(s.pearlHour) ? s.pearlHour.get() : nullptr;
     const auto *fx = fresh(s.fxHour) ? s.fxHour.get() : nullptr;
-    const bool aligned = pearl && fx && pearl->start == fx->start && pearl->end == fx->end;
+    const auto *kraken = policy.publicHourKrakenFallback && fresh(s.krakenHour) ? s.krakenHour.get() : nullptr;
+    const bool aligned = alignedHours(pearl, fx);
+    const bool useKraken = hourFallbackGap(pearl, fx) && alignedHours(pearl, kraken) &&
+        kraken->minutes.size() == marketHourMinutes;
     MarketWindow window;
     if (pearl) {
         const std::vector<ReviewMinute> missing;
-        window = calculateMarketHour(pearl->start, pearl->end, pearl->minutes, aligned ? fx->minutes : missing);
+        const auto &conversion = useKraken ? kraken->minutes : aligned ? fx->minutes : missing;
+        window = calculateMarketHour(pearl->start, pearl->end, pearl->minutes, conversion);
     }
     lines.push_back("1h mean of minute closes: " + displayedMean(window.tokenUsdt) + " USDT/PRL | " +
-        displayedMean(window.tokenUsd) + " USD/PRL");
+        displayedMean(window.tokenUsd) + " USD/PRL" + (useKraken && window.tokenUsd ? " (Kraken fallback)" : ""));
     lines.push_back("1h candles: TWAP approximation | candidate data, finality unverified");
     const auto describe = [&](unsigned feed, const char *label, const PublicHourObservation *reading) {
         std::string line = label;
@@ -441,6 +501,7 @@ void appendPublicHour(std::vector<std::string> &lines, const MarketSnapshot &s, 
     };
     describe(pearlHourFeed, "MEXC PEARLUSDT: ", pearl);
     describe(fxHourFeed, "Coinbase USDT-USD: ", fx);
+    if (policy.publicHourKrakenFallback) describe(krakenHourFeed, "Kraken USDT/USD fallback: ", kraken);
     const auto interval = [](const PublicHourObservation &reading) {
         return "[" + std::to_string(reading.start) + ", " + std::to_string(reading.end) + ")";
     };

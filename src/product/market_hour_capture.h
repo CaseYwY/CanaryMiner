@@ -26,8 +26,7 @@ struct PublicHourOriginal {
 };
 
 inline bool canFallbackHourFx(const HourSample &pearl, const HourSample &coinbase) {
-    return !pearl.problem && pearl.minutes.size() == marketHourMinutes &&
-           !coinbase.problem && coinbase.minutes.size() < marketHourMinutes;
+    return !pearl.problem && !coinbase.problem && hourFallbackCoverage(pearl.minutes.size(), coinbase.minutes.size());
 }
 
 inline uint64_t publicHourEnd(uint64_t initialUtc) {
