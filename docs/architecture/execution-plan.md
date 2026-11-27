@@ -105,6 +105,10 @@ The [Linux TLS worker](../pool-native-tls.md#linux-certificate-status-in-the-han
 
 [Migration review](../pool-tls-migration.md) accepts ASCII case variations of the documented legacy DNS names at their published TCP ports. The saved strict declaration uses the canonical DNS identity. The worker keeps the pool protocol, account, compression setting and target rules from the configured entry.
 
+## P-12u Preflight the saved first-pool TLS configuration
+
+[`pool-tls-check --config FILE`](../pool-tls-runtime.md#check-a-saved-tls-configuration) uses the normal saved first-pool transport policy and native system-trust check. It verifies the configured TLS peer without requiring login data, starting devices or changing either file. The explicit mode refuses plaintext and fallback-enabled configurations. Actual share acceptance remains an installed GPU and pool test.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

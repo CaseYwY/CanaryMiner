@@ -912,7 +912,8 @@ if(CANARY_ENABLE_POOL_TLS_RUNTIME)
 endif()
 add_test(NAME pool_tls_preflight_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_pool_tls_preflight_cli.py
          $<TARGET_FILE:test_pearl_cuda_cli_host> ${pool_tls_runtime_cli_mode}
-         $<TARGET_FILE:pool_tls_stream_fixture> ${pool_tls_preflight_native})
+         $<TARGET_FILE:pool_tls_stream_fixture> $<TARGET_FILE:canary_preferences_worker>
+         ${pool_tls_preflight_native})
 set_tests_properties(pool_tls_preflight_cli PROPERTIES TIMEOUT 45)
 set(tls_stream_artifact_args --parent-library $<TARGET_FILE:canary_pool_tls_process> --runtime-library $<TARGET_FILE:canary_pool_tls_runtime> --service-library $<TARGET_FILE:canary_pool_tls_service> --duplex-library $<TARGET_FILE:canary_duplex_tasks> --ordinary-artifact $<TARGET_FILE:work_pause_ordinary_artifact>)
 if(NOT CANARY_POOL_TLS_CHECK_AVAILABLE)

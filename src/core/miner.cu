@@ -152,11 +152,21 @@ int main(int argc, char **argv) {
         }
         PoolSecurityEndpoint endpoint;
         const auto &spec = cli.poolTlsCheckSpec;
-        const auto *preset = findPoolTlsPreset(spec);
-        if (!nativeCliArguments(argc, argv, {{1, "pool-tls-check"}, {2, "--pool"}, {3, spec}}) ||
-            !parsePoolSecurityUrl(preset ? preset->tlsUrl : spec, &endpoint) || !endpoint.tls) {
-            std::fputs("pool-tls-check: supply one TLS URL with a DNS name and port or a strict TLS preset. See pool-tls-check --help\n", stderr);
-            return kExitUsage;
+        std::optional<std::string> configPath;
+        if (!cli.ov.configPath.empty()) {
+            if (nativeCliArguments(argc, argv, {{1, "pool-tls-check"}, {2, "--config"}}))
+                configPath = nativeCliPathArgument(argc, argv, 3);
+            if (!configPath) {
+                std::fputs("pool-tls-check: invalid config argument. See pool-tls-check --help\n", stderr);
+                return kExitUsage;
+            }
+        } else {
+            const auto *preset = findPoolTlsPreset(spec);
+            if (!nativeCliArguments(argc, argv, {{1, "pool-tls-check"}, {2, "--pool"}, {3, spec}}) ||
+                !parsePoolSecurityUrl(preset ? preset->tlsUrl : spec, &endpoint) || !endpoint.tls) {
+                std::fputs("pool-tls-check: supply one TLS URL with a DNS name and port or a strict TLS preset. See pool-tls-check --help\n", stderr);
+                return kExitUsage;
+            }
         }
 #if defined(CANARY_ENABLE_POOL_TLS_RUNTIME) && CANARY_ENABLE_POOL_TLS_RUNTIME
         signal(SIGINT, onSignal);
@@ -164,12 +174,41 @@ int main(int argc, char **argv) {
 #if defined(SIGBREAK)
         signal(SIGBREAK, onSignal);
 #endif
+        const auto epoch = nativeProcessAdmissionEpoch();
+        NativeProcessScope original(epoch);
+        if (configPath) {
+            StartupConfig startup;
+            std::string configError;
+            const auto loaded = inspectStartupConfig(*configPath, &g_stop, false, &startup, &configError);
+            if (!nativeProcessEpochCurrent(epoch)) return kExitFaultLatched;
+            if (loaded == StartupConfigStatus::Stopped || g_stop) return 130;
+            if (loaded != StartupConfigStatus::Ready || !validateConfig(startup.config, false, nullptr)) {
+                std::fputs("pool-tls-check: config unavailable or invalid\n", stderr);
+                return kExitConfig;
+            }
+            PreRunPreferences saved;
+            const auto inspected = inspectPreRunPreferences(startup.config.stateDir, &g_stop,
+                                                           PreRunPreferencesMode::PoolOnly, &saved);
+            if (!nativeProcessEpochCurrent(epoch)) return kExitFaultLatched;
+            if (inspected == PreRunPreferencesStatus::Stopped || g_stop) return 130;
+            if (inspected != PreRunPreferencesStatus::Ready) return kExitConfig;
+            PoolTlsRuntimePolicy policy;
+            if (!resolvePoolTlsRuntimePolicy(startup.config, saved.pool, !startup.config.tuning.requested(),
+                                             poolTlsRuntimeAvailable(), &policy, &configError)) {
+                std::fprintf(stderr, "pool-tls-check: %s\n", configError.c_str());
+                return kExitConfig;
+            }
+            if (!policy.tls || !policy.fallbackUrl.empty()) {
+                std::fputs("pool-tls-check: the first user pool requires TLS without a plaintext fallback\n", stderr);
+                return kExitConfig;
+            }
+            endpoint = {std::move(policy.host), policy.port, true};
+        }
         const auto helper = poolTlsRuntimeWorkerPath();
         if (helper.empty()) {
             std::fputs("pool-tls-check: cannot locate the installed TLS worker\n", stderr);
             return kExitConfig;
         }
-        const auto epoch = nativeProcessAdmissionEpoch();
         PoolTransportObservation observation;
         {
             PoolTlsCheckRequest request;

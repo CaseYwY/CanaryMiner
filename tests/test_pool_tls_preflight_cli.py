@@ -1,5 +1,6 @@
 """The standalone TLS check uses a fixed sibling and never enters normal miner setup."""
 import ctypes
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,7 +11,7 @@ import sys
 import tempfile
 
 
-def main(cli, mode, fixture, native=None):
+def main(cli, mode, fixture, preferences, native=None):
     available = mode == 'on'
     assert available == (native is not None)
     suffix = '.exe' if os.name == 'nt' else ''
@@ -47,7 +48,10 @@ def main(cli, mode, fixture, native=None):
 
         help_result = run('--help', code=0, message=b'--pool stratum+ssl://')
         assert b'--pool kryptex-hk-tls' in help_result.stdout
+        assert b'--config FILE' in help_result.stdout
         for options in ([], ['--pool'], ['--help', '--pool', 'stratum+ssl://echo.test:443'],
+                        ['--config'], ['--config', ''], ['--confi\uff47', str(inputs[0])],
+                        ['--config', str(inputs[0]), '--pool', 'kryptex-tls'],
                         ['--pool', 'stratum+tcp://echo.test:443'], ['--pool', 'kryptex'],
                         ['--pool', 'kryptex-hk'], ['--poo\uff4c', 'kryptex-hk-tls'],
                         ['--pool', 'herominers'], ['--pool', 'f2pool'], ['--pool', 'KRYPTEX-HK-TLS'],
@@ -69,6 +73,7 @@ def main(cli, mode, fixture, native=None):
             run('--pool', url, code=3, message=b'runtime is unavailable')
             run('--pool', 'kryptex-hk-tls', code=3, message=b'runtime is unavailable')
             run('--pool', 'herominers-tls', code=3, message=b'runtime is unavailable')
+            run('--config', str(inputs[0]), code=3, message=b'runtime is unavailable')
             return
 
         # There is a genuine fixture in both the working directory and PATH.
@@ -94,6 +99,62 @@ def main(cli, mode, fixture, native=None):
         marker.write_bytes(b'')
         run('--pool', 'kryptex-hk-tl\uff53', code=2, message=b'pool-tls-check --help')
         assert not marker.read_bytes()
+
+        preferences_worker = bundle / ('canary_preferences_worker' + suffix)
+        shutil.copy2(preferences, preferences_worker)
+        supplied_config = root / 'private migration \U0001F9EA.json'
+        supplied_state = root / 'test state'
+        supplied_state.mkdir()
+        saved = supplied_state / 'pool-security-preferences.json'
+        document = dict(schema_version=1, donation=False, state_dir=supplied_state.name,
+                        pools=['PRL-HK.KRYPTEX.NETWORK:7048'])
+        tls = 'stratum+ssl://prl-hk.kryptex.network:8048'
+        tcp = 'stratum+tcp://prl-hk.kryptex.network:7048'
+
+        def configuration(**changes):
+            supplied_config.write_text(json.dumps(dict(document, **changes)), encoding='ascii')
+
+        def declaration(mode, tls_url=tls, fallback='', consent=False):
+            saved.write_text(json.dumps(dict(schema_version=1, user_pools=[
+                dict(mode=mode, tls_url=tls_url, plaintext_url=fallback, plaintext_consent=consent)],
+                donation=dict(mode='unchanged', tls_url='', plaintext_url='', plaintext_consent=False))),
+                encoding='ascii')
+
+        def from_config(code, message, target=None):
+            marker.write_bytes(b'')
+            before = {path: path.read_bytes() for path in (supplied_config, saved) if path.exists()}
+            result = run('--config', str(supplied_config), code=code, message=message, public_success=code == 0)
+            assert supplied_config.name.encode('utf8') not in result.stdout + result.stderr
+            assert {path: path.read_bytes() for path in (supplied_config, saved) if path.exists()} == before
+            assert marker.read_text(encoding='ascii') == (target or '')
+            assert set(supplied_state.iterdir()) == ({saved} if saved.exists() else set())
+
+        configuration()
+        from_config(3, b'without a plaintext fallback')
+        declaration('strict_tls')
+        from_config(0, b'Connection closed.', 'prl-hk.kryptex.network 8048 tls\n')
+        configuration(pools=['kryptex-hk-tls'])
+        from_config(0, b'Connection closed.', 'prl-hk.kryptex.network 8048 tls\n')
+        declaration('strict_tls', 'stratum+ssl://prl-hk.kryptex.network:9948')
+        from_config(3, b'endpoints conflict')
+        configuration()
+        declaration('strict_tls', 'stratum+ssl://prl-us.kryptex.network:8048')
+        from_config(3, b'match the first pool DNS host')
+        declaration('prefer_tls', tls, tcp, True)
+        from_config(3, b'without a plaintext fallback')
+        configuration(pools=['kryptex-hk-tls'])
+        from_config(0, b'Connection closed.', 'prl-hk.kryptex.network 8048 tls\n')
+        configuration(donation=True)
+        from_config(3, b'donation:false')
+        saved.write_bytes(b'private malformed fixture')
+        configuration()
+        from_config(3, b'pool security declarations unavailable')
+        supplied_config.write_bytes(b'private malformed fixture')
+        from_config(3, b'config unavailable or invalid')
+
+        saved.unlink()
+        supplied_config.unlink()
+        supplied_state.rmdir()
         marker.unlink()
         for host, reason in (('dns-fail.test', b'dns'), ('connect-fail.test', b'connect'),
                              ('verify-fail.test', b'verification'), ('wrong-mode.test', b'protocol')):
@@ -151,7 +212,8 @@ def main(cli, mode, fixture, native=None):
                 unexpected.close()
                 raise AssertionError('the check opened a second connection')
 
-        assert set(root.rglob('*')) == {bundle, state, cli_path, foreign_worker, bundled_worker, *inputs}
+        assert set(root.rglob('*')) == {bundle, state, cli_path, foreign_worker, bundled_worker,
+                                       preferences_worker, *inputs}
         for path in inputs:
             assert path.read_bytes() == b'private malformed fixture'
 

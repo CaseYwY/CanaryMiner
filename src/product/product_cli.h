@@ -54,7 +54,9 @@ enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diag
 inline constexpr char poolTlsCheckHelp[] =
     "canary-miner pool-tls-check --pool stratum+ssl://HOST:PORT\n"
     "canary-miner pool-tls-check --pool kryptex-hk-tls\n"
-    "Supply one TLS URL or a strict TLS preset used by the miner.\n"
+    "canary-miner pool-tls-check --config FILE\n"
+    "Supply one TLS URL, strict TLS preset or config-v1 file.\n"
+    "Config mode checks the first user pool using its saved TLS declaration and requires TLS without a plaintext fallback.\n"
     "Check one TLS connection with system trust. Requires a TLS-enabled build.\n"
     "The check sends no mining login or share, and closes the connection before reporting.";
 
@@ -175,11 +177,12 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         const auto option = i < argc ? std::string_view(argv[i]) : std::string_view();
         r.help = argc == i + 1 && (option == "-h" || option == "--help");
         if (!r.help) {
-            if (argc != i + 2 || option != "--pool" || !argv[i + 1][0]) {
-                if (error) *error = "pool-tls-check: supply one TLS URL or strict TLS preset. See pool-tls-check --help";
+            if (argc != i + 2 || (option != "--pool" && option != "--config") || !argv[i + 1][0]) {
+                if (error) *error = "pool-tls-check: supply one --pool or --config argument. See pool-tls-check --help";
                 return false;
             }
-            r.poolTlsCheckSpec = argv[i + 1];
+            if (option == "--config") r.ov.configPath = argv[i + 1];
+            else r.poolTlsCheckSpec = argv[i + 1];
         }
         *out = std::move(r);
         return true;
