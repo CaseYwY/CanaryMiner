@@ -28,6 +28,8 @@ int main(int argc,char **argv){using namespace om;
             }
         }else if(operation=="plaintext-refused"){
             ok=transport.open(config.host,static_cast<int>(config.port))!=PearlPoolConnectStatus::Connected&&!transport.isOpen();
+        }else if(operation=="inspect"){
+            ok=transport.open(config.host,static_cast<int>(config.port))==PearlPoolConnectStatus::Connected;
         }else if(transport.open(config.host,static_cast<int>(config.port))==PearlPoolConnectStatus::Connected){
             if(operation=="plaintext-eof"||operation=="plaintext-cancel"){
                 std::thread stopper;if(operation=="plaintext-cancel")stopper=std::thread([&]{std::this_thread::sleep_for(std::chrono::milliseconds(100));cancel=true;});

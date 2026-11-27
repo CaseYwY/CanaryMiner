@@ -20,7 +20,27 @@ Each connection owns a fresh client context, peer verification, TLS 1.2 minimum,
 
 Empty CA bytes select native OpenSSL default trust paths. Explicit bounded PEM bytes instead populate that fresh context's **exclusive in-memory anchor store**, without adding ordinary roots or modifying OS stores. Only complete certificate PEM blocks and whitespace are accepted; each admitted anchor must be a self-signed CA with a valid self-signature. A leaf, incomplete/empty bundle, wrong anchor, trailing junk or malformed certificate is not a reason to use system trust. This initial API supplies anchors, not user configuration persistence or automatic enrollment.
 
-**Revocation remains a release gate.** This OpenSSL slice does not obtain/qualify CRL/OCSP evidence, enable automatic AIA fetching or claim equivalence with Windows native trust. No missing revocation input is reported as a passed revocation check. The [Windows private-trust study](research/schannel-private-trust.md) preserves normal automatic Schannel verification and describes the separate exclusive-memory-store/strict revocation/SSL-policy obligations; client `hRootStore` is not a private-CA mechanism. Follow-ons P-12c/d supply offline inspection and native development records, not production custom-trust or normal automatic-trust qualification.
+## Linux certificate status in the handshake
+
+The OpenSSL pool worker requests one stapled OCSP response for the leaf. It
+matches the response to the leaf and issuer in the verified chain. It accepts
+a signature from that issuer or its directly authorized OCSP responder. The worker
+refuses duplicate matches, revoked or unknown status, unsupported critical
+extensions and invalid or stale responses before making the connection
+available to Stratum. It allows up to
+five minutes of clock skew for the validity window. The status observation is
+at most ten days old when a next-update time is present, or 24 hours when it
+is absent. [RFC 6960](https://www.rfc-editor.org/rfc/rfc6960) ·
+[CA/Browser Forum TLS baseline requirements](https://cabforum.org/working-groups/server/baseline-requirements/requirements/) ·
+[OpenSSL OCSP API](https://docs.openssl.org/3.5/man3/OCSP_resp_find_status/)
+
+If the leaf requires the `status_request` feature, the worker also refuses an
+absent staple. The worker refuses other required TLS features, including
+`status_request_v2`. If the leaf leaves stapling optional, a missing response gives
+the ordinary certificate check without a revocation result. The worker uses
+the pool's response in the handshake. Live responder lookup, intermediate
+revocation and Linux release qualification remain separate work.
+[RFC 7633](https://www.rfc-editor.org/rfc/rfc7633)
 
 ## Finite progress and exact bytes
 

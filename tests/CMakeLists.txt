@@ -975,6 +975,13 @@ if(CANARY_POOL_TLS_STREAM_LOOPBACK_TESTS)
   endif()
   add_test(NAME pool_tls_stream_loopback COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_pool_tls_stream_loopback.py ${tls_stream_args})
   set_tests_properties(pool_tls_stream_loopback PROPERTIES TIMEOUT 120)
+  if(CANARY_POOL_TLS_OPENSSL_AVAILABLE)
+    find_program(CANARY_OCSP_TEST_OPENSSL openssl REQUIRED)
+    add_test(NAME pool_tls_ocsp_loopback COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/check_pool_tls_ocsp_loopback.py
+             --openssl "${CANARY_OCSP_TEST_OPENSSL}" --probe $<TARGET_FILE:pool_tls_stream_probe>
+             --worker $<TARGET_FILE:canary_pool_tls_stream_worker> --scratch "${CANARY_POOL_TLS_CHECK_SCRATCH}")
+    set_tests_properties(pool_tls_ocsp_loopback PROPERTIES TIMEOUT 90)
+  endif()
   set(tls_runtime_args --case untrusted --probe $<TARGET_FILE:pool_tls_runtime_probe> --worker $<TARGET_FILE:canary_pool_tls_stream_worker> --scratch "${CANARY_POOL_TLS_CHECK_SCRATCH}" --generator-script "${CANARY_SCHANNEL_MATERIAL_GENERATOR}")
   if(CANARY_SCHANNEL_FIXTURE_WSL_DISTRO)
     list(APPEND tls_runtime_args --wsl-distro "${CANARY_SCHANNEL_FIXTURE_WSL_DISTRO}")
