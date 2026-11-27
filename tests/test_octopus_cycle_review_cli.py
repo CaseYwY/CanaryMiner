@@ -45,7 +45,7 @@ def cycle(begin, end, product, kwh, pence, standing, days, *, bundle=False):
     return declaration, readings, snapshot, amount
 
 
-def main(cli, bundle):
+def main(cli, bundle, clock_fixture=None):
     with tempfile.TemporaryDirectory(prefix='canary-octopus-cycle-') as directory:
         root = Path(directory)
         installed = root / 'installed'
@@ -63,13 +63,13 @@ def main(cli, bundle):
             for path, doc in zip((tariff, readings, rates), c):
                 write(path, doc)
 
-        def run(*args, code=0, reason='', cwd=root):
+        def run(*args, code=0, reason='', cwd=root, env=None):
             nonlocal count
-            result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=cwd, capture_output=True,
+            result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=cwd, env=env, capture_output=True,
                                     text=True, timeout=20)
             assert result.returncode == code, (args, result)
             private = (tariff.name, rates.name, readings.name, invoice.name, 'FORBIDDEN_DEVICE_SETUP')
-            if code or args[0] != '--next-readings-plan':
+            if code or args[0] not in ('--next-readings-plan', '--scheduled-readings-plan'):
                 private += (SCOPE,)
             assert all(value not in result.stdout + result.stderr for value in private)
             if code:
@@ -271,6 +271,14 @@ def main(cli, bundle):
         expected_plan = dict(schema_version=1, scope=SCOPE, begin_utc_ms=november, end_utc_ms=december,
                              predecessor_sha256=sha256(planner_seed.read_bytes()).hexdigest())
         assert json.loads(run(*query, cwd=planner)) == expected_plan
+        scheduled = ('--scheduled-readings-plan', planner_seed)
+        seed_digest = expected_plan['predecessor_sha256']
+        assert json.loads(run(*scheduled, cwd=planner)) == dict(expected_plan, seed_sha256=seed_digest, ready=True)
+        publishing = planner / f'cycle-{december}.cmr.tmp'
+        publishing.write_bytes(b'watcher is staging the next archive')
+        assert json.loads(run(*scheduled, cwd=planner)) == dict(expected_plan, seed_sha256=seed_digest, ready=False)
+        run(*query, cwd=planner, code=3, reason='uncertain temporary output')
+        publishing.unlink()
         assert set(planner.iterdir()) == {planner_seed}
         run(*query, code=3, reason='seed archive\'s workspace')
         for extra in (('--save-review', 'new.cmr'), ('--allow-public-rates',), ('--as-of-utc-ms', november),
@@ -282,11 +290,24 @@ def main(cli, bundle):
             run(*query, cwd=planner, code=3, reason='readings are already staged')
             assert existing.read_bytes() == b'staged input'
             existing.unlink()
+        pages_slot = planner / f'cycle-{december}.pages'
+        pages_slot.mkdir()
+        assert json.loads(run(*scheduled, cwd=planner)) == dict(expected_plan, seed_sha256=seed_digest, ready=False)
+        pages_slot.rmdir()
         successor = planner / f'cycle-{december}.cmr'
         shutil.copy2(root / 'go-november.cmr', successor)
         expected_plan.update(begin_utc_ms=december, end_utc_ms=utc('2024-01-01T00:00:00'),
                              predecessor_sha256=sha256(successor.read_bytes()).hexdigest())
         assert json.loads(run(*query, cwd=planner)) == expected_plan
+        assert json.loads(run(*scheduled, cwd=planner)) == dict(expected_plan, seed_sha256=seed_digest, ready=True)
+        if clock_fixture:
+            past = dict(os.environ, LD_PRELOAD=str(Path(clock_fixture).resolve()),
+                        CANARY_TEST_SUCCESSOR_CUTOFF_MS=str(december + HOUR))
+            past.pop('CANARY_TEST_SUCCESSOR_CLOCK_ADVANCE', None)
+            run(*scheduled, cwd=planner, env=past, code=3, reason='successor archive is newer')
+            advancing = dict(past, CANARY_TEST_SUCCESSOR_CLOCK_ADVANCE='1')
+            assert json.loads(run(*scheduled, cwd=planner, env=advancing)) == dict(
+                expected_plan, seed_sha256=seed_digest, ready=False)
         damaged = successor.read_bytes()
         successor.write_bytes(damaged[:-1])
         run(*query, cwd=planner, code=3, reason='successor archive is invalid')
