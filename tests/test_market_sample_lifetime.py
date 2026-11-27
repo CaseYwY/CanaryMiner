@@ -27,6 +27,8 @@ def main(cli, worker):
              "Mean USD per PRL (exact sum / minutes): 210 / 60"),
             ("market-hour", ["--allow-public-candles", "--save-review", "capture.cmh"], "candle-requests", ["4", "5"],
              "Mean USD per PRL (exact sum / minutes): 210 / 60"),
+            ("market-hour", ["--allow-public-candles", "--kraken-fallback", "--save-review", "fallback.cmh"],
+             "candle-requests", ["4", "5", "3"], "Mean USD per PRL (exact sum / minutes): 480 / 60"),
         )
         (root / "reward-response.json").write_text(json.dumps(status(PUBLIC_HEIGHT, int(time.time()) - 1)), encoding="ascii")
         (root / "reward-indexed.json").write_text(json.dumps({"blockHash": TIP_HASH}), encoding="ascii")
@@ -36,8 +38,12 @@ def main(cli, worker):
             requests = root / log
             archive = root / (args[-1] if "--save-review" in args else "unexpected.cmt")
             modes = ("fresh", "stale", "first", "second") if sys.platform.startswith("linux") else ("fresh", "stale")
+            if "--kraken-fallback" in args:
+                (root / "candle-scenario").write_text("gap-fx", encoding="ascii")
+            if len(feeds) == 3 and sys.platform.startswith("linux"):
+                modes += ("third",)
             if command == "market-reward" and sys.platform.startswith("linux"):
-                modes += ("third", "deadline-third")
+                modes += ("deadline-third",)
             for mode in modes:
                 requests.unlink(missing_ok=True)
                 archive.unlink(missing_ok=True)
@@ -63,6 +69,8 @@ def main(cli, worker):
                     failures.append((command, mode, launched, result.returncode, result.stdout, result.stderr))
                 assert archive.exists() == ("--save-review" in args and mode == "fresh"), result
                 assert not archive.with_name(archive.name + ".tmp").exists(), result
+            if "--kraken-fallback" in args:
+                (root / "candle-scenario").unlink()
         if sys.platform.startswith("linux"):
             (root / "sample-lifetime-mode").write_text("clock-rollback", encoding="ascii")
             (root / "ticker-scenario").write_text("clock-rollback", encoding="ascii")

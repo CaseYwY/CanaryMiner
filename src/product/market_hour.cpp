@@ -24,10 +24,11 @@ using market_detail::marketUtcLimit;
 constexpr size_t maxInputBytes = 64 * 1024;
 constexpr size_t maxReportBytes = 4 * 1024;
 constexpr size_t maxArchiveBytes = maxInputBytes + maxReportBytes + 256;
-constexpr size_t maxPublicArchiveBytes = 2 * market_detail::marketHourBodyBytes + maxReportBytes + 512;
+constexpr size_t maxPublicArchiveBytes = 3 * market_detail::marketHourBodyBytes + maxReportBytes + 512;
 static_assert(maxPublicArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-MARKET-HOUR-REVIEW-1\n";
 constexpr std::string_view publicArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-2\n";
+constexpr std::string_view fallbackArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-3\n";
 constexpr char pearlSeriesId[] = "gate-pearl-mainnet-usdt-v1";
 constexpr char fxSeriesId[] = "kraken-usdt-usd-v1";
 constexpr char mexcSeriesId[] = "mexc-pearl-mainnet-usdt-v1";
@@ -110,32 +111,69 @@ bool readCoinbaseMinute(const JsonValue &row, ReviewMinute &minute) {
         readPrices(row.find("open"), row.find("high"), row.find("low"), row.find("close"), row.find("volume"), minute);
 }
 
+const JsonValue *krakenHourRows(const JsonValue &payload) {
+    const auto *error = payload.find("error"), *result = payload.find("result");
+    uint64_t cursor = 0;
+    if (!payload.isObject() || payload.members.size() != 2 || !error || !error->isArray() ||
+        !error->items.empty() || !result || !result->isObject() || result->members.size() != 2 ||
+        !integer(*result, "last", cursor))
+        return nullptr;
+    return result->find("USDTZUSD");
+}
+
+bool readKrakenMinute(const JsonValue &row, ReviewMinute &minute) {
+    if (!row.isArray() || row.items.size() != 8) return false;
+    const auto &v = row.items;
+    ExactDecimal vwap;
+    uint64_t count = 0;
+    return v[0].asUint64(&minute.startUtc) && minute.startUtc && minute.startUtc % 60 == 0 &&
+        readPrices(&v[1], &v[2], &v[3], &v[4], &v[6], minute) && decimal(&v[5], vwap, false) &&
+        v[7].asUint64(&count);
+}
+
 }  // namespace
 
 bool market_detail::readMarketHourPayload(const JsonValue &payload, HourFeed feed, uint64_t start, uint64_t end,
                                           uint64_t observedUtc, std::vector<ReviewMinute> &minutes) {
     if (minuteWindowBounds(start, end).expected != marketHourMinutes || observedUtc < end ||
         observedUtc > marketUtcLimit) return false;
-    const bool pearl = feed == HourFeed::MexcPearl;
+    const bool kraken = feed == HourFeed::KrakenFx;
+    unsigned maxRows = 500;
+    auto readMinute = readMexcMinute;
     const auto *rows = &payload;
-    if (!pearl) {
+    if (feed == HourFeed::CoinbaseFx) {
         // Coinbase's payload is an object containing exactly one candles array.
-        if (!rows || !rows->isObject() || rows->members.size() != 1) return false;
+        if (!rows->isObject() || rows->members.size() != 1) return false;
         rows = rows->find("candles");
+        maxRows = 350;
+        readMinute = readCoinbaseMinute;
+    } else if (kraken) {
+        rows = krakenHourRows(payload);
+        maxRows = 720;
+        readMinute = readKrakenMinute;
     }
-    if (!rows || !rows->isArray() || rows->items.size() > (pearl ? 500u : 350u)) return false;
+    if (!rows || !rows->isArray() || rows->items.size() > maxRows || (kraken && rows->items.empty()))
+        return false;
     std::vector<ReviewMinute> parsed;
     parsed.reserve(rows->items.size());
-    const auto readMinute = pearl ? readMexcMinute : readCoinbaseMinute;
     for (const auto &row : rows->items) {
         ReviewMinute minute;
-        if (!readMinute(row, minute) || minute.startUtc > observedUtc) return false;
+        if (!readMinute(row, minute) || minute.startUtc > observedUtc ||
+            (kraken && !parsed.empty() && parsed.back().startUtc >= minute.startUtc))
+            return false;
         parsed.push_back(std::move(minute));
     }
-    std::sort(parsed.begin(), parsed.end(), [](const auto &a, const auto &b) { return a.startUtc < b.startUtc; });
-    if (std::adjacent_find(parsed.begin(), parsed.end(), [](const auto &a, const auto &b) {
-            return a.startUtc == b.startUtc;
-        }) != parsed.end()) return false;
+    if (kraken) {
+        // Kraken defines its terminal row as current. Require its timestamp to match
+        // the current UTC minute start at receipt before interpreting any row that way.
+        if (parsed.back().startUtc != observedUtc - observedUtc % 60) return false;
+        parsed.pop_back();
+    } else {
+        std::sort(parsed.begin(), parsed.end(), [](const auto &a, const auto &b) { return a.startUtc < b.startUtc; });
+        if (std::adjacent_find(parsed.begin(), parsed.end(), [](const auto &a, const auto &b) {
+                return a.startUtc == b.startUtc;
+            }) != parsed.end()) return false;
+    }
     parsed.erase(std::remove_if(parsed.begin(), parsed.end(), [&](const auto &minute) {
         return minute.startUtc < start || minute.startUtc >= end;
     }), parsed.end());
@@ -284,19 +322,22 @@ bool readPublicHourReceipt(const std::string &bytes, size_t &offset, market_deta
 
 bool decodePublicHourReview(const std::string &bytes, market_detail::PublicHourOriginal &original,
                             std::string &savedReport) {
-    size_t offset = publicArchiveHeader.size();
+    const bool fallback = std::string_view(bytes).substr(0, fallbackArchiveHeader.size()) == fallbackArchiveHeader;
+    size_t offset = fallback ? fallbackArchiveHeader.size() : publicArchiveHeader.size();
     int64_t initial = 0, end = 0;
     if (!local_review_archive::readArchiveNumber(bytes, offset, marketUtcLimit, initial) ||
         !local_review_archive::readArchiveNumber(bytes, offset, marketUtcLimit, end) ||
-        !readPublicHourReceipt(bytes, offset, original.pearl) || !readPublicHourReceipt(bytes, offset, original.fx) ||
+        !readPublicHourReceipt(bytes, offset, original.pearl) || !readPublicHourReceipt(bytes, offset, original.coinbase) ||
+        (fallback && !readPublicHourReceipt(bytes, offset, original.kraken.emplace())) ||
         !local_review_archive::readArchivePart(bytes, offset, maxReportBytes, savedReport) ||
         bytes.size() - offset != 65 || bytes.back() != '\n' ||
         bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
         return false;
     original.initialUtc = static_cast<uint64_t>(initial);
     original.endUtc = static_cast<uint64_t>(end);
-    return original.endUtc == market_detail::publicHourEnd(original.initialUtc) &&
-           original.initialUtc <= original.pearl.sentUtc && original.pearl.receivedUtc <= original.fx.sentUtc;
+    return original.endUtc && original.endUtc == market_detail::publicHourEnd(original.initialUtc) &&
+           original.initialUtc <= original.pearl.sentUtc && original.pearl.receivedUtc <= original.coinbase.sentUtc &&
+           (!original.kraken || original.coinbase.receivedUtc <= original.kraken->sentUtc);
 }
 
 const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::string &report) {
@@ -305,19 +346,29 @@ const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::stri
     std::string savedReport;
     if (!decodePublicHourReview(bytes, original, savedReport))
         return "review archive unavailable or invalid";
-    if (original.fx.receivedUtc > clock) return "saved review cutoff is in the future";
+    const auto cutoff = original.kraken ? original.kraken->receivedUtc : original.coinbase.receivedUtc;
+    if (cutoff > clock) return "saved review cutoff is in the future";
     const auto start = original.endUtc - marketHourSeconds;
-    HourSample pearl, fx;
+    HourSample pearl, coinbase;
     if (decodePublicHourPayload(original.pearl.response, HourFeed::MexcPearl, start, original.endUtc,
                                 original.pearl.sentUtc, original.pearl.receivedUtc, pearl.minutes) != MarketDataStatus::Ok ||
-        decodePublicHourPayload(original.fx.response, HourFeed::CoinbaseFx, start, original.endUtc,
-                                original.fx.sentUtc, original.fx.receivedUtc, fx.minutes) != MarketDataStatus::Ok)
+        decodePublicHourPayload(original.coinbase.response, HourFeed::CoinbaseFx, start, original.endUtc,
+                                original.coinbase.sentUtc, original.coinbase.receivedUtc, coinbase.minutes) != MarketDataStatus::Ok)
         return "saved public hour response unavailable or invalid";
     pearl.observedUtc = original.pearl.response.observedUtc;
-    fx.observedUtc = original.fx.response.observedUtc;
-    if (!renderPublicHour(original.endUtc, original.fx.receivedUtc, pearl, fx, report))
+    coinbase.observedUtc = original.coinbase.response.observedUtc;
+    HourSample kraken;
+    if (original.kraken) {
+        const auto &receipt = *original.kraken;
+        if (!canFallbackHourFx(pearl, coinbase) ||
+            decodePublicHourPayload(receipt.response, HourFeed::KrakenFx, start, original.endUtc,
+                                    receipt.sentUtc, receipt.receivedUtc, kraken.minutes) != MarketDataStatus::Ok)
+            return "saved Kraken fallback unavailable or invalid";
+        kraken.observedUtc = receipt.response.observedUtc;
+    }
+    if (!renderPublicHour(original.endUtc, cutoff, pearl, coinbase, original.kraken ? &kraken : nullptr, report))
         return "saved public hour requires complete aligned minute coverage and exact means";
-    report += publicHourCaptureTime(original.fx.receivedUtc);
+    report += publicHourCaptureTime(cutoff);
     if (savedReport != report) return "saved review report differs from the recalculated report";
     return nullptr;
 }
@@ -337,7 +388,8 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
     if (reopening) {
         if (!readLocalReviewInput(path, maxPublicArchiveBytes, bytes))
             return refuse("review archive unavailable or invalid");
-        publicArchive = std::string_view(bytes).substr(0, publicArchiveHeader.size()) == publicArchiveHeader;
+        publicArchive = std::string_view(bytes).substr(0, publicArchiveHeader.size()) == publicArchiveHeader ||
+                        std::string_view(bytes).substr(0, fallbackArchiveHeader.size()) == fallbackArchiveHeader;
         if (!publicArchive && (bytes.size() > maxArchiveBytes || !decodeHourReview(bytes, original)))
             return refuse("review archive unavailable or invalid");
     } else if (!readLocalReviewInput(path, maxInputBytes, original.input)) {
@@ -383,19 +435,25 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
 
 }  // namespace
 
-std::string market_detail::publicHourCoverage(uint64_t end,uint64_t cutoff,const HourSample &pearl,const HourSample &fx) {
+std::string market_detail::publicHourCoverage(uint64_t end, uint64_t cutoff, const HourSample &pearl,
+                                              const HourSample &coinbase, const HourSample *kraken) {
     std::string details="UTC seconds ["+std::to_string(end-marketHourSeconds)+", "+std::to_string(end)+
         "); window ended "+std::to_string(cutoff-end)+" s ago\n";
     appendPublicCoverage(details,"MEXC Pearl mainnet PRL/USDT",pearl,cutoff);
-    appendPublicCoverage(details,"Coinbase USDT/USD",fx,cutoff);
+    appendPublicCoverage(details, "Coinbase USDT/USD", coinbase, cutoff);
+    if (kraken)
+        appendPublicCoverage(details, "Kraken USDT/USD fallback", *kraken, cutoff);
     return details;
 }
 
-bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &fx,
-                                    std::string &report) {
+bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl,
+                                    const HourSample &coinbase, const HourSample *kraken, std::string &report) {
+    const auto &fx = kraken ? *kraken : coinbase;
     const auto window = calculateMarketHour(end-marketHourSeconds,end,pearl.minutes,fx.minutes);
     report = "One public candle sample; candle finality is unverified.\n";
-    report += publicHourCoverage(end,cutoff,pearl,fx);
+    report += publicHourCoverage(end, cutoff, pearl, coinbase, kraken);
+    if (kraken && window.tokenUsd)
+        report += "FX source for USD mean: Kraken USDT/USD (candidate, minute starts inferred at receipt)\n";
     report += "Mean USDT per PRL (exact sum / minutes): ";
     report += window.tokenUsdt ? exactHourMean(*window.tokenUsdt) :
         window.status == MarketDataStatus::Arithmetic ? "N/A (exact arithmetic limit exceeded)" :
@@ -412,17 +470,22 @@ local_review_archive::ReviewSave market_detail::savePublicHourReview(const std::
                                                                     const PublicHourOriginal &original,
                                                                     const std::string &report,
                                                                     const std::function<bool()> &stopped) {
-    if (report.empty() || report.size() > maxReportBytes ||
-        original.pearl.response.body.empty() || original.pearl.response.body.size() > marketHourBodyBytes ||
-        original.fx.response.body.empty() || original.fx.response.body.size() > marketHourBodyBytes)
+    const auto validBody = [](const PublicHourReceipt &receipt) {
+        return !receipt.response.body.empty() && receipt.response.body.size() <= marketHourBodyBytes;
+    };
+    if (report.empty() || report.size() > maxReportBytes || !validBody(original.pearl) || !validBody(original.coinbase) ||
+        (original.kraken && !validBody(*original.kraken)))
         return local_review_archive::ReviewSave::Unavailable;
-    std::string body(publicArchiveHeader);
+    std::string body(original.kraken ? fallbackArchiveHeader : publicArchiveHeader);
     body += std::to_string(original.initialUtc) + '\n' + std::to_string(original.endUtc) + '\n';
-    for (const auto *receipt : {&original.pearl, &original.fx}) {
-        body += std::to_string(receipt->sentUtc) + '\n' + std::to_string(receipt->response.observedUtc) + '\n' +
-            std::to_string(receipt->receivedUtc) + '\n' + std::to_string(receipt->response.body.size()) + '\n' +
-            receipt->response.body;
-    }
+    const auto appendReceipt = [&](const PublicHourReceipt &receipt) {
+        body += std::to_string(receipt.sentUtc) + '\n' + std::to_string(receipt.response.observedUtc) + '\n' +
+            std::to_string(receipt.receivedUtc) + '\n' + std::to_string(receipt.response.body.size()) + '\n' +
+            receipt.response.body;
+    };
+    appendReceipt(original.pearl);
+    appendReceipt(original.coinbase);
+    if (original.kraken) appendReceipt(*original.kraken);
     body += std::to_string(report.size()) + '\n' + report;
     return local_review_archive::saveWhileActive(name, marketReviewExtension, body + sha256Hex(body) + '\n',
                                                 maxPublicArchiveBytes, stopped);
@@ -458,8 +521,9 @@ int commandMarketHour(const MarketHourOptions &options, int argc, const char *co
         if (help) {
             std::printf("canary-miner market-hour --file FILE [--save-review NAME.cmh]\n"
                         "canary-miner market-hour --open-review FILE\n"
-                        "canary-miner market-hour --allow-public-candles [--dns-server IP|cloudflare-doh] [--save-review NAME.cmh]\n"
+                        "canary-miner market-hour --allow-public-candles [--kraken-fallback] [--dns-server IP|cloudflare-doh] [--save-review NAME.cmh]\n"
                         "Request one hour from the installed HTTPS helper for MEXC Pearl/USDT and Coinbase USDT/USD.\n"
+                        "With --kraken-fallback, request Kraken USDT/USD if the valid Coinbase hour has missing minutes and MEXC is complete.\n"
                         "Review an hour of user-declared UTC minute prices, offline.\n"
                         "Save a new archive in your trusted local folder. Open recalculates the original review.\n"
                         "JSON (up to 64 KiB): schema_version, end_utc, pearl, optional fx.\n"

@@ -41,13 +41,32 @@ std::string candleBody(bool pearl, int64_t start, unsigned count) {
     return body;
 }
 
+std::string krakenHourBody(int64_t start, int64_t observed, std::string_view mode) {
+    std::string body = R"({"error":[],"result":{"USDTZUSD":[)";
+    const auto terminal = mode == "kraken-open-in-window" ? 59 : (observed / 60 * 60 - start) / 60;
+    for (int i = 0; i <= terminal; ++i) {
+        if (mode == "kraken-gap" && i == 12) continue;
+        if (i) body += ',';
+        auto minute = i;
+        if (mode == "kraken-disordered" && (i == 13 || i == 15))
+            minute = 28 - i;
+        const auto time = start + minute * 60;
+        const std::string price = i == terminal ? "\"999\"" : i < 30 ? "\"2\"" : "\"3\"";
+        body += '[' + std::to_string(time) + ',' + price + ',' + price + ',' + price + ',' +
+            price + ',' + price + ",\"1\",1]";
+    }
+    body += "],\"last\":" + std::to_string(start + (terminal - 1) * 60) + "}}";
+    return body;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
     if (argc != 8 && argc != 9) return 2;
     if (argc == 9 && !om::validPublicDnsServer(argv[8])) return 2;
     const std::string_view feed(argv[1]);
-    const bool candles = feed == "4" || feed == "5";
+    const bool krakenHour = feed == "3";
+    const bool candles = feed == "4" || feed == "5" || krakenHour;
     const bool indexedHash = feed == "9";
     const bool reward = feed == "6" || indexedHash;
     const bool trades = feed == "7" || feed == "8";
@@ -88,7 +107,8 @@ int main(int argc, char **argv) {
         output << argv[8] << '\n';
         if (!output) return 4;
     }
-    if (mode == "slow" || (mode == "slow-closing" && rewardStep == 2))
+    if (mode == "slow" || (mode == "slow-kraken" && krakenHour) ||
+        (mode == "slow-closing" && rewardStep == 2))
         std::this_thread::sleep_for(std::chrono::seconds(10));
     if (reward && mode == "budget") std::this_thread::sleep_for(std::chrono::milliseconds(100));
     om::PublicJsonResponse response;
@@ -97,11 +117,20 @@ int main(int argc, char **argv) {
     // Match the real HTTPS worker's clock so coarse time() cannot lag the request's start second.
     const auto observed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     response.observedUtc = static_cast<uint64_t>(observed);
-    if (candles) {
+    if (krakenHour) {
+        response.body = krakenHourBody(from, observed, mode);
+        if (mode == "kraken-archive") {
+            std::ofstream source(dir / "body-kraken", std::ios::binary);
+            source << response.body;
+            if (!source) return 4;
+        }
+    } else if (candles) {
         const bool pearl = feed == "4";
         // Index 60 adds an end-boundary row. The gap fixtures end at index 58.
-        response.body = candleBody(pearl, from, ((!pearl && mode == "gap-fx") || (pearl && mode == "gap-pearl")) ? 58 : 60);
-        if (mode == "archive") {
+        const bool gap = pearl ? mode == "gap-pearl" : mode == "gap-fx" || mode == "slow-kraken" ||
+                                                       mode.rfind("kraken-", 0) == 0;
+        response.body = candleBody(pearl, from, gap ? 58 : 60);
+        if (mode == "archive" || mode == "kraken-archive") {
             response.body += std::string(33000, ' ') + "\r\n";
             std::ofstream source(dir / (pearl ? "body-pearl" : "body-fx"), std::ios::binary);
             source << response.body;

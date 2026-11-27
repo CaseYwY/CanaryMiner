@@ -11,7 +11,7 @@ inline constexpr uint64_t marketHourSeconds = 3600;
 inline constexpr uint64_t marketUtcLimit = 253402300799ULL;
 inline constexpr size_t marketHourBodyBytes = 64 * 1024;
 
-enum class HourFeed { MexcPearl, CoinbaseFx };
+enum class HourFeed { MexcPearl, CoinbaseFx, KrakenFx };
 
 struct ReviewMinute {
     uint64_t startUtc = 0;
