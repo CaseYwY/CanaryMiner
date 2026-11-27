@@ -15,6 +15,7 @@ struct MarketTickerOptions {
     MarketTickerAction action = MarketTickerAction::Help;
     std::string dnsServer, archiveName;
     int dnsFlag = 0, saveFlag = 0;
+    bool saveIncomplete = false;
 };
 
 inline bool parseMarketTickerCli(int argc, const char *const *argv, int begin, MarketTickerOptions &out) {
@@ -35,9 +36,10 @@ inline bool parseMarketTickerCli(int argc, const char *const *argv, int begin, M
             if (!options.dnsFlag && option == "--dns-server" && validPublicDnsServer(argv[i + 1])) {
                 options.dnsFlag = i;
                 options.dnsServer = argv[i + 1];
-            } else if (!options.saveFlag && option == "--save-review" &&
+            } else if (!options.saveFlag && (option == "--save-review" || option == "--save-sample") &&
                        localExportName(argv[i + 1], tickerReviewExtension)) {
                 options.saveFlag = i;
+                options.saveIncomplete = option == "--save-sample";
                 options.archiveName = argv[i + 1];
             } else return false;
         }

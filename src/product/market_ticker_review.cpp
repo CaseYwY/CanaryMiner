@@ -4,6 +4,7 @@
 #include "local_review_archive.h"
 #include "market_data.h"
 #include "market_public_sample.h"
+#include "public_json_process.h"
 
 #include <chrono>
 #include <cstdio>
@@ -22,6 +23,8 @@ constexpr uint64_t maxCaptureMs=120000;
 constexpr MarketFreshnessPolicy tickerCaptureV1Policy{120000,30000,false};
 constexpr std::string_view tickerArchiveHeader="CANARY-MARKET-TICKER-REVIEW-1\n";
 constexpr std::string_view tradeArchiveHeader="CANARY-MARKET-TRADE-REVIEW-1\n";
+constexpr std::string_view tickerSampleHeader="CANARY-MARKET-TICKER-SAMPLE-1\n";
+constexpr std::string_view tradeSampleHeader="CANARY-MARKET-TRADE-SAMPLE-1\n";
 
 std::optional<std::filesystem::path> reviewFile(MarketTickerAction action, int argc, const char *const *argv) {
     if (argc!=4) return {};
@@ -80,44 +83,64 @@ int reportError(const char *message,int code=3) {
     return code;
 }
 
-bool renderTickerCapture(const PublicTickerCapture &capture, std::string &report) {
+PublicQuoteReport renderTickerCapture(const PublicTickerCapture &capture, std::string &report, bool sample) {
     using market_detail::marketSampleClockContinuous;
     const auto &gate=capture.gate, &kraken=capture.kraken;
     const market_detail::MarketSampleClock started{0,capture.startedUtc}, first{gate.elapsedMs,gate.receivedUtc},
         second{kraken.elapsedMs,kraken.receivedUtc}, cutoff{capture.elapsedMs,capture.cutoffUtc};
     if (!capture.startedUtc || capture.elapsedMs>maxCaptureMs ||
-        gate.sentUtc<capture.startedUtc || kraken.sentUtc<gate.receivedUtc ||
+        gate.sentUtc<capture.startedUtc || gate.sentUtc>gate.receivedUtc ||
+        kraken.sentUtc<gate.receivedUtc || kraken.sentUtc>kraken.receivedUtc ||
         !marketSampleClockContinuous(started,started,first) ||
         !marketSampleClockContinuous(started,first,second) ||
         !marketSampleClockContinuous(started,second,cutoff))
-        return false;
+        return PublicQuoteReport::InvalidClock;
     const auto parse=[&](const PublicTickerReceipt &receipt, PublicFeed feed) {
         const MarketParseContext context{{feed},receipt.sentUtc,receipt.elapsedMs,1,MarketOrigin::ProviderResponse,
                                          MarketMinuteConvention::Unqualified,receipt.receivedUtc};
-        return parseMarketQuote(receipt.response,context).value;
+        return parseMarketQuote(receipt.response,context);
     };
     const auto pearl=parse(gate,PublicFeed::GatePearlTicker), fx=parse(kraken,PublicFeed::KrakenUsdtTicker);
-    const auto latest=latestMarketReference(pearl?&*pearl:nullptr,fx?&*fx:nullptr,
+    const auto latest=latestMarketReference(pearl.value?&*pearl.value:nullptr,fx.value?&*fx.value:nullptr,
                                             capture.cutoffUtc,capture.elapsedMs,tickerCaptureV1Policy);
-    if (!latest.tokenUsd) return false;
-    report="Historical public ticker capture (ages at capture)\n"
-           "Capture UTC "+std::to_string(capture.cutoffUtc)+" | no trade-event timestamps or current freshness claim\n";
-    const auto append=[&](const char *label,const MarketQuote &quote,const PublicTickerReceipt &receipt) {
-        report+=std::string(label)+": "+quote.last.text()+" | observed UTC "+
-            std::to_string(quote.observation.observedUtc)+" | age at capture "+
-            std::to_string(capture.cutoffUtc-quote.observation.observedUtc)+" s\n";
-        report+="  Request start UTC "+std::to_string(receipt.sentUtc)+" | receipt UTC "+
+    if (!latest.tokenUsd && !sample) return PublicQuoteReport::Incomplete;
+    report=sample ? "Historical public ticker sample (ages at capture)\n" :
+                    "Historical public ticker capture (ages at capture)\n";
+    report+="Capture UTC "+std::to_string(capture.cutoffUtc)+" | no trade-event timestamps or current freshness claim\n";
+    const auto append=[&](const char *label,const MarketDataResult<MarketQuote> &parsed,const PublicTickerReceipt &receipt,
+                          const std::optional<ExactDecimal> &fresh) {
+        report+=std::string(label)+": ";
+        if (parsed.value) {
+            const auto &quote=*parsed.value;
+            report+=quote.last.text()+" | observed UTC "+std::to_string(quote.observation.observedUtc)+" | age at capture "+
+                std::to_string(capture.cutoffUtc-quote.observation.observedUtc)+" s";
+            if (!fresh) report+=" | outside age limit";
+        } else {
+            const auto *reason=parsed.status==MarketDataStatus::Transport ?
+                publicHttpsStatusName(receipt.response.status) : marketDataStatusName(parsed.status);
+            report+="N/A ("+std::string(reason)+")";
+        }
+        report+='\n';
+        if (sample) appendPublicQuoteReceipt(report,receipt,false);
+        else report+="  Request start UTC "+std::to_string(receipt.sentUtc)+" | receipt UTC "+
             std::to_string(receipt.receivedUtc)+'\n';
     };
-    append("Gate Pearl mainnet PRL/USDT",*pearl,gate);
-    append("Kraken USDT/USD",*fx,kraken);
-    report+="PRL/USD reference at capture: "+latest.tokenUsd->text()+'\n';
-    return true;
+    append("Gate Pearl mainnet PRL/USDT",pearl,gate,latest.tokenUsdt);
+    append("Kraken USDT/USD",fx,kraken,latest.usdtUsd);
+    report+="PRL/USD reference at capture: ";
+    if (latest.tokenUsd) {
+        report+=latest.tokenUsd->text()+'\n';
+        return PublicQuoteReport::Complete;
+    }
+    const auto *unavailable="requires both valid, fresh observations";
+    if (latest.usdStatus==MarketFreshness::Skew) unavailable="observations or receipts more than 30 s apart";
+    else if (latest.tokenUsdt && latest.usdtUsd) unavailable="combined price exceeds arithmetic capacity";
+    report+="N/A ("+std::string(unavailable)+")\n";
+    return PublicQuoteReport::Incomplete;
 }
 
-bool renderCapture(const PublicTickerCapture &capture,std::string &report) {
-    return capture.trades ? renderPublicTradeSample(capture,report)==PublicTradeReport::Complete :
-                            renderTickerCapture(capture,report);
+PublicQuoteReport renderCapture(const PublicTickerCapture &capture,std::string &report,bool sample) {
+    return capture.trades ? renderPublicTradeSample(capture,report,sample) : renderTickerCapture(capture,report,sample);
 }
 
 void encodeTickerReceipt(std::string &bytes,const PublicTickerReceipt &receipt) {
@@ -139,20 +162,55 @@ bool decodeTickerReceipt(const std::string &bytes,size_t &offset,PublicTickerRec
     return true;
 }
 
+constexpr size_t responseWireOverhead=128;
+
+bool encodeSampleReceipt(std::string &bytes,const PublicTickerReceipt &receipt,size_t bodyLimit) {
+    std::string wire;
+    if (receipt.response.status==PublicHttpsStatus::Unreaped || receipt.response.body.size()>bodyLimit ||
+        !encodePublicJsonResponse(receipt.response,&wire) || wire.size()>bodyLimit+responseWireOverhead)
+        return false;
+    bytes+=std::to_string(receipt.sentUtc)+'\n'+std::to_string(receipt.receivedUtc)+'\n'+
+        std::to_string(receipt.elapsedMs+1)+'\n'+std::to_string(wire.size())+'\n'+wire;
+    return true;
+}
+
+bool decodeSampleReceipt(const std::string &bytes,size_t &offset,PublicTickerReceipt &receipt,bool trades) {
+    using local_review_archive::readArchiveNumber;
+    const auto clockLimit=trades ? market_detail::maxMarketUtcMs : maxUtc;
+    const auto bodyLimit=trades ? maxPublicTradeBodyBytes : tickerBodyBytes;
+    int64_t sent=0,received=0,elapsed=0;
+    std::string wire,canonical;
+    PublicJsonResponse response;
+    if (!readArchiveNumber(bytes,offset,clockLimit,sent) || !readArchiveNumber(bytes,offset,clockLimit,received) ||
+        !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
+        !local_review_archive::readArchivePart(bytes,offset,bodyLimit+responseWireOverhead,wire) ||
+        !decodePublicJsonResponse(wire,bodyLimit,&response) || response.status==PublicHttpsStatus::Unreaped ||
+        !encodePublicJsonResponse(response,&canonical) || canonical!=wire)
+        return false;
+    receipt={static_cast<uint64_t>(sent),static_cast<uint64_t>(received),static_cast<uint64_t>(elapsed-1),
+             std::move(response)};
+    return true;
+}
+
 const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::string &report) {
     using local_review_archive::readArchiveNumber;
-    const bool trades=std::string_view(bytes).substr(0,tradeArchiveHeader.size())==tradeArchiveHeader;
-    const auto header=trades ? tradeArchiveHeader : tickerArchiveHeader;
+    const auto raw=std::string_view(bytes);
+    const auto starts=[&](std::string_view header) { return raw.substr(0,header.size())==header; };
+    const bool trades=starts(tradeArchiveHeader) || starts(tradeSampleHeader);
+    const bool sample=starts(tickerSampleHeader) || starts(tradeSampleHeader);
+    const auto header=sample ? (trades ? tradeSampleHeader : tickerSampleHeader) :
+                              (trades ? tradeArchiveHeader : tickerArchiveHeader);
     auto offset=header.size();
     const auto clockLimit=trades ? market_detail::maxMarketUtcMs : maxUtc;
     int64_t started=0, cutoff=0, elapsed=0;
     PublicTickerCapture capture;
     capture.trades=trades;
     std::string savedReport;
-    if (std::string_view(bytes).substr(0,offset)!=header ||
+    const auto readReceipt=sample ? decodeSampleReceipt : decodeTickerReceipt;
+    if (!starts(header) ||
         !readArchiveNumber(bytes,offset,clockLimit,started) || !readArchiveNumber(bytes,offset,clockLimit,cutoff) ||
         !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
-        !decodeTickerReceipt(bytes,offset,capture.gate,trades) || !decodeTickerReceipt(bytes,offset,capture.kraken,trades) ||
+        !readReceipt(bytes,offset,capture.gate,trades) || !readReceipt(bytes,offset,capture.kraken,trades) ||
         !local_review_archive::readArchivePart(bytes,offset,tickerReportBytes,savedReport) ||
         bytes.size()-offset!=65 || bytes.back()!='\n' ||
         bytes.compare(offset,64,sha256Hex(bytes.substr(0,offset)))!=0)
@@ -161,9 +219,11 @@ const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::str
     capture.cutoffUtc=static_cast<uint64_t>(cutoff);
     capture.elapsedMs=static_cast<uint64_t>(elapsed-1);
     const auto now=trades ? nowMs : nowMs/1000;
-    if (!now || now>clockLimit || capture.cutoffUtc>now || !renderCapture(capture,report))
-        return trades ? "invalid times or incomplete fresh trade pair at capture" :
-                        "invalid times or incomplete fresh ticker pair at capture";
+    const auto *invalid=trades ? "invalid times or incomplete fresh trade pair at capture" :
+                                 "invalid times or incomplete fresh ticker pair at capture";
+    if (!now || now>clockLimit || capture.cutoffUtc>now) return invalid;
+    const auto rendered=renderCapture(capture,report,sample);
+    if (rendered==PublicQuoteReport::InvalidClock || (!sample && rendered!=PublicQuoteReport::Complete)) return invalid;
     return report==savedReport?nullptr:"saved ticker report differs from the recalculated report";
 }
 
@@ -173,8 +233,20 @@ int writeTickerReport(const std::string &report) {
 
 }  // namespace
 
+void appendPublicQuoteReceipt(std::string &report,const PublicTickerReceipt &receipt,bool trades) {
+    const char *unit=trades ? " UTC ms " : " UTC ";
+    report+="  Request start"+std::string(unit)+std::to_string(receipt.sentUtc)+" | receipt"+unit+
+        std::to_string(receipt.receivedUtc);
+    if (receipt.response.httpStatus && receipt.response.status!=PublicHttpsStatus::Ok)
+        report+=" | HTTP "+std::to_string(receipt.response.httpStatus);
+    if (receipt.response.retryAfterSeconds)
+        report+=" | Retry-After "+std::to_string(receipt.response.retryAfterSeconds)+" s";
+    report+='\n';
+}
+
 int savePublicTickerReview(const std::string &name, const PublicTickerCapture &capture,
-                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop) {
+                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
+                           bool saveIncomplete) {
     using local_review_archive::ReviewSave;
     const auto stopped=[&] { return market_detail::marketSampleStopped(stop) || !lifetime.permitted(); };
     const auto interrupted=[&] {
@@ -183,16 +255,25 @@ int savePublicTickerReview(const std::string &name, const PublicTickerCapture &c
     if (stopped()) return interrupted();
     std::string report;
     const auto bodyLimit=capture.trades ? maxPublicTradeBodyBytes : tickerBodyBytes;
+    const auto rendered=renderCapture(capture,report,saveIncomplete);
     const bool valid=capture.gate.response.body.size()<=bodyLimit && capture.kraken.response.body.size()<=bodyLimit &&
-        renderCapture(capture,report) && report.size()<=tickerReportBytes;
+        rendered!=PublicQuoteReport::InvalidClock && (saveIncomplete || rendered==PublicQuoteReport::Complete) &&
+        report.size()<=tickerReportBytes;
     if (stopped()) return interrupted();
+    if (!valid && saveIncomplete) return reportError("could not save quote sample: invalid clocks or responses");
     if (!valid) return reportError(capture.trades ? "could not save trade review: both valid, fresh, aligned trades required" :
         "could not save ticker review: both valid, fresh, aligned observations required");
-    std::string bytes(capture.trades?tradeArchiveHeader:tickerArchiveHeader);
+    std::string bytes(saveIncomplete ? (capture.trades ? tradeSampleHeader : tickerSampleHeader) :
+                                        (capture.trades ? tradeArchiveHeader : tickerArchiveHeader));
     bytes+=std::to_string(capture.startedUtc)+'\n'+std::to_string(capture.cutoffUtc)+'\n'+
         std::to_string(capture.elapsedMs+1)+'\n';
-    encodeTickerReceipt(bytes,capture.gate);
-    encodeTickerReceipt(bytes,capture.kraken);
+    if (saveIncomplete) {
+        if (!encodeSampleReceipt(bytes,capture.gate,bodyLimit) || !encodeSampleReceipt(bytes,capture.kraken,bodyLimit))
+            return reportError("could not save quote sample: invalid response receipt");
+    } else {
+        encodeTickerReceipt(bytes,capture.gate);
+        encodeTickerReceipt(bytes,capture.kraken);
+    }
     bytes+=std::to_string(report.size())+'\n'+report;
     const auto state=local_review_archive::saveWhileActive(name,tickerReviewExtension,
         bytes+sha256Hex(bytes)+'\n',tickerArchiveBytes,stopped);
@@ -200,7 +281,8 @@ int savePublicTickerReview(const std::string &name, const PublicTickerCapture &c
     if (state==ReviewSave::Uncertain)
         return reportError("archive publication or cleanup is uncertain; inspect the review and its temporary file");
     if (state!=ReviewSave::Written) return reportError("could not create the new ticker archive; any existing archive was preserved");
-    return writeTickerReport(report);
+    if (const auto written=writeTickerReport(report)) return written;
+    return rendered==PublicQuoteReport::Complete ? 0 : 3;
 }
 
 int commandTickerFile(MarketTickerAction action,int argc,const char *const *argv,const volatile sig_atomic_t *stop) {

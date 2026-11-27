@@ -14,14 +14,17 @@ struct PublicTickerCapture {
     PublicTickerReceipt gate, kraken;
     bool trades = false;  // Parent UTC fields, including receipt sent/received, use milliseconds for trades.
 };
-enum class PublicTradeReport { InvalidClock, Incomplete, Complete };
-PublicTradeReport renderPublicTradeSample(const PublicTickerCapture &capture, std::string &report);
+enum class PublicQuoteReport { InvalidClock, Incomplete, Complete };
+PublicQuoteReport renderPublicTradeSample(const PublicTickerCapture &capture, std::string &report,
+                                          bool withReceipts = false);
+void appendPublicQuoteReceipt(std::string &report, const PublicTickerReceipt &receipt, bool trades);
 
 // Reads one explicit local file, independently of the installed HTTPS helper.
 int commandTickerFile(MarketTickerAction action, int argc, const char *const *argv,
                       const volatile sig_atomic_t *stop);
 class NativeProcessLifetime;
 int savePublicTickerReview(const std::string &name, const PublicTickerCapture &capture,
-                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop);
+                           const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
+                           bool saveIncomplete);
 
 }  // namespace om

@@ -56,6 +56,29 @@ def offline_original():
     return sign_archive(raw), report
 
 
+def offline_partial():
+    start = 1760000000000
+    gate = gate_body(gate_row(start // 1000 - 5))
+    report = ("Public trade sample (newest timestamp in each returned batch)\n"
+              f"Capture UTC ms {start + 300} | ages at capture\n"
+              f"Gate Pearl mainnet PRL/USDT: 2.5 | event UTC 1759999995.123456700 | receipt UTC ms {start + 100}"
+              " | event age 5177 ms | receipt age 200 ms\n"
+              f"  Request start UTC ms {start + 10} | receipt UTC ms {start + 100}\n"
+              "Kraken USDT/USD: N/A (public provider HTTP error)\n"
+              f"  Request start UTC ms {start + 110} | receipt UTC ms {start + 200} | HTTP 429 | Retry-After 1 s\n"
+              "PRL/USD trade reference at capture: N/A (requires two valid trades and receipts within 120 s)\n")
+
+    def record(begin_ms, receipt_ms, wire):
+        return f"{start + begin_ms}\n{start + receipt_ms}\n{receipt_ms + 1}\n{len(wire)}\n".encode() + wire
+
+    ticker_wire = f"CMJSON1 0 200 {start // 1000} 0 {len(gate)}\n".encode() + gate
+    limited_wire = b"CMJSON1 10 429 0 1 0\n"
+    raw = (b"CANARY-MARKET-TRADE-SAMPLE-1\n" + f"{start}\n{start + 300}\n301\n".encode() +
+           record(10, 100, ticker_wire) + record(110, 200, limited_wire) +
+           f"{len(report)}\n".encode() + report.encode())
+    return sign_archive(raw), report
+
+
 def main(cli_path, fixture, capable):
     with TemporaryDirectory(prefix="canary-public-trade-") as temp:
         root = Path(temp)
@@ -102,16 +125,28 @@ def main(cli_path, fixture, capable):
         assert invalid_utf8 != supplied[:-65] and len(invalid_utf8) == len(supplied) - 65
         archive.write_bytes(sign_archive(invalid_utf8))
         assert "incomplete fresh trade pair" in call(3, "--open-review", archive).stderr
+        partial, expected_partial = offline_partial()
+        archive.write_bytes(partial)
+        assert call(0, "--open-review", archive).stdout == expected_partial
+        forged = partial[:-65].replace(b"CMJSON1 10 429", b"CMJSON1 10 503")
+        archive.write_bytes(sign_archive(forged))
+        assert "differs from the recalculated report" in call(3, "--open-review", archive).stderr
+        noncanonical = partial[:-65].replace(b"CMJSON1 10", b"CMJSON1\t10")
+        archive.write_bytes(sign_archive(noncanonical))
+        assert "archive unavailable or invalid" in call(3, "--open-review", archive).stderr
         archive.unlink()
 
         shutil.copy2(fixture, helper)
         assert ALLOW in call(0, "--help").stdout
         for args in ((ALLOW, ALLOW), (ALLOW, "--allow-public-tickers"), (ALLOW, "--file", private),
                      (ALLOW, "--save-review", "../outside.cmt"), ("--allow-public-trade\uff53",),
-                     (ALLOW, "--sav\uff45-review", archive.name), (ALLOW, "--unknown")):
+                     (ALLOW, "--sav\uff45-review", archive.name), (ALLOW, "--sav\uff45-sample", archive.name),
+                     (ALLOW, "--save-review", archive.name, "--save-sample", archive.name), (ALLOW, "--unknown")):
             assert not call(2, *args).stdout and not requests.exists()
         if not capable:
             disabled = call(3, ALLOW, "--save-review", archive.name)
+            assert "HTTPS unavailable in this build" in disabled.stderr and not disabled.stdout
+            disabled = call(3, ALLOW, "--save-sample", archive.name)
             assert "HTTPS unavailable in this build" in disabled.stderr and not disabled.stdout
             assert not requests.exists() and not archive.exists()
             print("Trade CLI: offline replay and disabled public fetch passed")
@@ -186,8 +221,18 @@ def main(cli_path, fixture, capable):
         assert "both valid, fresh, aligned trades required" in failed.stderr and not failed.stdout
         assert not (work / "incomplete.cmt").exists()
         assert_requests()
+        partial_path = work / "incomplete.cmt"
+        saved = call(3, ALLOW, "--save-sample", partial_path.name, "--dns-server", RESOLVER)
+        assert not saved.stderr and "HTTP 429 | Retry-After 1 s" in saved.stdout
+        assert "Gate Pearl mainnet PRL/USDT: 2.5" in saved.stdout and "reference at capture: N/A" in saved.stdout
+        saved_bytes = partial_path.read_bytes()
+        assert saved_bytes.startswith(b"CANARY-MARKET-TRADE-SAMPLE-1\n") and RESOLVER.encode() not in saved_bytes
+        assert dns.read_text(encoding="ascii").splitlines() == [RESOLVER, RESOLVER]
+        dns.unlink()
+        assert_requests()
         helper.unlink()
         assert call(0, "--open-review", archive).stdout == captured.stdout
+        assert call(0, "--open-review", partial_path).stdout == saved.stdout and partial_path.read_bytes() == saved_bytes
         assert not requests.exists() and not dns.exists()
         assert archive.read_bytes() == stored and private.read_text() == "private-sentinel"
     print("Trade CLI: selection, independent freshness and skew, consent, capture and offline replay passed")
