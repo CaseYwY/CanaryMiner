@@ -35,6 +35,8 @@ with the programs. It contains the verified data used by named tariff clocks.
 All profiles support offline market archive replay.
 
 A public HTTPS candidate reports public-https=opt-in in the version command.
+The public commands accept --dns-server cloudflare-doh for a one-shot
+encrypted DNS lookup with the installed public worker.
 Public-ticker settings and economic mode start disabled. One-shot market
 commands require explicit flags for each invocation. Actual public-source
 validation and permission to distribute this build are separate gates.

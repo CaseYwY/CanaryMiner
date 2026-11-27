@@ -458,7 +458,7 @@ int commandMarketHour(const MarketHourOptions &options, int argc, const char *co
         if (help) {
             std::printf("canary-miner market-hour --file FILE [--save-review NAME.cmh]\n"
                         "canary-miner market-hour --open-review FILE\n"
-                        "canary-miner market-hour --allow-public-candles [--dns-server IP] [--save-review NAME.cmh]\n"
+                        "canary-miner market-hour --allow-public-candles [--dns-server IP|cloudflare-doh] [--save-review NAME.cmh]\n"
                         "Request one hour from the installed HTTPS helper for MEXC Pearl/USDT and Coinbase USDT/USD.\n"
                         "Review an hour of user-declared UTC minute prices, offline.\n"
                         "Save a new archive in your trusted local folder. Open recalculates the original review.\n"

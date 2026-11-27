@@ -36,6 +36,7 @@ def main(cli_path, fixture, capable):
         save = (allow, '--save-review', archive.name)
         resolver = '192.168.50.53'
         dns = ('--dns-server', resolver)
+        doh = ('--dns-server', 'cloudflare-doh')
         scenario = install / 'ticker-scenario'
 
         def invoke(*args):
@@ -60,7 +61,7 @@ def main(cli_path, fixture, capable):
         shutil.copy2(fixture, helper)
         for args in ((), (allow, allow), (allow, '--no-market'), (allow, '--config', config.name),
                      (allow+'=true',), ('--help', allow), ('--allow-public-ticker\uff53',),
-                     ('--url', 'private-sentinel'), dns, (allow, '--dns-server'),
+                     ('--url', 'private-sentinel'), dns, doh, (allow, '--dns-server'),
                      (allow, '--dns-server', '8.8.8.8:53'), (allow, *dns, *dns),
                      (allow, '--dn\uff53-server', resolver), (allow, '--dns-server', '\uff11' + resolver[1:]),
                      ('--file', config.name, *dns), save[1:], (*save, *save[1:]),
@@ -74,7 +75,7 @@ def main(cli_path, fixture, capable):
         assert result.returncode == 2 and not result.stdout and not requests.exists(), result
         assert not resolver_requests.exists()
         if not capable:
-            for args in ((allow,), (allow, *dns), save, (*save, *dns)):
+            for args in ((allow,), (allow, *dns), (allow, *doh), save, (*save, *dns)):
                 result = run(*args)
                 assert result.returncode == 3 and not result.stdout and 'HTTPS unavailable in this build' in result.stderr
             assert not requests.exists() and not resolver_requests.exists() and not archive.exists() and not temporary.exists()
@@ -110,7 +111,8 @@ def main(cli_path, fixture, capable):
         resolver_requests.unlink()
 
         scenario.write_text('archive', encoding='ascii')
-        for args in ((*save, *dns), (allow, *dns, *save[1:])):
+        for args, selected in (((*save, *dns), resolver), ((allow, *dns, *save[1:]), resolver),
+                               ((*save, *doh), doh[1])):
             captured = run(*args)
             assert captured.returncode == 0 and not captured.stderr, captured
             assert 'Historical public ticker capture' in captured.stdout and 'PRL/USD reference at capture: 2.45' in captured.stdout
@@ -125,9 +127,9 @@ def main(cli_path, fixture, capable):
                 assert original.startswith(b'\t') and original.endswith(b'\r\n  ')
                 assert length == len(original) and fields.read(length) == original
             assert fields.read(int(fields.readline())) == captured.stdout.encode('ascii')
-            assert resolver.encode('ascii') not in stored
+            assert selected not in captured.stdout and selected.encode('ascii') not in stored
             assert_requests(['0', '2'])
-            assert resolver_requests.read_text(encoding='ascii').splitlines() == [resolver, resolver]
+            assert resolver_requests.read_text(encoding='ascii').splitlines() == [selected, selected]
             resolver_requests.unlink()
             replay = run('--open-review', str(archive))
             assert replay.returncode == 0 and replay.stdout == captured.stdout and not replay.stderr, replay

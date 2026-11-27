@@ -301,6 +301,7 @@ class CandidateTests(unittest.TestCase):
                 backend = (b'schannel: AcquireCredentialsHandle failed:' if platform == 'windows'
                            else b'OpenSSL SSL_connect:')
                 files[worker] = self.public_worker_payload(platform)
+                doh = CANDIDATE.PUBLIC_DOH_SELECTOR
 
                 def with_manifest(payload, public_https=True):
                     data = {name: value for name, value in payload.items() if name != CANDIDATE.MANIFEST}
@@ -312,6 +313,8 @@ class CandidateTests(unittest.TestCase):
                         patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
                     for mixed in (
                         with_manifest({**files, miner: offline_miner}),
+                        with_manifest({**files, miner: files[miner] + doh}),
+                        with_manifest({**files, worker: files[worker] + doh}),
                         with_manifest({**files, preferences: files[preferences] + files[worker]}),
                         with_manifest({**files, pool: files[pool] + files[worker]}),
                         with_manifest({**files, worker: files[worker].replace(b'8.23.0', b'8.12.0')}),
@@ -332,6 +335,10 @@ class CandidateTests(unittest.TestCase):
                     _, document, _ = CANDIDATE.load(platform, archive, digest)
                     self.assertEqual(document['schema'], CANDIDATE.PUBLIC_HTTPS_SCHEMA)
                     self.assertEqual(document['public_https']['tls_backend'], document['tls_backend'])
+                    paired = with_manifest({**files, miner: files[miner] + doh, worker: files[worker] + doh})
+                    paired_digest = self.archive(platform, paired, root / ('doh' + CANDIDATE.suffix(platform)))
+                    self.assertEqual(CANDIDATE.load(platform, root / ('doh' + CANDIDATE.suffix(platform)), paired_digest)[1]['schema'],
+                                     CANDIDATE.PUBLIC_HTTPS_SCHEMA)
                     if platform == 'windows' or os.name == 'posix':
                         CANDIDATE.install(platform, archive, digest, prefix)
                         self.assertEqual((prefix / worker).read_bytes(), files[worker])

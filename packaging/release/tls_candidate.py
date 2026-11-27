@@ -37,6 +37,7 @@ ENERGY_FIXTURE_MARKERS = (b'fixture-stall-before.json', b'fixture-stall-after.js
                           b'fixture-parent-death.json', b'fixture-entropy-fail.json', b'.fixture-ready')
 PUBLIC_HTTPS_OPT_IN = b'  public-https=opt-in\0'
 PUBLIC_HTTPS_AGENT = b'CanaryMiner-PublicData/1\0'
+PUBLIC_DOH_SELECTOR = b'cloudflare-doh\0'
 CURL_VERSION = '8.23.0'
 CARES_VERSION = '1.34.9'
 LINUX_OPENSSL_VERSION = b'OpenSSL 3.5.9 '
@@ -200,6 +201,8 @@ def check_public_https(platform, files, energy_runtime=False):
     if any(PUBLIC_HTTPS_AGENT in files[f'bin/{image}'] for image in native if image != public_worker):
         raise ValueError('public HTTPS transport must be confined to the public JSON worker')
     data = files[f'bin/{public_worker}']
+    if (PUBLIC_DOH_SELECTOR in files[f'bin/{miner}']) != (PUBLIC_DOH_SELECTOR in data):
+        raise ValueError('the candidate miner and public worker disagree on encrypted DNS')
     # The generic backend name also appears in the runtime's backend selection check.
     # Require strings from the selected libcurl implementation itself.
     backend = ((b'schannel: AcquireCredentialsHandle failed:',) if platform == 'windows' else

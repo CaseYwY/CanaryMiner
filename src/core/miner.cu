@@ -300,8 +300,8 @@ int main(int argc, char **argv) {
     }
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
-            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP] [--save-review NAME.cmt]\n"
-                      "canary-miner market-tickers --allow-public-trades [--dns-server IP] [--save-review NAME.cmt]\n"
+            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP|cloudflare-doh] [--save-review NAME.cmt]\n"
+                      "canary-miner market-tickers --allow-public-trades [--dns-server IP|cloudflare-doh] [--save-review NAME.cmt]\n"
                       "canary-miner market-tickers --file FILE\n"
                       "canary-miner market-tickers --open-review FILE\n"
                       "Sample Gate PEARL_USDT and Kraken USDTUSD with the installed HTTPS helper, or review saved JSON offline.\n"
@@ -482,7 +482,7 @@ int main(int argc, char **argv) {
             if (a != "--market-dns-server" || cli.command != Command::Run || publicDnsArg ||
                 i + 1 >= cli.rest.size() || cli.restArgIndices[i + 1] != flagIndex + 1 ||
                 !validPublicDnsServer(cli.rest[i + 1])) {
-                fprintf(stderr, "--market-dns-server requires one unicast IPv4 or unscoped IPv6 address for run\n");
+                fprintf(stderr, "--market-dns-server requires one unicast IPv4 or unscoped IPv6 address for run, or cloudflare-doh\n");
                 return kExitUsage;
             }
             publicDnsArg = flagIndex;
@@ -689,7 +689,7 @@ int main(int argc, char **argv) {
                 "  --allow-public-tickers  allow public tickers for a saved Dashboard market request\n"
                 "  --allow-public-trades   allow trade-time references for a saved Dashboard market request\n"
                 "  --allow-public-candles  also allow public hourly candles for this dashboard run\n"
-                "  --market-dns-server IP  use this resolver for the authorized Dashboard feeds on this run\n"
+                "  --market-dns-server IP|cloudflare-doh  choose a resolver for authorized Dashboard feeds\n"
                 "  --no-energy       disable optional session board-energy recording this run\n"
                 "  --work-wait-ms N  0..1000 ms between complete work batches (default 0);\n"
                 "                    not duty cycle; runtime defaults can be edited in Settings\n"
