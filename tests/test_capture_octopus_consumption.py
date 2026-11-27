@@ -90,10 +90,13 @@ class AuthenticatedCaptureTests(unittest.TestCase):
     def capture(self, provider, scope=SCOPE):
         return capture.capture_consumption(provider, IDENTITY, scope, BEGIN, END, time.monotonic() + 10)
 
-    def command(self, provider, destination, *extra, workspace=False, identity=IDENTITY, scope=SCOPE):
+    def command(self, provider, destination, *extra, workspace=False, identity=IDENTITY, scope=SCOPE, from_seed=False):
         stdout, stderr = io.StringIO(), io.StringIO()
-        args = ['capture_octopus_consumption.py', '--begin', capture.iso_utc(BEGIN), '--end', capture.iso_utc(END),
-                '--scope', scope, '--workspace' if workspace else '--output', str(destination), *extra]
+        if from_seed:
+            args = ['capture_octopus_consumption.py', '--next-cycle', str(destination), *extra]
+        else:
+            args = ['capture_octopus_consumption.py', '--begin', capture.iso_utc(BEGIN), '--end', capture.iso_utc(END),
+                    '--scope', scope, '--workspace' if workspace else '--output', str(destination), *extra]
         with (redirect_stderr(stderr), redirect_stdout(stdout), mock.patch.object(sys, 'argv', args),
               mock.patch.object(capture, 'read_identity', return_value=identity) as prompt,
               mock.patch.object(capture, 'private_opener', return_value=provider)):
@@ -105,6 +108,46 @@ class AuthenticatedCaptureTests(unittest.TestCase):
         for secret in (*IDENTITY, 'fixture-private-property'):
             self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue())
         return code, prompt.call_count, stderr.getvalue()
+
+    def test_plan_drift_before_and_after_supplier_capture(self):
+        plan = (SCOPE, BEGIN, END, '0' * 64)
+        replacement = (*plan[:3], '1' * 64)
+        consent = '--confirm-electricity-import'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / 'seed.cmr'
+            seed.touch()
+            refused = capture.CaptureError('no next readings plan is available')
+            for results, requests, prompts, diagnostic in (
+                ((refused,), 0, 0, 'no next readings plan'),
+                ((plan, replacement), 0, 1, 'changed before capture'),
+                ((plan, plan, replacement), 16, 1, 'changed during capture'),
+            ):
+                provider = Provider(account(), *page_documents(BEGIN, END))
+                with mock.patch.object(capture, 'next_cycle_plan', side_effect=results):
+                    code, entered, error = self.command(provider, seed, consent, from_seed=True)
+                self.assertEqual((code, entered, len(provider.requests)), (1, prompts, requests))
+                self.assertIn(diagnostic, error)
+                self.assertEqual(list(root.iterdir()), [seed])
+            with mock.patch.object(capture, 'next_cycle_plan') as planner:
+                self.assertEqual(self.command(Provider(), seed, consent, '--scope', SCOPE, from_seed=True)[:2], (2, 0))
+                planner.assert_not_called()
+            binding = root / capture.BINDING_NAME
+            capture.pin_binding(binding, IDENTITY, SCOPE)
+            saved = binding.read_bytes()
+
+            def drift_during_publication(_):
+                if any(path != binding for path in root.glob('.canary-octopus-*')):
+                    return replacement
+                return plan
+
+            provider = Provider(account(), *page_documents(BEGIN, END))
+            with mock.patch.object(capture, 'next_cycle_plan', side_effect=drift_during_publication):
+                code, entered, error = self.command(provider, seed, consent, from_seed=True)
+            self.assertEqual((code, entered, len(provider.requests)), (1, 1, 16))
+            self.assertIn('changed during capture', error)
+            self.assertEqual(set(root.iterdir()), {seed, binding})
+            self.assertEqual(binding.read_bytes(), saved)
 
     def test_capture_fixes_endpoints_and_reads_full_spring_month(self):
         provider = Provider(account(), *page_documents(BEGIN, END))

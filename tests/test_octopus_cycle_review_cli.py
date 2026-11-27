@@ -68,8 +68,10 @@ def main(cli, bundle):
             result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=cwd, capture_output=True,
                                     text=True, timeout=20)
             assert result.returncode == code, (args, result)
-            assert all(value not in result.stdout + result.stderr for value in
-                       (SCOPE, tariff.name, rates.name, readings.name, invoice.name, 'FORBIDDEN_DEVICE_SETUP'))
+            private = (tariff.name, rates.name, readings.name, invoice.name, 'FORBIDDEN_DEVICE_SETUP')
+            if code or args[0] != '--next-readings-plan':
+                private += (SCOPE,)
+            assert all(value not in result.stdout + result.stderr for value in private)
             if code:
                 assert not result.stdout and reason in result.stderr, result
             else:
@@ -262,6 +264,37 @@ def main(cli, bundle):
         close(go_new[3], go)
         assert 'Octopus Go public rate snapshot' in go and 'API quantities are reported' in go
         assert run('--open-review', 'go-november.cmr', '--previous-cycle', 'go-october.cmr') == go
+        planner = root / 'readings planner'
+        planner.mkdir()
+        planner_seed = Path(shutil.copy2(root / 'go-october.cmr', planner))
+        query = ('--next-readings-plan', planner_seed)
+        expected_plan = dict(schema_version=1, scope=SCOPE, begin_utc_ms=november, end_utc_ms=december,
+                             predecessor_sha256=sha256(planner_seed.read_bytes()).hexdigest())
+        assert json.loads(run(*query, cwd=planner)) == expected_plan
+        assert set(planner.iterdir()) == {planner_seed}
+        run(*query, code=3, reason='seed archive\'s workspace')
+        for extra in (('--save-review', 'new.cmr'), ('--allow-public-rates',), ('--as-of-utc-ms', november),
+                      ('--roll-forward', planner_seed)):
+            run(*query, *extra, cwd=planner, code=2, reason='invalid options')
+        for suffix in ('.readings.json', '.pages'):
+            existing = planner / f'cycle-{december}{suffix}'
+            existing.write_bytes(b'staged input')
+            run(*query, cwd=planner, code=3, reason='readings are already staged')
+            assert existing.read_bytes() == b'staged input'
+            existing.unlink()
+        successor = planner / f'cycle-{december}.cmr'
+        shutil.copy2(root / 'go-november.cmr', successor)
+        expected_plan.update(begin_utc_ms=december, end_utc_ms=utc('2024-01-01T00:00:00'),
+                             predecessor_sha256=sha256(successor.read_bytes()).hexdigest())
+        assert json.loads(run(*query, cwd=planner)) == expected_plan
+        damaged = successor.read_bytes()
+        successor.write_bytes(damaged[:-1])
+        run(*query, cwd=planner, code=3, reason='successor archive is invalid')
+        successor.unlink()
+        gap = planner / f"cycle-{expected_plan['end_utc_ms']}.cmr"
+        gap.write_bytes(damaged)
+        run(*query, cwd=planner, code=3, reason='archive gap')
+        run('--next-readings-plan', archived, code=3, reason='requires an eligible Octopus half-hour import cycle')
         supplier_workspace = root / 'supplier pages'
         workspace_pages = supplier_workspace / f'cycle-{december}.pages'
         workspace_pages.mkdir(parents=True)

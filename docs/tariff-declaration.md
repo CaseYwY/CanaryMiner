@@ -909,6 +909,25 @@ An enabled watcher can then use the bundle together with the cycle's price captu
 The capture prompts for authorization each time. The watcher reads the local bundle
 and can run after the capture process exits.
 
+For a recurring workspace, an installed candidate can derive the alias and window
+from its seed archive:
+
+~~~text
+python -I -B tools/capture_octopus_consumption.py --confirm-electricity-import --next-cycle PRIVATE_DIRECTORY/march.cmr
+~~~
+
+The collector uses the installed miner to replay the local archive chain and find
+the next closed cycle missing readings. It stops before asking for credentials if
+that cycle has staged readings or pages, the chain has a gap, or the seed uses a
+cumulative register. The native planner can be inspected offline with
+`canary-miner meter-bill --next-readings-plan SEED.cmr` from the seed's directory.
+The planner reads archives while a watcher is active. It creates no files.
+The collector rechecks the same predecessor and window before fetching and
+again after staging the new bundle, just before publication. Use one producer
+for a cycle's inputs when staging provider pages or archives in the same
+workspace. The final publication preserves any readings bundle already at
+the target filename.
+
 Use a dedicated workspace for each meter. Keep the first and subsequent captures
 for that meter in the same directory. When first connecting
 an existing archive, verify that the selected physical meter matches the archive.
