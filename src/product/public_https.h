@@ -12,15 +12,32 @@ namespace om {
 
 enum class PublicFeed {
     GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles,
-    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip, GatePearlTrades, KrakenUsdtTrades, PearlIndexedBlockHash
+    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip, GatePearlTrades, KrakenUsdtTrades, PearlIndexedBlockHash,
+    OctopusUnitRates, OctopusStandingCharges
 };
 inline constexpr uint32_t maxPearlRewardTipHeight = INT32_MAX - 1;
 inline constexpr size_t maxPublicTradeRows=20;
 inline constexpr size_t maxPublicTradeBodyBytes=64*1024;
+inline constexpr std::string_view octopusRateRegions = "ABCDEFGHJKLMNP";
+inline constexpr unsigned octopusRatePageSize = 100, octopusMaxUnitRows = 8192, octopusMaxStandingRows = 256;
+inline constexpr unsigned octopusMaxPages(unsigned rows) { return (rows + octopusRatePageSize - 1) / octopusRatePageSize; }
+bool validOctopusRateProduct(std::string_view product);
+
+struct OctopusRatePage {
+    std::string product;
+    char region = 0;
+    unsigned page = 0;
+
+    bool operator==(const OctopusRatePage &other) const {
+        return product == other.product && region == other.region && page == other.page;
+    }
+};
+
 struct PublicJsonRequest {
     PublicFeed feed = PublicFeed::GatePearlTicker;
-    int64_t fromUtc = 0, toUtc = 0;  // minute bounds for candles; zero otherwise
+    int64_t fromUtc = 0, toUtc = 0;  // UTC seconds for candle and Octopus price windows
     std::optional<uint32_t> blockHeight{};  // Pearl indexed block hash only
+    std::optional<OctopusRatePage> octopus{};
 };
 struct PublicHttpsLimits {
     unsigned connectMs = 5000, totalMs = 15000;

@@ -727,17 +727,24 @@ The revision starts and ends at London local midnight and covers the reviewed bi
 cycle, set the opening to the cycle start with zero accrued usage and charges, then supply adjacent UTC half-hour
 register readings through the close. Use the same scope in both files.
 
-Capture the public rate pages once from the repository with Python 3.8 or later. Give the capture a new filename
-in a trusted local directory and use the UTC instants for the local window boundaries (inclusive start, exclusive end).
+Run the capture once from a trusted local directory using a build with public HTTPS and the bundled tariff time
+database. Give the capture a new ASCII filename in that directory. The tariff's single empty dynamic revision
+defines the elapsed London-midnight window, its dated product and its region.
 
 ```text
-python tools/capture_octopus_rates.py --product AGILE-FLEX-22-11-25 --region C --payment-method DIRECT_DEBIT --begin 2023-03-01T00:00:00Z --end 2023-03-31T23:00:00Z --output march-rates.json
+canary-miner meter-rates --allow-public-rates --tariff config/tariff-declaration.octopus.example.json --payment-method DIRECT_DEBIT --save-rates march-rates.json
 canary-miner meter-bill --tariff config/tariff-declaration.octopus.example.json --intervals register-march.json --octopus-rates march-rates.json --save-review march.cmr
 canary-miner meter-bill --open-review march.cmr
 ```
 
-The capture uses the unauthenticated standard-unit-rate and standing-charge endpoints and saves the original page
-contents along with the tariff identity, payment choice and local observation time. Meter readings stay local.
+The capture sends the tariff product, region and UTC window to the unauthenticated standard-unit-rate and
+standing-charge endpoints. It saves the original page contents with the tariff identity, payment choice and local
+observation time after validating complete price coverage. The payment method is selected locally. The capture
+sends no meter readings, account credentials or tariff declaration. It requests page numbers from the fixed host
+and uses one two-minute budget for both price series. An invalid or incomplete response leaves no saved rate file.
+When the published rates disagree with a declared accrued opening, reconcile the opening before capturing again.
+If a file with the same name exists, the command preserves it. The optional --dns-server applies only to this
+capture. Repository users can still produce the same format with tools/capture_octopus_rates.py.
 [Octopus API price endpoints](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#price-endpoints)
 
 The offline review checks that every half hour has one applicable price and every London day has one applicable
@@ -757,7 +764,7 @@ revision as for the Agile example. Set the declaration's `plan.product` to the a
 For the sample London window, set it to `GO-VAR-22-10-14` and save the declaration as `go-tariff.json`.
 
 ```text
-python tools/capture_octopus_rates.py --product GO-VAR-22-10-14 --region C --payment-method DIRECT_DEBIT --begin 2023-03-01T00:00:00Z --end 2023-03-31T23:00:00Z --output go-rates.json
+canary-miner meter-rates --allow-public-rates --tariff go-tariff.json --payment-method DIRECT_DEBIT --save-rates go-rates.json
 canary-miner meter-bill --tariff go-tariff.json --intervals register-march.json --octopus-rates go-rates.json --save-review go.cmr
 canary-miner meter-bill --open-review go.cmr
 ```

@@ -236,6 +236,9 @@ int main() {
     auto wrongHeight = *ticket;
     wrongHeight.request.blockHeight = 0;
     CHECK(!lifecycle.complete(wrongHeight,failure,MarketDataStatus::Transport,0,E+10)&&lifecycle.active()&&!lifecycle.helperFault());
+    auto wrongRate = *ticket;
+    wrongRate.request.octopus = OctopusRatePage{"AGILE-24-02-29", 'C', 1};
+    CHECK(!lifecycle.complete(wrongRate,failure,MarketDataStatus::Transport,0,E+10)&&lifecycle.active()&&!lifecycle.helperFault());
     CHECK(lifecycle.complete(*ticket,failure,MarketDataStatus::Transport,0,E+9));  // a concurrent clock problem cannot hide ownership loss
     CHECK(lifecycle.helperFault()&&!lifecycle.active()&&!lifecycle.next(0,E+10)&&!lifecycle.takeEconomicRequest(0,E+10));
     CHECK(lifecycle.health()[0].transport==PublicHttpsStatus::Unreaped);

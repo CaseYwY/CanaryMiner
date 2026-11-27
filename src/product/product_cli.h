@@ -44,11 +44,12 @@
 #include "market_reward.h"
 #include "market_sample_options.h"
 #include "meter_bill.h"
+#include "octopus_rate_cli.h"
 #include "energy_periods_cli.h"
 
 namespace om {
 
-enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods, MarketReward, PoolTlsCheck };
+enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diagnostics, MeterBill, MarketHour, MarketTickers, EnergyPeriods, MarketReward, PoolTlsCheck, MeterRates };
 
 inline constexpr char poolTlsCheckHelp[] =
     "canary-miner pool-tls-check --pool stratum+ssl://HOST:PORT\n"
@@ -103,6 +104,7 @@ struct CliParse {
     CliOverrides ov;
     DiagnosticOptions diagnostics; // isolated parser; never accepts mining/configuration options
     MeterBillOptions meterBill;
+    OctopusRateOptions meterRates;
     MarketHourOptions marketHour;
     MarketRewardOptions marketReward;
     MarketTickerOptions marketTicker;
@@ -150,6 +152,7 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         else if (c == "settings") r.command = Command::Settings;
         else if (c == "diagnostics") r.command = Command::Diagnostics;
         else if (c == "meter-bill") r.command = Command::MeterBill;
+        else if (c == "meter-rates") r.command = Command::MeterRates;
         else if (c == "market-hour") r.command = Command::MarketHour;
         else if (c == "market-tickers") r.command = Command::MarketTickers;
         else if (c == "market-reward") r.command = Command::MarketReward;
@@ -176,6 +179,15 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             }
             r.poolTlsCheckUrl = argv[i + 1];
         }
+        *out = std::move(r);
+        return true;
+    }
+    if (r.command == Command::MeterRates) {
+        if (!parseOctopusRateCli(argc, argv, i, r.meterRates)) {
+            if (error) *error = "meter-rates: invalid options. See meter-rates --help";
+            return false;
+        }
+        r.help = r.meterRates.help;
         *out = std::move(r);
         return true;
     }
@@ -543,6 +555,7 @@ inline std::string productHelpText() {
         "       canary-miner settings          edit display/runtime defaults without mining\n"
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       canary-miner meter-bill        review a tariff and imported meter intervals; see meter-bill --help\n"
+        "       canary-miner meter-rates       capture public Octopus prices; see meter-rates --help\n"
         "       canary-miner energy-periods   review local GPU-board energy by month; see energy-periods --help\n"
         "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
         "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
