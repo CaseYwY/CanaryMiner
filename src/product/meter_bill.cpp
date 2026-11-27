@@ -1265,8 +1265,11 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                         if (priorReview.readings.version != 3)
                             return "Octopus pages cannot continue a cumulative-register archive";
                         const auto &priorTariff = priorReview.declaration;
+                        // A producer may publish a complete export during this check. Verify its observation
+                        // against the refreshed watch cutoff after reading the inputs.
+                        const auto pageCutoff = watch ? meterBillMaxUtcMs : cutoff;
                         if (const auto *problem = loadOctopusImportPages(*directory, priorTariff.opening.evidence.scope,
-                                draft.bounds, cutoff, priorTariff.resetSchedule->annualMonth != 0,
+                                draft.bounds, pageCutoff, priorTariff.resetSchedule->annualMonth != 0,
                                 stopped, next.intervals)) return problem;
                     } else if (type != std::filesystem::file_type::not_found) {
                         return "Octopus consumption page directory is unavailable";
@@ -1289,6 +1292,10 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             const auto invoice = readCycleSlot(stem + ".invoice.json", maxInvoiceBytes, next.invoice);
             if (invoice != LocalFileRead::Missing && invoice != LocalFileRead::Ok)
                 return "recurring review invoice is unavailable or invalid";
+            if (watch) {
+                if (!refreshClock()) return "local clock changed during the billing review";
+                next.cutoff = now;
+            }
 
             if (rates == LocalFileRead::Missing) {
                 if (captures >= maxCaptures) {

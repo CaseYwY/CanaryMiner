@@ -741,8 +741,10 @@ The process stays in the foreground and holds the workspace lease between checks
 recurring review in that directory receives a busy error. Keep the lock file and workspace
 in place during a run. Waiting for a closing time, readings
 or a saved rate capture keeps the process active. Its terminal output changes when the
-review state changes. Publish staged files by completing them and then renaming them to their
-final names in the same directory.
+review state changes. When supervised, direct output to a file or have the supervisor read it
+continuously. Publish staged files by completing them and then renaming them to their final
+names in the same directory. The watcher checks observation times against its refreshed clock
+after reading the staged files.
 
 Each check replays the verified archive chain. The watcher stops on invalid input, a changed
 seed, a missing or changed previously verified archive, a clock discontinuity, or the history
