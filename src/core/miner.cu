@@ -141,6 +141,17 @@ int main(int argc, char **argv) {
             return kExitUsage;
         }
     }
+    if (cli.configArg) {
+        auto configPath = nativeCliArguments(argc, argv, {{cli.configArg - 1, "--config"}}) ?
+            nativeCliPathArgument(argc, argv, cli.configArg) : std::nullopt;
+        if (!configPath) {
+            std::fputs(cli.command == Command::PoolTlsCheck ?
+                "pool-tls-check: invalid config argument. See pool-tls-check --help\n" :
+                "--config requires an exact option and a nonempty native path\n", stderr);
+            return kExitUsage;
+        }
+        cli.ov.configPath = std::move(*configPath);
+    }
     if(cli.command==Command::Diagnostics){
         signal(SIGINT,onSignal);signal(SIGTERM,onSignal);
         return commandDiagnostics(cli.diagnostics,&g_stop); // before any config, preference, platform or device/runtime setup
@@ -152,14 +163,8 @@ int main(int argc, char **argv) {
         }
         PoolSecurityEndpoint endpoint;
         const auto &spec = cli.poolTlsCheckSpec;
-        std::optional<std::string> configPath;
-        if (!cli.ov.configPath.empty()) {
-            if (nativeCliArguments(argc, argv, {{1, "pool-tls-check"}, {2, "--config"}}))
-                configPath = nativeCliPathArgument(argc, argv, 3);
-            if (!configPath) {
-                std::fputs("pool-tls-check: invalid config argument. See pool-tls-check --help\n", stderr);
-                return kExitUsage;
-            }
+        if (cli.configArg) {
+            if (!nativeCliArguments(argc, argv, {{1, "pool-tls-check"}})) return kExitUsage;
         } else {
             const auto *preset = findPoolTlsPreset(spec);
             if (!nativeCliArguments(argc, argv, {{1, "pool-tls-check"}, {2, "--pool"}, {3, spec}}) ||
@@ -176,10 +181,10 @@ int main(int argc, char **argv) {
 #endif
         const auto epoch = nativeProcessAdmissionEpoch();
         NativeProcessScope original(epoch);
-        if (configPath) {
+        if (cli.configArg) {
             StartupConfig startup;
             std::string configError;
-            const auto loaded = inspectStartupConfig(*configPath, &g_stop, false, &startup, &configError);
+            const auto loaded = inspectStartupConfig(cli.ov.configPath, &g_stop, false, &startup, &configError);
             if (!nativeProcessEpochCurrent(epoch)) return kExitFaultLatched;
             if (loaded == StartupConfigStatus::Stopped || g_stop) return 130;
             if (loaded != StartupConfigStatus::Ready || !validateConfig(startup.config, false, nullptr)) {

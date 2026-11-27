@@ -114,6 +114,7 @@ struct CliParse {
     MarketTickerOptions marketTicker;
     EnergyPeriodsOptions energyPeriods;
     std::string poolTlsCheckSpec;
+    int configArg = 0; // original argv index of the explicit config path
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
     std::vector<int> gpuIdArgIndices; // only consumed --gpu-id option/value pairs, for worker argument forwarding
@@ -181,8 +182,10 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
                 if (error) *error = "pool-tls-check: supply one --pool or --config argument. See pool-tls-check --help";
                 return false;
             }
-            if (option == "--config") r.ov.configPath = argv[i + 1];
-            else r.poolTlsCheckSpec = argv[i + 1];
+            if (option == "--config") {
+                r.configArg = i + 1;
+                r.ov.configPath = argv[r.configArg];
+            } else r.poolTlsCheckSpec = argv[i + 1];
         }
         *out = std::move(r);
         return true;
@@ -297,10 +300,11 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             r.ov.noHistory = true;
         } else if (a == "--config") {
             if (!need(i, "--config", &v)) return false;
-            if (!r.ov.configPath.empty()) {
+            if (r.configArg) {
                 if (error) *error = "--config given twice";
                 return false;
             }
+            r.configArg = i;
             r.ov.configPath = v;
         } else if (a == "--pool" || a == "-o") {
             if (!need(i, a.c_str(), &v)) return false;
@@ -460,7 +464,8 @@ inline std::vector<std::string> supervisorUserArguments(int argc, const char *co
         if (std::find(parentOnlyIndices.begin(), parentOnlyIndices.end(), i) != parentOnlyIndices.end() ||
             std::find(cli.gpuIdArgIndices.begin(), cli.gpuIdArgIndices.end(), i) != cli.gpuIdArgIndices.end())
             continue;
-        result.emplace_back(argv[i]);
+        if (i == cli.configArg) result.push_back(cli.ov.configPath);
+        else result.emplace_back(argv[i]);
     }
     return result;
 }

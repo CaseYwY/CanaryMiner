@@ -146,6 +146,11 @@ def main(cli, mode, fixture, preferences, native=None):
         from_config(0, b'Connection closed.', 'prl-hk.kryptex.network 8048 tls\n')
         configuration(donation=True)
         from_config(3, b'donation:false')
+        ordinary = subprocess.run([cli_path, 'run', '--config', str(supplied_config)],
+                                  cwd=root, env=env, capture_output=True, timeout=16)
+        assert ordinary.returncode == 3 and b'donation:false' in ordinary.stderr, ordinary
+        assert not ordinary.stdout and b'FORBIDDEN_DEVICE_SETUP' not in ordinary.stderr
+        assert not marker.read_bytes()
         saved.write_bytes(b'private malformed fixture')
         configuration()
         from_config(3, b'pool security declarations unavailable')
