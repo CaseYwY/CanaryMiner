@@ -17,7 +17,10 @@ import time
 ALLOW = "--allow-public-reward"
 TIP_HASH = "ab" * 32
 MAX_TIP = (1 << 31) - 2
-ARCHIVE_HEADER = b"CMR1 PearlMainnetTip\n"
+LEGACY_HEADER = b"CMR1 PearlMainnetTip\n"
+ARCHIVE_HEADER = b"CMR2 PearlMainnetTip\n"
+PUBLIC_HEIGHT = 148_569
+REQUEST_SEQUENCE = ["6", f"9 {PUBLIC_HEIGHT}", "6"]
 
 
 def run(cli, cwd, *args):
@@ -79,7 +82,7 @@ def offline_archive(cli, root, cutoff):
     ).encode("ascii")
 
     def encode(sent, observed, received, raw, shown):
-        return with_checksum(ARCHIVE_HEADER + f"{sent}\n{observed}\n{received}\n{len(raw)}\n".encode("ascii") +
+        return with_checksum(LEGACY_HEADER + f"{sent}\n{observed}\n{received}\n{len(raw)}\n".encode("ascii") +
                              raw + f"{len(shown)}\n".encode("ascii") + shown)
 
     original = encode(cutoff - 1, cutoff, cutoff + 1, body, report)
@@ -106,6 +109,55 @@ def offline_archive(cli, root, cutoff):
         (encode(cutoff - 1, cutoff, cutoff + 1, body, b"X" * 1025), "archive unavailable or invalid"),
     )
     for data, error in reject:
+        file.write_bytes(data)
+        result = run(cli, root, "--open-review", file.name)
+        assert result.returncode == 3 and not result.stdout and error in result.stderr, result
+        assert file.read_bytes() == data
+    file.unlink()
+
+
+def offline_reconciled_archive(cli, root, cutoff):
+    file = root / "reconciled.cmr"
+    first = json.dumps(status(42, cutoff - 1), indent=2).encode("ascii") + b"\n"
+    index = json.dumps({"blockHash": TIP_HASH}).encode("ascii")
+    last = json.dumps(status(42, cutoff)).encode("ascii") + b"\n"
+    frames = ((cutoff - 2, cutoff - 1, cutoff - 1, first),
+              (cutoff - 1, cutoff, cutoff, index),
+              (cutoff, cutoff + 1, cutoff + 1, last))
+    report = (
+        "Pearl mainnet subsidy [historical Blockbook capture, tip verified across three requests]\n"
+        f"Indexed height: 42\nBackend tip hash: {TIP_HASH}\nIndexer update UTC: {cutoff}\n"
+        f"Closing status observation UTC: {cutoff + 1}\nNext block height: 43\n"
+        f"Next block subsidy: {expected_subsidy(42)} (scheduled consensus subsidy, excluding fees)\n"
+        f"Indexed block hash: {TIP_HASH}\nRequest start UTC: {cutoff - 2}\n"
+        f"Opening status observation UTC: {cutoff - 1}\nIndexed hash observation UTC: {cutoff}\n"
+        f"Capture completed UTC: {cutoff + 1}\n"
+    ).encode("ascii")
+
+    def encode(frames, shown=report):
+        response_parts = b"".join(f"{sent}\n{observed}\n{received}\n{len(raw)}\n".encode("ascii") + raw
+                                  for sent, observed, received, raw in frames)
+        return with_checksum(ARCHIVE_HEADER + response_parts + f"{len(shown)}\n".encode("ascii") + shown)
+
+    original = encode(frames)
+    file.write_bytes(original)
+    result = run(cli, root, "--open-review", file.name)
+    assert_reward(result, 42)
+    assert result.stdout.encode("ascii") == report and file.read_bytes() == original
+
+    different_hash = TIP_HASH.replace("ab", "cd").encode("ascii")
+    for data, error in (
+        (original.replace(TIP_HASH.encode("ascii"), different_hash, 1), "archive unavailable or invalid"),
+        (encode(frames[:2]), "archive unavailable or invalid"),
+        (encode((frames[0], (cutoff - 2, cutoff, cutoff, index), frames[2])), "observation times"),
+        (encode((*frames[:2], (cutoff, cutoff + 30, cutoff + 30, last))), "observation times"),
+        (encode((*frames[:2], (cutoff, cutoff + 3600, cutoff + 3600, last))), "observation times"),
+        (encode((frames[0], (*frames[1][:3], index.replace(TIP_HASH.encode("ascii"), different_hash)), frames[2])),
+         "indexed block hash differs"),
+        (encode((*frames[:2], (*frames[2][:3], last.replace(TIP_HASH.encode("ascii"), different_hash)))),
+         "tip changed"),
+        (encode(frames, report.replace(b"Next block height: 43", b"Next block height: 44")), "recalculated report"),
+    ):
         file.write_bytes(data)
         result = run(cli, root, "--open-review", file.name)
         assert result.returncode == 3 and not result.stdout and error in result.stderr, result
@@ -182,6 +234,7 @@ def offline(cli, root):
         assert result.returncode == 2 and not result.stdout, result
     assert {x.name for x in root.iterdir()} == {file.name}
     offline_archive(cli, root, cutoff)
+    offline_reconciled_archive(cli, root, cutoff)
     print("Pearl subsidy review checks exact consensus floor, historical cutoff, identity, sync and input limits")
 
 
@@ -194,6 +247,10 @@ def public(cli_path, fixture, enabled, root):
     requests = installed / "reward-requests"
     resolver_requests = installed / "resolver-requests"
     body = installed / "reward-response.json"
+    indexed = installed / "reward-indexed.json"
+    closing = installed / "reward-closing.json"
+    original_index = json.dumps({"blockHash": TIP_HASH}, indent=2).encode("ascii") + b"\n"
+    indexed.write_bytes(original_index)
     scenario = installed / "reward-scenario"
     config = root / "config.json"
     config.write_text("private-sentinel", encoding="ascii")
@@ -235,13 +292,14 @@ def public(cli_path, fixture, enabled, root):
         assert libc and tuple(map(int, libc.split()[1].split(".")[:2])) < (2, 40), default
         return 77
     assert_reward(default, 148_569)
-    assert "live Blockbook indexer, locally observed" in default.stdout
-    assert requests.read_text().splitlines() == ["6"] and not resolver_requests.exists()
+    assert "live Blockbook tip verified across three requests" in default.stdout
+    assert f"Indexed block hash: {TIP_HASH}" in default.stdout
+    assert requests.read_text().splitlines() == REQUEST_SEQUENCE and not resolver_requests.exists()
     requests.unlink()
     result = run(cli, root, ALLOW, "--dns-server", resolver)
     assert_reward(result, 148_569)
     assert resolver not in result.stdout
-    assert requests.read_text().splitlines() == ["6"] and resolver_requests.read_text().splitlines() == [resolver]
+    assert requests.read_text().splitlines() == REQUEST_SEQUENCE and resolver_requests.read_text().splitlines() == [resolver] * 3
     requests.unlink()
     resolver_requests.unlink()
     original_response = json.dumps(status(148_569, int(time.time()) - 1), indent=2).encode("ascii") + b"\n"
@@ -249,11 +307,12 @@ def public(cli_path, fixture, enabled, root):
     saved = run(cli, root, ALLOW, "--save-review", archive.name, "--dns-server", resolver)
     assert_reward(saved, 148_569)
     assert "historical Blockbook capture" in saved.stdout and resolver not in saved.stdout, saved
-    assert requests.read_text().splitlines() == ["6"] and resolver_requests.read_text().splitlines() == [resolver]
+    assert requests.read_text().splitlines() == REQUEST_SEQUENCE and resolver_requests.read_text().splitlines() == [resolver] * 3
     requests.unlink()
     resolver_requests.unlink()
     original_archive = archive.read_bytes()
-    assert original_archive.startswith(ARCHIVE_HEADER) and original_response in original_archive
+    assert original_archive.startswith(ARCHIVE_HEADER) and original_archive.count(original_response) == 2
+    assert original_index in original_archive
     assert with_checksum(original_archive[:-65]) == original_archive
     reopened = run(cli, root, "--open-review", archive.name)
     assert reopened.returncode == 0 and reopened.stdout == saved.stdout and not reopened.stderr, reopened
@@ -261,7 +320,7 @@ def public(cli_path, fixture, enabled, root):
     existing = run(cli, root, ALLOW, "--save-review", archive.name)
     assert existing.returncode == 3 and not existing.stdout and "existing archive was preserved" in existing.stderr, existing
     assert archive.read_bytes() == original_archive and not temporary_archive.exists()
-    assert requests.read_text().splitlines() == ["6"]
+    assert requests.read_text().splitlines() == REQUEST_SEQUENCE
     requests.unlink()
     archive.unlink()
     temporary_archive.write_bytes(b"existing temporary")
@@ -276,42 +335,77 @@ def public(cli_path, fixture, enabled, root):
         rival = Path(shutil.copy2(cli_path, other / cli_path.name))
         shutil.copy2(fixture, other / name)
         (other / body.name).write_bytes(original_response)
+        (other / indexed.name).write_bytes(original_index)
         with ThreadPoolExecutor(max_workers=2) as pool:
             submissions = [pool.submit(run, contender, root, ALLOW, "--save-review", archive.name)
                            for contender in (cli, rival)]
             simultaneous = [submission.result() for submission in submissions]
-        assert (other / requests.name).read_text().splitlines() == ["6"]
+        assert (other / requests.name).read_text().splitlines() == REQUEST_SEQUENCE
     assert sorted(result.returncode for result in simultaneous) == [0, 3], simultaneous
     winner = next(result for result in simultaneous if result.returncode == 0)
     loser = next(result for result in simultaneous if result.returncode == 3)
     assert not loser.stdout and "existing archive was preserved" in loser.stderr, loser
     assert run(cli, root, "--open-review", archive.name).stdout == winner.stdout
-    assert archive.is_file() and not temporary_archive.exists() and requests.read_text().splitlines() == ["6"]
+    assert archive.is_file() and not temporary_archive.exists() and requests.read_text().splitlines() == REQUEST_SEQUENCE
     archive.unlink()
     requests.unlink()
     if os.name != "nt":
         run_with_closed_stdout(cli, root, ALLOW, "--save-review", archive.name)
-        assert requests.read_text().splitlines() == ["6"] and not temporary_archive.exists()
+        assert requests.read_text().splitlines() == REQUEST_SEQUENCE and not temporary_archive.exists()
         assert_reward(run(cli, root, "--open-review", archive.name), 148_569)
         archive.unlink()
         requests.unlink()
-    for mode, expected in (("future", "invalid response observation time"), ("timeout", "deadline exceeded")):
-        scenario.write_text(mode, encoding="ascii")
+    def reject(expected, sequence=REQUEST_SEQUENCE):
         result = run(cli, root, ALLOW, "--save-review", archive.name)
         assert result.returncode == 3 and expected in result.stderr and not result.stdout, result
         assert not archive.exists() and not temporary_archive.exists()
-        assert requests.read_text().splitlines() == ["6"] and not resolver_requests.exists()
+        assert requests.read_text().splitlines() == sequence and not resolver_requests.exists()
         requests.unlink()
+
+    for mode, expected, count in (("future", "invalid response observation time", 1),
+                                  ("timeout", "deadline exceeded", 1),
+                                  ("timeout-index", "deadline exceeded", 2),
+                                  ("future-closing", "invalid response observation time", 3)):
+        scenario.write_text(mode, encoding="ascii")
+        reject(expected, REQUEST_SEQUENCE[:count])
+    scenario.unlink()
+
+    for payload, expected in (
+        ({"blockHash": "cd" * 32}, "indexed block hash differs"),
+        ({"blockHash": "0" * 64}, "invalid Pearl indexed block hash"),
+        ({"blockHash": TIP_HASH.upper()}, "invalid Pearl indexed block hash"),
+        ({"hash": TIP_HASH}, "invalid Pearl indexed block hash"),
+    ):
+        indexed.write_text(json.dumps(payload), encoding="utf-8")
+        reject(expected)
+    indexed.write_bytes(original_index)
+    for payload, expected in (
+        (status(PUBLIC_HEIGHT + 1, int(time.time()) - 1), "tip changed"),
+        (status(PUBLIC_HEIGHT, int(time.time()) - 1801), "over 1800 seconds"),
+    ):
+        closing.write_text(json.dumps(payload), encoding="utf-8")
+        reject(expected)
+    closing.write_bytes(original_response.replace(TIP_HASH.encode("ascii"), ("cd" * 32).encode("ascii")))
+    reject("tip changed")
+    closing.unlink()
+
+    scenario.write_text("budget", encoding="ascii")
+    assert_reward(run(cli, root, ALLOW), PUBLIC_HEIGHT)
+    stages = [line.rsplit(" ", 1) for line in requests.read_text().splitlines()]
+    budgets = [int(limit) for _, limit in stages]
+    assert [step for step, _ in stages] == REQUEST_SEQUENCE and 15000 >= budgets[0] > budgets[1] > budgets[2] >= 50
+    requests.unlink()
+
     can_signal = os.name != "nt" or ctypes.windll.kernel32.GetConsoleCP() != 0
     if can_signal:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-        scenario.write_text("slow", encoding="ascii")
+        scenario.write_text("slow-closing", encoding="ascii")
         with subprocess.Popen([cli, "market-reward", ALLOW, "--save-review", archive.name], cwd=root, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, creationflags=flags, text=True) as child:
             try:
                 deadline = time.monotonic() + 4
                 while child.poll() is None and time.monotonic() < deadline:
-                    if requests.exists() and requests.read_text().splitlines() == ["6"]:
+                    if requests.exists() and requests.read_text().splitlines() == REQUEST_SEQUENCE:
                         break
                     time.sleep(0.02)
                 else:

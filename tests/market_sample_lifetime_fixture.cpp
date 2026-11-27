@@ -1,9 +1,11 @@
 #include "product/executable_path.h"
 #include "product/market_hour.h"
+#include "product/market_reward.h"
 #include "product/market_sample_options.h"
 #include "product/market_ticker_runtime.h"
 #include "product/native_process_admission.h"
 
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <fstream>
@@ -25,7 +27,8 @@ void advanceEpoch() {
 }
 
 #if defined(__linux__)
-thread_local unsigned faultOnThread = 0;
+thread_local unsigned faultOnThread = 0, expireOnThread = 0;
+std::atomic<bool> sampleExpired{false};
 thread_local bool tickerClockRollback = false;
 thread_local size_t tickerClockRead = 0;
 thread_local volatile sig_atomic_t *stopAfterSync = nullptr;
@@ -42,6 +45,10 @@ extern "C" int pthread_create(pthread_t *thread, const pthread_attr_t *attribute
         advanceEpoch();
         std::fputs("fixture epoch advanced\n", stderr);
     }
+    if (expireOnThread && --expireOnThread == 0) {
+        sampleExpired.store(true);
+        std::fputs("fixture deadline expired\n", stderr);
+    }
     return create(thread, attributes, function, argument);
 }
 
@@ -53,7 +60,9 @@ extern "C" int clock_gettime(clockid_t clock, struct timespec *value) noexcept {
         *value = {utc[tickerClockRead++], 0};
         return 0;
     }
-    return readClock ? readClock(clock, value) : -1;
+    const int result = readClock ? readClock(clock, value) : -1;
+    if (!result && clock == CLOCK_MONOTONIC && sampleExpired.load()) value->tv_sec += 16;
+    return result;
 }
 
 extern "C" int fsync(int fd) {
@@ -82,9 +91,17 @@ int main(int argc, char **argv) {
 #if defined(__linux__)
     if (mode == "first") faultOnThread = 1;
     if (mode == "second") faultOnThread = 2;
+    if (mode == "third") faultOnThread = 3;
+    if (mode == "deadline-third") expireOnThread = 3;
 #endif
     const om::NativeProcessScope scope(epoch);
     const auto command = std::string_view(argv[1]);
+    if (command == "market-reward") {
+        om::MarketRewardOptions options;
+        if (!om::parseMarketRewardCli(argc, argv, 2, options) ||
+            options.action != om::MarketRewardAction::PublicSample) return 2;
+        return om::commandPublicMarketReward(options, module, nullptr);
+    }
     if (command == "market-hour") {
         om::MarketHourOptions options;
         if (!om::parseMarketHourCli(argc, argv, 2, options) || !options.samplesPublic()) return 2;

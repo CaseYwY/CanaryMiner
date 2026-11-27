@@ -40,7 +40,8 @@ bool transient(const PublicJsonResponse &r) {
 }
 bool sameTicket(const MarketFetchTicket &a, const MarketFetchTicket &b) {
     return a.generation == b.generation && a.serial == b.serial && a.request.feed == b.request.feed && a.request.fromUtc == b.request.fromUtc &&
-        a.request.toUtc == b.request.toUtc && a.startedUtc == b.startedUtc && a.startedMonoMs == b.startedMonoMs;
+        a.request.toUtc == b.request.toUtc && a.request.blockHeight == b.request.blockHeight &&
+        a.startedUtc == b.startedUtc && a.startedMonoMs == b.startedMonoMs;
 }
 }  // namespace
 

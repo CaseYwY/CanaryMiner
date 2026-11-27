@@ -20,12 +20,21 @@ namespace {
 constexpr uint64_t grainsPerPrl = 100'000'000;
 constexpr uint64_t maxIndexAgeSeconds = 30 * 60;
 constexpr uint64_t emissionBlocks = (4 * 365 * 24 * 60 * 60) / 194;
-constexpr std::string_view rewardArchiveHeader = "CMR1 PearlMainnetTip\n";
+constexpr std::string_view legacyRewardArchiveHeader = "CMR1 PearlMainnetTip\n";
+constexpr std::string_view rewardArchiveHeader = "CMR2 PearlMainnetTip\n";
 constexpr size_t rewardReportBytes = 1024;
-constexpr size_t maxRewardArchiveBytes = marketRewardBodyBytes + rewardReportBytes + 256;
+constexpr size_t maxRewardArchiveBytes = 3 * marketRewardBodyBytes + rewardReportBytes + 512;
+// The live sample checks elapsed monotonic time, and permits up to five seconds of UTC drift.
+constexpr uint64_t maxRewardCaptureUtcSeconds = marketRewardSampleMs / 1000 + 5;
 
 bool stringIs(const JsonValue *field, const char *expected) {
     return field && field->isString() && field->text == expected;
+}
+
+bool validBlockHash(const JsonValue *field) {
+    return field && field->isString() && field->text.size() == 64 &&
+        field->text.find_first_not_of("0123456789abcdef") == std::string::npos &&
+        field->text.find_first_not_of('0') != std::string::npos;
 }
 
 struct IndexTimestamp {
@@ -112,24 +121,75 @@ std::string renderCapturedSubsidy(const PearlSubsidyObservation &sample, uint64_
         std::to_string(receivedUtc) + "\n";
 }
 
+const char *rewardStatusProblem(PearlRewardStatus status) {
+    if (status == PearlRewardStatus::Unsynced) return "Pearl indexer and backend are not synchronized";
+    if (status == PearlRewardStatus::Stale) return "Pearl index time is invalid, future or over 1800 seconds old";
+    return "invalid Pearl mainnet indexer response";
+}
+
+const char *reconcileRewardReplies(const MarketRewardReplies &replies, uint64_t now, PearlSubsidyObservation &sample) {
+    const auto &[opening, indexed, closing] = replies;
+    auto previous = opening.sentUtc;
+    for (const auto &reply : replies) {
+        if (!reply.sentUtc || reply.sentUtc < previous || reply.sentUtc > reply.observedUtc ||
+            reply.observedUtc > reply.receivedUtc)
+            return "reward review observation times are invalid";
+        previous = reply.receivedUtc;
+    }
+    if (closing.receivedUtc > now || closing.receivedUtc - opening.sentUtc > maxRewardCaptureUtcSeconds)
+        return "reward review observation times are invalid or in the future";
+
+    const auto first = parsePearlBlockbookTip(opening.body, opening.observedUtc, PearlRewardCutoff::WholeObservationSecond);
+    if (!first.value) return rewardStatusProblem(first.status);
+    const auto last = parsePearlBlockbookTip(closing.body, closing.observedUtc, PearlRewardCutoff::WholeObservationSecond);
+    if (!last.value) return rewardStatusProblem(last.status);
+    if (first.value->tipHeight != last.value->tipHeight || first.value->backendTipHash != last.value->backendTipHash)
+        return "Pearl tip changed during the sample";
+
+    JsonValue index;
+    if (indexed.body.size() > marketRewardBodyBytes || !boundedPublicJson(indexed.body) ||
+        !parseJsonStrict(indexed.body, &index, nullptr, {marketRewardBodyBytes, 256}) || !index.isObject())
+        return "invalid Pearl indexed block hash response";
+    const auto *hash = index.find("blockHash");
+    if (!validBlockHash(hash)) return "invalid Pearl indexed block hash response";
+    if (hash->text != last.value->backendTipHash) return "Pearl indexed block hash differs from the backend tip";
+    sample = *last.value;
+    return nullptr;
+}
+
+std::string renderReconciledSubsidy(const PearlSubsidyObservation &sample, const MarketRewardReplies &replies, bool saved) {
+    const auto &[opening, indexed, closing] = replies;
+    return renderSubsidy(sample, closing.observedUtc,
+        saved ? "Pearl mainnet subsidy [historical Blockbook capture, tip verified across three requests]" :
+                "Pearl mainnet subsidy [live Blockbook tip verified across three requests]",
+        "Closing status observation UTC: ") +
+        "Indexed block hash: " + sample.backendTipHash + "\nRequest start UTC: " + std::to_string(opening.sentUtc) +
+        "\nOpening status observation UTC: " + std::to_string(opening.observedUtc) +
+        "\nIndexed hash observation UTC: " + std::to_string(indexed.observedUtc) +
+        "\nCapture completed UTC: " + std::to_string(closing.receivedUtc) + "\n";
+}
+
 int writeRewardReport(const std::string &text) {
     return std::fwrite(text.data(), 1, text.size(), stdout) == text.size() && std::fflush(stdout) == 0 ? 0 : 1;
 }
 
-const char *replayCapturedSubsidy(const std::string &bytes, uint64_t now, std::string &report) {
+bool rewardArchiveChecksum(const std::string &bytes, size_t offset) {
+    return bytes.size() - offset == 65 && bytes.back() == '\n' &&
+        bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) == 0;
+}
+
+const char *replayLegacySubsidy(const std::string &bytes, uint64_t now, std::string &report) {
     using local_review_archive::readArchiveNumber;
     using local_review_archive::readArchivePart;
-    size_t offset = rewardArchiveHeader.size();
+    size_t offset = legacyRewardArchiveHeader.size();
     int64_t sent = 0, observed = 0, received = 0;
     std::string body, savedReport;
-    if (std::string_view(bytes).substr(0, offset) != rewardArchiveHeader ||
-        !readArchiveNumber(bytes, offset, rewardUtcLimit, sent) ||
+    if (!readArchiveNumber(bytes, offset, rewardUtcLimit, sent) ||
         !readArchiveNumber(bytes, offset, rewardUtcLimit, observed) ||
         !readArchiveNumber(bytes, offset, rewardUtcLimit, received) ||
         !readArchivePart(bytes, offset, marketRewardBodyBytes, body) ||
         !readArchivePart(bytes, offset, rewardReportBytes, savedReport) ||
-        bytes.size() - offset != 65 || bytes.back() != '\n' ||
-        bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
+        !rewardArchiveChecksum(bytes, offset))
         return "reward review archive unavailable or invalid";
     if (sent > observed || observed > received || static_cast<uint64_t>(received) > now)
         return "reward review observation times are invalid or in the future";
@@ -137,6 +197,35 @@ const char *replayCapturedSubsidy(const std::string &bytes, uint64_t now, std::s
                                               PearlRewardCutoff::WholeObservationSecond);
     if (!result.value) return "saved Pearl mainnet indexer response is invalid or stale at capture";
     report = renderCapturedSubsidy(*result.value, sent, observed, received);
+    return report == savedReport ? nullptr : "saved reward report differs from the recalculated report";
+}
+
+const char *replayCapturedSubsidy(const std::string &bytes, uint64_t now, std::string &report) {
+    using local_review_archive::readArchiveNumber;
+    using local_review_archive::readArchivePart;
+    if (std::string_view(bytes).substr(0, legacyRewardArchiveHeader.size()) == legacyRewardArchiveHeader)
+        return replayLegacySubsidy(bytes, now, report);
+
+    size_t offset = rewardArchiveHeader.size();
+    const auto *invalid = "reward review archive unavailable or invalid";
+    if (std::string_view(bytes).substr(0, offset) != rewardArchiveHeader) return invalid;
+    MarketRewardReplies replies;
+    for (auto &reply : replies) {
+        int64_t sent = 0, observed = 0, received = 0;
+        if (!readArchiveNumber(bytes, offset, rewardUtcLimit, sent) ||
+            !readArchiveNumber(bytes, offset, rewardUtcLimit, observed) ||
+            !readArchiveNumber(bytes, offset, rewardUtcLimit, received) ||
+            !readArchivePart(bytes, offset, marketRewardBodyBytes, reply.body)) return invalid;
+        reply.sentUtc = static_cast<uint64_t>(sent);
+        reply.observedUtc = static_cast<uint64_t>(observed);
+        reply.receivedUtc = static_cast<uint64_t>(received);
+    }
+    std::string savedReport;
+    if (!readArchivePart(bytes, offset, rewardReportBytes, savedReport) || !rewardArchiveChecksum(bytes, offset))
+        return invalid;
+    PearlSubsidyObservation sample;
+    if (const auto *problem = reconcileRewardReplies(replies, now, sample)) return problem;
+    report = renderReconciledSubsidy(sample, replies, true);
     return report == savedReport ? nullptr : "saved reward report differs from the recalculated report";
 }
 
@@ -190,10 +279,8 @@ PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutof
     const auto *inSync = index->find("inSync"), *initialSync = index->find("initialSync");
     uint64_t decimals = 0, bestHeight = 0, nodeBlocks = 0, nodeHeaders = 0;
     if (!scale || !scale->asUint64(&decimals) || decimals != 8 || !height || !height->asUint64(&bestHeight) ||
-        bestHeight >= INT32_MAX || !blocks || !blocks->asUint64(&nodeBlocks) || !headers ||
-        !headers->asUint64(&nodeHeaders) || !hash || !hash->isString() || hash->text.size() != 64 ||
-        hash->text.find_first_not_of("0123456789abcdef") != std::string::npos ||
-        hash->text.find_first_not_of('0') == std::string::npos || !timestamp || !timestamp->isString() ||
+        bestHeight > maxPearlRewardTipHeight || !blocks || !blocks->asUint64(&nodeBlocks) || !headers ||
+        !headers->asUint64(&nodeHeaders) || !validBlockHash(hash) || !timestamp || !timestamp->isString() ||
         !inSync || !inSync->isBool() || !initialSync || !initialSync->isBool()) return {};
     if (!inSync->boolean || initialSync->boolean || bestHeight != nodeBlocks || nodeBlocks != nodeHeaders)
         return {PearlRewardStatus::Unsynced, {}};
@@ -208,30 +295,32 @@ PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutof
                                                          indexUpdateUtc->second, *subsidy}};
 }
 
-int reportPearlSubsidy(const PearlRewardResult &result, uint64_t cutoffUtc, bool live) {
-    if (!result.value) {
-        if (result.status == PearlRewardStatus::Unsynced) return reviewError("Pearl indexer and backend are not synchronized");
-        if (result.status == PearlRewardStatus::Stale) return reviewError("Pearl index time is invalid, future or over 1800 seconds old");
-        return reviewError("invalid Pearl mainnet indexer response");
-    }
-    return writeRewardReport(renderSubsidy(*result.value, cutoffUtc,
-        live ? "Pearl mainnet subsidy [live Blockbook indexer, locally observed]" :
-               "Pearl mainnet subsidy [saved Blockbook status, user-declared cutoff]",
-        live ? "Observation UTC: " : "Declared cutoff UTC: "));
+int reportPearlRewardFailure(const PearlRewardResult &result) {
+    return reviewError(rewardStatusProblem(result.status));
 }
 
-int savePublicMarketRewardReview(const std::string &name, const PublicJsonResponse &response,
-                                 uint64_t sentUtc, uint64_t receivedUtc, const PearlRewardResult &result,
-                                 const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop) {
+int reportPublicMarketReward(const std::string &archiveName, const MarketRewardReplies &replies,
+                             const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop) {
     using local_review_archive::ReviewSave;
-    if (!result.value) return reportPearlSubsidy(result, response.observedUtc, true);
-    const auto report = renderCapturedSubsidy(*result.value, sentUtc, response.observedUtc, receivedUtc);
+    PearlSubsidyObservation sample;
+    const auto *problem = reconcileRewardReplies(replies, rewardUtcLimit, sample);
+    if (!lifetime.permitted()) return reviewError("helper ownership uncertain");
+    if (market_detail::marketSampleStopped(stop)) return reviewError("sample cancelled", 130);
+    if (problem) return reviewError(problem);
+    const auto report = renderReconciledSubsidy(sample, replies, !archiveName.empty());
+    if (archiveName.empty()) {
+        if (!lifetime.permitted()) return reviewError("helper ownership uncertain");
+        if (market_detail::marketSampleStopped(stop)) return reviewError("sample cancelled", 130);
+        return writeRewardReport(report);
+    }
     if (report.size() > rewardReportBytes) return reviewError("reward review report exceeds the archive bound");
     std::string bytes(rewardArchiveHeader);
-    bytes += std::to_string(sentUtc) + '\n' + std::to_string(response.observedUtc) + '\n' +
-        std::to_string(receivedUtc) + '\n' + std::to_string(response.body.size()) + '\n' + response.body +
-        std::to_string(report.size()) + '\n' + report;
-    const auto state = local_review_archive::saveWhileActive(name, rewardReviewExtension,
+    for (const auto &reply : replies) {
+        bytes += std::to_string(reply.sentUtc) + '\n' + std::to_string(reply.observedUtc) + '\n' +
+            std::to_string(reply.receivedUtc) + '\n' + std::to_string(reply.body.size()) + '\n' + reply.body;
+    }
+    bytes += std::to_string(report.size()) + '\n' + report;
+    const auto state = local_review_archive::saveWhileActive(archiveName, rewardReviewExtension,
         bytes + sha256Hex(bytes) + '\n', maxRewardArchiveBytes, [&] { return (stop && *stop) || !lifetime.permitted(); });
     if (state == ReviewSave::Stopped)
         return lifetime.permitted() ? reviewError("sample cancelled", 130) : reviewError("helper ownership uncertain");
@@ -267,7 +356,9 @@ int commandMarketRewardFile(const MarketRewardOptions &options, int argc, const 
         if (options.cutoffUtc > static_cast<uint64_t>(now)) return reviewError("declared cutoff is in the future");
         const auto result = parsePearlBlockbookTip(body, options.cutoffUtc, PearlRewardCutoff::ExactSecond);
         if (stopped()) return reviewError("review cancelled", 130);
-        return reportPearlSubsidy(result, options.cutoffUtc, false);
+        if (!result.value) return reportPearlRewardFailure(result);
+        return writeRewardReport(renderSubsidy(*result.value, options.cutoffUtc,
+            "Pearl mainnet subsidy [saved Blockbook status, user-declared cutoff]", "Declared cutoff UTC: "));
     } catch (...) {
         if (stopped()) return reviewError("review cancelled", 130);
         return reviewError("could not review the saved indexer response");

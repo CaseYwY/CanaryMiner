@@ -57,18 +57,26 @@ inline PublicJsonResponse awaitPublicMarketReply(const MarketFetch &fetch, const
     if (!lifetime.permitted()) return marketSampleFailure(PublicHttpsStatus::Unreaped);
     std::atomic<bool> cancel{marketSampleStopped(stop)};
     if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
+    if (std::chrono::steady_clock::now() >= limits.parentDeadline)
+        return marketSampleFailure(PublicHttpsStatus::Timeout);
 
     // A new std::async thread does not inherit the command's original native scope.
     auto job = std::async(std::launch::async, [&] {
         const NativeProcessScope scope(lifetime.epoch());
         if (!lifetime.permitted()) return marketSampleFailure(PublicHttpsStatus::Unreaped);
+        if (std::chrono::steady_clock::now() >= limits.parentDeadline)
+            return marketSampleFailure(PublicHttpsStatus::Timeout);
         return fetch(request, cancel, limits);
     });
     while (job.wait_for(std::chrono::milliseconds(20)) != std::future_status::ready) {
-        if (marketSampleStopped(stop) || !lifetime.permitted()) cancel.store(true);
+        if (marketSampleStopped(stop) || !lifetime.permitted() || std::chrono::steady_clock::now() >= limits.parentDeadline)
+            cancel.store(true);
     }
     auto reply = job.get();
-    if (!lifetime.permitted()) return marketSampleFailure(PublicHttpsStatus::Unreaped);
+    if (!lifetime.permitted() || reply.status == PublicHttpsStatus::Unreaped)
+        return marketSampleFailure(PublicHttpsStatus::Unreaped);
+    if (std::chrono::steady_clock::now() >= limits.parentDeadline)
+        return marketSampleFailure(PublicHttpsStatus::Timeout);
     return reply;
 }
 

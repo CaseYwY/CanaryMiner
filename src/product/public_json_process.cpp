@@ -116,7 +116,8 @@ struct PublicJsonProcessClient::Impl {
         closeHandle(process); closeHandle(output); closeHandle(job);
         jobBound = false;
     }
-    bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel) {
+    bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel,
+               std::chrono::steady_clock::time_point deadline) {
         struct Temps {
             HANDLE read = nullptr, write = nullptr, null = nullptr, thread = nullptr;
             ~Temps() { closeHandle(read); closeHandle(write); closeHandle(null); closeHandle(thread); }
@@ -152,13 +153,15 @@ struct PublicJsonProcessClient::Impl {
         environment += systemRoot; environment.push_back(0); environment.push_back(0);
         PROCESS_INFORMATION pi{};
         const auto parent = helper.parent_path().wstring();
-        bool created = ready && !cancel.load() && admission.permitted() && CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
+        bool created = ready && !cancel.load() && admission.permitted() && std::chrono::steady_clock::now() < deadline &&
+            CreateProcessW(helper.c_str(), cmd.data(), nullptr, nullptr, TRUE,
             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | CREATE_SUSPENDED,
             &environment[0], parent.c_str(), &si.StartupInfo, &pi);
         if (created) {
             process = pi.hProcess; output = temp.read; temp.read = nullptr; temp.thread = pi.hThread;
             jobBound = AssignProcessToJobObject(job, process) != 0;
-            created = jobBound && !cancel.load() && admission.permitted() && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
+            created = jobBound && !cancel.load() && admission.permitted() &&
+                std::chrono::steady_clock::now() < deadline && ResumeThread(pi.hThread) != static_cast<DWORD>(-1);
             // The common cleanup retains both native handles until exit is actually observed.
         }
         return created;
@@ -192,7 +195,8 @@ struct PublicJsonProcessClient::Impl {
         if (output >= 0) { ::close(output); output = -1; }
         if (pidfd >= 0) { ::close(pidfd); pidfd = -1; }
     }
-    bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel) {
+    bool start(const std::vector<std::string> &args, const std::atomic<bool> &cancel,
+               std::chrono::steady_clock::time_point deadline) {
         struct sigaction policy{};
         if (sigaction(SIGCHLD, nullptr, &policy) || policy.sa_handler != SIG_DFL || (policy.sa_flags & SA_NOCLDWAIT)) return false;
 #if !defined(OM_PUBLIC_PIDFD_SPAWN) || !defined(SYS_pidfd_send_signal)
@@ -234,10 +238,11 @@ struct PublicJsonProcessClient::Impl {
         char *environment[] = {lang, locale, nullptr};
         // Obtain the kernel identity atomically with creation. A later pidfd_open(pid) is still a reuse race.
 #if defined(OM_PUBLIC_PIDFD_SPAWN)
-        const int result = ready && !cancel.load() && admission.permitted() ? pidfd_spawn(&pidfd, executable.c_str(), &setup.actions, &setup.attributes, argv.data(), environment) : -1;
+        const int result = ready && !cancel.load() && admission.permitted() && std::chrono::steady_clock::now() < deadline ?
+            pidfd_spawn(&pidfd, executable.c_str(), &setup.actions, &setup.attributes, argv.data(), environment) : -1;
 #else
         const int result = -1;
-        (void)ready; (void)cancel; (void)environment;
+        (void)ready; (void)cancel; (void)environment; (void)deadline;
 #endif
         if (result != 0) { pidfd = -1; return false; }
         output = pipe.fd[0]; pipe.fd[0] = -1;
@@ -321,16 +326,26 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
         if (root.size() != 2 || root[1] != L':' || impl_->helper.native().find(L'\"') != std::wstring::npos) return response;
 #endif
         if (!impl_->helper.is_absolute() || !std::filesystem::is_regular_file(impl_->helper)) return response;
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(limits.totalMs);
-        std::vector<std::string> args = {std::to_string(static_cast<unsigned>(request.feed)), std::to_string(request.fromUtc), std::to_string(request.toUtc),
+        const auto now = std::chrono::steady_clock::now();
+        const auto deadline = (std::min)(limits.parentDeadline, now + std::chrono::milliseconds(limits.totalMs));
+        if (deadline < now + std::chrono::milliseconds(50)) {
+            response.status = PublicHttpsStatus::Timeout;
+            return response;
+        }
+        limits.totalMs = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
+        limits.connectMs = (std::min)(limits.connectMs, limits.totalMs);
+        // The indexed-hash feed uses the first numeric selector for height. All other feeds retain their UTC fields.
+        const int64_t first = request.blockHeight ? static_cast<int64_t>(*request.blockHeight) : request.fromUtc;
+        std::vector<std::string> args = {std::to_string(static_cast<unsigned>(request.feed)), std::to_string(first), std::to_string(request.toUtc),
             std::to_string(limits.connectMs), std::to_string(limits.totalMs), std::to_string(limits.bodyBytes), std::to_string(limits.headerBytes)};
         if (!limits.dnsServer.empty()) args.push_back(limits.dnsServer);
         response.status = Impl::reserve(impl_.get());
         if (response.status != PublicHttpsStatus::Ok) return response;
         response = {};
-        if (!impl_->start(args, cancel)) {
+        if (!impl_->start(args, cancel, deadline)) {
             if (cancel.load()) response.status = PublicHttpsStatus::Cancelled;
             else if (nativeProcessUnresolved() || impl_->admission.invalidated()) response.status = PublicHttpsStatus::Unreaped;
+            else if (std::chrono::steady_clock::now() >= deadline) response.status = PublicHttpsStatus::Timeout;
             return response;
         }
         std::string wire;
