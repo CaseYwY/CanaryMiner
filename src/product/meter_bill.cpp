@@ -1121,28 +1121,34 @@ const char *loadOctopusImportPages(const std::filesystem::path &directory, const
     return nullptr;
 }
 
+int64_t recurringCycleClosingFromName(std::string_view basename) {
+    constexpr std::string_view prefix = "cycle-", suffix = ".cmr";
+    if (basename.size() <= prefix.size() + suffix.size() ||
+        basename.size() > prefix.size() + suffix.size() + 15)
+        return 0;
+    const auto matchesLowercase = [](char expected, char actual) {
+        if (actual >= 'A' && actual <= 'Z') actual = static_cast<char>(actual - 'A' + 'a');
+        return expected == actual;
+    };
+    if (!std::equal(prefix.begin(), prefix.end(), basename.begin(), matchesLowercase) ||
+        !std::equal(suffix.begin(), suffix.end(), basename.end() - suffix.size(), matchesLowercase))
+        return 0;
+    const auto *first = basename.data() + prefix.size();
+    const auto *last = basename.data() + basename.size() - suffix.size();
+    if (*first < '1' || *first > '9') return 0;
+    int64_t closing = 0;
+    const auto parsed = std::from_chars(first, last, closing);
+    return parsed.ec == std::errc{} && parsed.ptr == last && closing <= meterBillMaxUtcMs ? closing : 0;
+}
+
 std::optional<int64_t> latestCycleArchiveEnd(const std::filesystem::path &directory,
                                                const std::function<bool()> &stopped) {
-    constexpr std::string_view prefix = "cycle-", suffix = ".cmr";
     int64_t latest = 0;
     std::error_code error;
     for (std::filesystem::directory_iterator entry(directory, error), end; !error && entry != end; entry.increment(error)) {
         if (stopped()) return std::nullopt;
         const auto name = entry->path().filename().u8string();
-        if (name.size() <= prefix.size() + suffix.size() || name.size() > prefix.size() + suffix.size() + 15)
-            continue;
-        std::string folded(name.begin(), name.end());
-        for (auto &c : folded)
-            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        const std::string_view basename(folded);
-        if (basename.substr(0, prefix.size()) != prefix || basename.substr(basename.size() - suffix.size()) != suffix)
-            continue;
-        const auto *first = folded.data() + prefix.size();
-        const auto *last = folded.data() + folded.size() - suffix.size();
-        int64_t closing = 0;
-        const auto parsed = std::from_chars(first, last, closing);
-        if (*first >= '1' && *first <= '9' && parsed.ec == std::errc{} && parsed.ptr == last && closing <= meterBillMaxUtcMs)
-            latest = (std::max)(latest, closing);
+        latest = (std::max)(latest, recurringCycleClosingFromName(std::string(name.begin(), name.end())));
     }
     if (error) return std::nullopt;
     return latest;
@@ -1423,7 +1429,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
     if (options.help) {
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
                   "    [--invoice FILE] [--prepaid FILE] [--save-review NAME.cmr]\n"
-                  "canary-miner meter-bill --open-review FILE [--invoice FILE] [--previous-cycle ARCHIVE]\n"
+                  "canary-miner meter-bill --open-review FILE [--invoice FILE [--save-review NAME.cmr]] [--previous-cycle ARCHIVE]\n"
                   "canary-miner meter-bill --prepare-next-cycle ARCHIVE (--save-tariff NAME.json | --save-register NAME.json)\n"
                   "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
                   "    --octopus-rates FILE [--tariff FILE] [--as-of-utc-ms MS] [--invoice FILE]\n"
@@ -1460,7 +1466,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Use --invoice to compare supply charges, reconcile independent export statements, or review interim annual charges.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
-                  "Open rechecks the saved inputs and results at their original cutoff without writing files.\n"
+                  "Open rechecks the saved inputs and results at their original cutoff.\n"
+                  "To retain a late invoice comparison, use --invoice with --save-review and a new archive name.\n"
                   "Extend verifies the saved review and requires the complete interval history with additional readings.");
         return 0;
     }
@@ -1592,6 +1599,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         const bool nextCycle = options.nextCycleArg != 0;
         const bool preparing = options.prepareCycleArg != 0;
         const bool archiving = options.saveArg != 0;
+        const bool savingAttachedInvoice = reopening && archiving;
+        if (savingAttachedInvoice && recurringCycleClosingFromName(options.outputName))
+            return fail("output name is reserved for recurring cycles");
         const auto cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
         const char *lateReadingError = options.reviewCutoffArg || reopening || extending || nextCycle || preparing
             ? "interval ends after the review cutoff" : "interval ends in the future";
@@ -1715,10 +1725,15 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty())
                 return fail("invoice file unavailable, empty, oversized or not a regular file");
         }
-        if (const auto *problem = calculateMeterReview(original, archiving || retainedInvoice, stopped, review))
+        // An attached invoice adds exact comparison rows to the new archive. Check
+        // the input archive against the meter results before admitting those rows.
+        std::string meterOnlyExact;
+        if (const auto *problem = calculateMeterReview(original, archiving || retainedInvoice, stopped, review,
+                                                       savingAttachedInvoice ? &meterOnlyExact : nullptr))
             return fail(problem);
         if (stopped()) return fail("review cancelled");
-        if (reopening && original.results != review.exact) return fail("saved review amounts differ from the recalculated amounts");
+        if (reopening && original.results != (savingAttachedInvoice ? meterOnlyExact : review.exact))
+            return fail("saved review amounts differ from the recalculated amounts");
         if (archiving) {
             if (review.exact.size() > maxExactResultsBytes) return fail("exact results exceed the archive bound");
             original.results = std::move(review.exact);
