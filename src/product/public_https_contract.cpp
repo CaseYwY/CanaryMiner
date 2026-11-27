@@ -2,6 +2,8 @@
 #include "public_https.h"
 #include "json_dom.h"
 #include <algorithm>
+#include <cstdio>
+#include <ctime>
 #include <utility>
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -33,8 +35,42 @@ const char *publicHttpsStatusName(PublicHttpsStatus status) {
     return "unsupported public response";
 }
 
+bool validOctopusRateProduct(std::string_view product) {
+    for (const std::string_view kind : {"AGILE-FLEX-", "AGILE-", "GO-VAR-"}) {
+        if (product.substr(0, kind.size()) != kind) continue;
+        auto date = product.substr(kind.size());
+        if (date.size() != 8 || date[2] != '-' || date[5] != '-' ||
+            date.substr(0, 2).find_first_not_of("0123456789") != date.npos ||
+            date.substr(3, 2).find_first_not_of("0123456789") != date.npos ||
+            date.substr(6, 2).find_first_not_of("0123456789") != date.npos) continue;
+        const auto pair = [&](size_t at) { return (date[at] - '0') * 10 + date[at + 1] - '0'; };
+        const auto year = pair(0), month = pair(3), day = pair(6);
+        const int days[] = {31, year % 4 == 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
+    }
+    return false;
+}
+
+static std::string octopusPriceUtc(int64_t seconds) {
+    const auto value = static_cast<std::time_t>(seconds);
+    if (static_cast<int64_t>(value) != seconds) return {};
+    std::tm utc{};
+#if defined(_WIN32)
+    if (gmtime_s(&utc, &value)) return {};
+#else
+    if (!gmtime_r(&value, &utc)) return {};
+#endif
+    char stamp[32];
+    const auto n = std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02dT%02d%%3A%02d%%3A%02dZ",
+                                 utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec);
+    return n == 24 ? std::string(stamp, static_cast<size_t>(n)) : std::string{};
+}
+
 bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
-    if (!url || (r.blockHeight && r.feed != PublicFeed::PearlIndexedBlockHash)) return false;
+    const bool unitRate = r.feed == PublicFeed::OctopusUnitRates;
+    const bool octopus = unitRate || r.feed == PublicFeed::OctopusStandingCharges;
+    if (!url || (r.blockHeight && r.feed != PublicFeed::PearlIndexedBlockHash) || octopus != r.octopus.has_value())
+        return false;
     std::string result;
     switch (r.feed) {
         case PublicFeed::GatePearlTicker:
@@ -82,6 +118,23 @@ bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
                 result = "https://api.coinbase.com/api/v3/brokerage/market/products/USDT-USD/candles?granularity=ONE_MINUTE&limit=61&start=" +
                     std::to_string(r.fromUtc) + "&end=" + std::to_string(r.toUtc);
             break;
+        case PublicFeed::OctopusUnitRates:
+        case PublicFeed::OctopusStandingCharges: {
+            const auto &selector = *r.octopus;
+            const auto rowLimit = unitRate ? octopusMaxUnitRows : octopusMaxStandingRows;
+            if (!validOctopusRateProduct(selector.product) || octopusRateRegions.find(selector.region) == std::string_view::npos ||
+                !selector.page || selector.page > octopusMaxPages(rowLimit) ||
+                r.fromUtc < 946684800 || r.toUtc > 4102444800LL || r.toUtc <= r.fromUtc ||
+                r.fromUtc % 1800 || r.toUtc % 1800 || r.toUtc - r.fromUtc > octopusMaxUnitRows * 1800LL) return false;
+            const auto begin = octopusPriceUtc(r.fromUtc);
+            const auto end = octopusPriceUtc(r.toUtc - 1); // Provider's price query end is inclusive.
+            if (begin.empty() || end.empty()) return false;
+            result = "https://api.oegb-kraken.energy/v1/products/" + selector.product +
+                "/electricity-tariffs/E-1R-" + selector.product + '-' + selector.region +
+                (unitRate ? "/standard-unit-rates/" : "/standing-charges/") + "?period_from=" + begin +
+                "&period_to=" + end + "&page_size=" + std::to_string(octopusRatePageSize) + "&page=" + std::to_string(selector.page);
+            break;
+        }
         default: return false;
     }
     *url = std::move(result);

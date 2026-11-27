@@ -18,6 +18,9 @@ struct OctopusRateImport {
     bool go = false;
 };
 
+// Validate the placeholder before reading or acquiring rate pages.
+const char *checkOctopusRateDeclaration(const TariffDeclaration &declaration);
+
 // Bind a locally captured Octopus Agile or Go rate file to a declared tariff for this review only.
 const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffDeclaration &declaration,
                               OctopusRateImport &summary, const std::function<bool()> &stop);

@@ -24,7 +24,26 @@ int main() {
     CHECK(url == "https://blockbook.pearlresearch.ai/api/v2/block-index/0");
     CHECK(publicFeedUrl({PublicFeed::PearlIndexedBlockHash, 0, 0, maxPearlRewardTipHeight}, &url));
     CHECK(url == "https://blockbook.pearlresearch.ai/api/v2/block-index/2147483646");
+    const OctopusRatePage agility{"AGILE-FLEX-22-11-25", 'C', 2};
+    CHECK(publicFeedUrl({PublicFeed::OctopusUnitRates, 1679788800, 1679871600, {}, agility}, &url));
+    CHECK(url == "https://api.oegb-kraken.energy/v1/products/AGILE-FLEX-22-11-25/electricity-tariffs/"
+                 "E-1R-AGILE-FLEX-22-11-25-C/standard-unit-rates/?period_from=2023-03-26T00%3A00%3A00Z"
+                 "&period_to=2023-03-26T22%3A59%3A59Z&page_size=100&page=2");
+    CHECK(publicFeedUrl({PublicFeed::OctopusStandingCharges, 1679788800, 1679871600, {},
+                         OctopusRatePage{"GO-VAR-22-10-14", 'A', 3}}, &url));
+    CHECK(url.find("/E-1R-GO-VAR-22-10-14-A/standing-charges/") != std::string::npos);
+    CHECK(validOctopusRateProduct("AGILE-24-02-29"));
+    CHECK(!validOctopusRateProduct("AGILE-23-02-29"));
     for (auto r : {PublicJsonRequest{static_cast<PublicFeed>(99)},
+                   PublicJsonRequest{PublicFeed::PearlMainnetTip, 0, 0, {}, agility},
+                   PublicJsonRequest{PublicFeed::OctopusUnitRates, 1679788800, 1679871600},
+                   PublicJsonRequest{PublicFeed::OctopusUnitRates, 1679788801, 1679871600, {}, agility},
+                   PublicJsonRequest{PublicFeed::OctopusStandingCharges, 1679788800, 1679871600, {},
+                                     OctopusRatePage{"GO-VAR-22-10-14", 'A', 4}},
+                   PublicJsonRequest{PublicFeed::OctopusUnitRates, 1679788800, 1679871600, {},
+                                     OctopusRatePage{"AGILE-22-11-25/", 'A', 1}},
+                   PublicJsonRequest{PublicFeed::OctopusUnitRates, 1679788800, 1679871600, {},
+                                     OctopusRatePage{"AGILE-22-11-25", 'I', 1}},
                    PublicJsonRequest{PublicFeed::PearlMainnetTip, 1, 0},
                    PublicJsonRequest{PublicFeed::PearlMainnetTip, 0, 1},
                    PublicJsonRequest{PublicFeed::PearlMainnetTip, 0, 0, 0},

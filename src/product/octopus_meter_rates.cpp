@@ -1,6 +1,9 @@
 #include "octopus_meter_rates.h"
 
+#include "market_native_arguments.h"
 #include "octopus_json.h"
+#include "octopus_rate_cli.h"
+#include "public_https.h"
 
 #include <algorithm>
 #include <string_view>
@@ -10,21 +13,12 @@ namespace om {
 namespace {
 
 using namespace octopus_detail;
-constexpr std::size_t maxUnitRows = 8192, maxStandingRows = 256, maxPages = 96;
+constexpr std::size_t maxPages = 96; // Legacy file imports permit smaller pages.
 
 struct Rate {
     int64_t begin = 0, end = 0;
     ExactDecimal pounds;
 };
-
-bool datedProduct(std::string_view product, std::string_view prefix) {
-    if (product.substr(0, prefix.size()) != prefix) return false;
-    product.remove_prefix(prefix.size());
-    if (product.size() != 8 || product[2] != '-' || product[5] != '-') return false;
-    const auto year = digits(product.substr(0, 2));
-    return year < 100 && validCivilDate({2000 + static_cast<int>(year), digits(product.substr(3, 2)),
-                                       digits(product.substr(6, 2))});
-}
 
 bool validLink(const JsonValue &value, bool present) {
     return present ? value.isString() && !value.text.empty() && value.text.size() <= 2048
@@ -83,7 +77,7 @@ bool rates(const JsonValue &pages, const std::string &payment, std::size_t maxRo
 bool compatiblePlan(const TariffPlan &plan) {
     if (plan.origin != TariffOrigin::UserDeclaredOffline || plan.supplier != "Octopus Energy" ||
         plan.territory.size() != 1 ||
-        std::string_view("ABCDEFGHJKLMNP").find(plan.territory) == std::string_view::npos ||
+        octopusRateRegions.find(plan.territory) == std::string_view::npos ||
         plan.currency != "GBP" || plan.tiers != TierMode::None ||
         plan.rounding != TariffRounding::MeterHalfHourKwhHalfEven2 ||
         plan.clock.kind != CivilClockKind::NamedIana || plan.clock.zone != "Europe/London" ||
@@ -123,20 +117,37 @@ bool alignUnitRates(std::vector<Rate> &rates, bool go, int64_t begin, int64_t en
 
 }  // namespace
 
-const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffDeclaration &declaration,
-                              OctopusRateImport &summary, const std::function<bool()> &stop) {
-    auto &plan = declaration.plan;
-    const bool go = datedProduct(plan.product, "GO-VAR-");
-    const auto error = [go](const char *agile, const char *goProduct) { return go ? goProduct : agile; };
-    if (!go && !datedProduct(plan.product, "AGILE-") && !datedProduct(plan.product, "AGILE-FLEX-"))
-        return "tariff declaration is unsuitable for an Octopus rate import";
+bool nativeOctopusRateInvocation(const OctopusRateOptions &options, int argc, const char *const *argv) {
+    using market_detail::nativeMarketArguments;
+    if (options.help) return argc == 3 &&
+        (nativeMarketArguments(argc, argv, {{1, "meter-rates"}, {2, "--help"}}) ||
+         nativeMarketArguments(argc, argv, {{1, "meter-rates"}, {2, "-h"}}));
+    return argc == (options.dns.empty() ? 9 : 11) &&
+        nativeMarketArguments(argc, argv, {{1, "meter-rates"}, {2, "--allow-public-rates"}, {3, "--tariff"},
+            {5, "--payment-method"}, {6, options.payment}, {7, "--save-rates"}, {8, options.output}}) &&
+        (options.dns.empty() || nativeMarketArguments(argc, argv, {{9, "--dns-server"}, {10, options.dns}}));
+}
+
+
+const char *checkOctopusRateDeclaration(const TariffDeclaration &declaration) {
+    const auto &plan = declaration.plan;
+    if (!validOctopusRateProduct(plan.product)) return "tariff declaration is unsuitable for an Octopus rate import";
     if (declaration.componentMultipliers || plan.demandCharge || !compatiblePlan(plan))
-        return error("tariff declaration is unsuitable for an Octopus Agile rate import",
-                     "tariff declaration is unsuitable for an Octopus Go rate import");
+        return plan.product.compare(0, 7, "GO-VAR-") == 0 ?
+            "tariff declaration is unsuitable for an Octopus Go rate import" :
+            "tariff declaration is unsuitable for an Octopus Agile rate import";
     for (const auto &period : plan.taxPeriods)
         if (std::any_of(period.rules.begin(), period.rules.end(), [](const auto &rule) { return rule.addsCharge(); }))
             return "Octopus rate imports already include VAT and cannot be used with added tax rules";
+    return nullptr;
+}
 
+const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffDeclaration &declaration,
+                              OctopusRateImport &summary, const std::function<bool()> &stop) {
+    if (const auto *problem = checkOctopusRateDeclaration(declaration)) return problem;
+    auto &plan = declaration.plan;
+    const bool go = plan.product.compare(0, 7, "GO-VAR-") == 0;
+    const auto error = [go](const char *agile, const char *goProduct) { return go ? goProduct : agile; };
     JsonValue root;
     if (!parseJsonStrict(bytes, &root, nullptr, {maxOctopusRateFileBytes, 7}) ||
         !fields(root, {"schema_version", "product_code", "tariff_code", "payment_method", "observed_utc_ms",
@@ -162,8 +173,8 @@ const char *importOctopusRates(const std::string &bytes, int64_t cutoff, TariffD
                      "Octopus Go rate window must start and end at London local midnight");
 
     std::vector<Rate> unit, fees;
-    if (!rates(*root.find("unit_rate_pages"), method.text, maxUnitRows, false, unit, stop) ||
-        !rates(*root.find("standing_charge_pages"), method.text, maxStandingRows, true, fees, stop))
+    if (!rates(*root.find("unit_rate_pages"), method.text, octopusMaxUnitRows, false, unit, stop) ||
+        !rates(*root.find("standing_charge_pages"), method.text, octopusMaxStandingRows, true, fees, stop))
         return error("invalid or incomplete Octopus Agile rate pages", "invalid or incomplete Octopus Go rate pages");
     if (!alignUnitRates(unit, go, placeholder.beginUtcMs, placeholder.endUtcMs))
         return error("Octopus Agile energy rates must cover every exact half hour once",

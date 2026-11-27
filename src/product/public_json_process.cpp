@@ -142,7 +142,7 @@ struct PublicJsonProcessClient::Impl {
         STARTUPINFOEXW si{};
         si.StartupInfo.cb = sizeof(si); si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
         si.StartupInfo.hStdInput = temp.null; si.StartupInfo.hStdOutput = temp.write; si.StartupInfo.hStdError = temp.null; si.lpAttributeList = attributes;
-        // Only bounded numeric fields and an optional validated address. No shell or environment inheritance.
+        // Only validated numeric, product, region and resolver fields. No shell or environment inheritance.
         std::wstring command = L"\"" + helper.wstring() + L"\"";
         for (const auto &arg : args) command += L" " + std::wstring(arg.begin(), arg.end());
         std::vector<wchar_t> cmd(command.begin(), command.end()); cmd.push_back(0);
@@ -338,6 +338,10 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
         const int64_t first = request.blockHeight ? static_cast<int64_t>(*request.blockHeight) : request.fromUtc;
         std::vector<std::string> args = {std::to_string(static_cast<unsigned>(request.feed)), std::to_string(first), std::to_string(request.toUtc),
             std::to_string(limits.connectMs), std::to_string(limits.totalMs), std::to_string(limits.bodyBytes), std::to_string(limits.headerBytes)};
+        if (request.octopus) {
+            const auto &page = *request.octopus;
+            args.insert(args.end(), {page.product, std::string(1, page.region), std::to_string(page.page)});
+        }
         if (!limits.dnsServer.empty()) args.push_back(limits.dnsServer);
         response.status = Impl::reserve(impl_.get());
         if (response.status != PublicHttpsStatus::Ok) return response;

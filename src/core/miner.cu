@@ -196,6 +196,29 @@ int main(int argc, char **argv) {
 #endif
         return kExitConfig;
     }
+    if (cli.command == Command::MeterRates) {
+        if (!nativeOctopusRateInvocation(cli.meterRates, argc, argv)) {
+            std::fputs("meter-rates: invalid options. See meter-rates --help\n", stderr);
+            return kExitUsage;
+        }
+        if (cli.help) {
+            std::puts(octopusRatesHelp);
+            return kExitOk;
+        }
+        if constexpr (kPublicTickerRuntimeBuilt) {
+            signal(SIGINT, onSignal);
+            signal(SIGTERM, onSignal);
+#if defined(SIGBREAK)
+            signal(SIGBREAK, onSignal);
+#endif
+#if defined(SIGPIPE)
+            signal(SIGPIPE, SIG_IGN);
+#endif
+            return commandPublicOctopusRates(cli.meterRates, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
+        }
+        std::fputs("meter-rates: public HTTPS unavailable in this build\n", stderr);
+        return kExitConfig;
+    }
     if (cli.command == Command::MeterBill) {
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
@@ -628,6 +651,7 @@ int main(int argc, char **argv) {
                 "       canary-miner settings          edit local display/runtime defaults\n"
                 "       canary-miner diagnostics       build-only preview/export; see diagnostics --help\n"
                 "       canary-miner meter-bill        review imported meter intervals; see meter-bill --help\n"
+                "       canary-miner meter-rates       capture public Octopus prices; see meter-rates --help\n"
                 "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
                 "       canary-miner market-tickers   review saved tickers or take a public sample; see market-tickers --help\n"
                 "       canary-miner market-reward    review the next Pearl mainnet block subsidy; see market-reward --help\n"
