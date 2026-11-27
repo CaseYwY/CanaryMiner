@@ -223,14 +223,16 @@ int main(int argc, char **argv) {
     if (cli.command == Command::MeterBill) {
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
-        if constexpr (kPublicTickerRuntimeBuilt) {
-            if (cli.meterBill.allowPublicRatesArg) {
+        if (cli.meterBill.watchArg || cli.meterBill.allowPublicRatesArg) {
 #if defined(SIGBREAK)
-                signal(SIGBREAK, onSignal);
+            signal(SIGBREAK, onSignal);
 #endif
 #if defined(SIGPIPE)
-                signal(SIGPIPE, SIG_IGN);
+            signal(SIGPIPE, SIG_IGN);
 #endif
+        }
+        if constexpr (kPublicTickerRuntimeBuilt) {
+            if (cli.meterBill.allowPublicRatesArg) {
                 const OctopusRateCaptureSource publicRates{std::filesystem::u8path(selfExecutablePath()),
                                                            capturePublicOctopusRates};
                 return commandMeterBill(cli.meterBill, argc, argv, &g_stop, &publicRates);

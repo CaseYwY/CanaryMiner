@@ -725,8 +725,36 @@ save up to 24 new archives and request up to three public captures. Rerun to con
 a write or capture limit. At the history limit, use the latest verified archive as the
 new starting point.
 
-The command can be invoked repeatedly as new input arrives. It keeps estimated charges
-and optional local invoice comparisons in the same archive format as the individual review.
+The command keeps estimated charges and optional local invoice comparisons in the same
+archive format as the individual review.
+
+#### Watch for new billing inputs
+
+Run the same command with a check interval between 1 and 86,400 seconds. The first check
+runs immediately. Each subsequent check runs after the previous check and the chosen interval.
+
+~~~text
+canary-miner meter-bill --roll-forward march.cmr --watch-every-seconds 300
+~~~
+
+The process stays in the foreground and holds the workspace lease between checks. A second
+recurring review in that directory receives a busy error. Keep the lock file and workspace
+in place during a run. Waiting for a closing time, readings
+or a saved rate capture keeps the process active. Its terminal output changes when the
+review state changes. When supervised, direct output to a file or have the supervisor read it
+continuously. Publish staged files by completing them and then renaming them to their final
+names in the same directory. The watcher checks observation times against its refreshed clock
+after reading the staged files.
+
+Each check replays the verified archive chain. The watcher stops on invalid input, a changed
+seed, a missing or changed previously verified archive, a clock discontinuity, or the history
+limit. Correct the cause before restarting. Completed archives stay available for replay.
+When the history limit is reached, restart from the latest verified archive.
+
+Watch uses the current clock and cannot be combined with `--as-of-utc-ms`. The
+`--confirm-electricity-import` and `--allow-public-rates` options apply to the running
+process when provided. Public capture can issue up to three successful captures per check.
+A capture failure terminates the watch. Use Ctrl+C or Ctrl+Break to stop a foreground run.
 
 ### Import Octopus consumption pages with the installed miner
 

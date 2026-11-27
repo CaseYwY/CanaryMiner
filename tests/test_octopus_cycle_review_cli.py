@@ -1,13 +1,17 @@
 """Close adjacent Octopus billing cycles using separate captures and private originals."""
 import copy
+import ctypes
 from decimal import Decimal
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 from test_meter_bill_named_cli import BUNDLE, HOUR, SCOPE, named, plan, register, utc
 from test_octopus_meter_rates_cli import GO_PRODUCT, HALF_HOUR, PAYMENT, PRODUCT, decimal_text, pages, row, timestamp
@@ -429,6 +433,97 @@ def main(cli, bundle):
         uncertain.unlink()
         second_archive.write_bytes(second_bytes)
         assert '2 verified, 0 saved' in run(*roll)
+
+        for extra in (('0',), ('01',), ('86401',), ('1.0',), ('1', '--watch-every-seconds', '1'),
+                      ('1', '--as-of-utc-ms', june + HOUR)):
+            run('--roll-forward', old, '--watch-every-seconds', *extra, code=2, reason='invalid options')
+        run('--open-review', old, '--watch-every-seconds', '1', code=2, reason='invalid options')
+
+        watched = root / 'watched workspace'
+        watched.mkdir()
+        watched_seed = watched / 'seed.cmr'
+        watched_seed.write_bytes(old_bytes)
+        watch = (binary, 'meter-bill', '--roll-forward', watched_seed, '--watch-every-seconds', '1')
+        first_target, second_target = (watched / f'cycle-{at}.cmr' for at in (may, june))
+        can_signal = os.name != 'nt' or ctypes.windll.kernel32.GetConsoleCP() != 0
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' and can_signal else 0
+
+        def publish_for_watch(at, kind, value):
+            destination = watched / f'cycle-{at}.{kind}.json'
+            staging = destination.with_suffix('.staged')
+            write(staging, value)
+            staging.replace(destination)
+
+        def await_watch(child, output, fragment):
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if fragment in output.read_text(encoding='ascii'):
+                    return
+                assert child.poll() is None, (fragment, child.returncode, output.read_text(encoding='ascii'))
+                time.sleep(0.025)
+            raise AssertionError((fragment, output.read_text(encoding='ascii')))
+
+        output, errors = watched / 'watch.log', watched / 'watch-errors.log'
+        with output.open('wb') as log, errors.open('wb') as err, subprocess.Popen(
+                watch, cwd=watched, stdout=log, stderr=err, creationflags=flags) as child:
+            try:
+                await_watch(child, output, 'waiting for complete meter readings')
+                time.sleep(1.25)
+                assert output.read_text(encoding='ascii').count('waiting for complete meter readings') == 1
+                run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
+                if os.name != 'nt':
+                    (watched / 'meter-billing.lock').unlink()
+                    run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
+                publish_for_watch(may, 'readings', current[1])
+                await_watch(child, output, 'waiting for a saved Octopus rate capture')
+                assert not first_target.exists()
+                fresh = dict(current[2], observed_utc_ms=time.time_ns() // 1_000_000)
+                publish_for_watch(may, 'rates', fresh)
+                await_watch(child, output, '0 verified, 1 saved')
+                close(current[3], run('--open-review', first_target, '--previous-cycle', watched_seed, cwd=watched))
+                publish_for_watch(june, 'readings', following[1])
+                publish_for_watch(june, 'rates', following[2])
+                await_watch(child, output, '1 verified, 1 saved')
+                close(following[3], run('--open-review', second_target, '--previous-cycle', first_target, cwd=watched))
+                held = watched / 'held-latest.cmr'
+                second_target.rename(held)
+                assert child.wait(timeout=10) == 3
+                assert 'archive changed or disappeared while watching' in errors.read_text(encoding='ascii')
+                assert not second_target.exists() and not second_target.with_suffix('.cmr.tmp').exists()
+                held.rename(second_target)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+
+        if can_signal:
+            with output.open('wb') as log, errors.open('wb') as err, subprocess.Popen(
+                    (*watch[:-1], '300'), cwd=watched, stdout=log, stderr=err, creationflags=flags) as child:
+                try:
+                    await_watch(child, output, '2 verified, 0 saved')
+                    child.send_signal(signal.CTRL_BREAK_EVENT if os.name == 'nt' else signal.SIGTERM)
+                    assert child.wait(timeout=5) == 130
+                    assert 'recurring review stopped' in errors.read_text(encoding='ascii')
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=5)
+        if os.name != 'nt':
+            moved = root / 'moved workspace'
+            with output.open('wb') as log, errors.open('wb') as err, subprocess.Popen(
+                    watch, cwd=watched, stdout=log, stderr=err) as child:
+                try:
+                    await_watch(child, output, '2 verified, 0 saved')
+                    watched.rename(moved)
+                    assert child.wait(timeout=5) == 3
+                    assert 'workspace moved' in (moved / errors.name).read_text(encoding='ascii')
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=5)
+                    if moved.exists():
+                        moved.rename(watched)
+        assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
 
         feb = utc('2023-02-01T00:00:00')
         drift = cycle(feb, march, GO_PRODUCT, Decimal(100), 14, 6, 28)
