@@ -59,6 +59,13 @@ class LocalStoreLease {
         return fd_ >= 0 && fstat(fd_, &info) == 0 && S_ISREG(info.st_mode) && flock(fd_, LOCK_EX | LOCK_NB) == 0;
 #endif
     }
+#if !defined(_WIN32)
+    bool acquireDirectory(const std::filesystem::path &path) {
+        if (fd_ >= 0) return false;
+        fd_ = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        return fd_ >= 0 && flock(fd_, LOCK_EX | LOCK_NB) == 0;
+    }
+#endif
    private:
 #if defined(_WIN32)
     HANDLE handle_ = INVALID_HANDLE_VALUE;

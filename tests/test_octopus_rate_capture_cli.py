@@ -292,6 +292,55 @@ def main(cli, fixture, bundle, real_worker):
         assert (saved_only / f"cycle-{ends}.cmr").exists()
         assert requests.read_text().splitlines() == expected_requests
 
+        watch_dir = root / "watch-public"
+        watch_dir.mkdir()
+        watch_seed = watch_dir / "seed.cmr"
+        shutil.copy2(root / prior_archive, watch_seed)
+        watch_output = watch_dir / "watch.log"
+        requests.unlink()
+
+        def poll_report(child, fragment):
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                output = watch_output.read_text(encoding="ascii")
+                if fragment in output:
+                    return
+                assert child.poll() is None, (fragment, child.returncode, output)
+                time.sleep(0.025)
+            raise AssertionError((fragment, output))
+
+        def stage_readings(at, document):
+            path = watch_dir / f"cycle-{at}.readings.json"
+            stage = path.with_suffix(".staged")
+            write(stage, document)
+            stage.replace(path)
+
+        with watch_output.open("wb") as log, subprocess.Popen(
+                [binary, "meter-bill", "--roll-forward", watch_seed, "--watch-every-seconds", "1",
+                 "--allow-public-rates", "--dns-server", "192.168.50.53"],
+                cwd=watch_dir, stdout=log, stderr=subprocess.PIPE, text=True) as owner:
+            try:
+                poll_report(owner, "waiting for complete meter readings")
+                assert not requests.exists()
+                stage_readings(ends, new_register)
+                poll_report(owner, "0 verified, 1 saved")
+                assert requests.read_text().splitlines() == expected_requests[:2]
+                stage_readings(june, may_readings)
+                poll_report(owner, "1 verified, 1 saved")
+                assert requests.read_text().splitlines() == expected_requests
+                july = utc("2023-06-30T23:00:00")
+                stage_readings(july, {})
+                _, error = owner.communicate(timeout=10)
+                assert owner.returncode == 3 and "invalid interval document" in error, error
+                assert requests.read_text().splitlines() == expected_requests
+                assert not (watch_dir / f"cycle-{july}.cmr").exists()
+                assert not (watch_dir / f"cycle-{july}.cmr.tmp").exists()
+                assert all((watch_dir / f"cycle-{at}.cmr").exists() for at in (ends, june))
+            finally:
+                if owner.poll() is None:
+                    owner.kill()
+                    owner.wait(timeout=5)
+
         base = ("10", str(BEGIN // 1000), str(END // 1000), "5000", "15000", "65536", "32768")
         for malformed in (("GO-VAR-22-10-14", "I", "1"), ("AGILE-23-02-29", "C", "1"),
                           (PRODUCT, "C", "83"), (PRODUCT, "C", "01")):

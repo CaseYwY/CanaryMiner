@@ -10,9 +10,11 @@
 #include "public_https.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <variant>
 #if defined(_WIN32)
@@ -45,7 +47,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         options.nextCycleArg ? options.nextCycleArg : options.extendArg;
     for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
                       options.saveArg, options.ratesArg, options.invoiceArg, options.prepaidArg, options.previousCycleArg,
-                      options.saveTariffArg, options.saveRegisterArg, options.dnsServerArg, options.importPagesArg, options.saveReadingsArg})
+                      options.saveTariffArg, options.saveRegisterArg, options.dnsServerArg, options.importPagesArg,
+                      options.saveReadingsArg, options.watchArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
     for (int index : {options.allowPublicRatesArg, options.confirmImportArg})
         if (index && (index < 2 || index >= argc)) return std::nullopt;
@@ -73,6 +76,9 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     if (options.reviewCutoffArg &&
         (!matches(options.reviewCutoffArg, L"--as-of-utc-ms") ||
          std::wstring_view(args.values[options.reviewCutoffArg]) != std::to_wstring(options.reviewCutoffUtcMs)))
+        return std::nullopt;
+    if (options.watchArg && (!matches(options.watchArg, L"--watch-every-seconds") ||
+        std::wstring_view(args.values[options.watchArg]) != std::to_wstring(options.watchSeconds)))
         return std::nullopt;
     if (options.allowPublicRatesArg && std::wstring_view(args.values[options.allowPublicRatesArg]) != L"--allow-public-rates")
         return std::nullopt;
@@ -1141,14 +1147,20 @@ std::optional<int64_t> latestCycleArchiveEnd(const std::filesystem::path &direct
 struct RecurringCycleProgress {
     size_t saved = 0;
     int64_t closing = 0;
+    bool historyLimit = false;
 };
 
-const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t requestedCutoff, int64_t now,
+struct RecurringCycleWatch {
+    std::string seedDigest, latestName, latestDigest;
+};
+
+const char *rollOctopusCycles(const std::filesystem::path &seed, const std::filesystem::path &workspace,
+                             int64_t requestedCutoff, int64_t now,
                              bool confirmImport,
                              const OctopusRateCaptureSource *source, const std::string &dns,
                              NativeProcessLifetime &lifetime, const market_detail::MarketSampleClock &started,
                              const volatile sig_atomic_t *stop, const std::function<bool()> &stopped,
-                             RecurringCycleProgress &progress, std::string &report) {
+                             RecurringCycleWatch *watch, RecurringCycleProgress &progress, std::string &report) {
     constexpr size_t maxHistory = 120;
     constexpr size_t maxNew = 24;
     constexpr size_t maxCaptures = 3;
@@ -1158,34 +1170,40 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t request
     std::string bytes;
     if (!readLocalReviewInput(seed, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, previous))
         return "recurring review seed archive unavailable or invalid";
+    auto previousDigest = sha256Hex(bytes);
+    if (watch) {
+        if (!watch->seedDigest.empty() && watch->seedDigest != previousDigest)
+            return "recurring review seed changed while watching";
+        watch->seedDigest = previousDigest;
+    }
+    bool sawWatchedHead = !watch || watch->latestName.empty();
     if (requestedCutoff && requestedCutoff < previous.cutoff) return "new review cutoff precedes the saved cutoff";
     if (requestedCutoff > now) return "review cutoff is in the future";
     if (const auto *problem = replaySavedReview(previous, now, lateReadingError, stopped, priorReview))
         return problem;
 
-    const auto leasePath = localReviewPath("meter-billing.lock");
-    LocalStoreLease lease;
-    if (stopped()) return "review cancelled";
-    if (!leasePath || !lease.acquire(*leasePath)) return "recurring review workspace is busy or unavailable";
-
+    const auto refreshClock = [&] {
+        if (!source && !watch) return true;
+        const auto current = market_detail::marketTradeClock();
+        if (!market_detail::marketTradeClockContinuous(started, started, current) ||
+            current.second < static_cast<uint64_t>(now)) return false;
+        now = static_cast<int64_t>(current.second);
+        return true;
+    };
     size_t existing = 0, captures = 0;
-    auto previousDigest = sha256Hex(bytes);
+    std::string latestName;
     std::string_view waiting;
     std::optional<int64_t> lastExistingClosing;
     for (;;) {
         progress.closing = 0;
         if (stopped()) return "review cancelled";
-        if (source) {
-            const auto current = market_detail::marketTradeClock();
-            if (!market_detail::marketTradeClockContinuous(started, started, current) ||
-                current.second < static_cast<uint64_t>(now)) return "local clock changed during the billing review";
-            now = static_cast<int64_t>(current.second);
-        }
+        if (!refreshClock()) return "local clock changed during the billing review";
         const auto cutoff = requestedCutoff ? requestedCutoff : now;
         const auto link = bindPreviousCycle(previous, priorReview, previousDigest);
         if (!link) return "previous review must be a complete recurring Octopus cycle and matching rate window";
         if (previous.cutoff > cutoff) return "new review cutoff precedes the saved cutoff";
         if (existing + progress.saved >= maxHistory) {
+            progress.historyLimit = true;
             waiting = "archive replay limit reached; use the latest verified archive as the next seed";
             break;
         }
@@ -1201,6 +1219,11 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t request
         const auto stem = "cycle-" + std::to_string(progress.closing);
         const auto target = stem + ".cmr";
         const auto archive = readCycleSlot(target, maxArchiveBytes, bytes);
+        if (watch && target == watch->latestName) {
+            if (archive != LocalFileRead::Ok || sha256Hex(bytes) != watch->latestDigest)
+                return "latest verified recurring archive changed or disappeared while watching";
+            sawWatchedHead = true;
+        }
         ReviewOriginal next;
         MeterReview nextReview;
         if (archive == LocalFileRead::Ok) {
@@ -1215,7 +1238,8 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t request
             ++existing;
         } else {
             if (archive != LocalFileRead::Missing) return "recurring review successor archive is unavailable";
-            if (!lastExistingClosing) lastExistingClosing = latestCycleArchiveEnd(leasePath->parent_path(), stopped);
+            if (!sawWatchedHead) return "a previously verified recurring archive disappeared while watching";
+            if (!lastExistingClosing) lastExistingClosing = latestCycleArchiveEnd(workspace, stopped);
             if (!lastExistingClosing) return "could not inspect recurring review archive names";
             if (*lastExistingClosing >= progress.closing)
                 return "recurring review archive gap; restore the existing archive chain before continuing";
@@ -1272,6 +1296,8 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t request
                     break;
                 }
                 if (!draft.publicCapture) return "next cycle exceeds the installed public rate capture bounds";
+                if (watch && std::filesystem::current_path() != workspace)
+                    return "recurring review workspace moved while watching";
                 if (const auto *problem = captureMeterReviewRates(next, now, lateReadingError,
                         priorReview.supplier->paymentMethod, dns, target, *source, lifetime, started, stop, stopped))
                     return problem;
@@ -1282,6 +1308,9 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t request
             if (const auto *problem = verifyCycleLink(next, nextReview)) return problem;
             if (const auto *problem = calculateMeterReview(next, true, stopped, nextReview)) return problem;
             if (stopped()) return "review cancelled";
+            if (!refreshClock()) return "local clock changed during the billing review";
+            if (watch && std::filesystem::current_path() != workspace)
+                return "recurring review workspace moved while watching";
             if (nextReview.exact.size() > maxExactResultsBytes) return "exact results exceed the archive bound";
             next.results = std::move(nextReview.exact);
             bytes = encodeReviewOriginal(next);
@@ -1294,8 +1323,14 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t request
             ++progress.saved;
         }
         previousDigest = sha256Hex(bytes);
+        if (watch) latestName = target;
         previous = std::move(next);
         priorReview = std::move(nextReview);
+    }
+    if (!sawWatchedHead) return "could not recheck the latest verified recurring archive while watching";
+    if (watch && !latestName.empty()) {
+        watch->latestName = std::move(latestName);
+        watch->latestDigest = std::move(previousDigest);
     }
     report = "Recurring Octopus review: " + std::to_string(existing) + " verified, " +
         std::to_string(progress.saved) + " saved\nLast verified closing " +
@@ -1326,7 +1361,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
                   "    --allow-public-rates [--dns-server IP] [--invoice FILE]\n"
                   "canary-miner meter-bill --roll-forward SEED.cmr [--confirm-electricity-import]\n"
-                  "    [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP]]\n"
+                  "    [--watch-every-seconds SECONDS] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP]]\n"
                   "canary-miner meter-bill --import-octopus-pages DIR --tariff FILE --save-readings NAME.json\n"
                   "    --confirm-electricity-import\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
@@ -1346,6 +1381,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Omit --tariff to derive it from the archive. Live capture requires --allow-public-rates.\n"
                   "Roll forward uses cycle-END.readings.json, cycle-END.rates.json and optional cycle-END.invoice.json.\n"
                   "END is the cycle closing UTC millisecond. Each verified cycle commits to cycle-END.cmr.\n"
+                  "Watch checks again after 1 to 86400 seconds. It requires the current clock and holds the workspace lease.\n"
                   "With electricity import confirmed, use cycle-END.pages if the readings file is absent.\n"
                   "Page directories contain observation.json and page-1.json, page-2.json, and so on.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
@@ -1376,8 +1412,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         return stopped() ? stopResult() : refuse(reason);
     };
     try {
-        const auto started = live ? market_detail::marketTradeClock() : market_detail::MarketSampleClock{};
-        auto now = static_cast<int64_t>(live ? started.second : market_detail::marketUtcClockMs());
+        const bool watching = options.watchArg != 0;
+        const auto started = live || watching ? market_detail::marketTradeClock() : market_detail::MarketSampleClock{};
+        auto now = static_cast<int64_t>(live || watching ? started.second : market_detail::marketUtcClockMs());
         if (stopped()) return stopResult();
         const auto paths = meterBillPaths(options, argc, argv);
         if (!paths) return fail(options.reviewCutoffArg ? "invalid review cutoff or input file arguments" :
@@ -1414,19 +1451,54 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                                static_cast<long long>(window.endUtcMs)) < 0 || std::fflush(stdout) != 0 ? 1 : 0;
         }
         if (options.rollForwardArg) {
-            std::string report;
-            RecurringCycleProgress progress;
-            if (const auto *problem = rollOctopusCycles(paths->archive, options.reviewCutoffUtcMs, now,
-                    options.confirmImportArg != 0, live ? publicRates : nullptr, options.dnsServer, captureLifetime, started, stop, stopped, progress, report)) {
-                if (progress.closing)
-                    std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
-                if (progress.saved)
-                    std::fprintf(stderr, "meter-bill: this run committed %zu new cycle%s\n",
-                                 progress.saved, progress.saved == 1 ? "" : "s");
-                return fail(problem);
+            const auto leasePath = localReviewPath("meter-billing.lock");
+            constexpr auto unavailable = "recurring review workspace is busy or unavailable";
+            if (!leasePath) return fail(unavailable);
+            const auto workspace = leasePath->parent_path();
+#if !defined(_WIN32)
+            // An unlinked lock file can be recreated while its original inode remains leased.
+            LocalStoreLease directoryLease;
+            if (!directoryLease.acquireDirectory(workspace)) return fail(unavailable);
+#endif
+            LocalStoreLease lease;
+            if (!lease.acquire(*leasePath)) return fail(unavailable);
+            RecurringCycleWatch watch;
+            auto previousSample = started;
+            std::string lastReport;
+            for (;;) {
+                if (stopped()) return fail("review cancelled");
+                if (watching && std::filesystem::current_path() != workspace)
+                    return fail("recurring review workspace moved while watching");
+                const auto sample = watching ? market_detail::marketTradeClock() : started;
+                if (watching && !market_detail::marketTradeClockContinuous(previousSample, previousSample, sample))
+                    return fail("local clock changed while waiting for the next billing check");
+                previousSample = sample;
+                std::string report;
+                RecurringCycleProgress progress;
+                if (const auto *problem = rollOctopusCycles(paths->archive, workspace,
+                        options.reviewCutoffUtcMs, watching ? static_cast<int64_t>(sample.second) : now,
+                        options.confirmImportArg != 0, live ? publicRates : nullptr, options.dnsServer,
+                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, progress, report)) {
+                    if (progress.closing)
+                        std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
+                    if (progress.saved)
+                        std::fprintf(stderr, "meter-bill: this %s committed %zu new cycle%s\n",
+                                     watching ? "check" : "run", progress.saved, progress.saved == 1 ? "" : "s");
+                    return fail(problem);
+                }
+                if (report != lastReport) {
+                    if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
+                        return 1;
+                    lastReport = std::move(report);
+                }
+                if (!watching) return 0;
+                if (progress.historyLimit) return refuse("recurring review watch reached its archive replay limit");
+
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(options.watchSeconds);
+                for (auto current = std::chrono::steady_clock::now(); !stopped() && current < deadline;
+                     current = std::chrono::steady_clock::now())
+                    std::this_thread::sleep_until((std::min)(deadline, current + std::chrono::milliseconds(100)));
             }
-            return std::fwrite(report.data(), 1, report.size(), stdout) == report.size() &&
-                std::fflush(stdout) == 0 ? 0 : 1;
         }
         ReviewOriginal original;
         std::string inheritedPayment;
