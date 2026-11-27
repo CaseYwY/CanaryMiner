@@ -21,7 +21,27 @@ To check a preset before mining, run `canary-miner pool-tls-check --pool kryptex
 
 On 2026-11-27 UTC, the installed PR #92 candidates checked each of the eight Kryptex aliases and the HeroMiners alias once through the local network. Windows verified and closed all nine. Linux verified and closed eight. Its first Russia check returned a protocol error, then two repeat checks verified and closed the connection. These observations cover the certificate and hostname handshake on that network. Pool login and accepted shares require separate evidence.
 
-Use `herominers-tls` for the Pearl US East endpoint `stratum+ssl://us2.pearl.herominers.com:1200`. The pool publishes both transports on port 1200. The preset uses the existing HeroMiners protocol rules and requires donation off. To upgrade the legacy `herominers` preset, review and save the same host and port in Settings. [HeroMiners Pearl regions](https://pearl.herominers.com/) · [Official TCP/TLS instructions](https://pearl.herominers.com/help/) · [Migration instructions](pool-tls-migration.md)
+## HeroMiners regional presets
+
+HeroMiners publishes eleven Pearl regions with TCP and TLS on port 1200. Each preset uses the existing HeroMiners protocol rules and requires donation off. Run `canary-miner pool-tls-check --pool herominers-hk-tls` to check the Hong Kong peer before mining. [HeroMiners Pearl region table](https://pearl.herominers.com/zh/) · [HeroMiners TLS instructions](https://pearl.herominers.com/help/)
+
+| Region | Strict preset | DNS host |
+| --- | --- | --- |
+| Germany | `herominers-de-tls` | `de.pearl.herominers.com` |
+| France | `herominers-fr-tls` | `fr.pearl.herominers.com` |
+| Finland | `herominers-fi-tls` | `fi.pearl.herominers.com` |
+| Russia | `herominers-ru-tls` | `ru.pearl.herominers.com` |
+| US West | `herominers-us-west-tls` | `us.pearl.herominers.com` |
+| US East | `herominers-tls` | `us2.pearl.herominers.com` |
+| US South | `herominers-us-south-tls` | `us3.pearl.herominers.com` |
+| Brazil | `herominers-br-tls` | `br.pearl.herominers.com` |
+| Hong Kong | `herominers-hk-tls` | `hk.pearl.herominers.com` |
+| Japan | `herominers-jp-tls` | `jp.pearl.herominers.com` |
+| Singapore | `herominers-sg-tls` | `sg.pearl.herominers.com` |
+
+To upgrade a listed TCP endpoint, review and save its same-host and same-port TLS address in Settings. The legacy `herominers` alias selects the US East TCP endpoint. [Migration instructions](pool-tls-migration.md)
+
+## Start with a strict preset
 
 Use a strict preset in a [TLS-enabled local build](pool-tls-runtime.md), with donation explicitly off:
 

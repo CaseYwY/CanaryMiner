@@ -33,6 +33,7 @@ def main():
         "us": ("kryptex", "prl-us.kryptex.network", 7048, 8048),
         "hk": ("stratum+tcp://PRL-HK.Kryptex.NETWORK:7048", "prl-hk.kryptex.network", 7048, 8048),
         "hero": ("herominers", "us2.pearl.herominers.com", 1200, 1200),
+        "hero-hk": ("stratum+tcp://HK.Pearl.HeroMiners.COM:1200", "hk.pearl.herominers.com", 1200, 1200),
         **{region: (f"stratum+tcp://{host}:7048", host, 7048, 8048)
            for region, host in regional_hosts.items()},
     }[sys.argv[2] if len(sys.argv) > 2 else "us"]

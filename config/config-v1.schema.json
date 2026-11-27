@@ -17,7 +17,7 @@
       "description": "Ordered. Failover is not implemented in this build: the first entry is used.",
       "items": {
         "oneOf": [
-          { "type": "string", "description": "A preset, HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT. TCP presets are kryptex, herominers and f2pool. Strict Kryptex presets are kryptex-tls (US), kryptex-hk-tls, kryptex-global-tls, kryptex-eu-tls, kryptex-br-tls, kryptex-sg-tls, kryptex-ru-tls and kryptex-ae-tls on port 8048. herominers-tls uses us2.pearl.herominers.com:1200. These strict presets require TLS runtime support and donation:false." },
+          { "type": "string", "description": "A preset, HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT. TCP presets are kryptex, herominers and f2pool. Strict Kryptex presets are kryptex-tls (US), kryptex-hk-tls, kryptex-global-tls, kryptex-eu-tls, kryptex-br-tls, kryptex-sg-tls, kryptex-ru-tls and kryptex-ae-tls on port 8048. Strict HeroMiners presets use port 1200: herominers-tls (US East), herominers-us-west-tls, herominers-us-south-tls, herominers-de-tls, herominers-fr-tls, herominers-fi-tls, herominers-ru-tls, herominers-br-tls, herominers-hk-tls, herominers-jp-tls and herominers-sg-tls. These strict presets require TLS runtime support and donation:false." },
           {
             "type": "object",
             "additionalProperties": false,

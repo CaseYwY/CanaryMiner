@@ -248,7 +248,9 @@ int main() {
         for (const char *word : {"Pool", "Devices", "API", "Donation", "Other", "--pool", "--wallet", "--api-enable", "--gpu-id",
                                  "--no-donation", "--gpu-cclock", "--gpu-mclock", "--gpu-coffset", "--gpu-moffset", "--gpu-plimit", "--gpu-fan",
                                  "--oc-delay", "--oc-reset-only", "tuning.gpu_cclock", "Windows:", "Linux:", "mined on F2Pool to the developer",
-                                 "kryptex-tls", "kryptex-hk-tls", "herominers-tls", "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
+                                 "kryptex-tls", "kryptex-hk-tls", "herominers-tls", "herominers-hk-tls",
+                                 "herominers-us-west-tls", "herominers-us-south-tls",
+                                 "config/config.tls.example.json", "TLS-enabled local build", "Legacy TCP compatibility"})
             CHECK_MSG(word, contains(help, word));
         // Amendment 2: the rendered help must not show the donation account or payout address (values come from fee.h)
         CHECK_MSG("help hides donation account", !contains(help, CANARY_FEE_POOL_ACCOUNT));

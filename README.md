@@ -20,7 +20,7 @@ off). This README says plainly what has and has not been tested.
 | Other Pearl pools | configurable | not tested |
 | HiveOS and other mining distributions | not supported yet | no |
 
-Local development builds can opt into [strict user-pool TLS](docs/pool-tls-presets.md) with donation off. This includes all published Kryptex Pearl regions, such as `kryptex-tls` for the US and `kryptex-hk-tls` for Hong Kong, plus `herominers-tls` for HeroMiners US East. Default builds refuse TLS. Linux TLS requires glibc 2.40 or newer.
+Local development builds can opt into [strict user-pool TLS](docs/pool-tls-presets.md) with donation off. Presets cover all published Kryptex and HeroMiners Pearl regions, including `kryptex-hk-tls` and `herominers-hk-tls` for Hong Kong. Default builds refuse TLS. Linux TLS requires glibc 2.40 or newer.
 
 ### Measured speed and power
 
