@@ -505,6 +505,48 @@ class CandidateTests(unittest.TestCase):
                         if platform == 'linux':
                             self.assertEqual(stat.S_IMODE((prefix / helper).stat().st_mode), 0o755)
 
+    def test_account_capture_requires_each_companion_and_preserves_v5(self):
+        for platform in ('windows', 'linux'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / ('account' + CANDIDATE.suffix(platform))
+                files, fixture_pin = self.named_payload(platform)
+                files.pop(CANDIDATE.MANIFEST, None)
+                glibc = '2.40' if platform == 'linux' else None
+                miner = 'bin/' + CANDIDATE.images(platform)[0]
+                files[miner] += CANDIDATE.BILLING_WATCH_QUIET
+                helper = CANDIDATE.billing_watch_path(platform)
+                files[helper] = b'watch script'
+                source = Path(__file__).resolve().parents[1]
+                companions = {name: (source / name).read_bytes() for name in CANDIDATE.OCTOPUS_ACCOUNT_FILES}
+
+                def ship(payload, *, account=False):
+                    document = CANDIDATE.manifest(platform, REVISION, glibc, payload, named_tzdb=True,
+                                                  billing_watch=True, octopus_account=account)
+                    digest = self.archive(platform, {**payload, CANDIDATE.MANIFEST: json.dumps(document).encode()}, archive)
+                    return digest
+
+                with patch.dict(CANDIDATE.TZDB_INVENTORY_SHA256, {platform: fixture_pin}), \
+                        patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+                    v5 = ship(files)
+                    self.assertEqual(CANDIDATE.load(platform, archive, v5)[1]['schema'], CANDIDATE.BILLING_WATCH_SCHEMA)
+                    combined = {**files, **companions}
+                    with self.assertRaises(ValueError):
+                        CANDIDATE.load(platform, archive, ship(combined))
+                    for name in (*companions, helper):
+                        incomplete = {key: val for key, val in combined.items() if key != name}
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.load(platform, archive, ship(incomplete, account=True))
+                    digest = ship(combined, account=True)
+                    if platform == 'windows' or os.name == 'posix':
+                        prefix = root / 'installed'
+                        doc, _ = CANDIDATE.install(platform, archive, digest, prefix)
+                        self.assertEqual(doc['schema'], CANDIDATE.OCTOPUS_ACCOUNT_SCHEMA)
+                        for name, data in companions.items():
+                            self.assertEqual((prefix / name).read_bytes(), data)
+                            if platform == 'linux':
+                                self.assertEqual(stat.S_IMODE((prefix / name).stat().st_mode), 0o644)
+
     def test_refuses_wrong_hash_changed_file_extra_and_missing_members(self):
         for platform in ('linux', 'windows'):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:

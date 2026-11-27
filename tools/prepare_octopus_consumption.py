@@ -9,7 +9,7 @@ import re
 import stat
 from urllib.parse import unquote, urlsplit
 
-from capture_octopus_rates import EPOCH, HALF_HOUR, publish, utc
+from capture_octopus_rates import EPOCH, HALF_HOUR, iso_utc, publish, utc
 
 
 MAX_BYTES = 1024 * 1024
@@ -97,6 +97,10 @@ def read_page(path):
         data = file.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError('input page unavailable or oversized')
+    return decode_json(data)
+
+
+def decode_json(data):
     return json.loads(data.decode('utf-8-sig'), parse_int=Number, parse_float=Number,
                       parse_constant=bad_constant, object_pairs_hook=unique_object)
 
@@ -137,15 +141,25 @@ def build_bundle(paths, scope, begin, end):
             results = page['results']
             if not isinstance(results, list) or not 1 <= len(results) <= expected - len(rows):
                 raise ValueError('page length does not match the requested window')
-            for row in results:
-                if not isinstance(row, dict) or set(row) != {'consumption', 'interval_start', 'interval_end'}:
-                    raise ValueError('unexpected reading fields')
-                start, finish = timestamp(row['interval_start']), timestamp(row['interval_end'])
-                if finish - start != HALF_HOUR:
-                    raise ValueError('expected half-hour readings')
-                rows.append((start, finish, row['interval_start'], row['interval_end'], quantity(row['consumption'])))
+            append_readings(rows, results)
         except (OSError, ValueError, OverflowError, InvalidOperation, RecursionError):
             raise ValueError(f'invalid or incomplete Octopus page {index + 1}') from None
+    return encode_bundle(rows, scope, begin, end)
+
+
+def append_readings(rows, results, *, normalize_utc=False):
+    for row in results:
+        if not isinstance(row, dict) or set(row) != {'consumption', 'interval_start', 'interval_end'}:
+            raise ValueError('unexpected reading fields')
+        start, finish = timestamp(row['interval_start']), timestamp(row['interval_end'])
+        if finish - start != HALF_HOUR:
+            raise ValueError('expected half-hour readings')
+        start_text = iso_utc(start) if normalize_utc else row['interval_start']
+        finish_text = iso_utc(finish) if normalize_utc else row['interval_end']
+        rows.append((start, finish, start_text, finish_text, quantity(row['consumption'])))
+
+
+def encode_bundle(rows, scope, begin, end, *, byte_limit=MAX_BYTES):
     rows.sort(key=lambda row: row[0])
     cursor = begin
     for start, finish, *_ in rows:
@@ -168,8 +182,8 @@ def build_bundle(paths, scope, begin, end):
         for _, _, start, finish, kwh in rows
     )
     result = (metadata[:-1] + ',\n"consumption":[' + records + ']\n}\n').encode('utf-8')
-    if len(result) > MAX_BYTES:
-        raise ValueError('consumption bundle exceeds 1 MiB')
+    if len(result) > byte_limit:
+        raise ValueError('consumption bundle exceeds the size limit')
     return result
 
 
