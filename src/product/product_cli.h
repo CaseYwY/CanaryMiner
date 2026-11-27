@@ -556,7 +556,7 @@ inline std::string productHelpText() {
         "       canary-miner diagnostics       build-only JSON preview; --help for explicit new-file export\n"
         "       canary-miner meter-bill        review a tariff and imported meter intervals; see meter-bill --help\n"
         "       canary-miner meter-rates       capture public Octopus prices; see meter-rates --help\n"
-        "       canary-miner energy-periods   review local GPU-board energy by month; see energy-periods --help\n"
+        "       canary-miner energy-periods   review local GPU-board energy by billing period; see energy-periods --help\n"
         "       canary-miner market-hour      review local minute closes or sample a public hour; see market-hour --help\n"
         "       canary-miner market-tickers   take one public ticker sample; see market-tickers --help\n"
         "       canary-miner market-reward    review the next Pearl mainnet subsidy (see market-reward --help)\n"

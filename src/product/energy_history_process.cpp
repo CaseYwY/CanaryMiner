@@ -32,7 +32,7 @@ bool valid(const EnergyHistoryRequest &r, bool periods = false){
     if (periods && (r.mode != EnergyHistoryOpen::Existing || r.recovery != EnergyRecoveryMode::Inspect || r.batch))
         return false;
     if(!r.generation||!r.ticket||!localTaskPath(r.file)||!validEnergyHistoryBinding(r.binding)||!validEnergyHistoryLimits(r.limits)||!instant(r.nowUtcMs)||r.binding.historyBeginUtcMs>r.nowUtcMs||
-        (r.mode!=EnergyHistoryOpen::Existing&&r.mode!=EnergyHistoryOpen::CreateNew)||r.queries.size()>(periods ? maxEnergyPeriods : 4))return false;
+        (r.mode!=EnergyHistoryOpen::Existing&&r.mode!=EnergyHistoryOpen::CreateNew)||r.queries.size()>(periods ? maxEnergyPeriodQueries : 4))return false;
     switch(r.recovery){
         case EnergyRecoveryMode::Volatile:break;
         case EnergyRecoveryMode::Inspect:if(r.batch)return false;break;
@@ -40,8 +40,14 @@ bool valid(const EnergyHistoryRequest &r, bool periods = false){
         case EnergyRecoveryMode::Retry:if(!r.batch||r.mode!=EnergyHistoryOpen::Existing)return false;break;
         default:return false;
     }
-    for(const auto &q:r.queries)if(!instant(q.beginUtcMs)||!instant(q.endUtcMs)||q.beginUtcMs>=q.endUtcMs||q.endUtcMs>r.nowUtcMs||
-        (q.registerId.empty()? !q.periodId.empty():periods||!identifier(q.registerId)||!identifier(q.periodId)))return false;
+    int64_t previousEnd = 0;
+    for (const auto &q : r.queries) {
+        if (!instant(q.beginUtcMs) || !instant(q.endUtcMs) || q.beginUtcMs >= q.endUtcMs || q.endUtcMs > r.nowUtcMs ||
+            (periods && q.beginUtcMs < previousEnd) ||
+            (q.registerId.empty() ? !q.periodId.empty() : periods || !identifier(q.registerId) || !identifier(q.periodId)))
+            return false;
+        previousEnd = q.endUtcMs;
+    }
     return !r.batch||boundedEnergyHistoryBatch(r.binding,*r.batch,r.nowUtcMs);
 }
 std::string headText(const EnergyHistoryCheckpoint &c,bool persistent,bool compact){
@@ -131,7 +137,7 @@ bool decodeRequest(const std::string &wire,EnergyHistoryRequest *out,bool period
     if(!array(v,compact?12:persistent?11:10)||(!compact&&!persistent&&v.items[0].text!="CMEQ1"))return false;
     const auto &a=v.items;EnergyHistoryRequest r;std::string path;uint64_t mode=0,n[5]={};
     if(!u(a[1],r.generation,UINT64_MAX)||!u(a[2],r.ticket,UINT64_MAX)||!str(a[3],path)||
-        !parseBindingValue(a[4],&r.binding)||!array(a[5],5)||!u(a[6],mode,1)||!time(a[7],r.nowUtcMs)||!a[9].isArray()||a[9].items.size()>(periods ? maxEnergyPeriods : 4))return false;
+        !parseBindingValue(a[4],&r.binding)||!array(a[5],5)||!u(a[6],mode,1)||!time(a[7],r.nowUtcMs)||!a[9].isArray()||a[9].items.size()>(periods ? maxEnergyPeriodQueries : 4))return false;
     for(size_t i=0;i<5;++i)if(!u(a[5].items[i],n[i],128*1024*1024))return false;
     r.limits={static_cast<size_t>(n[0]),static_cast<size_t>(n[1]),static_cast<size_t>(n[2]),static_cast<size_t>(n[3]),n[4]};r.mode=static_cast<EnergyHistoryOpen>(mode);
     if(persistent||compact){uint64_t recoveryMode=0;if(!u(a[10],recoveryMode,3)||(!compact&&!recoveryMode))return false;r.recovery=static_cast<EnergyRecoveryMode>(recoveryMode);}
@@ -145,7 +151,7 @@ bool decodeRequest(const std::string &wire,EnergyHistoryRequest *out,bool period
 }
 bool decodeReply(const EnergyHistoryRequest &r,const std::string &wire,EnergyHistoryReply *out,bool periods);
 bool encodeReply(const EnergyHistoryRequest &r,const EnergyHistoryReply &reply,std::string *wire,bool periods){
-    if(!wire||!valid(r,periods)||reply.totals.size()>(periods ? maxEnergyPeriods : 4))return false;
+    if(!wire||!valid(r,periods)||reply.totals.size()>(periods ? maxEnergyPeriodQueries : 4))return false;
     const bool persistent=r.recovery!=EnergyRecoveryMode::Volatile;if(persistent!=reply.recovery.has_value())return false;
     const bool compact=r.limits.compaction.has_value();
     std::string text=std::string(compact?"[\"CMEA3\",":persistent?"[\"CMEA2\",":"[\"CMEA1\",")+std::to_string(reply.generation)+","+std::to_string(reply.ticket)+","+std::to_string(static_cast<unsigned>(reply.opened))+","+

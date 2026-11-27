@@ -6,7 +6,7 @@ namespace om {
 enum class EnergyRecoveryMode { Volatile, Inspect, Submit, Retry };
 enum class EnergyRecoveryState { Disabled, Empty, Prepared, Confirmed, Rejected, Diverged, Unavailable };
 constexpr size_t energyHistoryRequestLimit=64*1024;
-constexpr size_t maxEnergyPeriods=12;
+constexpr size_t maxEnergyPeriodQueries = 64; // One audited read can split reports at reset and price boundaries.
 struct EnergyHistoryQuery {
     int64_t beginUtcMs=0,endUtcMs=0;
     std::string registerId,periodId; // optional exact-window assertion; mismatch rejects instead of choosing another period

@@ -7,7 +7,7 @@
 namespace om { struct JsonValue; }
 namespace om::energy_history_detail {
 constexpr int64_t lastUtcMs = 253402300799999LL;
-constexpr uint64_t clockGuardMs = 2000;
+constexpr uint64_t clockGuardMs = energyHistoryClockGuardMs;
 constexpr size_t batchWireLimit = 48*1024;
 constexpr uint64_t lifetimeBatchLimit = 1000000000000ULL;
 bool instant(int64_t n);

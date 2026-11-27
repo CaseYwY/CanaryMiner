@@ -26,14 +26,17 @@ int main(int argc, char **argv) {
         return 0;
     }
     const auto reset = std::stoll(argv[2]);
+    const int64_t scale = scenario == "priced-v1" || scenario == "priced-v2" ? 5 : 1;
+    const auto utc = [=](int64_t offset) { return reset + offset * scale; };
+    const auto mono = [=](unsigned offset) { return 100 + offset * static_cast<unsigned>(scale); };
     EnergyAuthorizationRequest auth;
     auth.generation = auth.ticket = 1;
     auth.file = root / energyAuthorizationName;
     auth.action = EnergyAuthorizationAction::Enroll;
     auth.expected = "absent";
-    auth.nowUtcMs = reset - 2000;
+    auth.nowUtcMs = utc(-2000);
     auth.devices = {"GPU-aaaaaaaa-0000-0000-0000-000000000001", "GPU-bbbbbbbb-0000-0000-0000-000000000002"};
-    if (scenario != "v1") auth.limits.compaction = EnergyCompactionPolicy{2, 32768};
+    if (scenario != "v1" && scenario != "priced-v1") auth.limits.compaction = EnergyCompactionPolicy{2, 32768};
     const auto enrollment = executeEnergyAuthorizationRequest(auth);
     if (enrollment.status != EnergyAuthorizationStatus::Ok || !enrollment.document) return 2;
     if (scenario == "empty") return 0;
@@ -48,12 +51,12 @@ int main(int argc, char **argv) {
     EnergyHistoryBatch first;
     first.sequence = 1;
     first.id = "energy.1";
-    first.observedAtMs = reset + 2000;
+    first.observedAtMs = utc(2000);
     first.sessionId = session;
-    first.start = EnergyHistorySession{session, reset - 2000, 100, 60000};
+    first.start = EnergyHistorySession{session, utc(-2000), mono(0), 60000};
     const bool zero = scenario == "zero";
-    first.readings = {{0, reset - 2000, 100, 1, zero ? 0U : 100000U}, {1, reset - 2000, 100, 1, zero ? 0U : 200000U},
-                      {0, reset + 2000, 4100, 1, 0}, {1, reset + 2000, 4100, 1, 0}};
+    first.readings = {{0, utc(-2000), mono(0), 1, zero ? 0U : 100000U}, {1, utc(-2000), mono(0), 1, zero ? 0U : 200000U},
+                      {0, utc(2000), mono(4000), 1, 0}, {1, utc(2000), mono(4000), 1, 0}};
     request.nowUtcMs = first.observedAtMs;
     request.batch = first;
     if (executeEnergyHistoryRequest(request).applied != Status::Ok) return 3;
@@ -61,11 +64,11 @@ int main(int argc, char **argv) {
     EnergyHistoryBatch second;
     second.sequence = 2;
     second.id = "energy.2";
-    second.observedAtMs = reset + 5000;
+    second.observedAtMs = utc(5000);
     second.sessionId = session;
-    // After two seconds of genuinely recorded zero, a new continuity epoch prevents a one-second bridge.
-    second.readings = {{0, reset + 4000, 6100, 1, 0}, {1, reset + 4000, 6100, 1, 0},
-                       {0, reset + 5000, 7100, 2, 0}, {1, reset + 5000, 7100, 2, 0}};
+    // A new continuity epoch prevents a hold across the final gap, even when the elapsed span is short.
+    second.readings = {{0, utc(4000), mono(6000), 1, 0}, {1, utc(4000), mono(6000), 1, 0},
+                       {0, utc(5000), mono(7000), 2, 0}, {1, utc(5000), mono(7000), 2, 0}};
     request.nowUtcMs = second.observedAtMs;
     request.batch = second;
     if (scenario != "prepared" && scenario != "committed") {

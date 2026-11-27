@@ -2,17 +2,22 @@
 
 #include <atomic>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
+#include <vector>
 
 namespace om {
+
+inline constexpr std::size_t maxEnergyReportRates = 24;
 
 struct EnergyPeriodsOptions {
     bool help = false;
     int stateDirArg = 0, policyArg = 0, cyclesArg = 0, throughArg = 0;
     unsigned cycles = 1;
     int64_t throughUtcMs = 0;
+    std::vector<int> flatRateArgs;
 };
 
 inline bool parseEnergyPeriodsCli(int argc, const char *const *argv, int first, EnergyPeriodsOptions &options) {
@@ -28,6 +33,8 @@ inline bool parseEnergyPeriodsCli(int argc, const char *const *argv, int first, 
         const std::string_view flag(argv[i]);
         if (flag == "--state-dir" && !options.stateDirArg) options.stateDirArg = i + 1;
         else if (flag == "--reset-policy" && !options.policyArg) options.policyArg = i + 1;
+        else if (flag == "--flat-rate" && options.flatRateArgs.size() < maxEnergyReportRates)
+            options.flatRateArgs.push_back(i + 1);
         else if ((flag == "--cycles" && !options.cyclesArg) || (flag == "--through-utc-ms" && !options.throughArg)) {
             const auto *start = argv[i + 1];
             const auto *end = start + std::strlen(start);
@@ -50,8 +57,10 @@ inline bool parseEnergyPeriodsCli(int argc, const char *const *argv, int first, 
 
 inline constexpr const char *energyPeriodsHelp =
     "canary-miner energy-periods --state-dir DIR --reset-policy FILE [--cycles N] [--through-utc-ms MS]\n"
-    "Read the existing local GPU-board energy history by independent monthly reset periods.\n"
-    "The reset policy is a JSON object with monthly_day (1 to 31) and an explicit clock.\n"
+    "    [--flat-rate FILE ...]\n"
+    "Read the existing local GPU-board energy history by monthly, two-month or annual reset periods.\n"
+    "Use a reviewed reset policy and optionally up to 24 saved flat electricity declarations in one currency.\n"
+    "An energy-only estimate requires both a valid rate and a covered observation.\n"
     "N includes the current period and defaults to one. The maximum is twelve.\n"
     "The cutoff is UTC Unix milliseconds and defaults to the current time. A development energy-runtime build is required.";
 
