@@ -50,7 +50,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
                       options.saveTariffArg, options.saveRegisterArg, options.dnsServerArg, options.importPagesArg,
                       options.saveReadingsArg, options.watchArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
-    for (int index : {options.allowPublicRatesArg, options.confirmImportArg})
+    for (int index : {options.allowPublicRatesArg, options.confirmImportArg, options.quietWatchArg})
         if (index && (index < 2 || index >= argc)) return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -84,6 +84,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         return std::nullopt;
     if (options.confirmImportArg &&
         std::wstring_view(args.values[options.confirmImportArg]) != L"--confirm-electricity-import")
+        return std::nullopt;
+    if (options.quietWatchArg && std::wstring_view(args.values[options.quietWatchArg]) != L"--watch-quiet")
         return std::nullopt;
     if (options.dnsServerArg && (!matches(options.dnsServerArg, L"--dns-server") ||
         std::wstring_view(args.values[options.dnsServerArg]) != std::wstring(options.dnsServer.begin(), options.dnsServer.end())))
@@ -1368,7 +1370,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
                   "    --allow-public-rates [--dns-server IP] [--invoice FILE]\n"
                   "canary-miner meter-bill --roll-forward SEED.cmr [--confirm-electricity-import]\n"
-                  "    [--watch-every-seconds SECONDS] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP]]\n"
+                  "    [--watch-every-seconds SECONDS [--watch-quiet]] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP]]\n"
                   "canary-miner meter-bill --import-octopus-pages DIR --tariff FILE --save-readings NAME.json\n"
                   "    --confirm-electricity-import\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
@@ -1389,6 +1391,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Roll forward uses cycle-END.readings.json, cycle-END.rates.json and optional cycle-END.invoice.json.\n"
                   "END is the cycle closing UTC millisecond. Each verified cycle commits to cycle-END.cmr.\n"
                   "Watch checks again after 1 to 86400 seconds. It requires the current clock and holds the workspace lease.\n"
+                  "Use --watch-quiet for a supervised watch without a standard output stream.\n"
                   "With electricity import confirmed, use cycle-END.pages if the readings file is absent.\n"
                   "Page directories contain observation.json and page-1.json, page-2.json, and so on.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
@@ -1493,7 +1496,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                                      watching ? "check" : "run", progress.saved, progress.saved == 1 ? "" : "s");
                     return fail(problem);
                 }
-                if (report != lastReport) {
+                if (!options.quietWatchArg && report != lastReport) {
                     if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
                         return 1;
                     lastReport = std::move(report);

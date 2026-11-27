@@ -438,6 +438,9 @@ def main(cli, bundle):
                       ('1', '--as-of-utc-ms', june + HOUR)):
             run('--roll-forward', old, '--watch-every-seconds', *extra, code=2, reason='invalid options')
         run('--open-review', old, '--watch-every-seconds', '1', code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-quiet', code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-every-seconds', '1', '--watch-quiet', '--watch-quiet',
+            code=2, reason='invalid options')
 
         watched = root / 'watched workspace'
         watched.mkdir()
@@ -523,6 +526,30 @@ def main(cli, bundle):
                         child.wait(timeout=5)
                     if moved.exists():
                         moved.rename(watched)
+        assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
+        # A supervisor can launch the quiet watch without a reader on stdout.
+        with subprocess.Popen((*watch, '--watch-quiet'), cwd=watched, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE) as child:
+            child.stdout.close()
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    contender = subprocess.run((binary, 'meter-bill', '--roll-forward', watched_seed), cwd=watched,
+                                               capture_output=True, timeout=10)
+                    if contender.returncode == 3 and b'workspace is busy' in contender.stderr:
+                        break
+                    assert contender.returncode == 0 and child.poll() is None
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError('quiet watcher never acquired the workspace')
+                watched_seed.write_bytes(b'damaged archive')
+                assert child.wait(timeout=10) == 3
+                assert child.stderr.read()
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+                watched_seed.write_bytes(old_bytes)
         assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
 
         feb = utc('2023-02-01T00:00:00')
