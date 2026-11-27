@@ -749,8 +749,17 @@ and count the shared cycle only once when combining totals.
 
 Add `--with-invoices` to see the saved invoice comparisons and the number of verified cycles
 with an invoice review. Each comparison uses its original invoice precision and rounding. The
-total continues to sum the estimated supply costs for all verified cycles. A cycle can have a
-recorded mismatch or an annual comparison with no stated adjustment.
+estimated total covers all verified cycles. The separate supply invoice totals cover only cycles
+with a complete stated supply charge. They sum the stated charges and the estimate for each
+of those cycles rounded at its own invoice precision. The difference is the calculated sum
+minus the stated sum. The total displays the greatest precision used by the included invoices.
+
+Supply amounts can come from a direct invoice, an independent supply-only statement or an
+annual reconciliation with a stated adjustment. The annual amount is the sum of interim
+charges and the stated adjustment. An annual comparison without a stated adjustment still
+counts as a review.
+If no cycle has a complete stated supply charge, the report shows zero coverage and omits the
+amounts.
 
 For an invoice that arrives after a cycle was archived, save a separate comparison named
 `cycle-END.compared.cmr`, substituting the cycle's UTC closing milliseconds for `END`. Use

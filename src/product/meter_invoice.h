@@ -53,6 +53,15 @@ struct MeterInvoice : InvoicePrecision {
     std::optional<IndependentInvoice> independent;
 };
 
+struct InvoiceTotals {
+    ExactDecimal calculated, stated;
+};
+
+struct SupplyInvoiceComparison {
+    InvoiceTotals totals;
+    unsigned places;
+};
+
 inline bool decodeInvoicePeriod(const JsonValue &row, InvoicePeriod &period) {
     const auto *begin = row.find("begin_utc_ms");
     const auto *end = row.find("end_utc_ms");
@@ -187,7 +196,8 @@ inline const char *decodeMeterInvoice(const std::string &bytes, const TariffDecl
 inline const char *appendAnnualReconciliation(const MeterInvoice &invoice, const InvoiceCycle &cycle,
                                              const AnnualInvoice &annual, const ExactDecimal &rounded,
                                              const std::string &estimate, const std::string &currency,
-                                             std::string &report, std::string *exact) {
+                                             std::string &report, std::string *exact,
+                                             std::optional<SupplyInvoiceComparison> *supply) {
     ExactDecimal alreadyBilled;
     std::string interimRecord = "[";
     for (const auto &charge : annual.interim) {
@@ -224,6 +234,12 @@ inline const char *appendAnnualReconciliation(const MeterInvoice &invoice, const
         report += "  Stated annual adjustment " + stated + " " + currency + "\n";
         report += "  Difference (estimated minus stated adjustment) " + comparison + " " + currency +
                   (difference.zero() ? " (match)\n" : " (mismatch)\n");
+        if (supply) {
+            ExactDecimal annualCharge;
+            if (!alreadyBilled.add(*annual.statedAdjustment, &annualCharge))
+                return "annual invoice amount exceeds arithmetic capacity";
+            *supply = SupplyInvoiceComparison{{rounded, annualCharge}, invoice.places};
+        }
         stated = jsonQuote(stated);
         comparison = jsonQuote(comparison);
     }
@@ -252,10 +268,6 @@ inline bool appendExportInvoiceLine(const char *label, const ExactDecimal &calcu
         *exact += ",[" + jsonQuote(estimate) + "," + jsonQuote(amount) + "," + jsonQuote(change) + "]";
     return true;
 }
-
-struct InvoiceTotals {
-    ExactDecimal calculated, stated;
-};
 
 inline bool appendStatement(const char *label, const char *record, const InvoicePrecision &precision,
                             const InvoiceAmount &statement, const ElectricityAmount &estimated,
@@ -338,7 +350,8 @@ inline const char *appendExportInvoiceComparison(const MeterInvoice &invoice, co
 
 inline const char *appendInvoiceComparison(const MeterInvoice &invoice, size_t index, const BillOpening &opening,
                                            const BillAccrual &accrual, const std::string &currency,
-                                           std::string &report, std::string *exact) {
+                                           std::string &report, std::string *exact,
+                                           std::optional<SupplyInvoiceComparison> *supply) {
     if (index >= invoice.cycles.size()) return "invoice must list one charge for each reviewed cycle";
     if (opening.throughUtcMs != opening.cycleBeginUtcMs || !opening.importedKwh.numerator.zero() ||
         !opening.accruedSubtotal.numerator.zero() || !accrual.settledTotal)
@@ -353,7 +366,7 @@ inline const char *appendInvoiceComparison(const MeterInvoice &invoice, size_t i
         !ExactDecimal::parse(estimate, &rounded))
         return "invoice comparison amount exceeds arithmetic capacity";
     if (const auto *annual = std::get_if<AnnualInvoice>(&cycle.charge))
-        return appendAnnualReconciliation(invoice, cycle, *annual, rounded, estimate, currency, report, exact);
+        return appendAnnualReconciliation(invoice, cycle, *annual, rounded, estimate, currency, report, exact, supply);
     if (const auto *statement = std::get_if<ExportInvoice>(&cycle.charge))
         return appendExportInvoiceComparison(invoice, cycle.period, *statement, accrual, rounded, currency, report, exact);
     const auto &amount = std::get<ExactDecimal>(cycle.charge);
@@ -367,6 +380,7 @@ inline const char *appendInvoiceComparison(const MeterInvoice &invoice, size_t i
     report += "  Calculated at invoice precision " + estimate + " " + currency + "\n";
     report += "  Difference (calculated minus invoice) " + change + " " + currency +
         (difference.zero() ? " (match)\n" : " (mismatch)\n");
+    if (supply) *supply = SupplyInvoiceComparison{{rounded, amount}, invoice.places};
     if (exact) {
         const char *ties = invoice.ties == DecimalTies::ToEven ? "half_even" : "half_away_from_zero";
         *exact += "[\"invoice\"," + std::to_string(cycle.period.begin) + "," + std::to_string(cycle.period.end) +
