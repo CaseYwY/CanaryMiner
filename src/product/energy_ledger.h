@@ -5,6 +5,7 @@
 #include <memory>
 
 namespace om {
+inline constexpr int64_t energyHistoryClockGuardMs = 2000;
 struct EnergyHistoryBinding {
     PowerEvidence evidence;
     std::vector<std::string> channels; // stable PRIVATE caller-bound channel keys, not rediscovered device ordinals
