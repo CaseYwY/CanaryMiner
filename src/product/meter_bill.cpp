@@ -71,7 +71,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         !matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals") ||
         !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates") ||
         !matches(options.nextCycleArg, L"--next-cycle-review") || !matches(options.rollForwardArg, L"--roll-forward") ||
-        !matches(options.readingsPlanArg, L"--next-readings-plan") ||
+        !matches(options.readingsPlanArg, options.scheduledReadingsPlan ? L"--scheduled-readings-plan" : L"--next-readings-plan") ||
         !matches(options.prepareCycleArg, L"--prepare-next-cycle") || !matches(options.importPagesArg, L"--import-octopus-pages") ||
         !matches(options.previousCycleArg, L"--previous-cycle") || !matches(options.prepaidArg, L"--prepaid"))
         return std::nullopt;
@@ -1158,24 +1158,39 @@ struct RecurringCycleWatch {
     std::string seedDigest, latestName, latestDigest;
 };
 
+enum class ReadingsPlanMode { None, Interactive, Scheduled };
+
 const char *describeOctopusReadingsPlan(const MeterReview &prior, const PreparedOctopusCycle &draft,
-                                      const std::string &previousDigest, const std::string &stem,
+                                      const std::string &previousDigest, const std::string &seedDigest,
+                                      ReadingsPlanMode mode, bool available,
                                       std::string &report) {
     const auto begin = draft.bounds.beginUtcMs;
     const auto end = draft.bounds.endUtcMs;
     if (prior.readings.version != 3 ||
         (end - begin) / octopus_detail::halfHourMs > static_cast<int64_t>(maxAnnualMeterIntervals))
         return "account capture requires an eligible Octopus half-hour import cycle";
-    for (const auto *suffix : {".readings.json", ".pages"}) {
-        const auto path = localReviewPath(stem + suffix);
-        if (!path) return "could not inspect staged readings";
-        std::error_code error;
-        if (std::filesystem::symlink_status(*path, error).type() != std::filesystem::file_type::not_found)
-            return "readings are already staged or unavailable";
+    const auto stem = "cycle-" + std::to_string(end);
+    bool ready = available;
+    if (available) {
+        using FileType = std::filesystem::file_type;
+        for (const auto &[suffix, expected] : {std::pair{".readings.json", FileType::regular},
+                                              std::pair{".pages", FileType::directory}}) {
+            const auto path = localReviewPath(stem + suffix);
+            if (!path) return "could not inspect staged readings";
+            std::error_code error;
+            const auto type = std::filesystem::symlink_status(*path, error).type();
+            if (type == FileType::not_found) continue;
+            if (mode == ReadingsPlanMode::Interactive || type != expected)
+                return "readings are already staged or unavailable";
+            ready = false;
+        }
     }
     report = "{\"schema_version\":1,\"scope\":" + jsonQuote(prior.declaration.opening.evidence.scope) +
         ",\"begin_utc_ms\":" + std::to_string(begin) + ",\"end_utc_ms\":" + std::to_string(end) +
-        ",\"predecessor_sha256\":" + jsonQuote(previousDigest) + "}\n";
+        ",\"predecessor_sha256\":" + jsonQuote(previousDigest);
+    if (mode == ReadingsPlanMode::Scheduled)
+        report += ",\"seed_sha256\":" + jsonQuote(seedDigest) + ",\"ready\":" + (ready ? "true" : "false");
+    report += "}\n";
     return nullptr;
 }
 
@@ -1185,7 +1200,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                              const OctopusRateCaptureSource *source, const std::string &dns,
                              NativeProcessLifetime &lifetime, const market_detail::MarketSampleClock &started,
                              const volatile sig_atomic_t *stop, const std::function<bool()> &stopped,
-                             RecurringCycleWatch *watch, bool readingsPlan,
+                             RecurringCycleWatch *watch, ReadingsPlanMode planMode,
                              RecurringCycleProgress &progress, std::string &report) {
     constexpr size_t maxHistory = 120;
     constexpr size_t maxNew = 24;
@@ -1197,6 +1212,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
     if (!readLocalReviewInput(seed, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, previous))
         return "recurring review seed archive unavailable or invalid";
     auto previousDigest = sha256Hex(bytes);
+    const auto seedDigest = planMode == ReadingsPlanMode::Scheduled ? previousDigest : std::string{};
     if (watch) {
         if (!watch->seedDigest.empty() && watch->seedDigest != previousDigest)
             return "recurring review seed changed while watching";
@@ -1229,7 +1245,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         if (!link) return "previous review must be a complete recurring Octopus cycle and matching rate window";
         if (previous.cutoff > cutoff) return "new review cutoff precedes the saved cutoff";
         if (existing + progress.saved >= maxHistory) {
-            if (readingsPlan) return "archive replay limit reached; use the latest verified archive as the seed";
+            if (planMode != ReadingsPlanMode::None) return "archive replay limit reached; use the latest verified archive as the seed";
             progress.historyLimit = true;
             waiting = "archive replay limit reached; use the latest verified archive as the next seed";
             break;
@@ -1240,13 +1256,22 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             return problem;
         progress.closing = draft.bounds.endUtcMs;
         if (progress.closing > cutoff) {
-            if (readingsPlan) return "the next billing cycle has not closed";
+            if (planMode == ReadingsPlanMode::Interactive) return "the next billing cycle has not closed";
+            if (planMode == ReadingsPlanMode::Scheduled)
+                return describeOctopusReadingsPlan(priorReview, draft, previousDigest, seedDigest, planMode, false, report);
             waiting = "waiting for the cycle to close";
             break;
         }
         const auto stem = "cycle-" + std::to_string(progress.closing);
         const auto target = stem + ".cmr";
-        const auto archive = readCycleSlot(target, maxArchiveBytes, bytes);
+        auto archive = readCycleSlot(target, maxArchiveBytes, bytes);
+        if (archive == LocalFileRead::Missing && planMode == ReadingsPlanMode::Scheduled) {
+            lastExistingClosing = latestCycleArchiveEnd(workspace, stopped);
+            if (!lastExistingClosing) return "could not inspect recurring review archive names";
+            // The watcher may have committed the missing archive during the directory scan.
+            if (*lastExistingClosing >= progress.closing)
+                archive = readCycleSlot(target, maxArchiveBytes, bytes);
+        }
         if (watch && target == watch->latestName) {
             if (archive != LocalFileRead::Ok || sha256Hex(bytes) != watch->latestDigest)
                 return "latest verified recurring archive changed or disappeared while watching";
@@ -1273,9 +1298,14 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                 return "recurring review archive gap; restore the existing archive chain before continuing";
             const auto temporary = localReviewPath(target + ".tmp");
             std::error_code error;
-            if (!temporary || std::filesystem::symlink_status(*temporary, error).type() != std::filesystem::file_type::not_found)
+            if (!temporary) return "recurring review successor has uncertain temporary output";
+            const auto tempType = std::filesystem::symlink_status(*temporary, error).type();
+            if (planMode == ReadingsPlanMode::Scheduled && tempType == std::filesystem::file_type::regular)
+                return describeOctopusReadingsPlan(priorReview, draft, previousDigest, seedDigest, planMode, false, report);
+            if (tempType != std::filesystem::file_type::not_found)
                 return "recurring review successor has uncertain temporary output";
-            if (readingsPlan) return describeOctopusReadingsPlan(priorReview, draft, previousDigest, stem, report);
+            if (planMode != ReadingsPlanMode::None)
+                return describeOctopusReadingsPlan(priorReview, draft, previousDigest, seedDigest, planMode, true, report);
             if (progress.saved >= maxNew) {
                 waiting = "new archive limit reached; run again to continue";
                 break;
@@ -1399,6 +1429,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "canary-miner meter-bill --roll-forward SEED.cmr [--confirm-electricity-import]\n"
                   "    [--watch-every-seconds SECONDS [--watch-quiet]] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP|cloudflare-doh]]\n"
                   "canary-miner meter-bill --next-readings-plan SEED.cmr\n"
+                  "canary-miner meter-bill --scheduled-readings-plan SEED.cmr\n"
                   "canary-miner meter-bill --import-octopus-pages DIR --tariff FILE --save-readings NAME.json\n"
                   "    --confirm-electricity-import\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
@@ -1492,6 +1523,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         }
         if (options.rollForwardArg || options.readingsPlanArg) {
             const bool planning = options.readingsPlanArg != 0;
+            const auto planMode = !planning ? ReadingsPlanMode::None :
+                options.scheduledReadingsPlan ? ReadingsPlanMode::Scheduled : ReadingsPlanMode::Interactive;
             const auto leasePath = localReviewPath("meter-billing.lock");
             constexpr auto unavailable = "recurring review workspace is busy or unavailable";
             if (!leasePath) return fail(unavailable);
@@ -1525,7 +1558,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                 if (const auto *problem = rollOctopusCycles(paths->archive, workspace,
                         options.reviewCutoffUtcMs, watching ? static_cast<int64_t>(sample.second) : now,
                         options.confirmImportArg != 0, live ? publicRates : nullptr, options.dnsServer,
-                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, planning, progress, report)) {
+                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, planMode, progress, report)) {
                     if (progress.closing)
                         std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
                     if (progress.saved)

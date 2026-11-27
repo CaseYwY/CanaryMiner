@@ -299,6 +299,12 @@ def validate(platform, files):
     miner, preferences, stream_worker = images(platform)
     if billing_watch and BILLING_WATCH_QUIET not in files[f'bin/{miner}']:
         raise ValueError('billing watcher requires a miner with quiet watch support')
+    if octopus_account:
+        runner = b'--run-scheduled'
+        scheduled = runner in files['tools/capture_octopus_consumption.py']
+        service = runner in files[billing_watch_path(platform)]
+        if scheduled != service or (scheduled and b'--scheduled-readings-plan SEED.cmr' not in files[f'bin/{miner}']):
+            raise ValueError('scheduled account capture requires a matching collector, launcher and native planner')
     if named_tzdb or energy_runtime:
         if stream_worker.encode('ascii') + b'\0' not in files[f'bin/{miner}']:
             raise ValueError('pool TLS worker reference missing from the miner')

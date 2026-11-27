@@ -526,6 +526,8 @@ class CandidateTests(unittest.TestCase):
                 files[helper] = b'watch script'
                 source = Path(__file__).resolve().parents[1]
                 companions = {name: (source / name).read_bytes() for name in CANDIDATE.OCTOPUS_ACCOUNT_FILES}
+                collector = 'tools/capture_octopus_consumption.py'
+                launcher = (source / 'packaging' / 'release' / CANDIDATE.BILLING_WATCH_FILES[platform]).read_bytes()
 
                 def ship(payload, *, account=False):
                     document = CANDIDATE.manifest(platform, REVISION, glibc, payload, named_tzdb=True,
@@ -537,13 +539,21 @@ class CandidateTests(unittest.TestCase):
                         patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
                     v5 = ship(files)
                     self.assertEqual(CANDIDATE.load(platform, archive, v5)[1]['schema'], CANDIDATE.BILLING_WATCH_SCHEMA)
-                    combined = {**files, **companions}
+                    legacy = {**files, **companions, collector: companions[collector].replace(b'--run-scheduled', b'legacy')}
+                    self.assertEqual(CANDIDATE.load(platform, archive, ship(legacy, account=True))[1]['schema'],
+                                     CANDIDATE.OCTOPUS_ACCOUNT_SCHEMA)
+                    combined = {**files, **companions, helper: launcher}
                     with self.assertRaises(ValueError):
                         CANDIDATE.load(platform, archive, ship(combined))
                     for name in (*companions, helper):
                         incomplete = {key: val for key, val in combined.items() if key != name}
                         with self.assertRaises(ValueError):
                             CANDIDATE.load(platform, archive, ship(incomplete, account=True))
+                    with self.assertRaisesRegex(ValueError, 'matching collector, launcher and native planner'):
+                        CANDIDATE.load(platform, archive, ship(combined, account=True))
+                    combined[miner] += b'--scheduled-readings-plan SEED.cmr'
+                    with self.assertRaisesRegex(ValueError, 'matching collector, launcher and native planner'):
+                        CANDIDATE.load(platform, archive, ship({**combined, helper: b'old launcher'}, account=True))
                     digest = ship(combined, account=True)
                     if platform == 'windows' or os.name == 'posix':
                         prefix = root / 'installed'

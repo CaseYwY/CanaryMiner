@@ -36,20 +36,24 @@ def stage(path, value):
 
 
 class ScheduledTask:
-    def __init__(self, installed, seed, label):
+    def __init__(self, installed, seed, label, *, capture_python=None):
         self.powershell = ('powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned')
         command = (*self.powershell, '-File', str(installed / 'deploy' / 'Register-BillingWatch.ps1'),
-                   '-Name', label, '-Seed', str(seed), '-Seconds', '1')
+                   '-Name', label, '-Seed', str(seed), '-Seconds', '60' if capture_python else '1')
+        if capture_python:
+            command += ('-AccountCapturePython', str(capture_python))
         name = execute(*command).decode('ascii').strip()
-        assert re.fullmatch(rf'CanaryMiner-Billing-{label}-S-1-[0-9-]+', name), name
+        kind = 'OctopusCapture' if capture_python else 'Billing'
+        assert re.fullmatch(rf'CanaryMiner-{kind}-{label}-S-1-[0-9-]+', name), name
         self.env = dict(os.environ, CANARY_BILLING_TEST_TASK=name)
         try:
             duplicate = subprocess.run(command, capture_output=True, timeout=30)
             assert duplicate.returncode != 0, duplicate
             xml = self.manage('Export-ScheduledTask').decode('ascii', errors='ignore')
-            for property_value in ('LogonTrigger', '--watch-quiet'):
+            for property_value in ('LogonTrigger', '--run-scheduled' if capture_python else '--watch-quiet'):
                 assert property_value in xml, property_value
-            assert '--allow-public-rates' not in xml and '--confirm-electricity-import' not in xml
+            assert '--allow-public-rates' not in xml
+            assert ('--confirm-electricity-import' in xml) == bool(capture_python)
             assert self.manage('(Get-ScheduledTask', ').Principal.LogonType').strip() == b'Interactive'
             assert self.manage('(Get-ScheduledTask', ').Principal.RunLevel').strip() == b'Limited'
             assert self.manage('(Get-ScheduledTask', ').Settings.MultipleInstances').strip() == b'IgnoreNew'
@@ -87,17 +91,22 @@ class ScheduledTask:
 
 
 class UserUnit:
-    def __init__(self, installed, seed, label):
+    def __init__(self, installed, seed, label, *, capture_python=None):
         self.name = f'canaryminer-billing-{label}.service'
         config = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
         self.unit = config / 'systemd' / 'user' / self.name
         self.unit.parent.mkdir(parents=True, exist_ok=True)
         renderer = installed / 'deploy' / 'billing-watch.sh'
-        data = execute(renderer, seed, '1')
-        assert b'--allow-public-rates' not in data and b'--confirm-electricity-import' not in data
-        for option in ('--allow-public-rates', '--confirm-electricity-import'):
-            assert option.encode('ascii') in execute(renderer, seed, '1', option)
-            execute(renderer, seed, '1', option, option, expected=2)
+        if capture_python:
+            data = execute(renderer, seed, '60', '--account-capture', capture_python)
+            assert b'--run-scheduled' in data and b'--confirm-electricity-import' in data
+            execute(renderer, seed, '1', '--account-capture', capture_python, expected=2)
+        else:
+            data = execute(renderer, seed, '1')
+            assert b'--allow-public-rates' not in data and b'--confirm-electricity-import' not in data
+            for option in ('--allow-public-rates', '--confirm-electricity-import'):
+                assert option.encode('ascii') in execute(renderer, seed, '1', option)
+                execute(renderer, seed, '1', option, option, expected=2)
         with self.unit.open('xb') as output:
             output.write(data)
         try:
