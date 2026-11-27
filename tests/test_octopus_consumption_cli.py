@@ -3,6 +3,7 @@ import copy
 import datetime as dt
 from decimal import Decimal, ROUND_HALF_EVEN
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -102,6 +103,61 @@ def main(cli, bundle):
         assert PRIVATE.encode() not in bundled and b'https://' not in bundled
         assert prepare(paths, BEGIN, END).returncode == 2 and consumption.read_bytes() == bundled
         observation = json.loads(bundled)['observed_utc_ms']
+        native_pages = root / 'exports' / 'raw pages \u7535'
+        native_pages.mkdir(parents=True)
+        for i, page in enumerate(old_bytes, 1):
+            (native_pages / f'page-{i}.json').write_bytes(page)
+        write(tariff, decl)
+        marker = native_pages / 'observation.json'
+        native = root / 'native-import.json'
+        import_args = (binary, 'meter-bill', '--import-octopus-pages', native_pages, '--tariff', tariff,
+                       '--save-readings', native.name)
+        assert command(*import_args).returncode == 2
+        assert command(*import_args, '--confirm-electricity-import', '--allow-public-rates').returncode == 2
+        assert command(*import_args, '--confirm-electricity-import', '--as-of-utc-ms', str(observation)).returncode == 2
+        import_args = (*import_args, '--confirm-electricity-import')
+        refuse(command(*import_args), 'page observation is invalid')
+        write(marker, {'observed_utc_ms': END - 1})
+        refuse(command(*import_args), 'page observation is invalid')
+        write(marker, {'observed_utc_ms': observation})
+        if os.name == 'nt':
+            redirected = root / 'redirected'
+            subprocess.run(['cmd.exe', '/d', '/c', 'mklink', '/J', str(redirected), str(native_pages.parent)],
+                           cwd=root, check=True, capture_output=True, timeout=8)
+            try:
+                redirected_args = (*import_args[:3], redirected / native_pages.name, *import_args[4:])
+                refuse(command(*redirected_args), 'page directory is unavailable')
+                assert not native.exists()
+            finally:
+                redirected.rmdir()
+        second_page = native_pages / 'page-2.json'
+        changes = (
+            (lambda page: page.update(count=1485), 'invalid or incomplete Octopus consumption pages'),
+            (lambda page: page.update(previous=page['previous'].replace('0000000000000', '0000000000001')),
+             'invalid or incomplete Octopus consumption pages'),
+            (lambda page: page.update(next=page['next'].replace('https://api.oegb-kraken.energy/',
+                                                               'https://outside.invalid/')),
+             'invalid or incomplete Octopus consumption pages'),
+            (lambda page: page['results'].__setitem__(1, page['results'][0]), 'without gaps or overlap'),
+            (lambda page: page['results'][0].update(consumption=0.0001), 'invalid Octopus half-hour electricity import'),
+        )
+        for change, diagnostic in changes:
+            broken = json.loads(old_bytes[1])
+            change(broken)
+            write(second_page, broken)
+            refuse(command(*import_args), diagnostic)
+            assert not native.exists() and not native.with_suffix('.json.tmp').exists()
+        second_page.unlink()
+        refuse(command(*import_args), 'invalid or incomplete Octopus consumption pages')
+        second_page.write_bytes(old_bytes[1])
+        assert command(*import_args).returncode == 0
+        native_bytes = native.read_bytes()
+        assert PRIVATE.encode() not in native_bytes and b'https://' not in native_bytes
+        assert all(item['interval_start'].endswith('Z') and item['interval_end'].endswith('Z')
+                   for item in json.loads(native_bytes)['consumption'])
+        refuse(command(*import_args), 'existing file was preserved')
+        assert native.read_bytes() == native_bytes
+        assert [(native_pages / f'page-{i}.json').read_bytes() for i in range(1, len(paths) + 1)] == old_bytes
         for path in paths:
             path.unlink()
 
@@ -115,6 +171,16 @@ def main(cli, bundle):
                          f'Cycle estimate at closing {total:.6f} GBP'):
             assert fragment in saved.stdout, saved
         assert PRIVATE.encode() not in archive.read_bytes()
+        native_archive = root / 'native.cmr'
+        prepared_native = command(binary, 'meter-bill', '--tariff', tariff, '--intervals', native,
+                                  '--octopus-rates', rate_file, '--as-of-utc-ms', str(observation),
+                                  '--save-review', native_archive.name)
+        assert prepared_native.returncode == 0 and prepared_native.stdout == saved.stdout, prepared_native
+        assert PRIVATE.encode() not in native_archive.read_bytes()
+        shutil.rmtree(native_pages)
+        native.unlink()
+        opened_native = command(binary, 'meter-bill', '--open-review', native_archive)
+        assert opened_native.returncode == 0 and opened_native.stdout == saved.stdout, opened_native
         refuse(review('--octopus-rates', rate_file, '--as-of-utc-ms', observation - 1), 'observed after the review cutoff')
 
         original = json.loads(bundled)

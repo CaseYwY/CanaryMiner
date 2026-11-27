@@ -59,9 +59,9 @@ def main(cli, bundle):
             for path, doc in zip((tariff, readings, rates), c):
                 write(path, doc)
 
-        def run(*args, code=0, reason=''):
+        def run(*args, code=0, reason='', cwd=root):
             nonlocal count
-            result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=root, capture_output=True,
+            result = subprocess.run([binary, 'meter-bill', *map(str, args)], cwd=cwd, capture_output=True,
                                     text=True, timeout=20)
             assert result.returncode == code, (args, result)
             assert all(value not in result.stdout + result.stderr for value in
@@ -258,6 +258,42 @@ def main(cli, bundle):
         close(go_new[3], go)
         assert 'Octopus Go public rate snapshot' in go and 'API quantities are reported' in go
         assert run('--open-review', 'go-november.cmr', '--previous-cycle', 'go-october.cmr') == go
+        supplier_workspace = root / 'supplier pages'
+        workspace_pages = supplier_workspace / f'cycle-{december}.pages'
+        workspace_pages.mkdir(parents=True)
+        write(supplier_workspace / f'cycle-{december}.rates.json', go_new[2])
+        rows = list(reversed(go_new[1]['consumption']))
+        link = ('https://api.oegb-kraken.energy/v1/electricity-meter-points/0000000000000'
+                '/meters/fixture-supplier-reading/consumption/?envelope=redacted-link')
+        for pos in range(0, len(rows), 100):
+            write(workspace_pages / f'page-{pos // 100 + 1}.json',
+                  dict(count=len(rows), previous=link if pos else None,
+                       next=link if pos + 100 < len(rows) else None, results=rows[pos:pos + 100]))
+        seed = root / 'go-october.cmr'
+        supplier_roll = ('--roll-forward', seed, '--as-of-utc-ms', december + HOUR)
+        staged = supplier_workspace / f'cycle-{december}.cmr'
+        assert 'waiting for complete meter readings' in run(*supplier_roll, cwd=supplier_workspace)
+        assert 'waiting for complete meter readings' in run(*supplier_roll, '--confirm-electricity-import',
+                                                             cwd=supplier_workspace)
+        assert not staged.exists()
+        write(workspace_pages / 'observation.json', {'observed_utc_ms': december + HOUR})
+        run('--roll-forward', seed, '--as-of-utc-ms', december + HOUR - 1, '--confirm-electricity-import',
+            cwd=supplier_workspace, code=3, reason='page observation is invalid')
+        assert not staged.exists()
+        register_workspace = root / 'register pages'
+        (register_workspace / f'cycle-{may}.pages').mkdir(parents=True)
+        # A register-based seed has an absolute opening control and cannot adopt supplier quantities.
+        old.write_bytes(old_bytes)
+        run('--roll-forward', old, '--as-of-utc-ms', may + HOUR, '--confirm-electricity-import',
+            cwd=register_workspace, code=3, reason='cannot continue a cumulative-register archive')
+        old.unlink()
+        live_stage = run('--confirm-electricity-import', *supplier_roll, cwd=supplier_workspace)
+        assert '0 verified, 1 saved' in live_stage
+        assert not (supplier_workspace / f'cycle-{december}.readings.json').exists()
+        assert b'fixture-supplier-reading' not in staged.read_bytes() and b'redacted-link' not in staged.read_bytes()
+        shutil.rmtree(workspace_pages)
+        assert '1 verified, 0 saved' in run(*supplier_roll, cwd=supplier_workspace)
+        assert run('--open-review', staged, '--previous-cycle', seed) == go
         inputs(cycle(november, december, GO_PRODUCT, Decimal(0), 20, 5, 30))
         refused('go-october.cmr', december + HOUR, 'payment method, meter or reset rule differs')
         # Both Octopus captures already include VAT. Each cycle may annotate that included tax.
@@ -299,6 +335,37 @@ def main(cli, bundle):
         close(annual[3], save('annual.cmr', annual_end + HOUR))
         annual_saved = prepare('annual.cmr', 'annual-next.json')
         assert f'[{annual_end}, {annual_next})' in annual_saved and 'exceeds the installed public rate capture bounds' in annual_saved
+
+        leap = cycle(annual_end, annual_next, GO_PRODUCT, None, 14, 6, 366, bundle=True)
+        leap[0].update(schema_version=5, reset_policy=dict(annual_month=1, annual_day=1, clock=LONDON))
+        leap_pages = root / 'leap year pages'
+        leap_pages.mkdir()
+        summer_start = utc('2024-03-31T01:00:00')
+        summer_end = utc('2024-10-27T01:00:00')
+
+        def supplier_time(at):
+            if summer_start <= at < summer_end:
+                return timestamp(at + HOUR).replace('Z', '+01:00')
+            return timestamp(at)
+
+        leap_rows = [dict(consumption=0.015, interval_start=supplier_time(at), interval_end=supplier_time(at + HALF_HOUR))
+                     for at in range(annual_end, annual_next, HALF_HOUR)]
+        assert len(leap_rows) == 17568
+        assert len(json.dumps(leap_rows, separators=(',', ':')).encode('ascii')) > 1792 * 1024
+        for pos in range(0, len(leap_rows), 100):
+            write(leap_pages / f'page-{pos // 100 + 1}.json',
+                  dict(count=len(leap_rows), previous=link if pos else None,
+                       next=link if pos + 100 < len(leap_rows) else None, results=leap_rows[pos:pos + 100]))
+        write(leap_pages / 'observation.json', {'observed_utc_ms': annual_next + HOUR})
+        write(tariff, leap[0])
+        write(rates, leap[2])
+        run('--import-octopus-pages', leap_pages, '--tariff', tariff, '--save-readings', 'leap-import.json',
+            '--confirm-electricity-import')
+        readings.write_bytes((root / 'leap-import.json').read_bytes())
+        assert readings.stat().st_size <= 1792 * 1024 and b'+01:00' not in readings.read_bytes()
+        leap_report = save('leap.cmr', annual_next + HOUR)
+        close(leap[3], leap_report)
+        assert run('--open-review', 'leap.cmr') == leap_report
 
         old.write_bytes(old_bytes)
         roll = ('--roll-forward', old, '--as-of-utc-ms', june + HOUR)

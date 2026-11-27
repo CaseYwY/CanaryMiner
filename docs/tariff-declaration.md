@@ -728,6 +728,53 @@ new starting point.
 The command can be invoked repeatedly as new input arrives. It keeps estimated charges
 and optional local invoice comparisons in the same archive format as the individual review.
 
+### Import Octopus consumption pages with the installed miner
+
+Use the local JSON responses from one meter's electricity import endpoint for the complete
+tariff window. The supplier also labels export readings as consumption. The
+`--confirm-electricity-import` option confirms that you selected the import meter.
+[Octopus consumption API](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/#consumption-endpoints)
+
+Save the responses as `page-1.json`, `page-2.json` and so on in a separate local directory. Use
+a consistent page size of up to 100 rows and at most 192 pages. Use 100 rows per page for
+an annual export. After the export is complete, put an `observation.json`
+file in the directory with the time you obtained the complete export, recorded as a UTC
+millisecond instant.
+
+~~~json
+{"observed_utc_ms":1680307200000}
+~~~
+
+For the first archive, build a normal whole-meter import bundle from a compatible saved
+Octopus Agile or Go declaration. The command derives the meter alias and complete period
+from the declaration.
+
+~~~text
+canary-miner meter-bill --confirm-electricity-import --import-octopus-pages march-pages --tariff march-tariff.json --save-readings march-usage.json
+~~~
+
+Supply the resulting file with `--intervals` to the usual meter-bill review. Each page must
+report the expected total, form a complete set and cover every half hour exactly once.
+Timestamps are stored in UTC while preserving the exact instants across changes in British Summer Time.
+Pagination links are checked for a consistent meter route and omitted from the result.
+A one-page export may have no link. The tariff's meter alias and the import confirmation
+come from your local declaration and selection.
+The import reads local files and makes no network requests.
+
+For later periods, put the page directory in the recurring workspace under the name
+`cycle-END.pages`, with the same closing timestamp used for the saved rate capture.
+
+~~~text
+canary-miner meter-bill --roll-forward march.cmr --confirm-electricity-import
+~~~
+
+When no `cycle-END.readings.json` file is present, this command reads the pages directly
+and archives the verified readings as a schema 3 bundle. The preceding archive must use the
+same supplier-interval input format. Select the same physical meter as the preceding
+archive's local alias. A staged directory waits for its observation file before processing. The declared observation must fall between cycle close
+and review cutoff. The raw pages and their pagination links remain separate from the private
+review archive. Public rate acquisition still requires its own explicit option.
+
 ### Review cumulative meter readings
 
 Use the same command with an interval file in schema version 2:

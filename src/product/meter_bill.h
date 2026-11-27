@@ -22,6 +22,7 @@ struct MeterBillOptions {
     int nextCycleArg = 0, previousCycleArg = 0, rollForwardArg = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
     int allowPublicRatesArg = 0, dnsServerArg = 0;
+    int importPagesArg = 0, confirmImportArg = 0, saveReadingsArg = 0;
     std::string outputName, dnsServer;
     int64_t reviewCutoffUtcMs = 0;
     bool help = false;
@@ -41,6 +42,10 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
                 options.allowPublicRatesArg = i++;
                 continue;
             }
+            if (name == "--confirm-electricity-import" && !options.confirmImportArg) {
+                options.confirmImportArg = i++;
+                continue;
+            }
             if (i + 1 >= argc) return false;
             const std::string value = argv[i+1];
             if (value.empty() || value.front() == '-') return false;
@@ -56,13 +61,16 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             else if (name == "--prepare-next-cycle" && !options.prepareCycleArg) options.prepareCycleArg = i+1;
             else if (name == "--next-cycle-review" && !options.nextCycleArg) options.nextCycleArg = i+1;
             else if (name == "--roll-forward" && !options.rollForwardArg) options.rollForwardArg = i+1;
+            else if (name == "--import-octopus-pages" && !options.importPagesArg) options.importPagesArg = i+1;
             else if (name == "--previous-cycle" && !options.previousCycleArg) options.previousCycleArg = i+1;
             else if (name == "--extend-review" && !options.extendArg) options.extendArg = i+1;
             else if (options.outputName.empty() &&
                      ((name == "--save-review" && localExportName(value, ".cmr")) ||
-                      ((name == "--save-tariff" || name == "--save-register") && localExportName(value, ".json")))) {
+                      ((name == "--save-tariff" || name == "--save-register" || name == "--save-readings") &&
+                       localExportName(value, ".json")))) {
                 if (name == "--save-tariff") options.saveTariffArg = i+1;
                 else if (name == "--save-register") options.saveRegisterArg = i+1;
+                else if (name == "--save-readings") options.saveReadingsArg = i+1;
                 else options.saveArg = i+1;
                 options.outputName = value;
             } else if (name == "--as-of-utc-ms" && !options.reviewCutoffArg) {
@@ -74,13 +82,19 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             } else return false;
             i += 2;
         }
+        if (options.importPagesArg) {
+            if (operands != 7 || !options.tariffArg || !options.confirmImportArg || !options.saveReadingsArg) return false;
+            *out = std::move(options);
+            return true;
+        }
+        if (options.saveReadingsArg || (options.confirmImportArg && !options.rollForwardArg)) return false;
         if (options.allowPublicRatesArg && ((!options.nextCycleArg && !options.rollForwardArg) ||
                                           options.archiveArg || options.prepareCycleArg ||
                                           options.tariffArg || options.ratesArg || options.reviewCutoffArg)) return false;
         if (options.dnsServerArg && !options.allowPublicRatesArg) return false;
         if (options.rollForwardArg) {
             if (operands != 2 + (options.reviewCutoffArg ? 2 : 0) + (options.allowPublicRatesArg ? 1 : 0) +
-                                (options.dnsServerArg ? 2 : 0)) return false;
+                                (options.dnsServerArg ? 2 : 0) + (options.confirmImportArg ? 1 : 0)) return false;
         } else if (options.prepareCycleArg) {
             if (operands != 4 || (!options.saveTariffArg && !options.saveRegisterArg)) return false;
         } else if (options.saveTariffArg || options.saveRegisterArg) return false;
