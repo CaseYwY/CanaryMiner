@@ -41,7 +41,8 @@ class MarketPollingPlan {
     void helperUnreaped();  // trusted local lifecycle outcome; terminal across generations, even after cancellation
     bool observeClock(uint64_t nowMs, uint64_t nowUtc);
     std::optional<MarketFetchTicket> next(uint64_t nowMs, uint64_t nowUtc);
-    bool complete(const MarketFetchTicket &ticket, const PublicJsonResponse &response, MarketDataStatus data, uint64_t nowMs, uint64_t nowUtc);
+    bool complete(const MarketFetchTicket &ticket, const PublicJsonResponse &response, MarketDataStatus data,
+                  uint64_t nowMs, uint64_t nowUtc, uint64_t providerNotBeforeUtc = 0);
     void setPublicHourFallback(uint64_t end); // set or clear the eligible window after primary observations commit
     bool takeEconomicRequest(uint64_t nowMs, uint64_t nowUtc);
     bool active() const { return active_; }

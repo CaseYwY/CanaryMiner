@@ -177,56 +177,46 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
     providerDue_[provider(choice)] = later(ms, 1000);  // shared endpoint/IP budget; never evade with concurrency
     current_ = ticket; return ticket;
 }
-bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJsonResponse &r, MarketDataStatus data, uint64_t ms, uint64_t utc) {
+bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJsonResponse &r, MarketDataStatus data,
+                                 uint64_t ms, uint64_t utc, uint64_t providerNotBeforeUtc) {
     if (r.status == PublicHttpsStatus::Unreaped && current_ && sameTicket(*current_, ticket)) { helperUnreaped(); return true; }
     if (!observeClock(ms, utc) || !current_ || !sameTicket(*current_, ticket)) return false;
-    auto &h = health_[index(ticket.request.feed)];
-    current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
     const auto feed = index(ticket.request.feed);
+    auto &h = health_[feed];
+    current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
     const auto refresh = fixtureCandles(feed) || publicHourFeed(feed) ? policy_.candleRefreshMs : policy_.quoteRefreshMs;
-    const bool sharedKrakenBudget = policy_.publicHourKrakenFallback && provider(feed) == provider(krakenHourFeed);
-    if (sharedKrakenBudget && r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::ProviderThrottled) {
-        const auto seconds = utcSeconds(policy_, utc);
-        const auto notBefore = krakenThrottleUtc(r);
-        const auto waitSeconds = notBefore > seconds ? notBefore - seconds : 0;
-        h.latched = !notBefore || waitSeconds >= 3600;
-        // UTC is quantized to seconds. Hold through the stated second on the monotonic clock.
-        auto &krakenDue = providerDue_[provider(feed)];
-        if (h.latched) {
-            krakenDue = UINT64_MAX;
-        } else {
-            const auto delay = (std::max)(policy_.retryBaseMs, (waitSeconds + 1) * 1000);
-            krakenDue = (std::max)(krakenDue, later(ms, delay));
-        }
-        h.nextDueMs = krakenDue;
-        return true;
-    }
-    if (sharedKrakenBudget &&
-        (r.httpStatus == 429 || (r.retryAfterSeconds && transient(r)) ||
-         (r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::RateLimited))) {
-        auto &krakenDue = providerDue_[provider(feed)];
-        // A capped Retry-After may denote a longer refusal than we can represent.
-        if (r.retryAfterSeconds >= 3600) {
-            krakenDue = UINT64_MAX;
-        } else {
-            const auto delay = (std::max)(policy_.retryBaseMs, static_cast<uint64_t>(r.retryAfterSeconds) * 1000);
-            krakenDue = (std::max)(krakenDue, later(ms, delay));
-        }
-    }
     if (r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::Ok) {
         h.attempts = 0; h.nextDueMs = later(ms, refresh); return true;
     }
+    const bool rateLimited = r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::RateLimited;
+    const bool kraken = policy_.publicHourKrakenFallback && provider(feed) == provider(krakenHourFeed);
+    const bool serviceThrottle = kraken && r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::ProviderThrottled;
+    const bool shareDelay = kraken && (serviceThrottle || rateLimited || r.httpStatus == 429 ||
+                                      (r.retryAfterSeconds && transient(r)));
+    const auto seconds = utcSeconds(policy_, utc);
+    const auto waitSeconds = providerNotBeforeUtc > seconds ? providerNotBeforeUtc - seconds : 0;
+    const bool unboundedServiceDelay = serviceThrottle && (!providerNotBeforeUtc || waitSeconds >= 3600);
+    const bool cappedRetry = (shareDelay || r.httpStatus == 429) && r.retryAfterSeconds >= 3600;
+
     ++h.attempts;
-    if ((!transient(r) && !(r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::RateLimited)) ||
-        (r.httpStatus == 429 && r.retryAfterSeconds >= 3600)) {
-        // A transport-capped Retry-After could mean a much longer refusal. Do not automatically retry early.
-        h.latched = true; h.nextDueMs = UINT64_MAX; return true;
+    if (!(transient(r) || rateLimited || serviceThrottle) || cappedRetry || unboundedServiceDelay) {
+        // A capped or unknown provider delay can be longer than the automatic wait limit.
+        h.latched = true; h.nextDueMs = UINT64_MAX;
+        if (shareDelay) providerDue_[provider(feed)] = UINT64_MAX;
+        return true;
     }
     uint64_t delay = policy_.retryBaseMs;
     for (unsigned i = 1; i < h.attempts; ++i) delay = (std::min)(later(delay, delay), policy_.retryMaxMs);
     delay = (std::max)(delay, static_cast<uint64_t>(r.retryAfterSeconds) * 1000);
+    // UTC is quantized to seconds. Hold through the stated second on the monotonic clock.
+    if (serviceThrottle) delay = (std::max)(delay, (waitSeconds + 1) * 1000);
     if (h.attempts >= policy_.maxAttempts) delay = (std::max)(delay, (std::max)(refresh, policy_.failedCycleCooldownMs));
-    h.nextDueMs = later(ms, delay); return true;
+    h.nextDueMs = later(ms, delay);
+    if (shareDelay) {
+        auto &due = providerDue_[provider(feed)];
+        due = (std::max)(due, h.nextDueMs);
+    }
+    return true;
 }
 void MarketPollingPlan::setPublicHourFallback(uint64_t end) {
     if (policy_.publicHourKrakenFallback) pendingFallbackEnd_ = end;
@@ -349,12 +339,14 @@ struct MarketDataOwner::Impl {
                         quote = parseMarketQuote(response, context);
                         status = quote.status;
                     }
+                    const auto notBefore = policy.publicHourKrakenFallback && status == MarketDataStatus::ProviderThrottled
+                        ? krakenThrottleUtc(response) : 0;
                     now = clock();
                     {
                         // Serialize cancellation with cache commit, not with network/parse work. No late fact commits after stop.
                         std::lock_guard<std::mutex> commit(commitMutex);
                         if (!nativeCurrent()||cancel.load()) break;
-                        if (plan.complete(*ticket, response, status, now.first, now.second)) {
+                        if (plan.complete(*ticket, response, status, now.first, now.second, notBefore)) {
                             if (quote.value) {
                                 if (ticket->request.feed == PublicFeed::GatePearlTicker) current.pearlQuote = std::move(quote.value);
                                 else current.fxQuote = std::move(quote.value);
