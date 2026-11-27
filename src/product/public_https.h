@@ -42,7 +42,7 @@ struct PublicJsonRequest {
 struct PublicHttpsLimits {
     unsigned connectMs = 5000, totalMs = 15000;
     size_t bodyBytes = 1024 * 1024, headerBytes = 32 * 1024;
-    std::string dnsServer{};  // optional resolver for this request, never a payload destination
+    std::string dnsServer{};  // optional resolver address or preset, never a payload destination
     // Parent-only deadline shared across requests. Each helper receives a bounded relative timeout.
     std::chrono::steady_clock::time_point parentDeadline = std::chrono::steady_clock::time_point::max();
 };
@@ -64,8 +64,9 @@ struct PublicJsonResponse {
 bool publicFeedUrl(const PublicJsonRequest &request, std::string *url);
 bool publicIpv4(const uint8_t *bytes);
 bool publicIpv6(const uint8_t *bytes);
-// One unscoped unicast address. The backend uses port 53.
-bool validPublicDnsServer(std::string_view address);
+inline constexpr std::string_view publicCloudflareDoh = "cloudflare-doh";
+// One unscoped unicast address on port 53 or the fixed DNS-over-HTTPS preset.
+bool validPublicDnsServer(std::string_view selector);
 bool boundedPublicJson(const std::string &text, std::size_t byteLimit = 1024 * 1024,
                        std::size_t nodeLimit = 20000);
 

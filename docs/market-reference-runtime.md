@@ -97,7 +97,7 @@ one-hour view. This trade reference is for display. Economic mode defaults off.
 
 ### Choose a resolver for one Dashboard launch
 
-Add `--market-dns-server IP` alongside `--allow-public-tickers` or `--allow-public-trades` on an ordinary parent launch. Use the IPv4 or unscoped IPv6 address of your approved DNS server on port 53. The selected resolver is fixed for that Dashboard session, including refreshes and retries. If the launch separately allows public candles, those requests use the same resolver.
+Add `--market-dns-server IP` alongside `--allow-public-tickers` or `--allow-public-trades` on an ordinary parent launch. Choose the IPv4 or unscoped IPv6 address of a DNS server on port 53, or `cloudflare-doh` for the [fixed encrypted resolver](#choose-a-resolver-for-one-public-sample). The selected resolver is fixed for that Dashboard session, including refreshes and retries. If the launch separately allows public candles, those requests use the same resolver.
 
 The saved ticker request and all the usual Dashboard admission checks still apply. The option lives in the parent process and goes only to the public data helper. It is consumed before mining workers are launched. It is absent from Settings, provider reports and public stats. The resolver address remains visible to users who can inspect the parent's command line. The helper continues to require a public destination and normal HTTPS certificate and hostname verification.
 
@@ -275,19 +275,23 @@ Existing [user-declared reviews](manual-market.md#save-and-reopen-a-local-hour-r
 ### Choose a resolver for one public sample
 
 A public sample can use one explicitly selected DNS server if the deployment's resolver returns a
-non-public address for a provider. Substitute the IPv4 or unscoped IPv6 address of your approved
-resolver for `IP`. It must answer ordinary DNS on port 53.
+non-public address for a provider. Enter one IPv4 or unscoped IPv6 address for ordinary DNS on
+port 53. The `cloudflare-doh` preset uses Cloudflare's fixed DNS-over-HTTPS endpoint over
+verified TLS. It sends the public provider's DNS name to Cloudflare. A resolver failure ends
+the selected request. [Cloudflare DNS over HTTPS](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/)
 
 ```text
 canary-miner market-tickers --allow-public-tickers --dns-server IP
-canary-miner market-hour --allow-public-candles --dns-server IP --save-review capture.cmh
+canary-miner market-hour --allow-public-candles --dns-server cloudflare-doh --save-review capture.cmh
 ```
 
 The flag applies only to the one-shot public invocation and requires the public consent flag. If
 omitted, the helper uses its usual resolver configuration. The option does not enter Settings,
 saved reviews or offline replay. The Dashboard has its own [per-launch flag](#choose-a-resolver-for-one-dashboard-launch). A DNS answer must still resolve to an allowed
 public destination, and HTTPS still verifies the provider name and certificate. The selected
-resolver address is visible to users with access to the command line.
+resolver selector is visible to users with access to the command line. The encrypted preset
+requires a public HTTPS worker with libcurl 8.16 or later. Candidate packages use the pinned
+worker. [libcurl TLS version defaults](https://curl.se/libcurl/c/CURLOPT_SSLVERSION.html)
 
 ### Review the next Pearl mainnet subsidy
 

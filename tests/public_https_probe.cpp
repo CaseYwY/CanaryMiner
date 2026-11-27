@@ -8,6 +8,9 @@
 int main(int argc, char **argv) {
     if (argc != 7 && argc != 8) return 2;
     const auto port = static_cast<unsigned>(std::stoul(argv[1]));
+    const std::string path = argv[2];
+    const bool dnsOverHttps = path.rfind("/doh-", 0) == 0;
+    const auto dns = dnsOverHttps ? std::string(om::publicCloudflareDoh) : std::string();
     const std::string mode = argv[4];
     std::atomic<bool> cancel{false};
     const auto start = std::chrono::steady_clock::now();
@@ -15,9 +18,10 @@ int main(int argc, char **argv) {
     if (mode == "cancel") stop = std::thread([&] { std::this_thread::sleep_for(std::chrono::milliseconds(100)); cancel = true; });
     om::PublicJsonResponse result;
     if (argc == 7) {
-        auto client = om::PublicHttpsTestPeer::create(port, argv[2], argv[3], mode == "wrong-name", mode != "blocked");
+        auto client = om::PublicHttpsTestPeer::create(port, dnsOverHttps ? "/ok" : path, argv[3], mode == "wrong-name",
+                                                     mode != "blocked", dnsOverHttps ? path : std::string());
         if (!client->available()) { if (stop.joinable()) stop.join(); return 3; }
-        result = client->get({}, cancel, {500, 800, 8192, 2048});
+        result = client->get({}, cancel, {500, 800, 8192, 2048, dns});
     } else {
         const char *paths[] = {"/ok", "/chunked", "/redirect", "/http-error", "/html", "/compressed", "/conflict-header", "/large-header",
             "/large-body", "/chunked-large", "/bad-json", "/invalid-utf8", "/deep-json", "/truncated", "/slow-header", "/slow-body", "/rate-limit"};
@@ -26,10 +30,17 @@ int main(int argc, char **argv) {
         if (mode == "wrong-name") scenario = 18;
         if (mode == "blocked") scenario = 19;
         if (std::filesystem::path(argv[3]).filename() == "untrusted.pem") scenario = 20;
+        if (dnsOverHttps) {
+            if (path == "/doh-ok") scenario = scenario == 20 ? 25 : 21;
+            else if (path == "/doh-refused") scenario = 22;
+            else if (path == "/doh-redirect") scenario = 23;
+            else if (path == "/doh-reserved") scenario = 24;
+            else if (path == "/doh-slow") scenario = 26;
+        }
         if (!scenario) { if (stop.joinable()) stop.join(); return 2; }
         om::PublicJsonProcessClient client(std::filesystem::absolute(argv[7]));
         const int64_t from = port * 60;
-        result = client.get({om::PublicFeed::GatePearlCandles, from, from + scenario * 60}, cancel, {500, 800, 8192, 2048});
+        result = client.get({om::PublicFeed::GatePearlCandles, from, from + scenario * 60}, cancel, {500, 800, 8192, 2048, dns});
     }
     if (stop.joinable()) stop.join();
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();

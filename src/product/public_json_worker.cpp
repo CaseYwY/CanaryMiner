@@ -1,4 +1,4 @@
-// Installed sibling helper. Fixed public requests with an optional validated DNS address.
+// Installed sibling helper. Fixed public requests with an optional validated DNS selector.
 #include "public_https_client.h"
 #include "public_json_process.h"
 #include <charconv>

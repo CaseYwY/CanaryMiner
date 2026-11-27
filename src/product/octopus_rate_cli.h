@@ -9,7 +9,7 @@
 namespace om {
 
 inline constexpr char octopusRatesHelp[] =
-    "canary-miner meter-rates --allow-public-rates --tariff FILE --payment-method METHOD --save-rates NAME.json [--dns-server IP]\n"
+    "canary-miner meter-rates --allow-public-rates --tariff FILE --payment-method METHOD --save-rates NAME.json [--dns-server IP|cloudflare-doh]\n"
     "Save public Octopus Agile or Go rates for the elapsed window in a compatible tariff declaration.\n"
     "METHOD is DIRECT_DEBIT or NON_DIRECT_DEBIT. Use the resulting JSON with meter-bill --octopus-rates.\n"
     "Requires public HTTPS and the bundled tariff time database.";

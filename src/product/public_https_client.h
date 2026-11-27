@@ -30,7 +30,8 @@ class PublicJsonClient {
 // Compiled only in the separate loopback-integration library, never the production target.
 struct PublicHttpsTestPeer {
     static std::unique_ptr<PublicJsonClient> create(unsigned port, std::string path, std::string caFile,
-                                                   bool wrongName = false, bool permitLoopback = true);
+                                                   bool wrongName = false, bool permitLoopback = true,
+                                                   std::string dohPath = {});
 };
 #endif
 

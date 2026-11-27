@@ -37,6 +37,14 @@ The helper path is application-owned, absolute and local; Windows UNC/device pat
   The HTTPS payload socket uses the same public address gate and provider certificate checks.
   An enabled Linux test uses the installed worker in a loopback-only namespace and checks IPv4 and IPv6
   DNS selection, search-suffix suppression, reserved-address refusal and timeout. It requires loopback port 53.
+- The `cloudflare-doh` selector uses libcurl's RFC 8484 transfer to
+  `https://1.1.1.1/dns-query`. The numeric address gives the resolver a fixed peer without
+  a bootstrap DNS lookup. The worker verifies the resolver certificate and IP identity
+  separately from provider TLS. It starts with a proxy-free environment and refuses this
+  mode if proxy variables are present. Resolver failure ends the selected request. The
+  overall request deadline covers resolution and provider I/O. All provider sockets still
+  pass the public-address gate. [RFC 8484](https://www.rfc-editor.org/rfc/rfc8484)
+  [libcurl DoH options](https://curl.se/libcurl/c/CURLOPT_DOH_URL.html)
 - Default connect/whole-operation limits are 5/15 seconds; accepted body <=1 MiB and cumulative callback-delivered headers <=32 KiB, with caller limits allowed only within declared bounds. Library/TLS/kernel buffers are separate from these application limits; this is not a total-RSS promise.
 - `Accept-Encoding: identity`; reject other content encodings and non-JSON media types. Count bytes before append, including chunked bodies. Failed/truncated/oversized/invalid responses publish no partial body or observation time.
 - UTF-8, strict JSON grammar, duplicate-key rejection, <=16 container depth, <=20,000 lexical nodes, <=256 members per object, <=4096 raw bytes per string and <=128 bytes per numeric/literal token. Object-member limits bound the existing strict DOM's duplicate comparisons. Provider adapters must additionally validate identity, units, precision, finite domains, timestamps and error envelopes.

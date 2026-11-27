@@ -160,6 +160,7 @@ bool publicIpv6(const uint8_t *b) {
 }
 
 bool validPublicDnsServer(std::string_view address) {
+    if (address == publicCloudflareDoh) return true;
     if (address.empty() || address.size() >= INET6_ADDRSTRLEN ||
         address.find_first_not_of("0123456789abcdefABCDEF:.") != std::string_view::npos) return false;
     char literal[INET6_ADDRSTRLEN]{};

@@ -100,11 +100,13 @@ int main() {
     v6[0] = 0x3f; v6[1] = 0xff; v6[2] = 1; CHECK(!publicIpv6(v6));
     v6[0] = 0x26; v6[1] = 6; v6[2] = 0x47; v6[3] = 0; CHECK(publicIpv6(v6));
     CHECK(!publicIpv6(nullptr));
+    CHECK(validPublicDnsServer(publicCloudflareDoh));
     for (const char *address : {"8.8.8.8", "10.1.2.3", "172.31.4.5", "192.168.50.53", "127.0.0.1",
                                 "100.100.100.100", "169.254.1.53", "2606:4700:4700::1111", "2606::8.10.8.8", "fd00::53", "::1"}) {
         CHECK(validPublicDnsServer(address));
     }
-    for (const char *address : {"", "resolver.local", "8.8.8.8:53", "8.8.8.8,1.1.1.1", " 8.8.8.8",
+    for (const char *address : {"", "resolver.local", "Cloudflare-doh", "cloudflare-doh ", "https://1.1.1.1/dns-query",
+                                "8.8.8.8:53", "8.8.8.8,1.1.1.1", " 8.8.8.8",
                                 "8.8.8.256", "0.0.0.0", "198.18.0.1", "255.255.255.255",
                                 "::", "[::1]", "::ffff:8.8.8.8", "2606::8.010.8.8", "2001:db8::1", "fe80::1%3", "ff02::1"}) {
         CHECK(!validPublicDnsServer(address));

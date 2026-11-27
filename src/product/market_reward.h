@@ -17,7 +17,7 @@ inline constexpr unsigned marketRewardSampleMs = 15000;
 inline constexpr size_t marketRewardBodyBytes = 16 * 1024;
 inline constexpr std::string_view rewardReviewExtension = ".cmr";
 inline constexpr char marketRewardHelp[] =
-    "canary-miner market-reward --allow-public-reward [--dns-server IP] [--save-review NAME.cmr]\n"
+    "canary-miner market-reward --allow-public-reward [--dns-server IP|cloudflare-doh] [--save-review NAME.cmr]\n"
     "canary-miner market-reward --file FILE --as-of UTC_SECONDS\n"
     "canary-miner market-reward --open-review FILE\n"
     "Calculate the next Pearl mainnet block subsidy from a live Blockbook tip check or saved status.\n"
