@@ -63,7 +63,15 @@ int main(int argc, char **argv) {
     const PublicHttpsLimits limits{300, 600, 8192, 2048};
     CHECK(client.get(request(1), cancel, limits).status == PublicHttpsStatus::Ok);
     CHECK(client.get({}, cancel, {0, 600}).status == PublicHttpsStatus::InvalidRequest);
+    auto deadlineLimits = limits;
+    deadlineLimits.parentDeadline = std::chrono::steady_clock::time_point::min();
+    CHECK(client.get(request(1), cancel, deadlineLimits).status == PublicHttpsStatus::Timeout);
     auto start = std::chrono::steady_clock::now();
+    deadlineLimits.totalMs = 15000;
+    deadlineLimits.parentDeadline = start + std::chrono::milliseconds(250);
+    CHECK(client.get(request(2), cancel, deadlineLimits).status == PublicHttpsStatus::Timeout);
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(2));
+    start = std::chrono::steady_clock::now();
     CHECK(client.get(request(2), cancel, limits).status == PublicHttpsStatus::Timeout);
     CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(2));
     for (unsigned scenario : {3u, 4u, 5u, 6u}) {

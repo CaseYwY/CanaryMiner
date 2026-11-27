@@ -1,10 +1,14 @@
 """Verify original one-shot admission with the real process client and an inert installed worker."""
+import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+
+from test_market_reward_cli import PUBLIC_HEIGHT, TIP_HASH, status
 
 
 def main(cli, worker):
@@ -24,10 +28,16 @@ def main(cli, worker):
             ("market-hour", ["--allow-public-candles", "--save-review", "capture.cmh"], "candle-requests", ["4", "5"],
              "Mean USD per PRL (exact sum / minutes): 210 / 60"),
         )
+        (root / "reward-response.json").write_text(json.dumps(status(PUBLIC_HEIGHT, int(time.time()) - 1)), encoding="ascii")
+        (root / "reward-indexed.json").write_text(json.dumps({"blockHash": TIP_HASH}), encoding="ascii")
+        cases += (("market-reward", ["--allow-public-reward", "--save-review", "capture.cmr"],
+                   "reward-requests", ["6", "9", "6"], "tip verified across three requests"),)
         for command, args, log, feeds, expected_report in cases:
             requests = root / log
             archive = root / (args[-1] if "--save-review" in args else "unexpected.cmt")
             modes = ("fresh", "stale", "first", "second") if sys.platform.startswith("linux") else ("fresh", "stale")
+            if command == "market-reward" and sys.platform.startswith("linux"):
+                modes += ("third", "deadline-third")
             for mode in modes:
                 requests.unlink(missing_ok=True)
                 archive.unlink(missing_ok=True)
@@ -39,15 +49,20 @@ def main(cli, worker):
                 launched = [line.split()[0] for line in requests.read_text().splitlines()] if requests.exists() else []
                 if mode == "fresh":
                     valid = result.returncode == 0 and expected_report in result.stdout and launched == feeds
+                elif mode == "deadline-third":
+                    valid = (result.returncode == 3 and not result.stdout and launched == feeds[:2]
+                             and "fixture deadline expired" in result.stderr and "deadline exceeded" in result.stderr)
                 else:
-                    expected = feeds[:1] if mode == "second" else []
+                    launches = {"second": 1, "third": 2}.get(mode, 0)
+                    expected = feeds[:launches]
                     valid = (result.returncode == 3 and not result.stdout and launched == expected
                              and "helper ownership uncertain" in result.stderr)
-                    if mode in ("first", "second"):
+                    if mode in ("first", "second", "third"):
                         valid = valid and "fixture epoch advanced" in result.stderr
                 if not valid:
                     failures.append((command, mode, launched, result.returncode, result.stdout, result.stderr))
                 assert archive.exists() == ("--save-review" in args and mode == "fresh"), result
+                assert not archive.with_name(archive.name + ".tmp").exists(), result
         if sys.platform.startswith("linux"):
             (root / "sample-lifetime-mode").write_text("clock-rollback", encoding="ascii")
             (root / "ticker-scenario").write_text("clock-rollback", encoding="ascii")

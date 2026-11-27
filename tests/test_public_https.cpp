@@ -20,9 +20,19 @@ int main() {
     CHECK(url == "https://api.coinbase.com/api/v3/brokerage/market/products/USDT-USD/candles?granularity=ONE_MINUTE&limit=61&start=600&end=4200");
     CHECK(publicFeedUrl({PublicFeed::PearlMainnetTip}, &url));
     CHECK(url == "https://blockbook.pearlresearch.ai/api/status");
+    CHECK(publicFeedUrl({PublicFeed::PearlIndexedBlockHash, 0, 0, 0}, &url));
+    CHECK(url == "https://blockbook.pearlresearch.ai/api/v2/block-index/0");
+    CHECK(publicFeedUrl({PublicFeed::PearlIndexedBlockHash, 0, 0, maxPearlRewardTipHeight}, &url));
+    CHECK(url == "https://blockbook.pearlresearch.ai/api/v2/block-index/2147483646");
     for (auto r : {PublicJsonRequest{static_cast<PublicFeed>(99)},
                    PublicJsonRequest{PublicFeed::PearlMainnetTip, 1, 0},
                    PublicJsonRequest{PublicFeed::PearlMainnetTip, 0, 1},
+                   PublicJsonRequest{PublicFeed::PearlMainnetTip, 0, 0, 0},
+                   PublicJsonRequest{PublicFeed::MexcPearlHour, 600, 4200, 100},
+                   PublicJsonRequest{PublicFeed::PearlIndexedBlockHash},
+                   PublicJsonRequest{PublicFeed::PearlIndexedBlockHash, 1, 0, 3},
+                   PublicJsonRequest{PublicFeed::PearlIndexedBlockHash, 0, 1, 3},
+                   PublicJsonRequest{PublicFeed::PearlIndexedBlockHash, 0, 0, maxPearlRewardTipHeight + 1},
                    PublicJsonRequest{PublicFeed::MexcPearlHour, 600, 4260},
                    PublicJsonRequest{PublicFeed::CoinbaseUsdtHour, 601, 4201},
                    PublicJsonRequest{PublicFeed::CoinbaseUsdtHour, 60, 60},

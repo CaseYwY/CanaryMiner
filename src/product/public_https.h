@@ -1,8 +1,10 @@
 // Bounded, unauthenticated public JSON transport. No wallets, arbitrary URLs, pool I/O or trading.
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -10,18 +12,22 @@ namespace om {
 
 enum class PublicFeed {
     GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles,
-    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip, GatePearlTrades, KrakenUsdtTrades
+    MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip, GatePearlTrades, KrakenUsdtTrades, PearlIndexedBlockHash
 };
+inline constexpr uint32_t maxPearlRewardTipHeight = INT32_MAX - 1;
 inline constexpr size_t maxPublicTradeRows=20;
 inline constexpr size_t maxPublicTradeBodyBytes=64*1024;
 struct PublicJsonRequest {
     PublicFeed feed = PublicFeed::GatePearlTicker;
     int64_t fromUtc = 0, toUtc = 0;  // minute bounds for candles; zero otherwise
+    std::optional<uint32_t> blockHeight{};  // Pearl indexed block hash only
 };
 struct PublicHttpsLimits {
     unsigned connectMs = 5000, totalMs = 15000;
     size_t bodyBytes = 1024 * 1024, headerBytes = 32 * 1024;
     std::string dnsServer{};  // optional resolver for this request, never a payload destination
+    // Parent-only deadline shared across requests. Each helper receives a bounded relative timeout.
+    std::chrono::steady_clock::time_point parentDeadline = std::chrono::steady_clock::time_point::max();
 };
 enum class PublicHttpsStatus {
     Ok, Unavailable, InvalidRequest, Busy, Cancelled, Timeout, DestinationBlocked,

@@ -1,6 +1,7 @@
 // Protocol fixture for the actual one-shot CLI. Does not open any sockets.
 #include "product/public_json_process.h"
 #include "product/executable_path.h"
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdio>
@@ -47,25 +48,38 @@ int main(int argc, char **argv) {
     if (argc == 9 && !om::validPublicDnsServer(argv[8])) return 2;
     const std::string_view feed(argv[1]);
     const bool candles = feed == "4" || feed == "5";
-    const bool reward = feed == "6";
+    const bool indexedHash = feed == "9";
+    const bool reward = feed == "6" || indexedHash;
     const bool trades = feed == "7" || feed == "8";
     if (!candles && !reward && !trades && feed != "0" && feed != "2") return 3;
     int64_t from = 0, to = 0;
     if (!readTime(argv[2], from) || !readTime(argv[3], to) ||
-        (candles ? from < 60 || from % 60 || to - from != 3600 || to > 253402300799LL : from || to)) return 2;
+        (candles ? from < 60 || from % 60 || to - from != 3600 || to > 253402300799LL :
+            to || (indexedHash ? from > om::maxPearlRewardTipHeight : from != 0))) return 2;
     if ((candles || trades) && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
                     std::string_view(argv[6]) != "65536")) return 2;
-    if (reward && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
+    int64_t connect = 0, total = 0;
+    if (reward && (!readTime(argv[4], connect) || !readTime(argv[5], total) ||
+                   total < 50 || total > 15000 || connect != (std::min)(total, int64_t{5000}) ||
                    std::string_view(argv[6]) != "16384")) return 2;
     const char *family = candles ? "candle" : reward ? "reward" : trades ? "trade" : "ticker";
     const auto dir = std::filesystem::u8path(om::selfExecutablePath()).parent_path();
     std::string mode;
+    unsigned rewardStep = 0;
     {
         std::ifstream input(dir / (std::string(family) + "-scenario"));
         input >> mode;
-        std::ofstream output(dir / (std::string(family) + "-requests"), std::ios::app);
+        const auto requests = dir / (std::string(family) + "-requests");
+        if (reward) {
+            std::ifstream previous(requests);
+            std::string line;
+            while (std::getline(previous, line)) ++rewardStep;
+        }
+        std::ofstream output(requests, std::ios::app);
         output << feed;
         if (candles) output << ' ' << from << ' ' << to;
+        if (indexedHash) output << ' ' << from;
+        if (reward && mode == "budget") output << ' ' << total;
         output << '\n';
         if (!output) return 4;
     }
@@ -74,7 +88,9 @@ int main(int argc, char **argv) {
         output << argv[8] << '\n';
         if (!output) return 4;
     }
-    if (mode == "slow") std::this_thread::sleep_for(std::chrono::seconds(10));
+    if (mode == "slow" || (mode == "slow-closing" && rewardStep == 2))
+        std::this_thread::sleep_for(std::chrono::seconds(10));
+    if (reward && mode == "budget") std::this_thread::sleep_for(std::chrono::milliseconds(100));
     om::PublicJsonResponse response;
     response.status = om::PublicHttpsStatus::Ok;
     response.httpStatus = 200;
@@ -105,14 +121,17 @@ int main(int argc, char **argv) {
             response.retryAfterSeconds = 1;
         }
     } else if (reward) {
-        if (mode == "timeout") {
+        if (mode == "timeout" || (mode == "timeout-index" && indexedHash)) {
             response = {};
             response.status = om::PublicHttpsStatus::Timeout;
         } else {
-            std::ifstream source(dir / "reward-response.json", std::ios::binary);
+            const auto closing = dir / "reward-closing.json";
+            const auto path = indexedHash ? dir / "reward-indexed.json" :
+                rewardStep == 2 && std::filesystem::exists(closing) ? closing : dir / "reward-response.json";
+            std::ifstream source(path, std::ios::binary);
             if (!source) return 4;
             response.body.assign(std::istreambuf_iterator<char>(source), std::istreambuf_iterator<char>());
-            if (mode == "future") response.observedUtc += 3600;
+            if (mode == "future" || (mode == "future-closing" && rewardStep == 2)) response.observedUtc += 3600;
         }
     } else if (trades) {
         if (mode == "limited" && feed == "8") {

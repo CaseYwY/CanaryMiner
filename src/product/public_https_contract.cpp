@@ -34,7 +34,7 @@ const char *publicHttpsStatusName(PublicHttpsStatus status) {
 }
 
 bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
-    if (!url) return false;
+    if (!url || (r.blockHeight && r.feed != PublicFeed::PearlIndexedBlockHash)) return false;
     std::string result;
     switch (r.feed) {
         case PublicFeed::GatePearlTicker:
@@ -56,6 +56,10 @@ bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
         case PublicFeed::PearlMainnetTip:
             if (r.fromUtc || r.toUtc) return false;
             result = "https://blockbook.pearlresearch.ai/api/status"; break;
+        case PublicFeed::PearlIndexedBlockHash:
+            if (r.fromUtc || r.toUtc || !r.blockHeight || *r.blockHeight > maxPearlRewardTipHeight) return false;
+            result = "https://blockbook.pearlresearch.ai/api/v2/block-index/" + std::to_string(*r.blockHeight);
+            break;
         case PublicFeed::GatePearlCandles:
         case PublicFeed::KrakenUsdtCandles: {
             const int64_t maximum = r.feed == PublicFeed::GatePearlCandles ? 900 * 60 : 719 * 60;

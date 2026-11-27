@@ -233,6 +233,9 @@ int main() {
     failure={};failure.status=PublicHttpsStatus::Unreaped;
     auto wrongLoss=*ticket;++wrongLoss.serial;
     CHECK(!lifecycle.complete(wrongLoss,failure,MarketDataStatus::Transport,0,E+10)&&lifecycle.active()&&!lifecycle.helperFault());
+    auto wrongHeight = *ticket;
+    wrongHeight.request.blockHeight = 0;
+    CHECK(!lifecycle.complete(wrongHeight,failure,MarketDataStatus::Transport,0,E+10)&&lifecycle.active()&&!lifecycle.helperFault());
     CHECK(lifecycle.complete(*ticket,failure,MarketDataStatus::Transport,0,E+9));  // a concurrent clock problem cannot hide ownership loss
     CHECK(lifecycle.helperFault()&&!lifecycle.active()&&!lifecycle.next(0,E+10)&&!lifecycle.takeEconomicRequest(0,E+10));
     CHECK(lifecycle.health()[0].transport==PublicHttpsStatus::Unreaped);

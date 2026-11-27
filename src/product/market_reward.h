@@ -3,6 +3,7 @@
 #include "local_export_name.h"
 #include "public_https.h"
 
+#include <array>
 #include <charconv>
 #include <csignal>
 #include <filesystem>
@@ -12,13 +13,14 @@
 namespace om {
 
 inline constexpr uint64_t rewardUtcLimit = 253402300799ULL;
+inline constexpr unsigned marketRewardSampleMs = 15000;
 inline constexpr size_t marketRewardBodyBytes = 16 * 1024;
 inline constexpr std::string_view rewardReviewExtension = ".cmr";
 inline constexpr char marketRewardHelp[] =
     "canary-miner market-reward --allow-public-reward [--dns-server IP] [--save-review NAME.cmr]\n"
     "canary-miner market-reward --file FILE --as-of UTC_SECONDS\n"
     "canary-miner market-reward --open-review FILE\n"
-    "Calculate the next Pearl mainnet block subsidy from live or saved Blockbook indexer status.\n"
+    "Calculate the next Pearl mainnet block subsidy from a live Blockbook tip check or saved status.\n"
     "Public sampling requires a public-HTTPS-enabled build. A block subsidy excludes transaction fees.";
 
 enum class MarketRewardAction { Help, PublicSample, LocalReview, OpenReview };
@@ -80,11 +82,16 @@ struct PearlRewardResult {
 std::optional<uint64_t> pearlMainnetSubsidyGrains(uint32_t height);
 enum class PearlRewardCutoff { ExactSecond, WholeObservationSecond };
 PearlRewardResult parsePearlBlockbookTip(const std::string &body, uint64_t cutoffUtc, PearlRewardCutoff precision);
-int reportPearlSubsidy(const PearlRewardResult &result, uint64_t cutoffUtc, bool live);
+struct MarketRewardReply {
+    uint64_t sentUtc = 0, observedUtc = 0, receivedUtc = 0;
+    std::string body;
+};
+using MarketRewardReplies = std::array<MarketRewardReply, 3>;
+
+int reportPearlRewardFailure(const PearlRewardResult &result);
 class NativeProcessLifetime;
-int savePublicMarketRewardReview(const std::string &name, const PublicJsonResponse &response,
-                                 uint64_t sentUtc, uint64_t receivedUtc, const PearlRewardResult &result,
-                                 const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop);
+int reportPublicMarketReward(const std::string &archiveName, const MarketRewardReplies &replies,
+                             const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop);
 int commandMarketRewardFile(const MarketRewardOptions &options, int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop);
 bool nativeMarketRewardInvocation(const MarketRewardOptions &options, int argc, const char *const *argv);

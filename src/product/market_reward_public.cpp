@@ -28,24 +28,43 @@ int commandPublicMarketReward(const MarketRewardOptions &options, const std::fil
         PublicHttpsLimits limits;
         limits.bodyBytes = marketRewardBodyBytes;
         limits.dnsServer = options.dnsServer;
+        limits.totalMs = marketRewardSampleMs;
+        limits.parentDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(marketRewardSampleMs);
         const auto initial = marketSystemClock();
         if (!initial.second || initial.second > rewardUtcLimit) return sampleError("local UTC clock unavailable");
-        const auto response = awaitPublicMarketReply(fetch, {PublicFeed::PearlMainnetTip}, limits, lifetime, stop);
-        if (response.status == PublicHttpsStatus::Unreaped || !lifetime.permitted())
-            return sampleError("helper ownership uncertain");
-        if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
-        if (response.status != PublicHttpsStatus::Ok) return sampleError(publicHttpsStatusName(response.status));
-        const auto received = marketSystemClock();
-        if (!marketSampleClockContinuous(initial, initial, received) || response.observedUtc < initial.second ||
-            response.observedUtc > received.second || response.httpStatus != 200)
-            return sampleError("invalid response observation time or HTTP status");
-        const auto result = parsePearlBlockbookTip(response.body, response.observedUtc, PearlRewardCutoff::WholeObservationSecond);
+        auto previous = initial;
+        const auto take = [&](const PublicJsonRequest &request, MarketRewardReply &reply) {
+            if (!lifetime.permitted()) return sampleError("helper ownership uncertain");
+            if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
+            const auto sent = marketSystemClock();
+            if (!marketSampleClockContinuous(initial, previous, sent))
+                return sampleError("local clock changed during the sample");
+            auto response = awaitPublicMarketReply(fetch, request, limits, lifetime, stop);
+            const auto received = marketSystemClock();
+            if (response.status == PublicHttpsStatus::Unreaped || !lifetime.permitted())
+                return sampleError("helper ownership uncertain");
+            if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
+            if (response.status != PublicHttpsStatus::Ok) return sampleError(publicHttpsStatusName(response.status));
+            if (!marketSampleClockContinuous(initial, sent, received) || response.observedUtc < sent.second ||
+                response.observedUtc > received.second || response.httpStatus != 200)
+                return sampleError("invalid response observation time or HTTP status");
+            if (std::chrono::steady_clock::now() >= limits.parentDeadline)
+                return sampleError(publicHttpsStatusName(PublicHttpsStatus::Timeout));
+            previous = received;
+            reply = {sent.second, response.observedUtc, received.second, std::move(response.body)};
+            return 0;
+        };
+
+        MarketRewardReplies replies;
+        auto &[opening, indexed, closing] = replies;
+        if (const int error = take({PublicFeed::PearlMainnetTip}, opening)) return error;
+        const auto tip = parsePearlBlockbookTip(opening.body, opening.observedUtc, PearlRewardCutoff::WholeObservationSecond);
         if (!lifetime.permitted()) return sampleError("helper ownership uncertain");
         if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);
-        if (options.saveFlag)
-            return savePublicMarketRewardReview(options.archiveName, response, initial.second, received.second,
-                                                result, lifetime, stop);
-        return reportPearlSubsidy(result, response.observedUtc, true);
+        if (!tip.value) return reportPearlRewardFailure(tip);
+        if (const int error = take({PublicFeed::PearlIndexedBlockHash, 0, 0, tip.value->tipHeight}, indexed)) return error;
+        if (const int error = take({PublicFeed::PearlMainnetTip}, closing)) return error;
+        return reportPublicMarketReward(options.archiveName, replies, lifetime, stop);
     } catch (...) {
         if (!lifetime.permitted()) return sampleError("helper ownership uncertain");
         if (marketSampleStopped(stop)) return sampleError("sample cancelled", 130);

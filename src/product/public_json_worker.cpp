@@ -20,13 +20,19 @@ int main(int argc, char **argv) {
             n[i] = n[i] * 10 + static_cast<unsigned>(c - '0');
         }
     }
-    if (n[0] > static_cast<unsigned>(om::PublicFeed::KrakenUsdtTrades) || n[1] > INT64_MAX || n[2] > INT64_MAX || n[3] > 60000 || n[4] > 60000 || n[5] > 1024 * 1024 || n[6] > 32768) return 2;
+    if (n[0] > static_cast<unsigned>(om::PublicFeed::PearlIndexedBlockHash) || n[1] > INT64_MAX || n[2] > INT64_MAX || n[3] > 60000 || n[4] > 60000 || n[5] > 1024 * 1024 || n[6] > 32768) return 2;
 #if defined(_WIN32)
     if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 2;
 #endif
     std::atomic<bool> cancel{false};
     om::PublicJsonClient client;
-    auto response = client.get({static_cast<om::PublicFeed>(n[0]), static_cast<int64_t>(n[1]), static_cast<int64_t>(n[2])}, cancel,
+    om::PublicJsonRequest request{static_cast<om::PublicFeed>(n[0]), static_cast<int64_t>(n[1]), static_cast<int64_t>(n[2])};
+    if (request.feed == om::PublicFeed::PearlIndexedBlockHash) {
+        if (n[1] > om::maxPearlRewardTipHeight || n[2]) return 2;
+        request.blockHeight = static_cast<uint32_t>(n[1]);
+        request.fromUtc = 0;
+    }
+    auto response = client.get(request, cancel,
         {static_cast<unsigned>(n[3]), static_cast<unsigned>(n[4]), static_cast<size_t>(n[5]), static_cast<size_t>(n[6]),
          argc == 9 ? argv[8] : ""});
     std::string wire;

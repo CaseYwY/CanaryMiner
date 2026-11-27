@@ -291,8 +291,10 @@ resolver address is visible to users with access to the command line.
 
 ### Review the next Pearl mainnet subsidy
 
-The live command makes one request to the documented `/api/status` endpoint of the Pearl Research Labs Blockbook indexer. Use a build with
-public HTTPS enabled. The optional DNS server is scoped to this sample. The saved-file command opens
+The live command queries the Pearl Research Labs Blockbook indexer in order. It reads `/api/status`,
+asks `/api/v2/block-index/{height}` for the indexed hash at the reported height, then reads `/api/status`
+again. The three requests share one 15-second sampling budget and one helper-ownership lifetime.
+Use a build with public HTTPS enabled. The optional DNS server is scoped to this sample. The saved-file command opens
 a user-selected raw status response with a declared UTC cutoff in Unix seconds. It starts no HTTPS helper.
 
 ```text
@@ -302,12 +304,14 @@ canary-miner market-reward --file blockbook-status.json --as-of UTC_SECONDS
 
 The command checks Pearl mainnet identity, eight-digit grain precision, synchronized index and backend
 heights, and a valid index update time no more than 30 minutes before the observation or declared
-cutoff. The provider exposes index update time as `lastBlockTime`. It records synchronization activity
-and has no block-header time or finality guarantee. The report labels the indexed height and the
-backend hash separately. Equal heights can occur during a same-height reorganization. Live mode uses
-the HTTPS helper's whole observation second, including index timestamps within that second. Offline
-mode treats the supplied integer cutoff as an exact instant and rejects even a fractional second
-after it. [Pearl Blockbook contract](https://github.com/pearl-research-labs/blockbook/blob/master/openapi.yaml) · [Status time source](https://github.com/pearl-research-labs/blockbook/blob/master/api/worker.go#L2691-L2748)
+cutoff. The provider exposes index update time as `lastBlockTime`, which records synchronization
+activity. Live mode also requires both status responses to agree on height and backend tip hash, and
+the indexed hash at that height to match. An advance, an observed same-height reorganization, or a
+hash mismatch rejects the sample without retrying. The result records agreement among these three
+responses from one provider. A later reorganization can still change the tip. The live checks use
+each status response's whole observation second. The raw saved-file mode uses only the selected
+status response and treats the supplied cutoff as an exact instant, rejecting even a fractional
+second after it. [Pearl Blockbook contract](https://github.com/pearl-research-labs/blockbook/blob/master/openapi.yaml) · [Status time source](https://github.com/pearl-research-labs/blockbook/blob/master/api/worker.go#L2691-L2748)
 
 For next height `h`, calculate the integer subsidy in grains by flooring
 `S × H / ((h + H) × (h + H − 1))`. The supply cap `S` is 210,000,000,000,000,000 grains and
@@ -328,9 +332,12 @@ canary-miner market-reward --allow-public-reward --save-review capture.cmr
 canary-miner market-reward --open-review capture.cmr
 ```
 
-A save records the original response bytes, the request start, observation and completion seconds, and the exact report in a version 1 archive. The SHA-256 checksum covers the entire record and detects local corruption. The response's origin depends on the original HTTPS request. Treat the archive as a local record. The optional resolver flag applies to the live request only. Capture publishes a new file after the response passes the same checks as the live report. It preserves an existing archive or temporary sibling. If stdout fails after publication, the command returns 1 and the archive remains available for replay. After an uncertain publication, inspect both files before retrying.
+A save records all three original response bodies in request order, each request's start, observation and completion seconds, and the exact report in a version 2 archive. The SHA-256 checksum covers the entire record and detects local corruption. The response's origin depends on the original HTTPS request. Treat the archive as a local record. The optional resolver flag applies to the live request only. Capture publishes a new file after the responses pass the same checks as the live report. It preserves an existing archive or temporary sibling. If stdout fails after publication, the command returns 1 and the archive remains available for replay. After an uncertain publication, inspect both files before retrying.
 
-Replay works without public HTTPS support. It validates the archive, checks the ordering and range of the recorded times, and recomputes the historical report from the response at the recorded whole observation second. The recomputed report must match the saved report. A valid capture remains reviewable as it ages. The live, captured and manually declared modes label the basis of their report. Capture and replay have no access to account payouts or income settings.
+Replay works without public HTTPS support. It validates the archive, checks the ordering and range
+of the recorded times, and repeats the height and hash checks at the original observation times.
+The recomputed report must match the saved report. Version 1 archives remain readable with their
+original status-only report. Capture and replay have no access to account payouts or income settings.
 
 ### Native ownership during one-shot ticker and hour sampling
 

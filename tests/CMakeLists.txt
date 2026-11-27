@@ -1885,7 +1885,7 @@ set_tests_properties(market_trade_review_cli PROPERTIES TIMEOUT 60 SKIP_RETURN_C
 add_test(NAME public_market_hour_cli COMMAND ${Python3_EXECUTABLE} -B ${R}/tests/test_public_market_hour_cli.py $<TARGET_FILE:test_pearl_cuda_cli_host> $<TARGET_FILE:market_tickers_cli_fixture> $<BOOL:${CANARY_ENABLE_PUBLIC_HTTPS}>)
 set_tests_properties(public_market_hour_cli PROPERTIES TIMEOUT 45 SKIP_RETURN_CODE 77)
 add_executable(market_sample_lifetime_fixture ${R}/tests/market_sample_lifetime_fixture.cpp)
-target_link_libraries(market_sample_lifetime_fixture PRIVATE canary_market ${CMAKE_DL_LIBS})
+target_link_libraries(market_sample_lifetime_fixture PRIVATE canary_economics ${CMAKE_DL_LIBS})
 if(WIN32)
   target_compile_definitions(market_sample_lifetime_fixture PRIVATE NOMINMAX)
 endif()
