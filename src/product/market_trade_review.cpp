@@ -211,7 +211,7 @@ const char *marketTradeStatusName(MarketDataStatus status,PublicHttpsStatus tran
     return marketDataStatusName(status);
 }
 
-PublicTradeReport renderPublicTradeSample(const PublicTickerCapture &capture,std::string &report) {
+PublicQuoteReport renderPublicTradeSample(const PublicTickerCapture &capture,std::string &report,bool withReceipts) {
     using market_detail::MarketSampleClock;
     using market_detail::marketTradeClockContinuous;
     const auto &gate=capture.gate,&kraken=capture.kraken;
@@ -221,22 +221,24 @@ PublicTradeReport renderPublicTradeSample(const PublicTickerCapture &capture,std
         gate.sentUtc>gate.receivedUtc || kraken.sentUtc<gate.receivedUtc || kraken.sentUtc>kraken.receivedUtc ||
         !marketTradeClockContinuous(start,start,first) || !marketTradeClockContinuous(start,first,second) ||
         !marketTradeClockContinuous(start,second,cutoff))
-        return PublicTradeReport::InvalidClock;
+        return PublicQuoteReport::InvalidClock;
 
     const auto pearl=parsePublicTrade(gate.response,PublicFeed::GatePearlTrades,gate.sentUtc,gate.receivedUtc,gate.elapsedMs);
     const auto fx=parsePublicTrade(kraken.response,PublicFeed::KrakenUsdtTrades,kraken.sentUtc,kraken.receivedUtc,kraken.elapsedMs);
     report="Public trade sample (newest timestamp in each returned batch)\n"
         "Capture UTC ms "+std::to_string(capture.cutoffUtc)+" | ages at capture\n";
     appendTrade(report,"Gate Pearl mainnet PRL/USDT",pearl,gate.response.status,capture);
+    if (withReceipts) appendPublicQuoteReceipt(report,gate,true);
     appendTrade(report,"Kraken USDT/USD",fx,kraken.response.status,capture);
+    if (withReceipts) appendPublicQuoteReceipt(report,kraken,true);
     const auto reference=publicTradeReference(pearl.value?&*pearl.value:nullptr,fx.value?&*fx.value:nullptr,
                                                capture.cutoffUtc,capture.elapsedMs);
     report+="PRL/USD trade reference at capture: ";
     if (reference.usd) {
         report+=reference.usd->text()+'\n';
-        return PublicTradeReport::Complete;
+        return PublicQuoteReport::Complete;
     }
     report+="N/A ("+std::string(reference.unavailable)+")\n";
-    return PublicTradeReport::Incomplete;
+    return PublicQuoteReport::Incomplete;
 }
 } // namespace om

@@ -125,15 +125,15 @@ int samplePublicTrades(const std::filesystem::path &helper,const MarketTickerOpt
     if (!marketTradeClockContinuous(start,previous,cutoff)) return tradeClockFault();
     capture.cutoffUtc=cutoff.second;
     capture.elapsedMs=cutoff.first-start.first;
-    if (options.saveFlag) return savePublicTickerReview(options.archiveName,capture,lifetime,stop);
+    if (options.saveFlag) return savePublicTickerReview(options.archiveName,capture,lifetime,stop,options.saveIncomplete);
 
     std::string report;
     const auto status=renderPublicTradeSample(capture,report);
     if (!lifetime.permitted()) return ownershipUncertain();
     if (marketSampleStopped(stop)) return interrupted();
-    if (status==PublicTradeReport::InvalidClock) return tradeClockFault();
+    if (status==PublicQuoteReport::InvalidClock) return tradeClockFault();
     if (std::fwrite(report.data(),1,report.size(),stdout)!=report.size() || std::fflush(stdout)!=0) return 1;
-    return status==PublicTradeReport::Complete ? 0 : 3;
+    return status==PublicQuoteReport::Complete ? 0 : 3;
 }
 
 }  // namespace
@@ -168,7 +168,8 @@ int commandPublicTickers(const MarketTickerOptions &options, const std::filesyst
             std::fputs("market-tickers: local clock unavailable or changed during sampling\n", stderr);
             return 3;
         }
-        if (options.saveFlag) return savePublicTickerReview(options.archiveName, capture, lifetime, stop);
+        if (options.saveFlag)
+            return savePublicTickerReview(options.archiveName, capture, lifetime, stop, options.saveIncomplete);
         const auto &p = sample.snapshot.pearlQuote, &f = sample.snapshot.fxQuote;
         const auto latest = latestMarketReference(p ? &*p : nullptr, f ? &*f : nullptr, sample.utc, sample.mono,
                                                    policy.freshness);

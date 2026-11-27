@@ -200,6 +200,8 @@ int main(int argc, char **argv) {
         if (mode == "foreign")
             response.body = R"({"error":[],"result":{"private-sentinel":{"c":["87213","1"]}}})";
     }
+    if (!candles && !reward && !trades && mode == "successful-retry-header")
+        response.retryAfterSeconds = 2;
     if (!candles && !reward && !trades && mode == "archive") {
         response.body = "\t" + response.body + "\r\n  ";
         std::ofstream original(dir / ("ticker-body-" + std::string(feed)), std::ios::binary);

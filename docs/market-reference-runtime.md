@@ -202,7 +202,7 @@ multiplication. A stale price can still appear with its age and an explicit
 stale label. The command returns 0 for a complete pair, 3 for an unavailable
 pair, and 130 for cancellation after confirmed cleanup.
 
-Saving requires a complete pair. The local archive retains the original
+`--save-review` requires a complete pair. The local archive retains the original
 responses and clocks. Reopening recalculates the capture offline at its
 original cutoff. Earlier readers need an update to open the trade archive.
 The returned batches establish only which entries the providers returned.
@@ -229,6 +229,27 @@ using the original cutoff. The command checks for cancellation before the final 
 Once published, the archive stays saved through terminal output errors. The checksum detects corruption.
 It provides no signature or proof of a provider's
 trade time. The command runs independently of Dashboard consent and economic-mode settings.
+
+### Keep incomplete ticker or trade samples
+
+```text
+canary-miner market-tickers --allow-public-tickers --save-sample quote-attempt.cmt
+canary-miner market-tickers --allow-public-trades --save-sample trade-attempt.cmt
+canary-miner market-tickers --open-review quote-attempt.cmt
+```
+
+Use `--save-sample` to keep both source outcomes even if either quote fails, is stale
+or cannot be aligned. The archive includes bounded original JSON for successful HTTP replies,
+request and receipt timestamps, and available HTTP status and retry delay. The report shows
+which prices were available at capture. The existing eligibility checks still govern the USD
+reference. The archive omits the DNS resolver setting.
+
+Capture returns 0 for a complete reference or 3 for an incomplete reference, including a
+successfully saved incomplete sample. A saved capture prints its report after the file is
+published. Clock failure, cancellation or uncertain helper ownership prevents publication.
+Use a new basename in a protected directory. A valid reopen returns 0 and reproduces the
+original report offline on either build profile. Older readers require an update to read
+sample archives.
 
 ### Review saved ticker payloads
 

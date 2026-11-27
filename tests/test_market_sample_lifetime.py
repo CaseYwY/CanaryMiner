@@ -23,6 +23,8 @@ def main(cli, worker):
              "Latest PRL/USD reference: 2.45"),
             ("market-tickers", ["--allow-public-tickers", "--save-review", "capture.cmt"], "ticker-requests", ["0", "2"],
              "PRL/USD reference at capture: 2.45"),
+            ("market-tickers", ["--allow-public-tickers", "--save-sample", "capture.cmt"], "ticker-requests", ["0", "2"],
+             "PRL/USD reference at capture: 2.45"),
             ("market-hour", ["--allow-public-candles"], "candle-requests", ["4", "5"],
              "Mean USD per PRL (exact sum / minutes): 210 / 60"),
             ("market-hour", ["--allow-public-candles", "--save-review", "capture.cmh"], "candle-requests", ["4", "5"],
@@ -36,7 +38,8 @@ def main(cli, worker):
                    "reward-requests", ["6", "9", "6"], "tip verified across three requests"),)
         for command, args, log, feeds, expected_report in cases:
             requests = root / log
-            archive = root / (args[-1] if "--save-review" in args else "unexpected.cmt")
+            saving = "--save-review" in args or "--save-sample" in args
+            archive = root / (args[-1] if saving else "unexpected.cmt")
             modes = ("fresh", "stale", "first", "second") if sys.platform.startswith("linux") else ("fresh", "stale")
             if "--kraken-fallback" in args:
                 (root / "candle-scenario").write_text("gap-fx", encoding="ascii")
@@ -67,7 +70,7 @@ def main(cli, worker):
                         valid = valid and "fixture epoch advanced" in result.stderr
                 if not valid:
                     failures.append((command, mode, launched, result.returncode, result.stdout, result.stderr))
-                assert archive.exists() == ("--save-review" in args and mode == "fresh"), result
+                assert archive.exists() == (saving and mode == "fresh"), result
                 assert not archive.with_name(archive.name + ".tmp").exists(), result
             if "--kraken-fallback" in args:
                 (root / "candle-scenario").unlink()
@@ -76,7 +79,7 @@ def main(cli, worker):
             (root / "ticker-scenario").write_text("clock-rollback", encoding="ascii")
             requests = root / "ticker-requests"
             requests.unlink(missing_ok=True)
-            result = subprocess.run([fixture, "market-tickers", "--allow-public-tickers", "--save-review", "rollback.cmt"],
+            result = subprocess.run([fixture, "market-tickers", "--allow-public-tickers", "--save-sample", "rollback.cmt"],
                                     cwd=root, capture_output=True, text=True, timeout=8)
             assert result.returncode == 3 and not result.stdout and "local clock unavailable or changed" in result.stderr, result
             assert requests.read_text().splitlines() == ["0"]
@@ -84,7 +87,7 @@ def main(cli, worker):
             requests.unlink()
             (root / "ticker-scenario").unlink()
             (root / "sample-lifetime-mode").write_text("stop-after-sync", encoding="ascii")
-            stopped = subprocess.run([fixture, "market-tickers", "--allow-public-tickers", "--save-review", "sync.cmt"],
+            stopped = subprocess.run([fixture, "market-tickers", "--allow-public-tickers", "--save-sample", "sync.cmt"],
                                      cwd=root, capture_output=True, text=True, timeout=8)
             assert stopped.returncode == 130 and not stopped.stdout and "sample cancelled" in stopped.stderr, stopped
             assert requests.read_text().splitlines() == ["0", "2"]

@@ -352,13 +352,14 @@ int main(int argc, char **argv) {
     }
     if (cli.command == Command::MarketTickers) {
         if (cli.help) {
-            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP|cloudflare-doh] [--save-review NAME.cmt]\n"
-                      "canary-miner market-tickers --allow-public-trades [--dns-server IP|cloudflare-doh] [--save-review NAME.cmt]\n"
+            std::puts("canary-miner market-tickers --allow-public-tickers [--dns-server IP|cloudflare-doh] [--save-review NAME.cmt | --save-sample NAME.cmt]\n"
+                      "canary-miner market-tickers --allow-public-trades [--dns-server IP|cloudflare-doh] [--save-review NAME.cmt | --save-sample NAME.cmt]\n"
                       "canary-miner market-tickers --file FILE\n"
                       "canary-miner market-tickers --open-review FILE\n"
                       "Sample Gate PEARL_USDT and Kraken USDTUSD with the installed HTTPS helper, or review saved JSON offline.\n"
                       "Trade sampling uses public fills and checks their event times separately from receipt.\n"
-                      "Open recalculates the original capture offline. Public sampling requires a public-HTTPS-enabled build.");
+                      "Save sample also keeps incomplete captures. Open recalculates the original capture offline.\n"
+                      "Public sampling requires a public-HTTPS-enabled build.");
             return kExitOk;
         }
         signal(SIGINT, onSignal);

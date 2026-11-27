@@ -22,7 +22,8 @@ inline bool nativePublicTickerInvocation(const MarketTickerOptions &options, int
         nativeMarketArgumentPair(argc, argv, 1, "market-tickers", 2, consent) &&
         (!options.dnsFlag || nativeMarketArgumentPair(argc, argv, options.dnsFlag, "--dns-server",
                                                       options.dnsFlag + 1, options.dnsServer)) &&
-        (!options.saveFlag || nativeMarketArgumentPair(argc, argv, options.saveFlag, "--save-review",
+        (!options.saveFlag || nativeMarketArgumentPair(argc, argv, options.saveFlag,
+                                                       options.saveIncomplete ? "--save-sample" : "--save-review",
                                                        options.saveFlag + 1, options.archiveName));
 }
 
