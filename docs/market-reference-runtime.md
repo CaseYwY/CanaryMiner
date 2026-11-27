@@ -324,7 +324,8 @@ canary-miner market-hour --open-review sample.cmh
 
 The version 4 archive records the frozen window, request and receipt times, fallback permission,
 and the bounded response for each attempted source. It keeps admitted JSON bodies byte for byte.
-An HTTP request failure carries its recorded status and no body. For each usable minute series,
+An HTTP request failure carries its recorded status and no body. The report shows any recorded HTTP status
+and bounded retry delay for failed or invalid responses. For each usable minute series,
 the report lists contiguous missing UTC ranges. A series with an invalid or unavailable response
 shows the failure instead of attributing a missing-minute count to the provider.
 
@@ -333,7 +334,7 @@ A save failure prints an error on stderr. Opening a valid archive exits with 0 a
 original report with its captured clock and completeness status. Cancellation, uncertain helper
 cleanup, or a discontinuous clock during sampling prevent publication.
 
-Use a new private local basename. `--save-review` keeps its complete-coverage requirement.
+Use a new ASCII basename in a trusted private local directory. `--save-review` keeps its complete-coverage requirement.
 `--save-sample` and `--save-review` are mutually exclusive. Treat the archive as local market-data
 evidence, subject to the same provider access and use terms.
 

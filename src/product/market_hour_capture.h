@@ -12,6 +12,8 @@ struct HourSample {
     const char *problem = nullptr;
     uint64_t observedUtc = 0;
     std::vector<ReviewMinute> minutes;
+    long httpStatus = 0;
+    unsigned retryAfterSeconds = 0;
 };
 
 struct PublicHourReceipt {

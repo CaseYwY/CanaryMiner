@@ -129,6 +129,7 @@ class MarketHourCli(unittest.TestCase):
             "Mean USDT per PRL (exact sum / minutes): 202.5 / 60\n"
             "Mean USD per PRL (exact sum / minutes): N/A (requires complete aligned PRL and FX coverage)\n"
             "Sample result: incomplete\n"
+            "Coinbase USDT/USD HTTP status 429 (Retry-After 1 s)\n"
             f"Capture UTC {cutoff} (ages at capture)\n"
         ).encode("ascii")
         header = f"CANARY-MARKET-HOUR-REVIEW-4\n{cutoff}\n{END}\n1\n2\n".encode("ascii")

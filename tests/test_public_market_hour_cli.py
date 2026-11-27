@@ -342,7 +342,10 @@ def main(cli_path, fixture, enabled, sample_only=False):
 
         for mode, flags, expected, feeds, code in (
             ("gap-pearl", (), "MEXC Pearl mainnet PRL/USDT missing elapsed-minute ranges", ["4", "5"], 3),
-            ("limited", (), "provider rate limited", ["4", "5"], 3),
+            ("limited", (), "HTTP status 429 (Retry-After 1 s)", ["4", "5"], 3),
+            ("forbidden", (), "HTTP status 403", ["4", "5"], 3),
+            ("restricted", (), "HTTP status 451", ["4", "5"], 3),
+            ("server-error", (), "HTTP status 503", ["4", "5"], 3),
             ("blocked", (), "non-public destination refused", ["4", "5"], 3),
             ("malformed", (fallback,), "invalid minute response schema", ["4", "5"], 3),
             ("future", (fallback,), "invalid response observation time", ["4", "5"], 3),
@@ -360,7 +363,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
             if mode == "kraken-gap":
                 assert f"[{sample_start + 12 * 60}, {sample_start + 13 * 60})" in sample.stdout
                 assert f"[{sample_end - 60}, {sample_end})" in sample.stdout
-            if mode in ("limited", "blocked", "malformed", "future"):
+            if mode in ("limited", "forbidden", "restricted", "server-error", "blocked", "malformed", "future"):
                 assert "missing elapsed-minute ranges" not in sample.stdout, sample
             assert resolver_requests.read_text(encoding="ascii").splitlines() == [resolver] * len(feeds)
             resolver_requests.unlink()

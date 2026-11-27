@@ -485,6 +485,8 @@ market_detail::HourSample market_detail::decodePublicHourReply(const PublicHourR
                                                                uint64_t start, uint64_t end) {
     HourSample sample;
     const auto &reply = receipt.response;
+    sample.httpStatus = reply.httpStatus;
+    sample.retryAfterSeconds = reply.retryAfterSeconds;
     if (reply.status != PublicHttpsStatus::Ok) {
         sample.problem = reply.httpStatus == 429 ? "provider rate limited the request" : publicHttpsStatusName(reply.status);
     } else if (reply.httpStatus != 200) {
@@ -539,8 +541,18 @@ bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSa
     report += '\n';
     if (capture) {
         report += window.tokenUsd ? "Sample result: complete\n" : "Sample result: incomplete\n";
-        const auto missing = [&](const char *name, const HourSample &sample) {
-            if (sample.problem || sample.minutes.size() == marketHourMinutes) return;
+        const auto detail = [&](const char *name, const HourSample &sample) {
+            if (sample.problem) {
+                if (sample.httpStatus || sample.retryAfterSeconds) {
+                    report += name;
+                    if (sample.httpStatus) report += " HTTP status " + std::to_string(sample.httpStatus);
+                    if (sample.retryAfterSeconds)
+                        report += " (Retry-After " + std::to_string(sample.retryAfterSeconds) + " s)";
+                    report += '\n';
+                }
+                return;
+            }
+            if (sample.minutes.size() == marketHourMinutes) return;
             report += std::string(name) + " missing elapsed-minute ranges (UTC seconds)";
             uint64_t expected = end - marketHourSeconds;
             const auto gapBefore = [&](uint64_t next) {
@@ -554,9 +566,9 @@ bool market_detail::renderPublicHour(uint64_t end, uint64_t cutoff, const HourSa
             gapBefore(end);
             report += '\n';
         };
-        missing("MEXC Pearl mainnet PRL/USDT", pearl);
-        missing("Coinbase USDT/USD", coinbase);
-        if (kraken) missing("Kraken USDT/USD fallback", *kraken);
+        detail("MEXC Pearl mainnet PRL/USDT", pearl);
+        detail("Coinbase USDT/USD", coinbase);
+        if (kraken) detail("Kraken USDT/USD fallback", *kraken);
     }
     return window.tokenUsd.has_value();
 }
