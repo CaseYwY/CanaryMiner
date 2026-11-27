@@ -10,6 +10,8 @@ import sys
 import tempfile
 
 from test_meter_tax_cli import fraction, period, tax_tariff
+from test_octopus_cycle_review_cli import LONDON, cycle
+from test_meter_bill_named_cli import utc
 from test_octopus_meter_rates_cli import BEGIN, BUNDLE, END, GO_PRODUCT, HOUR, PAYMENT, PRODUCT, SLOTS, inputs, pages as paginate, row
 
 
@@ -137,6 +139,33 @@ def main(cli, fixture, bundle, real_worker):
         assert go_bill.returncode == 0 and f"Cycle estimate at closing {go_total:.6f} GBP" in go_bill.stdout, go_bill
         go_replay = run("meter-bill", "--open-review", go_archive)
         assert go_replay.returncode == 0 and go_replay.stdout == go_bill.stdout, go_replay
+
+        # The generated declaration goes through the installed capture command and back into a linked bill review.
+        go["reset_policy"] = {"monthly_day": 1, "clock": LONDON}
+        write(tariff, go)
+        prior = run("meter-bill", "--tariff", tariff.name, "--intervals", "meter.json",
+                    "--octopus-rates", rate_file.name, "--save-review", "march-monthly.cmr")
+        assert prior.returncode == 0, prior
+        generated = run("meter-bill", "--prepare-next-cycle", "march-monthly.cmr", "--save-tariff", "april.json")
+        assert generated.returncode == 0 and "Payment method DIRECT_DEBIT" in generated.stdout, generated
+        ends = utc("2023-04-30T23:00:00")
+        register_end = Decimal(readings["register_readings"][-1]["imported_kwh"])
+        _, new_register, new_snapshot, new_total = cycle(END, ends, GO_PRODUCT, register_end, 25, 40, 30)
+        write(first, new_snapshot["unit_rate_pages"][0])
+        write(fee, new_snapshot["standing_charge_pages"][0])
+        write(root / "april-meter.json", new_register)
+        requests.unlink()
+        captured = run("meter-rates", "--allow-public-rates", "--tariff", "april.json", "--payment-method",
+                       PAYMENT, "--save-rates", "april-rates.json")
+        assert captured.returncode == 0 and "Saved 1 Octopus Go rate intervals" in captured.stdout, captured
+        assert requests.read_text().splitlines() == [
+            f"{feed} {END // 1000} {ends // 1000} {GO_PRODUCT} C 1 -" for feed in (10, 11)]
+        applied = run("meter-bill", "--next-cycle-review", "march-monthly.cmr", "--tariff", "april.json",
+                      "--intervals", "april-meter.json", "--octopus-rates", "april-rates.json",
+                      "--save-review", "april.cmr")
+        assert applied.returncode == 0 and f"Cycle estimate at closing {new_total:.6f} GBP" in applied.stdout, applied
+        replay = run("meter-bill", "--open-review", "april.cmr", "--previous-cycle", "march-monthly.cmr")
+        assert replay.returncode == 0 and replay.stdout == applied.stdout, replay
 
         base = ("10", str(BEGIN // 1000), str(END // 1000), "5000", "15000", "65536", "32768")
         for malformed in (("GO-VAR-22-10-14", "I", "1"), ("AGILE-23-02-29", "C", "1"),

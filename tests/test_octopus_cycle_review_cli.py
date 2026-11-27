@@ -82,6 +82,9 @@ def main(cli, bundle):
                        '--octopus-rates', rates, '--save-review', target, '--as-of-utc-ms', cutoff,
                        *extra, **expectation)
 
+        def prepare(previous, output='generated-tariff.json', *, kind='--save-tariff', **expectation):
+            return run('--prepare-next-cycle', previous, kind, output, **expectation)
+
         def close(amount, result):
             assert result.count('Cycle estimate at closing') == 1, result
             assert f'Cycle estimate at closing {amount:.6f} GBP' in result, result
@@ -112,6 +115,36 @@ def main(cli, bundle):
         inputs(partial)
         assert 'Provisional cycle estimate' in save('partial.cmr', april + HOUR)
 
+        prepare('partial.cmr', 'rejected.json', code=3, reason='previous review must be a complete')
+        assert not (root / 'rejected.json').exists() and not (root / 'rejected.json.tmp').exists()
+        for flags in (('--prepare-next-cycle', old), ('--save-tariff', 'x.json'),
+                      ('--prepare-next-cycle', old, '--save-review', 'x.cmr'),
+                      ('--prepare-next-cycle', old, '--save-register', 'x.cmr'),
+                      ('--prepare-next-cycle', old, '--save-tariff', '../x.json'),
+                      ('--prepare-next-cycle', old, '--save-register', 'x.json', '--save-tariff', 'y.json')):
+            run(*flags, code=2, reason='invalid options')
+        prepared = prepare(old)
+        assert f'[{april}, {may})' in prepared and f'Payment method {PAYMENT}' in prepared and '42.29' not in prepared
+        starter_report = prepare(old, 'opening-register.json', kind='--save-register')
+        assert '42.29' not in starter_report and 'Saved the opening register' in starter_report
+        tariff_draft = root / 'generated-tariff.json'
+        saved_tariff = tariff_draft.read_bytes()
+        draft = json.loads(saved_tariff)
+        assert draft['confirmed_utc'] == previous[0]['confirmed_utc']
+        assert draft['reset_policy'] == previous[0]['reset_policy'] and draft['plan']['clock'] == LONDON
+        assert draft['plan']['key'] != previous[0]['plan']['key']
+        assert draft['plan']['revisions'][0]['dynamic'] == []
+        assert draft['plan']['revisions'][0]['begin_utc_ms'] == april
+        assert draft['plan']['revisions'][0]['end_utc_ms'] == may
+        assert draft['opening']['through_utc_ms'] == draft['opening']['cycle_begin_utc_ms'] == april
+        assert draft['opening']['cycle_end_utc_ms'] == may
+        assert draft['opening']['imported_kwh'] == draft['opening']['accrued_subtotal'] == '0'
+        starter = json.loads((root / 'opening-register.json').read_bytes())
+        assert starter == register([(april, '42.29')])
+        prepare(old, code=3, reason='existing file was preserved')
+        assert tariff_draft.read_bytes() == saved_tariff and not tariff_draft.with_suffix('.json.tmp').exists()
+        assert old.read_bytes() == old_bytes
+
         inputs(current)
         refused('partial.cmr', may + HOUR, 'previous review must be a complete')
         refused(old, april + HOUR - 1, 'precedes the saved cutoff')
@@ -140,6 +173,9 @@ def main(cli, bundle):
         refused(old, june + HOUR, 'does not start at the previous closing time')
 
         inputs(current)
+        tariff.write_bytes(saved_tariff)
+        starter['register_readings'].extend(current[1]['register_readings'][1:])
+        write(readings, starter)
         source_bytes = [path.read_bytes() for path in (tariff, readings, rates)]
         write(invoice, dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2, rounding='half_even',
                             cycles=[dict(begin_utc_ms=april, end_utc_ms=may, supply_charge=str(current[3]))]))
@@ -177,12 +213,16 @@ def main(cli, bundle):
         tampered = left + fingerprint + b'0' * 64 + right[64:]
         (root / 'tampered.cmr').write_bytes(tampered + sha256(tampered).hexdigest().encode() + b'\n')
         run('--open-review', 'tampered.cmr', code=3, reason='payment method, meter or reset rule differs')
+        prepare('tampered.cmr', 'tampered.json', code=3, reason='payment method, meter or reset rule differs')
+        assert not (root / 'tampered.json').exists()
         for path in (old, tariff, readings, rates, invoice):
             path.unlink()
         assert run('--open-review', archived) == report
         run('--open-review', archived, '--previous-cycle', old, code=3, reason='archive unavailable')
 
         inputs(following)
+        assert f'[{may}, {june})' in prepare(archived, 'may-tariff.json')
+        tariff.write_bytes((root / 'may-tariff.json').read_bytes())
         final = advance(archived, 'may.cmr', june + HOUR)
         close(following[3], final)
         assert run('--open-review', 'may.cmr', '--previous-cycle', archived) == final
@@ -198,6 +238,10 @@ def main(cli, bundle):
         inputs(go_old)
         close(go_old[3], save('go-october.cmr', november + HOUR))
         inputs(go_new)
+        assert f'[{november}, {december})' in prepare('go-october.cmr', 'go-next.json')
+        prepare('go-october.cmr', 'go-opening.json', kind='--save-register', code=3, reason='no absolute closing')
+        assert not (root / 'go-opening.json').exists()
+        tariff.write_bytes((root / 'go-next.json').read_bytes())
         go = advance('go-october.cmr', 'go-november.cmr', december + HOUR)
         close(go_new[3], go)
         assert 'Octopus Go public rate snapshot' in go and 'API quantities are reported' in go
@@ -220,6 +264,13 @@ def main(cli, bundle):
         inputs(vat(previous, '0.05'))
         vat_first = save('vat-march.cmr', april + HOUR)
         close(previous[3], vat_first)
+        assert 'Review any included-price tax annotations' in prepare('vat-march.cmr', 'vat-next.json')
+        vat_draft = json.loads((root / 'vat-next.json').read_bytes())
+        assert vat_draft['schema_version'] == 4 and 'tax_periods' not in vat_draft['plan']
+        assert 'tax_bases' not in vat_draft['opening']
+        inputs(current)
+        tariff.write_bytes((root / 'vat-next.json').read_bytes())
+        close(current[3], advance('vat-march.cmr', 'vat-with-generated.cmr', may + HOUR))
         inputs(vat(current, '0.2'))
         vat_next = advance('vat-march.cmr', 'vat-april.cmr', may + HOUR)
         close(current[3], vat_next)
@@ -227,7 +278,24 @@ def main(cli, bundle):
         assert run('--open-review', 'vat-march.cmr') == vat_first
         inputs(vat(current, '0.2', added=True))
         refused('vat-march.cmr', may + HOUR, 'already include VAT')
-        print(f'Octopus adjacent cycle review passed {count} installed CLI commands.')
+        annual_begin = utc('2023-01-01T00:00:00')
+        annual_end = utc('2024-01-01T00:00:00')
+        annual_next = utc('2025-01-01T00:00:00')
+        annual = cycle(annual_begin, annual_end, GO_PRODUCT, Decimal(100), 14, 6, 365)
+        annual[0].update(schema_version=5, reset_policy=dict(annual_month=1, annual_day=1, clock=LONDON))
+        inputs(annual)
+        close(annual[3], save('annual.cmr', annual_end + HOUR))
+        annual_saved = prepare('annual.cmr', 'annual-next.json')
+        assert f'[{annual_end}, {annual_next})' in annual_saved and 'exceeds the installed public rate capture bounds' in annual_saved
+
+        feb = utc('2023-02-01T00:00:00')
+        drift = cycle(feb, march, GO_PRODUCT, Decimal(100), 14, 6, 28)
+        drift[0]['reset_policy']['clock'] = dict(kind='utc', fixed_offset_seconds=0)
+        inputs(drift)
+        close(drift[3], save('utc-reset.cmr', march + HOUR))
+        prepare('utc-reset.cmr', 'drift.json', code=3, reason='London local midnight')
+        assert not (root / 'drift.json').exists()
+        print(f'Octopus adjacent cycle review and preparation passed {count} installed CLI commands.')
 
 
 if __name__ == '__main__':
