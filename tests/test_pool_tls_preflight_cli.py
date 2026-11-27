@@ -45,9 +45,13 @@ def main(cli, mode, fixture, native=None):
                            b'echo.test', b'FORBIDDEN_DEVICE_SETUP', b'kryptex.network')), result
             return result
 
-        run('--help', code=0, message=b'--pool stratum+ssl://')
+        help_result = run('--help', code=0, message=b'--pool stratum+ssl://')
+        assert b'--pool kryptex-hk-tls' in help_result.stdout
         for options in ([], ['--pool'], ['--help', '--pool', 'stratum+ssl://echo.test:443'],
-                        ['--pool', 'stratum+tcp://echo.test:443'], ['--pool', 'kryptex-hk-tls'],
+                        ['--pool', 'stratum+tcp://echo.test:443'], ['--pool', 'kryptex-hk'],
+                        ['--pool', 'herominers'], ['--pool', 'f2pool'], ['--pool', 'KRYPTEX-HK-TLS'],
+                        ['--pool', 'kryptex-hk-tl\uff53'], ['--pool', 'unknown-tls'],
+                        ['--pool', 'kryptex-hk-tls:8048'], ['--pool', 'kryptex-hk-tls', '--pool', 'kryptex-tls'],
                         ['--pool', 'stratum+ssl://127.0.0.1:443'],
                         ['--pool', 'stratum+ssl://0X7f.0.0.1:443'],
                         ['--pool', 'stratum+ssl://0x7f000001:443'],
@@ -62,12 +66,34 @@ def main(cli, mode, fixture, native=None):
         if not available:
             shutil.copy2(foreign_worker, bundled_worker)
             run('--pool', url, code=3, message=b'runtime is unavailable')
+            run('--pool', 'kryptex-hk-tls', code=3, message=b'runtime is unavailable')
+            run('--pool', 'herominers-tls', code=3, message=b'runtime is unavailable')
             return
 
         # There is a genuine fixture in both the working directory and PATH.
         run('--pool', url, code=3, message=b'transport')
         shutil.copy2(foreign_worker, bundled_worker)
         run('--pool', 'stratum+ssl://ECHO.test:443', code=0, message=b'Connection closed.', public_success=True)
+        targets = (
+            ('kryptex-tls', 'prl-us.kryptex.network', 8048),
+            ('kryptex-hk-tls', 'prl-hk.kryptex.network', 8048),
+            ('kryptex-global-tls', 'prl.kryptex.network', 8048),
+            ('kryptex-eu-tls', 'prl-eu.kryptex.network', 8048),
+            ('kryptex-br-tls', 'prl-br.kryptex.network', 8048),
+            ('kryptex-sg-tls', 'prl-sg.kryptex.network', 8048),
+            ('kryptex-ru-tls', 'prl-ru.kryptex.network', 8048),
+            ('kryptex-ae-tls', 'prl-ae.kryptex.network', 8048),
+            ('herominers-tls', 'us2.pearl.herominers.com', 1200),
+        )
+        marker = bundle / 'preflight-target'
+        for alias, host, port in targets:
+            marker.write_bytes(b'')
+            run('--pool', alias, code=0, message=b'Connection closed.', public_success=True)
+            assert marker.read_text(encoding='ascii') == f'{host} {port} tls\n'
+        marker.write_bytes(b'')
+        run('--pool', 'kryptex-hk-tl\uff53', code=2, message=b'pool-tls-check --help')
+        assert not marker.read_bytes()
+        marker.unlink()
         for host, reason in (('dns-fail.test', b'dns'), ('connect-fail.test', b'connect'),
                              ('verify-fail.test', b'verification'), ('wrong-mode.test', b'protocol')):
             run('--pool', f'stratum+ssl://{host}:443', code=3, message=b'pool-tls-check: ' + reason)

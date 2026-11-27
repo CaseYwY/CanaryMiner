@@ -53,6 +53,8 @@ enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diag
 
 inline constexpr char poolTlsCheckHelp[] =
     "canary-miner pool-tls-check --pool stratum+ssl://HOST:PORT\n"
+    "canary-miner pool-tls-check --pool kryptex-hk-tls\n"
+    "Supply one TLS URL or a strict TLS preset used by the miner.\n"
     "Check one TLS connection with system trust. Requires a TLS-enabled build.\n"
     "The check sends no mining login or share, and closes the connection before reporting.";
 
@@ -109,7 +111,7 @@ struct CliParse {
     MarketRewardOptions marketReward;
     MarketTickerOptions marketTicker;
     EnergyPeriodsOptions energyPeriods;
-    std::string poolTlsCheckUrl;
+    std::string poolTlsCheckSpec;
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
     std::vector<int> gpuIdArgIndices; // only consumed --gpu-id option/value pairs, for worker argument forwarding
@@ -174,10 +176,10 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         r.help = argc == i + 1 && (option == "-h" || option == "--help");
         if (!r.help) {
             if (argc != i + 2 || option != "--pool" || !argv[i + 1][0]) {
-                if (error) *error = "pool-tls-check: supply one explicit TLS URL. See pool-tls-check --help";
+                if (error) *error = "pool-tls-check: supply one TLS URL or strict TLS preset. See pool-tls-check --help";
                 return false;
             }
-            r.poolTlsCheckUrl = argv[i + 1];
+            r.poolTlsCheckSpec = argv[i + 1];
         }
         *out = std::move(r);
         return true;

@@ -194,11 +194,7 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
     // A secure alias has the same meaning in every build; runtime availability never changes it to TCP.
     // Use the ordinary URL path so the pool-specific protocol/policy identity is retained.
     std::string endpoint = spec;
-    for (const auto &preset : kPoolTlsPresets) {
-        if (spec != preset.alias) continue;
-        endpoint = preset.tlsUrl;
-        break;
-    }
+    if (const auto *preset = findPoolTlsPreset(spec)) endpoint = preset->tlsUrl;
     if (endpoint.rfind("stratum+ssl://", 0) == 0) {
         e.tls=true;endpoint=endpoint.substr(std::string("stratum+ssl://").size());
     }

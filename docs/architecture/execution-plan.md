@@ -97,6 +97,10 @@ The [independent donation TLS path](../pool-donation-tls.md) accepts only a sepa
 
 The [Linux TLS worker](../pool-native-tls.md#linux-certificate-status-in-the-handshake) verifies signed leaf status from the handshake. It rejects invalid or unavailable required status before Stratum. Revocation coverage for peers without a staple and for intermediate certificates remains open.
 
+## P-12s Preflight strict pool presets
+
+[`pool-tls-check --pool`](../pool-tls-runtime.md#check-a-pool-before-mining) accepts the same strict aliases as the miner. It checks the preset's fixed peer under system trust and closes the connection before reporting. Operators can verify the alias they intend to use for mining without first supplying a wallet or loading settings.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.
