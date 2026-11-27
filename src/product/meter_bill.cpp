@@ -51,7 +51,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
                       options.saveTariffArg, options.saveRegisterArg, options.dnsServerArg, options.importPagesArg,
                       options.saveReadingsArg, options.watchArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
-    for (int index : {options.allowPublicRatesArg, options.confirmImportArg, options.quietWatchArg})
+    for (int index : {options.allowPublicRatesArg, options.confirmImportArg, options.quietWatchArg,
+                      options.historyInvoicesArg})
         if (index && (index < 2 || index >= argc)) return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -90,6 +91,9 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         std::wstring_view(args.values[options.confirmImportArg]) != L"--confirm-electricity-import")
         return std::nullopt;
     if (options.quietWatchArg && std::wstring_view(args.values[options.quietWatchArg]) != L"--watch-quiet")
+        return std::nullopt;
+    if (options.historyInvoicesArg &&
+        std::wstring_view(args.values[options.historyInvoicesArg]) != L"--with-invoices")
         return std::nullopt;
     if (options.dnsServerArg && (!matches(options.dnsServerArg, L"--dns-server") ||
         std::wstring_view(args.values[options.dnsServerArg]) != std::wstring(options.dnsServer.begin(), options.dnsServer.end())))
@@ -454,7 +458,8 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
                            const std::function<bool()> &stopped, std::string &report, std::string &exactResults,
                            const MeterInvoice *invoice, std::string *exactInvoice,
                            std::string *meterOnlyExact = nullptr,
-                           std::vector<CompletedSupplyCycle> *completedSupply = nullptr) {
+                           std::vector<CompletedSupplyCycle> *completedSupply = nullptr,
+                           std::string *invoiceDetails = nullptr) {
     constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
     using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
     auto opening = declaration.opening;
@@ -496,9 +501,11 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
         if (completedSupply && accrual.settledTotal && opening.throughUtcMs == opening.cycleBeginUtcMs)
             completedSupply->push_back({{opening.cycleBeginUtcMs, opening.cycleEndUtcMs}, *accrual.settledTotal});
         if (invoice) {
+            const auto start = report.size();
             if (const auto *problem = appendInvoiceComparison(*invoice, cycle - 1, opening, accrual,
                                                               declaration.plan.currency, report, exactInvoice))
                 return problem;
+            if (invoiceDetails) invoiceDetails->append(report, start);
         }
         if (next < readings.size()) {
             opening = *accrual.ending;
@@ -689,17 +696,20 @@ const char *addPrepaidReview(const std::optional<PrepaidReviewInput> &prepaid,co
 const char *calculateMeterReview(const ReviewOriginal &original, bool includeInvoiceInExact,
                                  const std::function<bool()> &stopped, MeterReview &review,
                                  std::string *meterOnlyExact = nullptr,
-                                 std::vector<CompletedSupplyCycle> *supplyPeriods = nullptr) {
+                                 std::vector<CompletedSupplyCycle> *supplyPeriods = nullptr,
+                                 std::string *invoiceDetails = nullptr) {
     std::optional<MeterInvoice> invoice;
     if (!original.invoice.empty()) {
         if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice.emplace()))
             return problem;
         if (!invoice->independent) {
+            const auto start = review.report.size();
             review.report += invoice->kind == MeterInvoiceKind::Annual ? "Annual reconciliation uses " :
                              invoice->kind == MeterInvoiceKind::Export ? "Export invoice reconciliation uses " :
                                                                         "Invoice comparison uses ";
             review.report += std::to_string(invoice->places) + " decimal places with ties ";
             review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
+            if (invoiceDetails) *invoiceDetails += "  " + review.report.substr(start);
         }
     }
     return std::visit([&](const auto &series) {
@@ -709,11 +719,13 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
         auto *exactInvoice = includeInvoiceInExact ? &review.exact : nullptr;
         const auto *problem=reviewReadings(series, review.declaration, original.cutoff, stopped, review.report, review.exact,
                                            invoice && !independent ? &*invoice : nullptr, exactInvoice, meterOnlyExact,
-                                           completed);
+                                           completed, invoiceDetails);
         if (problem) return problem;
         if (independent) {
+            const auto start = review.report.size();
             if (const auto *invoiceProblem = reviewIndependentInvoice(*independent, *completed, series, review.declaration,
                     original.cutoff, stopped, review.report, exactInvoice)) return invoiceProblem;
+            if (invoiceDetails) invoiceDetails->append(review.report, start);
         }
         if (!review.prepaid) return static_cast<const char *>(nullptr);
         const auto start=review.exact.size();
@@ -868,11 +880,13 @@ const char *verifyCycleLink(const ReviewOriginal &original, const MeterReview &r
 const char *replaySavedReview(const ReviewOriginal &original, int64_t now, const char *lateReadingError,
                              const std::function<bool()> &stopped, MeterReview &review,
                              std::string *meterOnlyExact = nullptr,
-                             std::vector<CompletedSupplyCycle> *supplyPeriods = nullptr) {
+                             std::vector<CompletedSupplyCycle> *supplyPeriods = nullptr,
+                             std::string *invoiceDetails = nullptr) {
     if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, review)) return problem;
     if (const auto *problem = verifyMeterPrefix(original, review, stopped)) return problem;
     if (const auto *problem = verifyCycleLink(original, review)) return problem;
-    if (const auto *problem = calculateMeterReview(original, true, stopped, review, meterOnlyExact, supplyPeriods)) return problem;
+    if (const auto *problem = calculateMeterReview(original, true, stopped, review, meterOnlyExact, supplyPeriods,
+                                                   invoiceDetails)) return problem;
     return original.results == review.exact ? nullptr : "saved review amounts differ from the recalculated amounts";
 }
 
@@ -1177,17 +1191,63 @@ struct RecurringCycleWatch {
     std::string seedDigest, latestName, latestDigest;
 };
 
+bool sameCycleReviewInputs(const ReviewOriginal &a, const ReviewOriginal &b) {
+    if (a.cutoff != b.cutoff || a.tariff != b.tariff || a.intervals != b.intervals ||
+        a.supplierRates != b.supplierRates || a.prepaid != b.prepaid ||
+        a.previous.has_value() != b.previous.has_value() ||
+        a.previousCycle.has_value() != b.previousCycle.has_value()) return false;
+    if (a.previous && (a.previous->cutoff != b.previous->cutoff || a.previous->through != b.previous->through ||
+        a.previous->archiveSha256 != b.previous->archiveSha256 || a.previous->prefixSha256 != b.previous->prefixSha256))
+        return false;
+    return !a.previousCycle || sameClosingRecord(*a.previousCycle, *b.previousCycle);
+}
+
+const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing, int64_t now,
+                                const char *lateReadingError, const std::function<bool()> &stopped,
+                                std::string &details) {
+    const auto name = "cycle-" + std::to_string(closing) + ".compared.cmr";
+    std::string bytes;
+    auto state = readCycleSlot(name, maxArchiveBytes, bytes);
+    if (state == LocalFileRead::Missing) {
+        const auto temporary = localReviewPath(name + ".tmp");
+        std::error_code error;
+        if (!temporary || std::filesystem::symlink_status(*temporary, error).type() != std::filesystem::file_type::not_found)
+            return "late invoice review has uncertain temporary output";
+        // A publisher may have moved the temporary file after the first read.
+        state = readCycleSlot(name, maxArchiveBytes, bytes);
+        if (state == LocalFileRead::Missing) return nullptr;
+    }
+    ReviewOriginal comparison;
+    if (state != LocalFileRead::Ok || !decodeReviewOriginal(bytes, comparison) || comparison.invoice.empty())
+        return "late invoice review unavailable or invalid";
+    if (!original.invoice.empty()) return "cycle already contains an archived invoice comparison";
+    if (!sameCycleReviewInputs(original, comparison))
+        return "late invoice review does not match the original cycle inputs";
+    MeterReview review;
+    std::string meterOnlyExact;
+    if (const auto *problem = replaySavedReview(comparison, now, lateReadingError, stopped, review,
+                                                 &meterOnlyExact, nullptr, &details)) return problem;
+    if (meterOnlyExact != original.results) return "late invoice review changed the original cycle amounts";
+    return nullptr;
+}
+
 const char *appendCycleHistory(const ReviewOriginal &original, const MeterReview &review,
                                const std::vector<CompletedSupplyCycle> &periods, ElectricityAmount &total,
-                               std::string &rows) {
+                               const std::string *invoiceDetails, size_t &invoiceCount, std::string &rows) {
     if (periods.size() != 1) return "cycle history requires a complete supply cycle";
     const auto &cycle = periods.front();
     std::string amount;
     if (!cycle.charge.format(6, &amount) || !total.numerator.add(cycle.charge.numerator, &total.numerator))
         return "cycle history amount exceeds arithmetic capacity";
     rows += "[" + std::to_string(cycle.period.begin) + ", " + std::to_string(cycle.period.end) + ") UTC ms: " +
-        amount + " " + review.declaration.plan.currency +
-        (original.invoice.empty() ? "\n" : " (archived invoice comparison)\n");
+        amount + " " + review.declaration.plan.currency;
+    if (!original.invoice.empty()) rows += " (archived invoice comparison)";
+    else if (invoiceDetails) rows += invoiceDetails->empty() ? " (no invoice review)" : " (late invoice comparison)";
+    rows += '\n';
+    if (invoiceDetails && !invoiceDetails->empty()) {
+        ++invoiceCount;
+        rows += *invoiceDetails;
+    }
     return nullptr;
 }
 
@@ -1231,7 +1291,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                              const OctopusRateCaptureSource *source, const std::string &dns,
                              NativeProcessLifetime &lifetime, const market_detail::MarketSampleClock &started,
                              const volatile sig_atomic_t *stop, const std::function<bool()> &stopped,
-                             RecurringCycleWatch *watch, RecurringInspection mode,
+                             RecurringCycleWatch *watch, RecurringInspection mode, bool withInvoices,
                              RecurringCycleProgress &progress, std::string &report) {
     constexpr size_t maxHistory = 120;
     constexpr size_t maxNew = 24;
@@ -1256,9 +1316,11 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
     if (requestedCutoff > now) return "review cutoff is in the future";
     std::vector<CompletedSupplyCycle> periods;
     ElectricityAmount historyTotal;
-    std::string historyRows;
+    std::string historyRows, invoiceDetails;
+    size_t invoiceCount = 0;
     if (const auto *problem = replaySavedReview(previous, now, lateReadingError, stopped, priorReview,
-                                                 nullptr, history ? &periods : nullptr))
+                                                 nullptr, history ? &periods : nullptr,
+                                                 withInvoices ? &invoiceDetails : nullptr))
         return problem;
 
     const auto refreshClock = [&] {
@@ -1281,9 +1343,17 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         const auto link = bindPreviousCycle(previous, priorReview, previousDigest);
         if (!link) return "previous review must be a complete recurring Octopus cycle and matching rate window";
         if (previous.cutoff > cutoff) return "new review cutoff precedes the saved cutoff";
-        if (history)
-            if (const auto *problem = appendCycleHistory(previous, priorReview, periods, historyTotal, historyRows))
+        if (history) {
+            if (withInvoices) {
+                progress.closing = link->closedAt;
+                if (const auto *problem = readLateCycleInvoice(previous, link->closedAt, now, lateReadingError, stopped,
+                                                               invoiceDetails)) return problem;
+                progress.closing = 0;
+            }
+            if (const auto *problem = appendCycleHistory(previous, priorReview, periods, historyTotal,
+                                                         withInvoices ? &invoiceDetails : nullptr, invoiceCount, historyRows))
                 return problem;
+        }
         if (existing + progress.saved >= maxHistory) {
             if (!history && mode != RecurringInspection::None)
                 return "archive replay limit reached; use the latest verified archive as the seed";
@@ -1339,8 +1409,10 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (next.cutoff > (refreshInspection ? now : cutoff))
                 return "successor archive is newer than the requested cutoff";
             periods.clear();
+            invoiceDetails.clear();
             if (const auto *problem = replaySavedReview(next, now, lateReadingError, stopped, nextReview,
-                                                         nullptr, history ? &periods : nullptr))
+                                                         nullptr, history ? &periods : nullptr,
+                                                         withInvoices ? &invoiceDetails : nullptr))
                 return problem;
             if (nextReview.declaration.opening.cycleEndUtcMs != progress.closing)
                 return "recurring review successor closes at a different time";
@@ -1454,12 +1526,16 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         priorReview = std::move(nextReview);
     }
     if (history) {
+        if (withInvoices && !refreshClock()) return "local clock changed during the billing review";
         std::string total;
         if (!historyTotal.format(6, &total)) return "cycle history amount exceeds the display range";
         report = "Octopus supply estimates from the selected seed (" + std::to_string(existing + 1) +
             (existing ? " verified cycles)\n" : " verified cycle)\n") + historyRows +
-            "Estimated total " + total + " " + priorReview.declaration.plan.currency + "\n" +
-            std::string(waiting) + "\n";
+            "Estimated total " + total + " " + priorReview.declaration.plan.currency + "\n";
+        if (withInvoices)
+            report += "Invoice reviews available for " + std::to_string(invoiceCount) + " of " +
+                std::to_string(existing + 1) + " verified cycles\n";
+        report += std::string(waiting) + "\n";
         return nullptr;
     }
 
@@ -1500,7 +1576,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "    [--watch-every-seconds SECONDS [--watch-quiet]] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP|cloudflare-doh]]\n"
                   "canary-miner meter-bill --next-readings-plan SEED.cmr\n"
                   "canary-miner meter-bill --scheduled-readings-plan SEED.cmr\n"
-                  "canary-miner meter-bill --cycle-history SEED.cmr\n"
+                  "canary-miner meter-bill --cycle-history SEED.cmr [--with-invoices]\n"
                   "canary-miner meter-bill --import-octopus-pages DIR --tariff FILE --save-readings NAME.json\n"
                   "    --confirm-electricity-import\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
@@ -1633,7 +1709,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                 if (const auto *problem = rollOctopusCycles(paths->archive, workspace,
                         options.reviewCutoffUtcMs, watching ? static_cast<int64_t>(sample.second) : now,
                         options.confirmImportArg != 0, live ? publicRates : nullptr, options.dnsServer,
-                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, options.inspection, progress, report)) {
+                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, options.inspection,
+                        options.historyInvoicesArg != 0, progress, report)) {
                     if (progress.closing)
                         std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
                     if (progress.saved)

@@ -22,7 +22,7 @@ struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
     int nextCycleArg = 0, previousCycleArg = 0, rollForwardArg = 0, watchArg = 0, quietWatchArg = 0;
-    int inspectionArg = 0;
+    int inspectionArg = 0, historyInvoicesArg = 0;
     RecurringInspection inspection = RecurringInspection::None;
     unsigned watchSeconds = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
@@ -53,6 +53,10 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             }
             if (name == "--watch-quiet" && !options.quietWatchArg) {
                 options.quietWatchArg = i++;
+                continue;
+            }
+            if (name == "--with-invoices" && !options.historyInvoicesArg) {
+                options.historyInvoicesArg = i++;
                 continue;
             }
             if (i + 1 >= argc) return false;
@@ -112,13 +116,14 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
         }
         if (options.saveReadingsArg || (options.confirmImportArg && !options.rollForwardArg) ||
             (options.watchArg && (!options.rollForwardArg || options.reviewCutoffArg)) ||
-            (options.quietWatchArg && !options.watchArg)) return false;
+            (options.quietWatchArg && !options.watchArg) ||
+            (options.historyInvoicesArg && options.inspection != RecurringInspection::History)) return false;
         if (options.allowPublicRatesArg && ((!options.nextCycleArg && !options.rollForwardArg) ||
                                           options.archiveArg || options.prepareCycleArg ||
                                           options.tariffArg || options.ratesArg || options.reviewCutoffArg)) return false;
         if (options.dnsServerArg && !options.allowPublicRatesArg) return false;
         if (options.inspectionArg) {
-            if (operands != 2) return false;
+            if (operands != 2 + (options.historyInvoicesArg ? 1 : 0)) return false;
         } else if (options.rollForwardArg) {
             if (operands != 2 + (options.reviewCutoffArg ? 2 : 0) + (options.allowPublicRatesArg ? 1 : 0) +
                                 (options.dnsServerArg ? 2 : 0) + (options.confirmImportArg ? 1 : 0) +
