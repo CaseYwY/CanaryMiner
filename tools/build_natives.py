@@ -36,6 +36,7 @@ else: TUS += [('exact_decimal','src/product/exact_decimal.cpp'),('manual_market'
               ('market_trade_review','src/product/market_trade_review.cpp'),
               ('market_reward','src/product/market_reward.cpp'),
               ('market_data','src/product/market_data.cpp'),('public_https_contract','src/product/public_https_contract.cpp'),
+              ('public_json_process','src/product/public_json_process.cpp'),
               ('preferences_protocol','src/product/preferences_protocol.cpp'),('preferences_document','src/product/preferences_document.cpp'),
               ('preferences_owner','src/product/preferences_owner.cpp'),('local_task_process','src/product/local_task_process.cpp'),('duplex_task_process','src/product/duplex_task_process.cpp')]
 HELPER_TUS=[] if a.only else [('preferences_service','src/product/preferences_service.cpp'),('preferences_worker','src/product/preferences_worker.cpp')]
