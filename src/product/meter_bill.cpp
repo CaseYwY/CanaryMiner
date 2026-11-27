@@ -25,18 +25,19 @@ constexpr size_t maxAnnualMeterIntervals = 18432;
 using MeterSeries = std::variant<std::vector<PowerInterval>, std::vector<MeterImportInterval>>;
 struct MeterReadings {
     MeterSeries series;
-    std::optional<ExactDecimal> registerStart, secondaryRegisterStart;
+    std::optional<ExactDecimal> registerStart, registerEnd, secondaryRegisterStart;
     std::vector<std::string> apparentSources;
     int64_t octopusObserved = 0;
     uint64_t version = 0;
 };
 
-struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice, prepaid; };
+struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice, prepaid, previousCycle; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
-    const auto archiveIndex = options.archiveArg ? options.archiveArg : options.extendArg;
+    const auto archiveIndex = options.archiveArg ? options.archiveArg :
+        options.nextCycleArg ? options.nextCycleArg : options.extendArg;
     for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
-                      options.saveArg, options.ratesArg, options.invoiceArg, options.prepaidArg})
+                      options.saveArg, options.ratesArg, options.invoiceArg, options.prepaidArg, options.previousCycleArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -55,7 +56,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     if (!matches(options.archiveArg, L"--open-review") || !matches(options.extendArg, L"--extend-review") ||
         !matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals") ||
         !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates") ||
-        !matches(options.prepaidArg, L"--prepaid"))
+        !matches(options.nextCycleArg, L"--next-cycle-review") ||
+        !matches(options.previousCycleArg, L"--previous-cycle") || !matches(options.prepaidArg, L"--prepaid"))
         return std::nullopt;
     if (options.reviewCutoffArg &&
         (!matches(options.reviewCutoffArg, L"--as-of-utc-ms") ||
@@ -70,7 +72,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     const auto path = [&](int i) { return i ? std::filesystem::path(argv[i]) : std::filesystem::path{}; };
 #endif
     return MeterBillPaths{path(options.tariffArg), path(options.intervalsArg), path(archiveIndex),
-                          path(options.ratesArg), path(options.invoiceArg), path(options.prepaidArg)};
+                          path(options.ratesArg), path(options.invoiceArg), path(options.prepaidArg), path(options.previousCycleArg)};
 }
 
 const char *decodeIntervals(const JsonValue &intervals, const BillOpening &opening, int64_t cutoff,
@@ -125,7 +127,7 @@ const char *decodeIntervals(const JsonValue &intervals, const BillOpening &openi
 }
 
 const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, int64_t cutoff,
-                           std::vector<MeterImportInterval> &readings, ExactDecimal &start,
+                           std::vector<MeterImportInterval> &readings, ExactDecimal &start, ExactDecimal &end,
                            ExactDecimal *secondaryStart, bool apparent) {
     std::optional<int64_t> previousUtc;
     ExactDecimal previous, previousSecondary;
@@ -169,6 +171,7 @@ const char *decodeRegister(const JsonValue &rows, const BillOpening &opening, in
         previousSecondary = std::move(secondary);
         previousUtc = utc;
     }
+    end = std::move(previous);
     return nullptr;
 }
 
@@ -213,7 +216,7 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     auto &imports = readings.series.emplace<std::vector<MeterImportInterval>>();
     if (isRegister)
         return decodeRegister(*rows, opening, cutoff, imports, readings.registerStart.emplace(),
-                              apparent || exported ? &readings.secondaryRegisterStart.emplace() : nullptr, apparent);
+                              readings.registerEnd.emplace(), apparent || exported ? &readings.secondaryRegisterStart.emplace() : nullptr, apparent);
 
     int64_t end = 0;
     if (!instant(root.find("end_utc_ms"), end) || !instant(root.find("observed_utc_ms"), readings.octopusObserved) ||
@@ -546,6 +549,7 @@ struct MeterReview {
     TariffDeclaration declaration;
     MeterReadings readings;
     std::optional<PrepaidReviewInput> prepaid;
+    std::optional<OctopusRateImport> supplier;
     std::string report, exact;
 };
 
@@ -618,7 +622,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         report += "Billing rounds each complete UTC half hour to 0.01 kWh, ties to even, before applying the rate.\n";
     }
     if (!original.supplierRates.empty()) {
-        OctopusRateImport imported;
+        auto &imported = review.supplier.emplace();
         if (const auto *problem = importOctopusRates(original.supplierRates, cutoff, declaration, imported, stopped))
             return problem;
         report += std::string(imported.go ? "Octopus Go" : "Octopus Agile") +
@@ -732,6 +736,118 @@ const char *verifyMeterPrefix(const ReviewOriginal &original, const MeterReview 
     }, review.readings.series);
 }
 
+const char *cycleClockToken(CivilClockKind kind) {
+    switch (kind) {
+        case CivilClockKind::Utc: return "utc";
+        case CivilClockKind::FixedStandardOffset: return "fixed_standard";
+        case CivilClockKind::NamedIana: return "named_iana";
+    }
+    return nullptr;
+}
+
+// The plan key and public price window can advance. These fields identify the continuing provider,
+// meter alias, input representation, time database and reset rule.
+std::optional<std::string> completeOctopusCycleBinding(const MeterReview &review) {
+    const auto &declaration = review.declaration;
+    const auto &plan = declaration.plan;
+    const auto &opening = declaration.opening;
+    const auto &meter = opening.evidence;
+    const auto *series = std::get_if<std::vector<MeterImportInterval>>(&review.readings.series);
+    if (!review.supplier || !declaration.resetSchedule || review.prepaid || plan.exportPayment ||
+        plan.restrictedCreditAtClose ||
+        (review.readings.version != 2 && review.readings.version != 3) ||
+        !series || series->empty() || opening.throughUtcMs != opening.cycleBeginUtcMs ||
+        !opening.importedKwh.numerator.zero() || !opening.accruedSubtotal.numerator.zero() ||
+        series->front().beginUtcMs != opening.cycleBeginUtcMs || series->back().endUtcMs != opening.cycleEndUtcMs ||
+        plan.revisions.empty() || plan.revisions.front().beginUtcMs != opening.cycleBeginUtcMs ||
+        plan.revisions.back().endUtcMs != opening.cycleEndUtcMs)
+        return std::nullopt;
+
+    const auto &reset = *declaration.resetSchedule;
+    const auto *rateClock = cycleClockToken(plan.clock.kind);
+    const auto *resetClock = cycleClockToken(reset.clock.kind);
+    if (!rateClock || !resetClock) return std::nullopt;
+    // Stable wire tokens for values already validated by the declaration and rate reader.
+    std::string binding = "canary-octopus-cycle-1\nwhole_meter_import\ndeclared_forecast\n";
+    binding += meterHalfHourRounding;
+    binding += '\n';
+    for (const auto *field : {&declaration.country, &plan.territory, &plan.supplier, &plan.product,
+                             &plan.currency, &review.supplier->paymentMethod, &meter.scope, &meter.adapter,
+                             &opening.timeDatabaseVersion})
+        binding += jsonQuote(*field) + '\n';
+    const auto appendClock = [&](const CivilClock &clock, const char *token) {
+        binding += std::string(token) + '\n' + jsonQuote(clock.zone) + '\n' +
+                   std::to_string(clock.fixedOffsetSeconds) + '\n';
+    };
+    appendClock(plan.clock, rateClock);
+    appendClock(reset.clock, resetClock);
+    binding += std::to_string(review.readings.version) + '\n' +
+               std::to_string(reset.day) + '\n' + std::to_string(reset.annualMonth) + '\n' +
+               std::to_string(reset.bimonthlyStartMonth) + '\n';
+    switch (reset.dailyFeeAllocation) {
+        case DailyFeeAllocation::WholeDay: binding += "whole_day\n"; break;
+        case DailyFeeAllocation::ProrateByCycleMinutes: binding += "prorate_by_cycle_minutes\n"; break;
+        default: return std::nullopt;
+    }
+    return sha256Hex(binding);
+}
+
+std::optional<PreviousMeterCycle> bindPreviousCycle(const ReviewOriginal &original, const MeterReview &review,
+                                                   std::string archiveSha256) {
+    auto binding = completeOctopusCycleBinding(review);
+    if (!binding) return std::nullopt;
+    const auto &end = review.readings.registerEnd;
+    std::string registerEnd = end ? end->text() : "-";
+    if (registerEnd.size() > maxCycleRegisterBytes) return std::nullopt;
+    return PreviousMeterCycle{original.cutoff, review.declaration.opening.cycleEndUtcMs, std::move(archiveSha256),
+                              std::move(*binding), std::move(registerEnd)};
+}
+
+const char *verifyCycleLink(const ReviewOriginal &original, const MeterReview &review) {
+    if (!original.previousCycle) return nullptr;
+    const auto &previous = *original.previousCycle;
+    const auto binding = completeOctopusCycleBinding(review);
+    if (!binding) return "next-cycle review requires one complete recurring Octopus cycle and matching rate window";
+    if (previous.closedAt != review.declaration.opening.cycleBeginUtcMs)
+        return "the new cycle does not start at the previous closing time";
+    if (*binding != previous.bindingSha256)
+        return "the Octopus tariff, payment method, meter or reset rule differs from the previous cycle";
+    const auto &start = review.readings.registerStart;
+    if ((start ? start->text() : "-") != previous.registerEnd)
+        return "the new opening register differs from the previous closing register";
+    return nullptr;
+}
+
+const char *replaySavedReview(const ReviewOriginal &original, int64_t now, const char *lateReadingError,
+                             const std::function<bool()> &stopped, MeterReview &review,
+                             std::string *meterOnlyExact = nullptr) {
+    if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, review)) return problem;
+    if (const auto *problem = verifyMeterPrefix(original, review, stopped)) return problem;
+    if (const auto *problem = verifyCycleLink(original, review)) return problem;
+    if (const auto *problem = calculateMeterReview(original, true, stopped, review, meterOnlyExact)) return problem;
+    return original.results == review.exact ? nullptr : "saved review amounts differ from the recalculated amounts";
+}
+
+const char *verifyPreviousCycleArchive(const std::filesystem::path &path, const ReviewOriginal &original,
+                                       int64_t now, const char *lateReadingError,
+                                       const std::function<bool()> &stopped) {
+    if (!original.previousCycle) return "saved review has no previous cycle link";
+    const auto &link = *original.previousCycle;
+    std::string bytes;
+    ReviewOriginal predecessor;
+    if (!readLocalReviewInput(path, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, predecessor))
+        return "previous cycle archive unavailable or invalid";
+    const auto hash = sha256Hex(bytes);
+    if (hash != link.archiveSha256) return "previous cycle archive checksum differs from the saved link";
+    MeterReview earlier;
+    if (const auto *problem = replaySavedReview(predecessor, now, lateReadingError, stopped, earlier)) return problem;
+    const auto derived = bindPreviousCycle(predecessor, earlier, hash);
+    if (!derived || derived->closedAt != link.closedAt || derived->cutoff != link.cutoff ||
+        derived->bindingSha256 != link.bindingSha256 || derived->registerEnd != link.registerEnd)
+        return "previous cycle archive does not match the saved closing record";
+    return nullptr;
+}
+
 int refuse(const char *reason) {
     std::fprintf(stderr, "meter-bill: %s\n", reason);
     return 3;
@@ -743,7 +859,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
     if (options.help) {
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
                   "    [--invoice FILE] [--prepaid FILE] [--save-review NAME.cmr]\n"
-                  "canary-miner meter-bill --open-review FILE [--invoice FILE]\n"
+                  "canary-miner meter-bill --open-review FILE [--invoice FILE] [--previous-cycle ARCHIVE]\n"
+                  "canary-miner meter-bill --next-cycle-review ARCHIVE --tariff FILE --intervals FILE\n"
+                  "    --octopus-rates FILE --save-review NAME.cmr [--as-of-utc-ms MS] [--invoice FILE]\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
                   "    [--as-of-utc-ms MS] [--invoice FILE] [--prepaid FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
@@ -756,6 +874,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "With demand, finer readings are grouped. Add a reading wherever either grid splits nonzero import.\n"
                   "Demand requires complete aligned windows. Add a register reading wherever a demand boundary splits nonzero import.\n"
                   "Use --octopus-rates to apply captured public Agile or Go prices to a compatible tariff declaration.\n"
+                  "Use --next-cycle-review for a complete adjacent Octopus billing cycle with a new rate capture.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Use --invoice to compare supply charges, reconcile independent export statements, or review interim annual charges.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
@@ -782,44 +901,48 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         ReviewOriginal original;
         const bool reopening = options.archiveArg != 0;
         const bool extending = options.extendArg != 0;
+        const bool nextCycle = options.nextCycleArg != 0;
         const bool archiving = options.saveArg != 0;
-        const char *lateReadingError = options.reviewCutoffArg || reopening || extending
+        const auto cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
+        const char *lateReadingError = options.reviewCutoffArg || reopening || extending || nextCycle
             ? "interval ends after the review cutoff" : "interval ends in the future";
         int64_t previousConsumptionObservation = 0;
-        if (reopening || extending) {
+        if (reopening || extending || nextCycle) {
             std::string bytes;
             if (!readLocalReviewInput(paths->archive, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, original))
                 return fail("review archive unavailable or invalid");
-            if (extending) {
-                if (static_cast<bool>(options.prepaidArg)!=!original.prepaid.empty())
+            if (extending || nextCycle) {
+                if (extending && original.previousCycle)
+                    return fail("use next-cycle review to continue a closed Octopus cycle");
+                if (extending && static_cast<bool>(options.prepaidArg) != !original.prepaid.empty())
                     return fail("prepaid continuation requires the same review format and complete purchase history");
-                const auto cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
                 if (cutoff < original.cutoff) return fail("new review cutoff precedes the saved cutoff");
                 MeterReview earlier;
-                if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, earlier))
-                    return fail(problem);
-                if (const auto *problem = verifyMeterPrefix(original, earlier, stopped)) return fail(problem);
                 std::string meterExact;
-                if (const auto *problem = calculateMeterReview(original, true, stopped, earlier, &meterExact))
+                if (const auto *problem = replaySavedReview(original, now, lateReadingError, stopped, earlier,
+                                                             extending ? &meterExact : nullptr))
                     return fail(problem);
-                if (original.results != earlier.exact)
-                    return fail("saved review amounts differ from the recalculated amounts");
-                auto &previous = original.previous.emplace();
-                previous.cutoff = original.cutoff;
-                previous.archiveSha256 = sha256Hex(bytes);
-                std::visit([&](const auto &series) {
-                    previous.through = series.back().endUtcMs;
-                    previous.prefixSha256 = meterPrefixDigest(earlier.readings, series, meterExact);
-                }, earlier.readings.series);
-                previousConsumptionObservation = earlier.readings.octopusObserved;
-                original.cutoff = cutoff;
-                original.invoice.clear();
+                if (nextCycle) {
+                    auto link = bindPreviousCycle(original, earlier, sha256Hex(bytes));
+                    if (!link) return fail("previous review must be a complete recurring Octopus cycle and matching rate window");
+                    original = {};
+                    original.previousCycle = std::move(link);
+                } else {
+                    auto &previous = original.previous.emplace();
+                    previous.cutoff = original.cutoff;
+                    previous.archiveSha256 = sha256Hex(bytes);
+                    std::visit([&](const auto &series) {
+                        previous.through = series.back().endUtcMs;
+                        previous.prefixSha256 = meterPrefixDigest(earlier.readings, series, meterExact);
+                    }, earlier.readings.series);
+                    previousConsumptionObservation = earlier.readings.octopusObserved;
+                    original.invoice.clear();
+                }
             }
-        } else {
-            original.cutoff = options.reviewCutoffArg ? options.reviewCutoffUtcMs : now;
-            if (!readLocalReviewInput(paths->tariff, tariffDeclarationMaxBytes, original.tariff))
-                return fail("saved tariff declaration unavailable or invalid");
         }
+        if (!reopening) original.cutoff = cutoff;
+        if (!reopening && !extending && !readLocalReviewInput(paths->tariff, tariffDeclarationMaxBytes, original.tariff))
+            return fail("saved tariff declaration unavailable or invalid");
         if (stopped()) return stopResult();
         if (!reopening && !readLocalReviewInput(paths->intervals, maxMeterFileBytes, original.intervals))
             return fail("interval file unavailable, oversized or not a regular file");
@@ -841,6 +964,13 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (original.previous)
             review.report += "Extends verified meter coverage through " + std::to_string(original.previous->through) +
                              " UTC ms (previous archive SHA-256 " + original.previous->archiveSha256 + ")\n";
+        if (const auto *problem = verifyCycleLink(original, review)) return fail(problem);
+        if (options.previousCycleArg)
+            if (const auto *problem = verifyPreviousCycleArchive(paths->previousCycle, original, now, lateReadingError, stopped))
+                return fail(problem);
+        if (original.previousCycle)
+            review.report += "Previous Octopus cycle closed at " + std::to_string(original.previousCycle->closedAt) +
+                             " UTC ms (archive SHA-256 " + original.previousCycle->archiveSha256 + ")\n";
         const bool retainedInvoice = !original.invoice.empty();
         if (options.invoiceArg) {
             if (retainedInvoice) return fail("saved review already contains an invoice comparison");
