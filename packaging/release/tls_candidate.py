@@ -24,8 +24,11 @@ NAMED_TZDB_SCHEMA = 'canaryminer-tls-named-tzdb-candidate-v2'
 PUBLIC_HTTPS_SCHEMA = 'canaryminer-tls-named-tzdb-public-https-candidate-v3'
 ENERGY_RUNTIME_SCHEMA = 'canaryminer-tls-energy-runtime-candidate-v4'
 BILLING_WATCH_SCHEMA = 'canaryminer-tls-billing-watch-candidate-v5'
+OCTOPUS_ACCOUNT_SCHEMA = 'canaryminer-tls-octopus-account-candidate-v6'
 BILLING_WATCH_FILES = {'linux': 'billing-watch.sh', 'windows': 'Register-BillingWatch.ps1'}
 BILLING_WATCH_QUIET = b'--watch-quiet\0'
+OCTOPUS_ACCOUNT_FILES = ('tools/capture_octopus_consumption.py', 'tools/prepare_octopus_consumption.py',
+                         'tools/capture_octopus_rates.py')
 ENERGY_WORKERS = ('canary_energy_authorization_worker', 'canary_energy_collector_worker')
 ENERGY_ROLE_MARKERS = (b'CanaryMiner-EnergyAuthorizationWorker/1\0', b'CanaryMiner-EnergyCollectorWorker/1\0')
 ENERGY_SQLITE = {'windows': 'winsqlite3.dll', 'linux': 'libsqlite3.so.0'}
@@ -125,11 +128,13 @@ def billing_watch_path(platform):
     return f'deploy/{BILLING_WATCH_FILES[platform]}'
 
 
-def file_limits(platform, named_tzdb=False, public_https=False, energy_runtime=False, billing_watch=False):
+def file_limits(platform, named_tzdb=False, public_https=False, energy_runtime=False, billing_watch=False,
+                octopus_account=False):
     return {**{f'bin/{name}': MAX_ARTIFACT_BYTES for name in images(platform, public_https, energy_runtime)},
             **dict.fromkeys(RELEASE_FILES, MAX_TEXT_BYTES),
             **dict.fromkeys(tzdb_paths(platform).values() if named_tzdb else (), MAX_TEXT_BYTES),
-            **({billing_watch_path(platform): MAX_TEXT_BYTES} if billing_watch else {}),
+            **({billing_watch_path(platform): MAX_TEXT_BYTES} if billing_watch or octopus_account else {}),
+            **dict.fromkeys(OCTOPUS_ACCOUNT_FILES if octopus_account else (), MAX_TEXT_BYTES),
             **({OPENSSL_LICENSE: MAX_TEXT_BYTES} if platform == 'linux' else {}),
             MANIFEST: MAX_TEXT_BYTES}
 
@@ -231,7 +236,7 @@ def check_energy_runtime(platform, files):
 
 
 def manifest(platform, revision, glibc, files, named_tzdb=False, public_https=False, energy_runtime=False,
-             billing_watch=False):
+             billing_watch=False, octopus_account=False):
     backend = 'schannel' if platform == 'windows' else 'openssl-3.5.9-static'
     document = {
         'schema': NAMED_TZDB_SCHEMA if named_tzdb else SCHEMA,
@@ -259,8 +264,8 @@ def manifest(platform, revision, glibc, files, named_tzdb=False, public_https=Fa
             'sqlite_library': ENERGY_SQLITE[platform],
             'min_sqlite': '3.31.0',
         }
-    if billing_watch:
-        document['schema'] = BILLING_WATCH_SCHEMA
+    if billing_watch or octopus_account:
+        document['schema'] = OCTOPUS_ACCOUNT_SCHEMA if octopus_account else BILLING_WATCH_SCHEMA
         document['named_tzdb'] = named_tzdb
     return document
 
@@ -274,17 +279,19 @@ def validate(platform, files):
         raise ValueError('candidate manifest is missing')
     document = json.loads(files[MANIFEST], object_pairs_hook=one)
     if not isinstance(document, dict) or document.get('schema') not in (
-            SCHEMA, NAMED_TZDB_SCHEMA, PUBLIC_HTTPS_SCHEMA, ENERGY_RUNTIME_SCHEMA, BILLING_WATCH_SCHEMA):
+            SCHEMA, NAMED_TZDB_SCHEMA, PUBLIC_HTTPS_SCHEMA, ENERGY_RUNTIME_SCHEMA,
+            BILLING_WATCH_SCHEMA, OCTOPUS_ACCOUNT_SCHEMA):
         raise ValueError('invalid candidate manifest')
     schema = document['schema']
-    billing_watch = schema == BILLING_WATCH_SCHEMA
+    octopus_account = schema == OCTOPUS_ACCOUNT_SCHEMA
+    billing_watch = schema == BILLING_WATCH_SCHEMA or octopus_account
     energy_runtime = schema == ENERGY_RUNTIME_SCHEMA or (billing_watch and 'energy_runtime' in document)
     public_https = schema == PUBLIC_HTTPS_SCHEMA or ((energy_runtime or billing_watch) and 'public_https' in document)
     named_tzdb = (document.get('named_tzdb') if energy_runtime or billing_watch
                   else public_https or schema == NAMED_TZDB_SCHEMA)
     if type(named_tzdb) is not bool or ((public_https or billing_watch) and not named_tzdb):
         raise ValueError('invalid candidate clock capability')
-    if set(files) != set(file_limits(platform, named_tzdb, public_https, energy_runtime, billing_watch)):
+    if set(files) != set(file_limits(platform, named_tzdb, public_https, energy_runtime, billing_watch, octopus_account)):
         raise ValueError('candidate inventory mismatch')
     miner, preferences, stream_worker = images(platform)
     if billing_watch and BILLING_WATCH_QUIET not in files[f'bin/{miner}']:
@@ -315,7 +322,7 @@ def validate(platform, files):
     if not valid_revision(revision) or not valid_glibc:
         raise ValueError('invalid candidate revision or runtime requirement')
     actual = manifest(platform, revision, glibc, {k: v for k, v in files.items() if k != MANIFEST},
-                      named_tzdb, public_https, energy_runtime, billing_watch)
+                      named_tzdb, public_https, energy_runtime, billing_watch, octopus_account)
     if document != actual:
         raise ValueError('candidate manifest or file hash mismatch')
     if platform == 'linux' and sha256(files[OPENSSL_LICENSE]) != OPENSSL_LICENSE_SHA256:
@@ -333,7 +340,7 @@ def load(platform, archive, expected=None):
     if expected is not None and digest != expected:
         raise ValueError('candidate archive hash mismatch')
     files, limits = {}, file_limits(platform, named_tzdb=True, public_https=True, energy_runtime=True,
-                                   billing_watch=True)
+                                   billing_watch=True, octopus_account=True)
     total = 0
 
     def add(name, size, mode, open_entry):
@@ -390,20 +397,22 @@ def write_package(platform, files, stream):
 
 
 def pack(platform, build, revision, deny_file, tool, archive, openssl_license, named_tzdb=False, public_https=False,
-         energy_runtime=False, billing_watch=False):
+         energy_runtime=False, billing_watch=False, octopus_account=False):
     source_tree = Path(__file__).resolve().parent.parent.parent
     if not valid_revision(revision) or not archive.name.endswith(suffix(platform)):
         raise ValueError('invalid revision or candidate archive extension')
     if archive.exists() or archive.is_symlink():
         raise ValueError('candidate archive already exists')
-    if billing_watch and not named_tzdb:
-        raise ValueError('billing watcher requires the bundled tariff TZDB')
+    if (billing_watch or octopus_account) and not named_tzdb:
+        raise ValueError('billing watch and account capture require the bundled tariff TZDB')
     check_cache(build / 'CMakeCache.txt', platform, named_tzdb, public_https, energy_runtime)
     files = {name: read_regular(source_tree / source, MAX_TEXT_BYTES)
              for name, source in RELEASE_FILES.items()}
-    if billing_watch:
+    if billing_watch or octopus_account:
         files[billing_watch_path(platform)] = read_regular(
             source_tree / 'packaging' / 'release' / BILLING_WATCH_FILES[platform], MAX_TEXT_BYTES)
+    if octopus_account:
+        files.update({name: read_regular(source_tree / name, MAX_TEXT_BYTES) for name in OCTOPUS_ACCOUNT_FILES})
     tzdb = {}
     if named_tzdb:
         tzdb = {destination: read_regular(build / TZDB_DIR / name, MAX_TEXT_BYTES)
@@ -423,7 +432,8 @@ def pack(platform, build, revision, deny_file, tool, archive, openssl_license, n
     files.update(tzdb)
     files.update({f'bin/{name}': data for name, data in checked.items()})
     glibc = '.'.join(map(str, floor)) if floor else None
-    document = manifest(platform, revision, glibc, files, named_tzdb, public_https, energy_runtime, billing_watch)
+    document = manifest(platform, revision, glibc, files, named_tzdb, public_https, energy_runtime,
+                        billing_watch, octopus_account)
     files[MANIFEST] = (json.dumps(document, indent=2, sort_keys=True) + '\n').encode('utf8')
     validate(platform, files)
     if sum(map(len, files.values())) > MAX_PACKAGE_BYTES:
@@ -481,6 +491,8 @@ def main():
                                  help='include both workers for opt-in energy persistence and journal review')
             command.add_argument('--with-billing-watch', action='store_true',
                                  help='include host deployment tooling (requires --with-named-tzdb)')
+            command.add_argument('--with-octopus-account', action='store_true',
+                                 help='include interactive Octopus capture and watch deployment (requires --with-named-tzdb)')
         else:
             command.add_argument('--sha256', required=True)
         if action == 'install':
@@ -490,7 +502,7 @@ def main():
         if args.operation == 'pack':
             print(pack(args.platform, args.build, args.revision, args.deny_file, args.tool,
                        args.archive, args.openssl_license, args.with_named_tzdb, args.with_public_https,
-                       args.with_energy_runtime, args.with_billing_watch))
+                       args.with_energy_runtime, args.with_billing_watch, args.with_octopus_account))
         else:
             if not re.fullmatch('[0-9a-f]{64}', args.sha256):
                 raise ValueError('expected a trusted SHA-256 digest')

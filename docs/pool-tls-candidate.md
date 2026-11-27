@@ -110,6 +110,16 @@ Extraction and installation only copy files. Follow the [billing watch deploymen
 to register a Windows logon task or enable a Linux systemd user service. The v5 installer
 also verifies the earlier v1 through v4 profiles.
 
+## Version 6 Octopus account capture layout
+
+Add `--with-octopus-account --with-named-tzdb` to include the billing watcher
+deployment helper and three Python scripts under `tools/`. With both optional
+native runtimes selected, each v6 candidate has six native programs and 41 hashed
+payload files. The capture uses the machine's Python 3 and its effective TLS trust.
+The candidate installation only copies the scripts. Follow the
+[Octopus account capture guide](tariff-declaration.md#capture-readings-from-an-octopus-account)
+for explicit interactive capture and handoff to the billing watcher.
+
 ## Candidate evidence
 
 ### Version 3 clean installation

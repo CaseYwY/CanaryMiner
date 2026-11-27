@@ -47,11 +47,18 @@ Windows System32 winsqlite3.dll or the distribution libsqlite3.so.0 on
 Linux. Use a serviced system library and protect the application and state
 directories. GPU-board history and whole-meter billing have separate inputs.
 
-A v5 billing watch candidate adds deploy/Register-BillingWatch.ps1 on
+A billing watch candidate adds deploy/Register-BillingWatch.ps1 on
 Windows or deploy/billing-watch.sh on Linux. These tools use the installed
 miner to watch a private Octopus billing workspace on login. Installation
 creates no task or service. See "Run the watcher at login" in the repository's
 docs/tariff-declaration.md for setup, status and removal.
+
+A v6 Octopus account candidate includes the billing watch helper and
+tools/capture_octopus_consumption.py plus its local Python modules.
+Run python -I -B tools/capture_octopus_consumption.py --help to see the
+one-shot capture options. The tool asks for account details and the API key
+at masked terminal prompts. See "Capture readings from an Octopus account"
+in docs/tariff-declaration.md for the private workspace handoff.
 
 See THIRD_PARTY.md and LICENSES for provenance and notices. GPU and mining
 acceptance and distribution approval are separate from this candidate check.

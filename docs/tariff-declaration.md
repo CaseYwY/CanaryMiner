@@ -887,6 +887,46 @@ archive's local alias. A staged directory waits for its observation file before 
 and review cutoff. The raw pages and their pagination links remain separate from the private
 review archive. Public rate acquisition still requires its own explicit option.
 
+### Capture readings from an Octopus account
+
+Use the account capture tool from the checkout or a v6 TLS candidate with Python 3.
+Enter the UK Octopus Energy account number, import MPAN, meter serial and API key in
+the masked terminal prompts. The tool uses the supplier's HTTPS account endpoint
+to check that the selected import meter belongs to one property covering the full
+requested window. It then reads the selected meter's half-hour consumption.
+Use the same private alias and billing window as the tariff declaration.
+[Octopus REST authentication](https://developer.oegb-kraken.energy/guides/rest/rest-api-basics/#authentication)
+[Octopus account and consumption endpoints](https://developer.oegb-kraken.energy/guides/rest/api-endpoints/)
+
+~~~text
+python -I -B tools/capture_octopus_consumption.py --confirm-electricity-import --scope home-meter --begin 2023-03-01T00:00:00Z --end 2023-03-31T23:00:00Z --output march-usage.json
+~~~
+
+Use the output as `--intervals` for the first bill review. For a later cycle, replace
+`--output march-usage.json` with `--workspace PRIVATE_DIRECTORY`. The collector
+publishes `cycle-END.readings.json` atomically after verifying complete coverage.
+An enabled watcher can then use the bundle together with the cycle's price capture.
+The capture prompts for authorization each time. The watcher reads the local bundle
+and can run after the capture process exits.
+
+Use a dedicated workspace for each meter. Keep the first and subsequent captures
+for that meter in the same directory. When first connecting
+an existing archive, verify that the selected physical meter matches the archive.
+The first successful acquisition pins that selection and alias in a private
+`.canary-octopus-meter.json` file. The file holds a random salt and a digest. Keep it
+with the workspace when moving or backing up the data. Subsequent captures reject a
+different account, meter or alias. A replacement meter uses a new workspace and
+opening review. Rotating the API key does not require a new workspace.
+
+Enter credentials only at the prompts. The tool keeps the API key and account
+response in process memory for the capture and publishes a private bundle containing
+the alias, observation time and exact readings. Use a local folder with private
+permissions. Redirects and inherited HTTP proxies
+are disabled. The tool reconstructs pagination requests on the documented API host.
+An access refusal, incomplete cycle or conflicting meter leaves the readings file
+absent. An existing file is preserved. After validation, the binding is published
+before the readings, so a failed write can be retried with the same meter.
+
 ### Review cumulative meter readings
 
 Use the same command with an interval file in schema version 2:
