@@ -41,6 +41,8 @@ def main(cli_path, fixture, enabled, sample_only=False):
         archive = operator / "public.cmh"
         save = (allow, "--save-review", archive.name)
         temporary = archive.with_suffix(".cmh.tmp")
+        sample_archive = operator / "sample.cmh"
+        capture = (allow, "--save-sample", sample_archive.name)
 
         def call(command, *args):
             result = subprocess.run([cli, command, *args], cwd=operator, capture_output=True, text=True, timeout=8)
@@ -64,7 +66,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
 
         for flag in ("--help", "-h"):
             result = run(flag)
-            assert result.returncode == 0 and "market-hour " + allow in result.stdout
+            assert result.returncode == 0 and "market-hour " + allow in result.stdout and "--save-sample" in result.stdout
         for arguments in ((), (allow, allow), (allow, "--no-market"), (allow, "--config", config.name),
                           ("--file", config.name, allow), (allow + "=true",), ("--help", allow),
                           ("--allow-public-candle\uff53",), ("--url", "private-sentinel"), dns,
@@ -72,7 +74,10 @@ def main(cli_path, fixture, enabled, sample_only=False):
                           (allow, *dns, *dns), ("--file", config.name, *dns),
                           ("--open-review", archive.name, *dns), (allow, "--dn\uff53-server", resolver),
                           (fallback,), (allow, fallback, fallback), (allow, fallback + "=true"),
-                          (allow, "--kraken-fallbac\u212a"), ("--open-review", archive.name, fallback)):
+                          (allow, "--kraken-fallbac\u212a"), ("--open-review", archive.name, fallback),
+                          ("--save-sample", sample_archive.name), (allow, "--save-sample"),
+                          (*capture, "--save-review", archive.name), (*capture, *capture[1:]),
+                          (allow, "--save-sampl\uff45", sample_archive.name), (allow, "--save-sample", "../bad.cmh")):
             result = run(*arguments)
             assert result.returncode == 2 and not result.stdout and not requests.exists(), result
         result = call("market-hou\uff52", allow)
@@ -151,11 +156,11 @@ def main(cli_path, fixture, enabled, sample_only=False):
 
         assert not resolver_requests.exists()
         if not enabled:
-            for args in ((allow,), save, (allow, *dns), (allow, fallback, *dns)):
+            for args in ((allow,), save, capture, (allow, *dns), (allow, fallback, *dns)):
                 result = run(*args)
                 assert result.returncode == 3 and not result.stdout and "HTTPS unavailable in this build" in result.stderr
             assert not requests.exists()
-            assert not archive.exists() and not resolver_requests.exists()
+            assert not archive.exists() and not sample_archive.exists() and not resolver_requests.exists()
             print("Public hour: default build refuses network opt-in")
             return 0
         result = run(allow)
@@ -335,10 +340,89 @@ def main(cli_path, fixture, enabled, sample_only=False):
         fallback_archive.write_bytes(fallback_data)
         scenario.unlink()
 
-        cancellations = (("slow", (), ("4",)), ("slow-kraken", (fallback,), ("4", "5", "3")))
-        for mode, flags, feeds in cancellations if os.name != "nt" else ():
+        for mode, flags, expected, feeds, code in (
+            ("gap-pearl", (), "MEXC Pearl mainnet PRL/USDT missing elapsed-minute ranges", ["4", "5"], 3),
+            ("limited", (), "HTTP status 429 (Retry-After 1 s)", ["4", "5"], 3),
+            ("forbidden", (), "HTTP status 403", ["4", "5"], 3),
+            ("restricted", (), "HTTP status 451", ["4", "5"], 3),
+            ("server-error", (), "HTTP status 503", ["4", "5"], 3),
+            ("blocked", (), "non-public destination refused", ["4", "5"], 3),
+            ("malformed", (fallback,), "invalid minute response schema", ["4", "5"], 3),
+            ("future", (fallback,), "invalid response observation time", ["4", "5"], 3),
+            ("kraken-gap", (fallback,), "Kraken USDT/USD fallback missing elapsed-minute ranges", ["4", "5", "3"], 3),
+            ("kraken-throttled", (fallback,), "provider throttled the request", ["4", "5", "3"], 3),
+            ("kraken-archive", (fallback,), "480 / 60", ["4", "5", "3"], 0),
+        ):
             scenario.write_text(mode, encoding="ascii")
-            with subprocess.Popen([cli, "market-hour", allow, *flags, "--save-review", "cancelled.cmh"],
+            sample = run(*capture, *flags, *dns)
+            assert sample.returncode == code and not sample.stderr and expected in sample.stdout, sample
+            assert ("Sample result: incomplete" in sample.stdout) == (code == 3), sample
+            sample_start, sample_end = launched(feeds)
+            if mode == "gap-pearl":
+                assert f"[{sample_end - 60}, {sample_end})" in sample.stdout
+            if mode == "kraken-gap":
+                assert f"[{sample_start + 12 * 60}, {sample_start + 13 * 60})" in sample.stdout
+                assert f"[{sample_end - 60}, {sample_end})" in sample.stdout
+            if mode in ("limited", "forbidden", "restricted", "server-error", "blocked", "malformed", "future"):
+                assert "missing elapsed-minute ranges" not in sample.stdout, sample
+            assert resolver_requests.read_text(encoding="ascii").splitlines() == [resolver] * len(feeds)
+            resolver_requests.unlink()
+            captured_bytes = sample_archive.read_bytes()
+            captured_body = captured_bytes[:-65]
+            assert captured_bytes == signed(captured_body)
+            assert captured_body.startswith(b"CANARY-MARKET-HOUR-REVIEW-4\n")
+            assert resolver.encode("ascii") not in captured_body
+            if mode == "limited":
+                assert b"CMJSON1 10 429 0 1 0\n" in captured_body
+            if mode == "malformed":
+                assert b'{"private-sentinel":"untrusted"}' in captured_body
+            if mode == "kraken-archive":
+                for role in ("pearl", "fx", "kraken"):
+                    original_body = installed / ("body-" + role)
+                    assert original_body.read_bytes() in captured_body
+                    original_body.unlink()
+
+            replay_sample = run("--open-review", sample_archive.name)
+            assert replay_sample.returncode == 0 and replay_sample.stdout == sample.stdout and not replay_sample.stderr
+            assert not requests.exists() and captured_bytes == sample_archive.read_bytes()
+
+            if mode == "kraken-gap":
+                header, initial, closing, permission, count, receipts = captured_body.split(b"\n", 5)
+                assert permission == b"2" and count == b"3"
+                changed = b"\n".join((header, initial, closing, b"1", count, receipts))
+                sample_archive.write_bytes(signed(changed))
+                refused_sample = run("--open-review", sample_archive.name)
+                assert refused_sample.returncode == 3 and not refused_sample.stdout
+                assert "captured request permission" in refused_sample.stderr
+
+            if mode == "limited":
+                sample_archive.write_bytes(signed(captured_body.replace(b"rate limited", b"rate altered", 1)))
+                refused_sample = run("--open-review", sample_archive.name)
+                assert refused_sample.returncode == 3 and not refused_sample.stdout
+                assert "differs from the recalculated report" in refused_sample.stderr
+                sample_archive.write_bytes(captured_bytes)
+                refused_sample = run(*capture)
+                assert refused_sample.returncode == 3 and not refused_sample.stdout
+                assert "existing archive was preserved" in refused_sample.stderr
+                launched(feeds)
+                assert captured_bytes == sample_archive.read_bytes()
+
+            assert not sample_archive.with_suffix(".cmh.tmp").exists()
+            sample_archive.unlink()
+        scenario.write_text("cancelled", encoding="ascii")
+        cancelled_sample = run(*capture)
+        assert cancelled_sample.returncode == 130 and not cancelled_sample.stdout
+        assert "sample cancelled" in cancelled_sample.stderr
+        launched(["4", "5"])
+        assert not sample_archive.exists() and not sample_archive.with_suffix(".cmh.tmp").exists()
+        scenario.unlink()
+
+        cancellations = (("slow", (), ("4",), "--save-review"),
+                         ("slow-kraken", (fallback,), ("4", "5", "3"), "--save-review"),
+                         ("slow-kraken", (fallback,), ("4", "5", "3"), "--save-sample"))
+        for mode, flags, feeds, save_flag in cancellations if os.name != "nt" else ():
+            scenario.write_text(mode, encoding="ascii")
+            with subprocess.Popen([cli, "market-hour", allow, *flags, save_flag, "cancelled.cmh"],
                                   cwd=operator, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True) as child:
                 try:

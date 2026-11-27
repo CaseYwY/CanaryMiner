@@ -112,6 +112,40 @@ class MarketHourCli(unittest.TestCase):
             with self.subTest(args=args):
                 self.assert_refusal(self.run_miner("market-hour", *args), code=2)
 
+    def test_open_a_partial_public_sample_offline(self):
+        cutoff = END + 5
+        payload = json.dumps(vendor_sample()["pearl"]["candles"]).encode("ascii")
+        pearl = f"CMJSON1 0 200 {cutoff} 0 {len(payload)}\n".encode("ascii") + payload
+        limited = b"CMJSON1 10 429 0 1 0\n"
+
+        def receipt(wire, received=cutoff):
+            return f"{cutoff}\n{received}\n{len(wire)}\n".encode("ascii") + wire
+
+        report = (
+            "One public candle sample; candle finality is unverified.\n"
+            f"UTC seconds [{START}, {END}); window ended 5 s ago\n"
+            f"MEXC Pearl mainnet PRL/USDT: 60/60 elapsed minute buckets; observed UTC {cutoff} (receipt age 0 s)\n"
+            "Coinbase USDT/USD: provider rate limited the request\n"
+            "Mean USDT per PRL (exact sum / minutes): 202.5 / 60\n"
+            "Mean USD per PRL (exact sum / minutes): N/A (requires complete aligned PRL and FX coverage)\n"
+            "Sample result: incomplete\n"
+            "Coinbase USDT/USD HTTP status 429 (Retry-After 1 s)\n"
+            f"Capture UTC {cutoff} (ages at capture)\n"
+        ).encode("ascii")
+        header = f"CANARY-MARKET-HOUR-REVIEW-4\n{cutoff}\n{END}\n1\n2\n".encode("ascii")
+        path = self.stage / "partial.cmh"
+
+        def reopen(second_receipt):
+            body = header + receipt(pearl) + second_receipt + str(len(report)).encode("ascii") + b"\n" + report
+            path.write_bytes(body + hashlib.sha256(body).hexdigest().encode("ascii") + b"\n")
+            return self.run_miner("market-hour", "--open-review", path.name)
+
+        replayed = reopen(receipt(limited))
+        self.assertEqual((replayed.returncode, replayed.stderr, replayed.stdout), (0, "", report.decode("ascii")))
+        self.assert_refusal(reopen(receipt(limited, received=cutoff - 1)), "archive unavailable or invalid")
+        self.assert_refusal(reopen(receipt(b"CMJSON1 4 0 0 0 0\n")), "archive unavailable or invalid")
+        self.assert_refusal(reopen(receipt(b"CMJSON1 14 0 0 0 0\n")), "archive unavailable or invalid")
+
     def test_local_file_and_exact_same_minute_conversion(self):
         result = self.run_review(sample())
         self.assertEqual((result.returncode, result.stderr), (0, ""), result)

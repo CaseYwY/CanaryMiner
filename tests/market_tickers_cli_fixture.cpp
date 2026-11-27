@@ -152,6 +152,15 @@ int main(int argc, char **argv) {
             response.httpStatus = 429;
             response.retryAfterSeconds = 1;
         }
+        if (!pearl && (mode == "forbidden" || mode == "restricted" || mode == "server-error")) {
+            response = {};
+            response.status = om::PublicHttpsStatus::HttpStatus;
+            response.httpStatus = mode == "forbidden" ? 403 : mode == "restricted" ? 451 : 503;
+        }
+        if (!pearl && mode == "cancelled") {
+            response = {};
+            response.status = om::PublicHttpsStatus::Cancelled;
+        }
     } else if (reward) {
         if (mode == "timeout" || (mode == "timeout-index" && indexedHash)) {
             response = {};
