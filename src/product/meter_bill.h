@@ -19,7 +19,7 @@ inline constexpr std::size_t maxInvoiceBytes = 16 * 1024;
 struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
-    int nextCycleArg = 0, previousCycleArg = 0;
+    int nextCycleArg = 0, previousCycleArg = 0, rollForwardArg = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
     int allowPublicRatesArg = 0, dnsServerArg = 0;
     std::string outputName, dnsServer;
@@ -55,6 +55,7 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             else if (name == "--open-review" && !options.archiveArg) options.archiveArg = i+1;
             else if (name == "--prepare-next-cycle" && !options.prepareCycleArg) options.prepareCycleArg = i+1;
             else if (name == "--next-cycle-review" && !options.nextCycleArg) options.nextCycleArg = i+1;
+            else if (name == "--roll-forward" && !options.rollForwardArg) options.rollForwardArg = i+1;
             else if (name == "--previous-cycle" && !options.previousCycleArg) options.previousCycleArg = i+1;
             else if (name == "--extend-review" && !options.extendArg) options.extendArg = i+1;
             else if (options.outputName.empty() &&
@@ -73,10 +74,14 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             } else return false;
             i += 2;
         }
-        if (options.allowPublicRatesArg && (!options.nextCycleArg || options.archiveArg || options.prepareCycleArg ||
+        if (options.allowPublicRatesArg && ((!options.nextCycleArg && !options.rollForwardArg) ||
+                                          options.archiveArg || options.prepareCycleArg ||
                                           options.tariffArg || options.ratesArg || options.reviewCutoffArg)) return false;
         if (options.dnsServerArg && !options.allowPublicRatesArg) return false;
-        if (options.prepareCycleArg) {
+        if (options.rollForwardArg) {
+            if (operands != 2 + (options.reviewCutoffArg ? 2 : 0) + (options.allowPublicRatesArg ? 1 : 0) +
+                                (options.dnsServerArg ? 2 : 0)) return false;
+        } else if (options.prepareCycleArg) {
             if (operands != 4 || (!options.saveTariffArg && !options.saveRegisterArg)) return false;
         } else if (options.saveTariffArg || options.saveRegisterArg) return false;
         else if (options.archiveArg) {

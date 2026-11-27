@@ -687,6 +687,47 @@ to verify the closing record against the original archive. Keep each archive to 
 entire chain. Meter identity uses the declared local alias and the existing input evidence.
 Supplier-account authentication and invoice settlement require separate evidence.
 
+### Roll forward through staged Octopus billing cycles
+
+Run the following from a private local working directory for one meter and tariff. Give the
+command a verified closed review as its starting archive.
+
+~~~text
+canary-miner meter-bill --roll-forward march.cmr
+canary-miner meter-bill --roll-forward march.cmr --allow-public-rates
+~~~
+
+For each cycle, replace END in the filenames with its exclusive closing timestamp in UTC
+milliseconds. The reset rule in the preceding review determines the timestamp, including
+changes in London's UTC offset. The review reads these files from the working directory.
+
+| Filename | Contents |
+| --- | --- |
+| cycle-END.readings.json | Complete absolute register readings or supplier import intervals for that cycle |
+| cycle-END.rates.json | Saved public prices for that cycle |
+| cycle-END.invoice.json | Optional local invoice comparison |
+| cycle-END.cmr | The resulting private review, written exclusively by the command |
+
+The command replays existing successor archives and checks every closing record against
+its predecessor. It saves each new cycle independently and stops at the first unclosed
+cycle, missing required file, or failed verification. A later failure leaves already
+published cycles available. Running the same command again adopts the verified prefix and
+continues at the first pending cycle. Archived originals are used when replaying saved cycles.
+A gap before an existing archive stops the run so the missing original can be restored.
+A temporary output without a published archive is reported for inspection and preserved.
+
+The working directory's meter-billing.lock serializes recurring reviews. The lease ends
+when the process exits and the file is retained. The default mode uses saved prices only.
+With explicit public authorization, it fetches prices for cycles whose saved capture is
+absent. Present captures must pass validation. Without public authorization, you may pass
+--as-of-utc-ms to review at a historical cutoff. A run can verify up to 120 successors,
+save up to 24 new archives and request up to three public captures. Rerun to continue after
+a write or capture limit. At the history limit, use the latest verified archive as the
+new starting point.
+
+The command can be invoked repeatedly as new input arrives. It keeps estimated charges
+and optional local invoice comparisons in the same archive format as the individual review.
+
 ### Review cumulative meter readings
 
 Use the same command with an interval file in schema version 2:

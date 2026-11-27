@@ -1,6 +1,7 @@
 #include "meter_bill.h"
 #include "meter_bill_archive.h"
 #include "meter_bill_input.h"
+#include "local_store_lease.h"
 #include "meter_prepaid.h"
 #include "meter_invoice.h"
 #include "market_public_sample.h"
@@ -37,7 +38,8 @@ struct MeterReadings {
 struct MeterBillPaths { std::filesystem::path tariff, intervals, archive, rates, invoice, prepaid, previousCycle; };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
-    const auto archiveIndex = options.prepareCycleArg ? options.prepareCycleArg : options.archiveArg ? options.archiveArg :
+    const auto archiveIndex = options.rollForwardArg ? options.rollForwardArg :
+        options.prepareCycleArg ? options.prepareCycleArg : options.archiveArg ? options.archiveArg :
         options.nextCycleArg ? options.nextCycleArg : options.extendArg;
     for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
                       options.saveArg, options.ratesArg, options.invoiceArg, options.prepaidArg, options.previousCycleArg,
@@ -62,7 +64,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
     if (!matches(options.archiveArg, L"--open-review") || !matches(options.extendArg, L"--extend-review") ||
         !matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals") ||
         !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates") ||
-        !matches(options.nextCycleArg, L"--next-cycle-review") ||
+        !matches(options.nextCycleArg, L"--next-cycle-review") || !matches(options.rollForwardArg, L"--roll-forward") ||
         !matches(options.prepareCycleArg, L"--prepare-next-cycle") ||
         !matches(options.previousCycleArg, L"--previous-cycle") || !matches(options.prepaidArg, L"--prepaid"))
         return std::nullopt;
@@ -846,6 +848,11 @@ const char *replaySavedReview(const ReviewOriginal &original, int64_t now, const
     return original.results == review.exact ? nullptr : "saved review amounts differ from the recalculated amounts";
 }
 
+bool sameClosingRecord(const PreviousMeterCycle &a, const PreviousMeterCycle &b) {
+    return a.closedAt == b.closedAt && a.cutoff == b.cutoff && a.archiveSha256 == b.archiveSha256 &&
+        a.bindingSha256 == b.bindingSha256 && a.registerEnd == b.registerEnd;
+}
+
 const char *verifyPreviousCycleArchive(const std::filesystem::path &path, const ReviewOriginal &original,
                                        int64_t now, const char *lateReadingError,
                                        const std::function<bool()> &stopped) {
@@ -860,8 +867,7 @@ const char *verifyPreviousCycleArchive(const std::filesystem::path &path, const 
     MeterReview earlier;
     if (const auto *problem = replaySavedReview(predecessor, now, lateReadingError, stopped, earlier)) return problem;
     const auto derived = bindPreviousCycle(predecessor, earlier, hash);
-    if (!derived || derived->closedAt != link.closedAt || derived->cutoff != link.cutoff ||
-        derived->bindingSha256 != link.bindingSha256 || derived->registerEnd != link.registerEnd)
+    if (!derived || !sameClosingRecord(*derived, link))
         return "previous cycle archive does not match the saved closing record";
     return nullptr;
 }
@@ -981,6 +987,216 @@ const char *checkLiveCycleInputs(const ReviewOriginal &original, const MeterRevi
     return nullptr;
 }
 
+const char *captureMeterReviewRates(ReviewOriginal &original, int64_t &now, const char *lateReadingError,
+                                    const std::string &payment, const std::string &dns, const std::string &output,
+                                    const OctopusRateCaptureSource &source, NativeProcessLifetime &lifetime,
+                                    const market_detail::MarketSampleClock &started, const volatile sig_atomic_t *stop,
+                                    const std::function<bool()> &stopped) {
+    using namespace market_detail;
+    MeterReview preview;
+    if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, preview))
+        return problem;
+    if (const auto *problem = checkLiveCycleInputs(original, preview, payment, output)) return problem;
+    if (!marketTradeClockContinuous(started, started, marketTradeClock()))
+        return "local clock changed during the billing review";
+    if (stopped() || !lifetime.begin()) return "helper ownership uncertain";
+
+    OctopusRateCapture captured;
+    if (const auto *problem = source.fetch(std::move(preview.declaration), payment, dns, source.module,
+                                           lifetime, stop, captured)) return problem;
+    const auto finished = marketTradeClock();
+    if (!marketTradeClockContinuous(started, started, finished) ||
+        captured.summary.observedUtcMs < now || captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
+        return "local clock changed during the billing review";
+    now = static_cast<int64_t>(finished.second);
+    original.cutoff = captured.summary.observedUtcMs;
+    original.supplierRates = std::move(captured.bytes);
+    return nullptr;
+}
+
+LocalFileRead readCycleSlot(const std::string &name, size_t limit, std::string &out) {
+    const auto path = localReviewPath(name);
+    if (!path) return LocalFileRead::Unreadable;
+    const auto state = readBoundedLocalFile(*path, limit, &out);
+    return state == LocalFileRead::Ok && out.empty() ? LocalFileRead::Invalid : state;
+}
+
+std::optional<int64_t> latestCycleArchiveEnd(const std::filesystem::path &directory,
+                                               const std::function<bool()> &stopped) {
+    constexpr std::string_view prefix = "cycle-", suffix = ".cmr";
+    int64_t latest = 0;
+    std::error_code error;
+    for (std::filesystem::directory_iterator entry(directory, error), end; !error && entry != end; entry.increment(error)) {
+        if (stopped()) return std::nullopt;
+        const auto name = entry->path().filename().u8string();
+        if (name.size() <= prefix.size() + suffix.size() || name.size() > prefix.size() + suffix.size() + 15)
+            continue;
+        std::string folded(name.begin(), name.end());
+        for (auto &c : folded)
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        const std::string_view basename(folded);
+        if (basename.substr(0, prefix.size()) != prefix || basename.substr(basename.size() - suffix.size()) != suffix)
+            continue;
+        const auto *first = folded.data() + prefix.size();
+        const auto *last = folded.data() + folded.size() - suffix.size();
+        int64_t closing = 0;
+        const auto parsed = std::from_chars(first, last, closing);
+        if (*first >= '1' && *first <= '9' && parsed.ec == std::errc{} && parsed.ptr == last && closing <= meterBillMaxUtcMs)
+            latest = (std::max)(latest, closing);
+    }
+    if (error) return std::nullopt;
+    return latest;
+}
+
+struct RecurringCycleProgress {
+    size_t saved = 0;
+    int64_t closing = 0;
+};
+
+const char *rollOctopusCycles(const std::filesystem::path &seed, int64_t requestedCutoff, int64_t now,
+                             const OctopusRateCaptureSource *source, const std::string &dns,
+                             NativeProcessLifetime &lifetime, const market_detail::MarketSampleClock &started,
+                             const volatile sig_atomic_t *stop, const std::function<bool()> &stopped,
+                             RecurringCycleProgress &progress, std::string &report) {
+    constexpr size_t maxHistory = 120;
+    constexpr size_t maxNew = 24;
+    constexpr size_t maxCaptures = 3;
+    constexpr auto lateReadingError = "interval ends after the review cutoff";
+    ReviewOriginal previous;
+    MeterReview priorReview;
+    std::string bytes;
+    if (!readLocalReviewInput(seed, maxArchiveBytes, bytes) || !decodeReviewOriginal(bytes, previous))
+        return "recurring review seed archive unavailable or invalid";
+    if (requestedCutoff && requestedCutoff < previous.cutoff) return "new review cutoff precedes the saved cutoff";
+    if (requestedCutoff > now) return "review cutoff is in the future";
+    if (const auto *problem = replaySavedReview(previous, now, lateReadingError, stopped, priorReview))
+        return problem;
+
+    const auto leasePath = localReviewPath("meter-billing.lock");
+    LocalStoreLease lease;
+    if (stopped()) return "review cancelled";
+    if (!leasePath || !lease.acquire(*leasePath)) return "recurring review workspace is busy or unavailable";
+
+    size_t existing = 0, captures = 0;
+    auto previousDigest = sha256Hex(bytes);
+    std::string_view waiting;
+    std::optional<int64_t> lastExistingClosing;
+    for (;;) {
+        progress.closing = 0;
+        if (stopped()) return "review cancelled";
+        if (source) {
+            const auto current = market_detail::marketTradeClock();
+            if (!market_detail::marketTradeClockContinuous(started, started, current) ||
+                current.second < static_cast<uint64_t>(now)) return "local clock changed during the billing review";
+            now = static_cast<int64_t>(current.second);
+        }
+        const auto cutoff = requestedCutoff ? requestedCutoff : now;
+        const auto link = bindPreviousCycle(previous, priorReview, previousDigest);
+        if (!link) return "previous review must be a complete recurring Octopus cycle and matching rate window";
+        if (previous.cutoff > cutoff) return "new review cutoff precedes the saved cutoff";
+        if (existing + progress.saved >= maxHistory) {
+            waiting = "archive replay limit reached; use the latest verified archive as the next seed";
+            break;
+        }
+
+        PreparedOctopusCycle draft;
+        if (const auto *problem = prepareNextOctopusCycle(previous, priorReview, *link, false, draft))
+            return problem;
+        progress.closing = draft.bounds.endUtcMs;
+        if (progress.closing > cutoff) {
+            waiting = "waiting for the cycle to close";
+            break;
+        }
+        const auto stem = "cycle-" + std::to_string(progress.closing);
+        const auto target = stem + ".cmr";
+        const auto archive = readCycleSlot(target, maxArchiveBytes, bytes);
+        ReviewOriginal next;
+        MeterReview nextReview;
+        if (archive == LocalFileRead::Ok) {
+            if (!decodeReviewOriginal(bytes, next)) return "recurring review successor archive is invalid";
+            if (!next.previousCycle || !sameClosingRecord(*next.previousCycle, *link))
+                return "recurring review successor does not match the previous closing record";
+            if (next.cutoff > cutoff) return "successor archive is newer than the requested cutoff";
+            if (const auto *problem = replaySavedReview(next, now, lateReadingError, stopped, nextReview))
+                return problem;
+            if (nextReview.declaration.opening.cycleEndUtcMs != progress.closing)
+                return "recurring review successor closes at a different time";
+            ++existing;
+        } else {
+            if (archive != LocalFileRead::Missing) return "recurring review successor archive is unavailable";
+            if (!lastExistingClosing) lastExistingClosing = latestCycleArchiveEnd(leasePath->parent_path(), stopped);
+            if (!lastExistingClosing) return "could not inspect recurring review archive names";
+            if (*lastExistingClosing >= progress.closing)
+                return "recurring review archive gap; restore the existing archive chain before continuing";
+            const auto temporary = localReviewPath(target + ".tmp");
+            std::error_code error;
+            if (!temporary || std::filesystem::symlink_status(*temporary, error).type() != std::filesystem::file_type::not_found)
+                return "recurring review successor has uncertain temporary output";
+            if (progress.saved >= maxNew) {
+                waiting = "new archive limit reached; run again to continue";
+                break;
+            }
+            next.cutoff = cutoff;
+            next.tariff = std::move(draft.bytes);
+            next.previousCycle = link;
+            const auto readings = readCycleSlot(stem + ".readings.json", maxMeterFileBytes, next.intervals);
+            if (readings == LocalFileRead::Missing) {
+                waiting = "waiting for complete meter readings";
+                break;
+            }
+            if (readings != LocalFileRead::Ok) return "recurring review readings are unavailable or invalid";
+            const auto rates = readCycleSlot(stem + ".rates.json", maxOctopusRateFileBytes, next.supplierRates);
+            if (rates == LocalFileRead::Missing && !source) {
+                waiting = "waiting for a saved Octopus rate capture";
+                break;
+            }
+            if (rates != LocalFileRead::Ok && rates != LocalFileRead::Missing)
+                return "recurring review rate capture is unavailable or invalid";
+            const auto invoice = readCycleSlot(stem + ".invoice.json", maxInvoiceBytes, next.invoice);
+            if (invoice != LocalFileRead::Missing && invoice != LocalFileRead::Ok)
+                return "recurring review invoice is unavailable or invalid";
+
+            if (rates == LocalFileRead::Missing) {
+                if (captures >= maxCaptures) {
+                    waiting = "public capture limit reached; run again to continue";
+                    break;
+                }
+                if (!draft.publicCapture) return "next cycle exceeds the installed public rate capture bounds";
+                if (const auto *problem = captureMeterReviewRates(next, now, lateReadingError,
+                        priorReview.supplier->paymentMethod, dns, target, *source, lifetime, started, stop, stopped))
+                    return problem;
+                ++captures;
+            }
+            if (const auto *problem = prepareMeterReview(next, now, false, lateReadingError, stopped, nextReview))
+                return problem;
+            if (const auto *problem = verifyCycleLink(next, nextReview)) return problem;
+            if (const auto *problem = calculateMeterReview(next, true, stopped, nextReview)) return problem;
+            if (stopped()) return "review cancelled";
+            if (nextReview.exact.size() > maxExactResultsBytes) return "exact results exceed the archive bound";
+            next.results = std::move(nextReview.exact);
+            bytes = encodeReviewOriginal(next);
+            const auto state = local_review_archive::saveWhileActive(target, ".cmr", bytes, maxArchiveBytes, stopped);
+            if (state == local_review_archive::ReviewSave::Stopped) return "review cancelled";
+            if (state == local_review_archive::ReviewSave::Uncertain)
+                return "recurring review publication or cleanup is uncertain";
+            if (state != local_review_archive::ReviewSave::Written)
+                return "could not create a recurring review archive; existing archives were preserved";
+            ++progress.saved;
+        }
+        previousDigest = sha256Hex(bytes);
+        previous = std::move(next);
+        priorReview = std::move(nextReview);
+    }
+    report = "Recurring Octopus review: " + std::to_string(existing) + " verified, " +
+        std::to_string(progress.saved) + " saved\nLast verified closing " +
+        std::to_string(priorReview.declaration.opening.cycleEndUtcMs) + " UTC ms\n";
+    report += waiting;
+    if (progress.closing && existing + progress.saved < maxHistory)
+        report += "\nNext closing " + std::to_string(progress.closing) + " UTC ms";
+    report += '\n';
+    return nullptr;
+}
+
 int refuse(const char *reason) {
     std::fprintf(stderr, "meter-bill: %s\n", reason);
     return 3;
@@ -999,6 +1215,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "    --octopus-rates FILE [--tariff FILE] [--as-of-utc-ms MS] [--invoice FILE]\n"
                   "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
                   "    --allow-public-rates [--dns-server IP] [--invoice FILE]\n"
+                  "canary-miner meter-bill --roll-forward SEED.cmr [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP]]\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
                   "    [--as-of-utc-ms MS] [--invoice FILE] [--prepaid FILE]\n"
                   "Review a saved combined tariff against contiguous whole-meter intervals.\n"
@@ -1014,6 +1231,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Use --prepare-next-cycle to write a tariff declaration or a starting register from a verified Octopus review.\n"
                   "Use --next-cycle-review for a complete adjacent Octopus billing cycle with a new rate capture.\n"
                   "Omit --tariff to derive it from the archive. Live capture requires --allow-public-rates.\n"
+                  "Roll forward uses cycle-END.readings.json, cycle-END.rates.json and optional cycle-END.invoice.json.\n"
+                  "END is the cycle closing UTC millisecond. Each verified cycle commits to cycle-END.cmr.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
                   "Use --invoice to compare supply charges, reconcile independent export statements, or review interim annual charges.\n"
                   "Save optionally writes the private inputs and exact results to a new archive in the current folder.\n"
@@ -1027,8 +1246,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         return market_detail::marketSampleStopped(stop) || (captureLifetime.bound() && !captureLifetime.permitted());
     };
     const auto stopResult = [&]() {
-        if (!options.saveArg && !options.archiveArg && !options.invoiceArg && !options.prepareCycleArg) return 0;
-        std::fputs(options.prepareCycleArg ? "meter-bill: next-cycle preparation stopped before publication\n" :
+        if (!options.saveArg && !options.archiveArg && !options.invoiceArg && !options.prepareCycleArg && !options.rollForwardArg) return 0;
+        std::fputs(options.rollForwardArg ? "meter-bill: recurring review stopped; saved cycles remain available\n" :
+                   options.prepareCycleArg ? "meter-bill: next-cycle preparation stopped before publication\n" :
                    options.saveArg ? "meter-bill: archive save stopped before publication\n" :
                    options.archiveArg ? "meter-bill: saved review verification stopped\n" :
                                         "meter-bill: invoice comparison stopped\n", stderr);
@@ -1048,6 +1268,21 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         if (live && !publicRates) return fail("public HTTPS unavailable in this build");
         if (live && (!publicRates->fetch || publicRates->module.empty()))
             return fail("installed helper path unavailable");
+        if (options.rollForwardArg) {
+            std::string report;
+            RecurringCycleProgress progress;
+            if (const auto *problem = rollOctopusCycles(paths->archive, options.reviewCutoffUtcMs, now,
+                    live ? publicRates : nullptr, options.dnsServer, captureLifetime, started, stop, stopped, progress, report)) {
+                if (progress.closing)
+                    std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
+                if (progress.saved)
+                    std::fprintf(stderr, "meter-bill: this run committed %zu new cycle%s\n",
+                                 progress.saved, progress.saved == 1 ? "" : "s");
+                return fail(problem);
+            }
+            return std::fwrite(report.data(), 1, report.size(), stdout) == report.size() &&
+                std::fflush(stdout) == 0 ? 0 : 1;
+        }
         ReviewOriginal original;
         std::string inheritedPayment;
         const bool reopening = options.archiveArg != 0;
@@ -1151,26 +1386,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (options.invoiceArg &&
                 (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty()))
                 return fail("invoice file unavailable, empty, oversized or not a regular file");
-            MeterReview preview;
-            if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, preview))
+            if (const auto *problem = captureMeterReviewRates(original, now, lateReadingError, inheritedPayment,
+                    options.dnsServer, options.outputName, *publicRates, captureLifetime, started, stop, stopped))
                 return fail(problem);
-            if (const auto *problem = checkLiveCycleInputs(original, preview, inheritedPayment, options.outputName))
-                return fail(problem);
-            if (!market_detail::marketTradeClockContinuous(started, started, market_detail::marketTradeClock()))
-                return fail("local clock changed during the billing review");
-            if (stopped() || !captureLifetime.begin()) return fail("helper ownership uncertain");
-
-            OctopusRateCapture captured;
-            if (const auto *problem = publicRates->fetch(std::move(preview.declaration), inheritedPayment,
-                    options.dnsServer, publicRates->module, captureLifetime, stop, captured)) return fail(problem);
-            const auto finished = market_detail::marketTradeClock();
-            if (!market_detail::marketTradeClockContinuous(started, started, finished) ||
-                captured.summary.observedUtcMs < now ||
-                captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
-                return fail("local clock changed during the billing review");
-            now = static_cast<int64_t>(finished.second);
-            original.cutoff = captured.summary.observedUtcMs;
-            original.supplierRates = std::move(captured.bytes);
         }
 
         MeterReview review;

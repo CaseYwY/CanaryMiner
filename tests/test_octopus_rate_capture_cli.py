@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 from test_meter_tax_cli import fraction, period, tax_tariff
 from test_octopus_cycle_review_cli import LONDON, cycle
@@ -45,8 +46,8 @@ def main(cli, fixture, bundle, real_worker):
         write(tariff, declaration)
         write(root / "meter.json", readings)
 
-        def run(command, *args):
-            result = subprocess.run([binary, command, *args], cwd=root, text=True, capture_output=True, timeout=16)
+        def run(command, *args, cwd=root):
+            result = subprocess.run([binary, command, *args], cwd=cwd, text=True, capture_output=True, timeout=16)
             assert tariff.name not in result.stdout + result.stderr
             assert "FORBIDDEN_DEVICE_SETUP" not in result.stdout + result.stderr
             return result
@@ -231,6 +232,65 @@ def main(cli, fixture, bundle, real_worker):
         replay = run("meter-bill", "--open-review", live_output.name, "--previous-cycle", prior_archive)
         assert replay.returncode == 0 and replay.stdout == live.stdout and not replay.stderr, replay
         assert len(requests.read_text().splitlines()) == 2
+
+        june = utc("2023-05-31T23:00:00")
+        following_register = Decimal(new_register["register_readings"][-1]["imported_kwh"])
+        _, may_readings, _, may_total = cycle(ends, june, GO_PRODUCT, following_register, 50, 60, 31)
+        write(root / f"cycle-{ends}.readings.json", new_register)
+        write(root / f"cycle-{june}.readings.json", may_readings)
+        write(install / f"{ends // 1000}-10-1.json",
+              paginate([row(ends - HOUR, june + HOUR, 50, "NON_DIRECT_DEBIT")])[0])
+        write(install / f"{ends // 1000}-11-1.json",
+              paginate([row(ends, None, 60, "NON_DIRECT_DEBIT")])[0])
+        roll = ("meter-bill", "--roll-forward", prior_archive)
+        requests.unlink()
+        waiting = run(*roll)
+        assert waiting.returncode == 0 and "waiting for a saved Octopus rate capture" in waiting.stdout, waiting
+        assert not requests.exists()
+        live_roll = (*roll, "--allow-public-rates", "--dns-server", "192.168.50.53")
+        staged_capture = root / f"cycle-{ends}.rates.json"
+        write(staged_capture, {})
+        invalid = run(*live_roll)
+        assert invalid.returncode == 3 and not invalid.stdout and not requests.exists(), invalid
+        assert not (root / f"cycle-{ends}.cmr").exists()
+        staged_capture.unlink()
+        pause = install / "pause"
+        pause.touch()
+        with subprocess.Popen([binary, *live_roll], cwd=root, text=True, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE) as owner:
+            try:
+                deadline = time.monotonic() + 4
+                while not requests.exists() and time.monotonic() < deadline and owner.poll() is None:
+                    time.sleep(0.01)
+                assert requests.exists(), owner.poll()
+                overlap = run(*live_roll)
+                assert overlap.returncode == 3 and "workspace is busy" in overlap.stderr, overlap
+            finally:
+                pause.unlink()
+            output, error = owner.communicate(timeout=16)
+            assert owner.returncode == 0 and "0 verified, 2 saved" in output and not error, (output, error)
+        expected_requests = [f"{feed} {a // 1000} {b // 1000} {GO_PRODUCT} C 1 192.168.50.53"
+                             for a, b in ((END, ends), (ends, june)) for feed in (10, 11)]
+        assert requests.read_text().splitlines() == expected_requests
+        applied_april = run("meter-bill", "--open-review", f"cycle-{ends}.cmr", "--previous-cycle", prior_archive)
+        applied_may = run("meter-bill", "--open-review", f"cycle-{june}.cmr", "--previous-cycle", f"cycle-{ends}.cmr")
+        for output, amount in ((applied_april, new_total), (applied_may, may_total)):
+            assert output.returncode == 0 and f"Cycle estimate at closing {amount:.6f} GBP" in output.stdout, output
+        restarted = run(*live_roll)
+        assert restarted.returncode == 0 and "2 verified, 0 saved" in restarted.stdout, restarted
+        assert requests.read_text().splitlines() == expected_requests
+
+        saved_only = root / "saved-only"
+        saved_only.mkdir()
+        verified_capture = dict(new_snapshot, payment_method="NON_DIRECT_DEBIT",
+                                unit_rate_pages=[live_units], standing_charge_pages=[live_standing])
+        write(saved_only / f"cycle-{ends}.rates.json", verified_capture)
+        write(saved_only / f"cycle-{ends}.readings.json", new_register)
+        selected = run("meter-bill", "--roll-forward", str(root / prior_archive),
+                       "--allow-public-rates", cwd=saved_only)
+        assert selected.returncode == 0 and "0 verified, 1 saved" in selected.stdout, selected
+        assert (saved_only / f"cycle-{ends}.cmr").exists()
+        assert requests.read_text().splitlines() == expected_requests
 
         base = ("10", str(BEGIN // 1000), str(END // 1000), "5000", "15000", "65536", "32768")
         for malformed in (("GO-VAR-22-10-14", "I", "1"), ("AGILE-23-02-29", "C", "1"),
