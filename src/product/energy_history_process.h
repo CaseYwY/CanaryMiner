@@ -7,6 +7,8 @@ enum class EnergyRecoveryMode { Volatile, Inspect, Submit, Retry };
 enum class EnergyRecoveryState { Disabled, Empty, Prepared, Confirmed, Rejected, Diverged, Unavailable };
 constexpr size_t energyHistoryRequestLimit=64*1024;
 constexpr size_t maxEnergyPeriodQueries = 64; // One audited read can split reports at reset and price boundaries.
+// Rate rows plus standing-charge splits may each produce two ranges. Reset boundaries add at most twelve.
+constexpr size_t maxEnergyDynamicPeriodQueries = 2 * (8192 + 128) + 12;
 struct EnergyHistoryQuery {
     int64_t beginUtcMs=0,endUtcMs=0;
     std::string registerId,periodId; // optional exact-window assertion; mismatch rejects instead of choosing another period
@@ -57,6 +59,7 @@ EnergyHistoryProcessResult queryEnergyPeriods(const std::filesystem::path &helpe
                                             const std::atomic<bool> &cancel, unsigned timeoutMs);
 int serveEnergyPeriods(const std::string &wire);
 inline constexpr char energyPeriodsRequestHeader[] = "CMERQ1\n";
+inline constexpr char energyDynamicPeriodsRequestHeader[] = "CMERQ2\n";
 class EnergyHistoryProcessClient {
    public:
     explicit EnergyHistoryProcessClient(std::filesystem::path helper,std::optional<EnergyCollectorFence> fence={}):process_(std::move(helper)),fence_(std::move(fence)){}

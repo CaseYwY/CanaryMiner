@@ -4,6 +4,7 @@
 #include "energy_runtime.h"
 #include "local_review_input.h"
 #include "native_process_admission.h"
+#include "octopus_meter_rates.h"
 #include "public_https.h" // bounded input JSON only
 #include "tariff_declaration.h"
 
@@ -18,7 +19,7 @@ namespace om {
 namespace {
 
 struct EnergyReportPaths {
-    std::filesystem::path stateDir, policy;
+    std::filesystem::path stateDir, policy, tariff, octopusRates;
     std::vector<std::filesystem::path> flatRates;
 };
 
@@ -30,6 +31,8 @@ struct ReportRate {
 struct ReportPricing {
     std::string currency;
     std::vector<ReportRate> rates;
+    const char *label = "Declared flat";
+    int64_t capturedUtcMs = 0;
 };
 
 struct ReportSlice {
@@ -61,19 +64,28 @@ std::optional<EnergyReportPaths> reportPaths(const EnergyPeriodsOptions &options
                                  std::wstring_view(args.values[options.throughArg]) != std::to_wstring(options.throughUtcMs))))
         return std::nullopt;
     const auto path = [&args](int index) { return std::filesystem::path(args.values[index]); };
+    const auto matches = [&args](int index, const wchar_t *flag) {
+        return !index || (std::wstring_view(args.values[index - 1]) == flag &&
+                          args.values[index][0] && args.values[index][0] != L'-');
+    };
+    if (!matches(options.tariffArg, L"--tariff") || !matches(options.octopusRatesArg, L"--octopus-rates"))
+        return std::nullopt;
     for (int index : options.flatRateArgs)
-        if (std::wstring_view(args.values[index - 1]) != L"--flat-rate" ||
-            !args.values[index][0] || args.values[index][0] == L'-') return std::nullopt;
+        if (!matches(index, L"--flat-rate")) return std::nullopt;
 #else
     (void)argc;
     const auto path = [argv](int index) { return std::filesystem::path(argv[index]); };
 #endif
-    EnergyReportPaths result{path(options.stateDirArg), path(options.policyArg), {}};
+    EnergyReportPaths result{path(options.stateDirArg), path(options.policyArg), {}, {}, {}};
+    if (options.tariffArg) {
+        result.tariff = path(options.tariffArg);
+        result.octopusRates = path(options.octopusRatesArg);
+    }
     for (int index : options.flatRateArgs) result.flatRates.push_back(path(index));
     return result;
 }
 
-const char *loadReportPricing(const std::vector<std::filesystem::path> &files, int64_t now,
+const char *loadFlatPricing(const std::vector<std::filesystem::path> &files, int64_t now,
                              const std::atomic<bool> &cancel, ReportPricing &pricing) {
     for (const auto &file : files) {
         if (cancel) return "report stopped";
@@ -98,6 +110,44 @@ const char *loadReportPricing(const std::vector<std::filesystem::path> &files, i
     if (std::adjacent_find(pricing.rates.begin(), pricing.rates.end(), [](const auto &left, const auto &right) {
             return left.endUtcMs > right.beginUtcMs;
         }) != pricing.rates.end()) return "flat rate effective windows overlap";
+    return nullptr;
+}
+
+const char *loadOctopusPricing(const EnergyReportPaths &paths, int64_t through, CivilStatus clockStatus,
+                               const std::atomic<bool> &cancel, ReportPricing &pricing) {
+    if (clockStatus != CivilStatus::Ok) return "reviewed tariff time database unavailable or invalid";
+    std::string bytes;
+    JsonValue root;
+    TariffDeclaration declaration;
+    if (!readLocalReviewInput(paths.tariff, tariffDeclarationMaxBytes, bytes) ||
+        !parseJsonStrict(bytes, &root, nullptr) || !decodeTariffDeclaration(root, &declaration))
+        return "saved tariff declaration unavailable or invalid";
+    if (declaration.confirmedUtc > static_cast<uint64_t>(through / 1000))
+        return "tariff declaration confirmed after the report cutoff";
+    if (cancel) return "report stopped";
+    if (!readLocalReviewInput(paths.octopusRates, maxOctopusRateFileBytes, bytes))
+        return "saved Octopus rate capture unavailable";
+    OctopusRateImport imported;
+    if (const auto *problem = importOctopusRates(bytes, through, declaration, imported, [&] { return cancel.load(); }))
+        return problem;
+    pricing.currency = declaration.plan.currency;
+    pricing.capturedUtcMs = imported.observedUtcMs;
+    pricing.label = imported.go ? "Captured Octopus Go" : "Captured Octopus Agile";
+    pricing.rates.reserve(imported.intervals);
+    for (auto &revision : declaration.plan.revisions) {
+        for (auto &rate : revision.dynamic) {
+            if (!pricing.rates.empty()) {
+                auto &previous = pricing.rates.back();
+                if (previous.endUtcMs == rate.beginUtcMs && previous.confirmedUtcMs == rate.publishedUtcMs &&
+                    previous.ratePerKwh.compare(rate.ratePerKwh) == 0) {
+                    // A standing-fee split or a repeated unit price does not change the priced rate.
+                    previous.endUtcMs = rate.endUtcMs;
+                    continue;
+                }
+            }
+            pricing.rates.push_back({rate.beginUtcMs, rate.endUtcMs, rate.publishedUtcMs, std::move(rate.ratePerKwh)});
+        }
+    }
     return nullptr;
 }
 
@@ -157,7 +207,9 @@ std::optional<std::string> renderReport(const std::vector<ReportPeriod> &periods
               (reply.checkpoint.sequence ? std::to_string(reply.checkpoint.observedAtMs) : std::string("unavailable")) +
               ", selected boards " + std::to_string(channels) + '\n';
     if (!pricing.currency.empty())
-        output += "Declared flat GPU-board energy-only estimates (" + pricing.currency + ")\n";
+        output += std::string(pricing.label) + " GPU-board energy-only estimates (" + pricing.currency + ")\n";
+    if (pricing.capturedUtcMs)
+        output += "Price capture observed UTC ms " + std::to_string(pricing.capturedUtcMs) + '\n';
     auto totals = reply.totals.begin();
     for (const auto &period : periods) {
         const auto &cycle = period.cycle;
@@ -233,16 +285,19 @@ int commandEnergyPeriods(const EnergyPeriodsOptions &options, int argc, const ch
         const auto now = utcNow();
         const int64_t through = options.throughUtcMs ? options.throughUtcMs : now;
         if (through <= 0 || through > now) return fail("cutoff must be in the past or present");
-        configureBundledCivilTimeData();
+        const auto clockStatus = configureBundledCivilTimeData();
         const auto cycles = reportPeriods(policy, through, options.cycles);
         if (cycles.empty()) return fail(policy.find("monthly_day") ?
             "monthly reset periods unavailable for the selected clock" : "reset periods unavailable for the selected clock");
         ReportPricing pricing;
-        if (const auto *problem = loadReportPricing(paths->flatRates, now, cancel, pricing))
-            return cancel ? stopped() : fail(problem);
+        const bool octopus = !paths->octopusRates.empty();
+        const auto *problem = octopus ? loadOctopusPricing(*paths, through, clockStatus, cancel, pricing) :
+            loadFlatPricing(paths->flatRates, now, cancel, pricing);
+        if (problem) return cancel ? stopped() : fail(problem);
         std::vector<EnergyHistoryQuery> ranges;
         const auto periods = splitPeriods(cycles, through, pricing.rates, ranges);
-        if (ranges.size() > maxEnergyPeriodQueries) return fail("report exceeds the price and reset range limit");
+        if (ranges.size() > (octopus ? maxEnergyDynamicPeriodQueries : maxEnergyPeriodQueries))
+            return fail("report exceeds the price and reset range limit");
         if (cancel) return stopped();
         if (!lifetime.permitted()) return fail("energy helper ownership uncertain");
 

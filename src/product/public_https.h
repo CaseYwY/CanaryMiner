@@ -66,6 +66,7 @@ bool publicIpv4(const uint8_t *bytes);
 bool publicIpv6(const uint8_t *bytes);
 // One unscoped unicast address. The backend uses port 53.
 bool validPublicDnsServer(std::string_view address);
-bool boundedPublicJson(const std::string &text);
+bool boundedPublicJson(const std::string &text, std::size_t byteLimit = 1024 * 1024,
+                       std::size_t nodeLimit = 20000);
 
 }  // namespace om

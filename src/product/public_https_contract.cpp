@@ -195,8 +195,8 @@ static bool validUtf8(const std::string &s) {
     }
     return true;
 }
-bool boundedPublicJson(const std::string &text) {
-    if (text.empty() || text.size() > 1024 * 1024 || !validUtf8(text)) return false;
+bool boundedPublicJson(const std::string &text, std::size_t byteLimit, std::size_t nodeLimit) {
+    if (text.empty() || text.size() > byteLimit || !validUtf8(text)) return false;
     size_t nodes = 0, depth = 0, stringBytes = 0, literalBytes = 0;
     size_t members[17] = {};
     bool quoted = false, escaped = false;
@@ -214,11 +214,11 @@ bool boundedPublicJson(const std::string &text) {
         else if (ch == ':') { if (++members[depth] > 256) return false; literalBytes = 0; }
         else if (ch == ',' || ch == ' ' || ch == '\r' || ch == '\n' || ch == '\t') literalBytes = 0;
         else { if (!literalBytes) ++nodes; if (++literalBytes > 128) return false; }
-        if (nodes > 20000) return false;
+        if (nodes > nodeLimit) return false;
     }
     if (quoted || depth) return false;
     JsonValue value;
-    return parseJsonStrict(text, &value, nullptr);  // never echo provider keys/payload as a diagnostic
+    return parseJsonStrict(text, &value, nullptr, {byteLimit, 256});  // never echo provider keys/payload as a diagnostic
 }
 
 }  // namespace om

@@ -11,6 +11,14 @@
 
 namespace om {
 constexpr size_t localTaskRequestLimit = 256 * 1024, localTaskResponseLimit = 64 * 1024;
+enum class LocalTaskFrameProfile { Standard, EnergyPeriods };
+struct LocalTaskFrameLimits {
+    size_t request, response;
+};
+constexpr LocalTaskFrameLimits localTaskFrameLimits(LocalTaskFrameProfile profile) {
+    return profile == LocalTaskFrameProfile::EnergyPeriods ? LocalTaskFrameLimits{768 * 1024, 3 * 1024 * 1024} :
+        LocalTaskFrameLimits{localTaskRequestLimit, localTaskResponseLimit};
+}
 enum class LocalTaskStatus { Ok, Invalid, Busy, Unavailable, Cancelled, Timeout, Unreaped };
 struct LocalTaskResult {
     LocalTaskStatus status = LocalTaskStatus::Unavailable;
@@ -26,7 +34,8 @@ class LocalTaskProcess {
     ~LocalTaskProcess();
     LocalTaskProcess(const LocalTaskProcess &) = delete;
     LocalTaskProcess &operator=(const LocalTaskProcess &) = delete;
-    LocalTaskResult run(const std::string &request, const std::atomic<bool> &cancel, unsigned timeoutMs);
+    LocalTaskResult run(const std::string &request, const std::atomic<bool> &cancel, unsigned timeoutMs,
+                        LocalTaskFrameProfile profile = LocalTaskFrameProfile::Standard);
     // One bounded newline-terminated readiness frame; child must then remain alive and silent until cancellation.
     // Called only by an owned background thread. Unexpected exit (even code 0) is loss of the held lease, never success.
     LocalTaskResult hold(const std::string &request,const std::atomic<bool> &cancel,unsigned startupTimeoutMs,
@@ -36,6 +45,6 @@ class LocalTaskProcess {
     std::unique_ptr<Impl> impl_;
 };
 // Helper-side entry only. Input cannot be an arbitrary command; the caller decodes its own strict versioned contract.
-bool readLocalTaskInput(int argc, char **argv, std::string *request);
-bool writeLocalTaskOutput(const std::string &response);
+bool readLocalTaskInput(int argc, char **argv, std::string *request, LocalTaskFrameProfile profile = LocalTaskFrameProfile::Standard);
+bool writeLocalTaskOutput(const std::string &response, LocalTaskFrameProfile profile = LocalTaskFrameProfile::Standard);
 }  // namespace om

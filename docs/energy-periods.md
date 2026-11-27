@@ -30,9 +30,26 @@ The report omits prices confirmed after the report cutoff. It uses previously sa
 canary-miner energy-periods --state-dir DIR --reset-policy RULE.json --cycles 2 --flat-rate prior.json --flat-rate current.json
 ```
 
+A local [Octopus Agile or Go rate capture](tariff-declaration.md#review-publicly-listed-octopus-agile-prices)
+can supply the signed, VAT-inclusive unit energy price for the board estimate. Select the same reviewed tariff
+file used to capture those prices. The input requires the bundled London clock data and a complete captured
+rate window, limited to 8,192 unit price rows. Set the report cutoff at or after the tariff confirmation
+and capture time. Use two or more cycles when the captured month ended before the current period.
+The reset policy still uses its own clock. The report shows the capture time and leaves history outside
+the captured window unpriced.
+
+```text
+canary-miner energy-periods --state-dir DIR --reset-policy RULE.json --cycles 2 --tariff TARIFF.json --octopus-rates CAPTURE.json
+```
+
+Choose either flat declarations or an Octopus capture per report. Adjacent captured intervals with the same
+unit price and publication time share one price window, including a Go interval split by a standing-charge
+change. The board estimate uses measured energy directly and excludes standing charges and meter-read rounding.
+
 The worker audits one history snapshot. It reports energy on the stored model's UTC timeline and
 leaves two seconds inside each price boundary unpriced because the saved measurements admit up to
-two seconds of clock disagreement. Rate windows of four seconds or less have no priced span.
+two seconds of clock disagreement. Rate windows of four seconds or less have no priced span. Large rate schedules use the current collector worker
+from the same package, with one audit for all ranges.
 Each segment contributes exact observed watt-milliseconds times the signed unit price, with division by
 3,600,000,000 after summing. The report shows priced GPU-time separately from observed GPU-time and displays
 only the priced subtotal. Missing measurements and prices leave gaps. An explicit zero price or a measured zero

@@ -226,6 +226,12 @@ EnergyHistoryTotals EnergyHistoryLedger::query(int64_t begin,int64_t end,int64_t
     if(!s.ready)return t;
     return s.model.query(s.binding,begin,end,now);
 }
+EnergyHistoryStatus EnergyHistoryLedger::queryPeriods(const std::vector<EnergyHistoryRange> &ranges, int64_t now,
+                                                      std::vector<EnergyHistoryTotals> &totals) const {
+    const auto &s = *impl_;
+    if (!s.ready) return EnergyHistoryStatus::Storage;
+    return s.model.queryPeriods(s.binding, ranges, now, totals);
+}
 EnergyHistoryTotals EnergyHistoryLedger::registerTotal(const std::string &reg,const std::string &period,int64_t through,int64_t now) const {
     const auto &s=*impl_;EnergyHistoryTotals t;
     if(!s.ready)return t;

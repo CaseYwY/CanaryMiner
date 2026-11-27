@@ -7,7 +7,8 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
-from test_meter_bill_named_cli import BUNDLE, named, utc
+from test_meter_bill_named_cli import BUNDLE, HOUR, named, plan, utc
+from test_octopus_meter_rates_cli import GO_PRODUCT, HALF_HOUR, PAYMENT, PRODUCT, pages, row
 
 
 def main(host, ordinary, auth, collector, fixture, tzdb=None):
@@ -46,10 +47,10 @@ def main(host, ordinary, auth, collector, fixture, tzdb=None):
             counts += 1
             return result.stdout
 
-        def report(directory=state, at=through, cycles=2, rates=(), **kwargs):
+        def report(directory=state, at=through, cycles=2, rates=(), extra=(), **kwargs):
             rate_args = [item for rate in rates for item in ('--flat-rate', rate)]
             return run('--state-dir', directory, '--through-utc-ms', at,
-                       '--reset-policy', file, '--cycles', cycles, *rate_args, **kwargs)
+                       '--reset-policy', file, '--cycles', cycles, *rate_args, *extra, **kwargs)
 
         def rate_file(name, begin_ms, end_ms, amount, *, currency='USD', confirmed=None, enabled=True):
             path = root / (name + '.json')
@@ -64,8 +65,8 @@ def main(host, ordinary, auth, collector, fixture, tzdb=None):
             path.write_text(json.dumps(data), encoding='ascii')
             return path
 
-        def seed(directory, shape):
-            subprocess.run([fixture, directory, str(boundary), shape], cwd=root, check=True, timeout=20)
+        def seed(directory, shape, at=boundary):
+            subprocess.run([fixture, directory, str(at), shape], cwd=root, check=True, timeout=20)
             return next(directory.glob('energy-history.*.db'))
 
         def snapshot(directory):
@@ -73,7 +74,7 @@ def main(host, ordinary, auth, collector, fixture, tzdb=None):
                     if p.name.endswith(('.json', '.db'))}
 
         help_text = run('--help', binary=ordinary)
-        assert all(flag in help_text for flag in ('--through-utc-ms', '--reset-policy', '--flat-rate'))
+        assert all(flag in help_text for flag in ('--through-utc-ms', '--reset-policy', '--flat-rate', '--octopus-rates'))
         policy()
         report(binary=ordinary, code=3, message='unavailable in this build')
         assert not state.exists()
@@ -243,13 +244,97 @@ def main(host, ordinary, auth, collector, fixture, tzdb=None):
             missing.unlink(missing_ok=True)
             moved.rename(missing)
 
+        tariff_path = root / 'rate notes tariff \u7535.json'
+        capture_path = root / 'rate notes capture \u4ef7.json'
+        octopus = ('--tariff', tariff_path, '--octopus-rates', capture_path)
+        for args in (octopus[:2], octopus[2:], octopus * 2):
+            report(extra=args, code=2, message='invalid options')
+        report(extra=octopus, rates=(old,), code=2, message='invalid options')
+
         if tzdb:
+            def write_json(path, doc):
+                path.write_text(json.dumps(doc, separators=(',', ':')), encoding='ascii')
+
+            def tariff(begin_at, end_at, product):
+                declaration = plan(begin_at, begin_at, end_at, clock)
+                declaration['plan'].update(territory='C', supplier='Octopus Energy', product=product,
+                                           currency='GBP', rounding='meter_import_half_hour_kwh_half_even_2')
+                declaration['plan']['revisions'][0].update(time_mode='dynamic', base_rate_per_kwh='0')
+                write_json(tariff_path, declaration)
+
+            def capture(product, observed_at, unit, standing, region='C'):
+                write_json(capture_path, dict(schema_version=1, product_code=product,
+                           tariff_code=f'E-1R-{product}-{region}', payment_method=PAYMENT,
+                           observed_utc_ms=observed_at, unit_rate_pages=pages(list(reversed(unit))),
+                           standing_charge_pages=pages(standing)))
+
+            observed = boundary + HOUR
+            tariff(begin, boundary, PRODUCT)
+            slots = (boundary - begin) // HALF_HOUR
+            assert slots == 1486
+            unit = [row(begin + i * HALF_HOUR, begin + (i + 1) * HALF_HOUR,
+                        -10 if i == slots - 1 else 11 + i % 2) for i in range(slots)]
+            fee = [row(begin, None, 1000)]
+            capture(PRODUCT, observed, unit, fee)
+            inputs = [p.read_bytes() for p in (tariff_path, capture_path)]
+            for shape in ('priced-v1', 'priced-v2'):
+                directory = root / shape
+                saved = snapshot(directory)
+                result = report(directory, at=observed, extra=octopus)
+                assert 'Captured Octopus Agile GPU-board energy-only estimates (GBP)' in result, result
+                assert f'Price capture observed UTC ms {observed}' in result, result
+                assert 'exact 3000000 W-ms' in result and 'exact -240000/3600000000 GBP' in result, result
+                assert ('estimate -0.000066667 GBP' in result and 'estimate unavailable' in result and
+                        'Priced coverage 16000/' in result and 'Priced coverage 0/7200000 GPU-ms' in result), result
+                assert snapshot(directory) == saved
+            assert [p.read_bytes() for p in (tariff_path, capture_path)] == inputs
+            for shape in ('prepared', 'committed'):
+                directory = root / shape
+                saved = snapshot(directory)
+                report(directory, at=observed, extra=octopus, code=3, message='require recovery review')
+                assert snapshot(directory) == saved
+            report(root / 'priced-v2', at=observed - 1, extra=octopus, code=3, message='observed after')
+            capture(PRODUCT, observed, unit[1:], fee)
+            report(root / 'priced-v2', at=observed, extra=octopus, code=3, message='every exact half hour')
+            capture(PRODUCT, observed, unit, fee, region='D')
+            report(root / 'priced-v2', at=observed, extra=octopus, code=3, message='rate identity')
+            capture(PRODUCT, observed, unit, [])
+            report(root / 'priced-v2', at=observed, extra=octopus, code=3, message='incomplete')
+
+            # A Go price spanning a midnight fee change has no unit-rate boundary at that instant.
+            tariff(begin, boundary, GO_PRODUCT)
+            fee_change = utc('2024-03-23T00:00:00')
+            go_units = [row(begin - HALF_HOUR, boundary + HALF_HOUR, 12.5, PAYMENT),
+                        row(begin, boundary, 99, 'NON_DIRECT_DEBIT')]
+            capture(GO_PRODUCT, observed, go_units,
+                    [row(begin, fee_change, 10), row(fee_change, None, 50)])
+            go = root / 'go'
+            seed(go, 'priced-v2', at=fee_change)
+            result = report(go, at=observed, extra=octopus)
+            assert 'Captured Octopus Go' in result and 'Priced coverage 60000/' in result, result
+            assert 'exact 750000/3600000000 GBP' in result and 'estimate 0.000208333 GBP' in result, result
+
+            # Near the maximum supported capture size. This crosses the old request and response byte limits.
+            long_begin, long_end = utc('2024-01-01T00:00:00'), utc('2024-06-18T23:00:00')
+            long_slots = (long_end - long_begin) // HALF_HOUR
+            assert 8100 <= long_slots <= 8192
+            tariff(long_begin, long_end, PRODUCT)
+            capture(PRODUCT, long_end + HOUR,
+                    [row(long_begin + i * HALF_HOUR, long_begin + (i + 1) * HALF_HOUR, i % 2)
+                     for i in range(long_slots)], [row(long_begin, None, 10)])
+            write_json(file, dict(annual_month=1, annual_day=1, clock=clock))
+            result = report(root / 'priced-v2', at=long_end + HOUR, cycles=1, extra=octopus)
+            assert 'Audited sequence 2' in result and 'exact 6000000 W-ms' in result, result
+            assert 'Priced coverage 52000/' in result and 'exact 24000/3600000000 GBP' in result, result
             policy(clock={'kind': 'utc', 'fixed_offset_seconds': 0})
             result = report(destination, at=utc('2024-04-01T00:00:02'))
             assert 'exact 1200000 W-ms' in result and result.count(': unavailable') == 1
             policy()
             (installed / BUNDLE / 'version').write_text('wrong', encoding='ascii')
             report(destination, code=3, message='monthly reset periods unavailable')
+            policy(clock={'kind': 'utc', 'fixed_offset_seconds': 0})
+            report(extra=octopus, code=3, message='reviewed tariff time database unavailable')
+            assert not state.exists()
         else:
             policy(day=31, clock={'kind': 'fixed_standard', 'fixed_offset_seconds': -18000})
             result = report(destination, at=utc('2024-02-29T05:00:01'), cycles=2)

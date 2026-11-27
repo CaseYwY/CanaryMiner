@@ -135,13 +135,13 @@ struct LocalTaskProcess::Impl {
         return jobBound&&!cancel.load()&&admission.permitted()&&ResumeThread(temp.thread)!=static_cast<DWORD>(-1);
     }
     bool send(const std::string &) { return true; } // no potentially blocking parent pipe writes on Windows
-    bool read(std::string &wire) {
+    bool read(std::string &wire, size_t limit = localTaskResponseLimit) {
         for (unsigned chunk = 0; chunk < 8; ++chunk) {
             DWORD available = 0;
             if (!PeekNamedPipe(output,nullptr,0,nullptr,&available,nullptr)) return GetLastError() == ERROR_BROKEN_PIPE;
             if (!available) return true;
             char data[4096]; DWORD count = 0;
-            if (!ReadFile(output,data,(std::min)(available,static_cast<DWORD>(sizeof(data))),&count,nullptr) || count > localTaskResponseLimit-wire.size()) return false;
+            if (!ReadFile(output,data,(std::min)(available,static_cast<DWORD>(sizeof(data))),&count,nullptr) || count > limit-wire.size()) return false;
             wire.append(data,count);
         }
         return true;
@@ -207,12 +207,12 @@ struct LocalTaskProcess::Impl {
         if (sent == request.size()) { ::close(input); input = -1; }
         return true;
     }
-    bool read(std::string &wire) {
+    bool read(std::string &wire, size_t limit = localTaskResponseLimit) {
         for (unsigned chunk = 0; chunk < 8; ++chunk) {
             char data[4096]; const auto n = ::read(output,data,sizeof(data));
             if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
             if (!n) return true;
-            if (static_cast<size_t>(n) > localTaskResponseLimit-wire.size()) return false;
+            if (static_cast<size_t>(n) > limit-wire.size()) return false;
             wire.append(data,static_cast<size_t>(n));
         }
         return true;
@@ -254,12 +254,14 @@ LocalTaskProcess::~LocalTaskProcess(){
     if(!impl_->stop()){std::lock_guard<std::mutex> lock(Impl::mutex());Impl::quarantine().push_back(impl_.release());}
     else{std::lock_guard<std::mutex> lock(Impl::mutex());impl_.reset();}
 }
-LocalTaskResult LocalTaskProcess::run(const std::string &request, const std::atomic<bool> &cancel, unsigned ms) {
+LocalTaskResult LocalTaskProcess::run(const std::string &request, const std::atomic<bool> &cancel, unsigned ms,
+                                   LocalTaskFrameProfile profile) {
+    const auto limits = localTaskFrameLimits(profile);
     LocalTaskResult result;
     if (cancel.load()) { result.status = LocalTaskStatus::Cancelled; return result; }
     if (impl_->busy.test_and_set()) { result.status = LocalTaskStatus::Busy; return result; }
     struct Busy { Impl &p; ~Busy(){p.busy.clear();} } busy{*impl_};
-    if (request.empty() || request.size() > localTaskRequestLimit || ms < 50 || ms > 60000 || !localTaskPath(impl_->helper)) { result.status = LocalTaskStatus::Invalid; return result; }
+    if (request.empty() || request.size() > limits.request || ms < 50 || ms > 60000 || !localTaskPath(impl_->helper)) { result.status = LocalTaskStatus::Invalid; return result; }
     if (!impl_->stop()) { result.status = LocalTaskStatus::Unreaped; return result; }
     impl_->created=false;
     try {
@@ -273,11 +275,11 @@ LocalTaskResult LocalTaskProcess::run(const std::string &request, const std::ato
                     if(!impl_->admission.permitted()){result.status=LocalTaskStatus::Unreaped;break;}
                     if (cancel.load()) { result.status = LocalTaskStatus::Cancelled; break; }
                     if (std::chrono::steady_clock::now() >= deadline) { result.status = LocalTaskStatus::Timeout; break; }
-                    if (!impl_->send(request) || !impl_->read(wire)) break;
+                    if (!impl_->send(request) || !impl_->read(wire, limits.response)) break;
                     bool ok = false;
                     if (impl_->exited(ok)) {
                         size_t previous = 0;
-                        do { previous = wire.size(); if (!impl_->read(wire)) { ok = false; break; } } while (wire.size() != previous);
+                        do { previous = wire.size(); if (!impl_->read(wire, limits.response)) { ok = false; break; } } while (wire.size() != previous);
                         if (cancel.load()) result.status = LocalTaskStatus::Cancelled;
                         else if (std::chrono::steady_clock::now() >= deadline) result.status = LocalTaskStatus::Timeout;
                         else if (ok && !wire.empty()) { result.status = LocalTaskStatus::Ok; result.response = std::move(wire); }
@@ -334,7 +336,8 @@ LocalTaskResult LocalTaskProcess::hold(const std::string &request,const std::ato
     result.response.clear();
     return result;
 }
-bool readLocalTaskInput(int argc, char **argv, std::string *out) {
+bool readLocalTaskInput(int argc, char **argv, std::string *out, LocalTaskFrameProfile profile) {
+    const auto limit = localTaskFrameLimits(profile).request;
     if (!out || argc < 2 || std::strcmp(argv[1],"--local-task-v1")) return false;
 #if defined(_WIN32)
     if (argc != 4) return false;
@@ -344,7 +347,7 @@ bool readLocalTaskInput(int argc, char **argv, std::string *out) {
         return true;
     };
     uint64_t handle = 0, size = 0;
-    if (!integer(argv[2],handle) || !integer(argv[3],size) || !handle || handle > UINTPTR_MAX || !size || size > localTaskRequestLimit) return false;
+    if (!integer(argv[2],handle) || !integer(argv[3],size) || !handle || handle > UINTPTR_MAX || !size || size > limit) return false;
     const auto mapping = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(handle));
     const void *view = MapViewOfFile(mapping,FILE_MAP_READ,0,0,static_cast<SIZE_T>(size));
     if (!view) { CloseHandle(mapping); return false; }
@@ -356,14 +359,15 @@ bool readLocalTaskInput(int argc, char **argv, std::string *out) {
         char data[4096]; const auto n = ::read(0,data,sizeof(data));
         if (n < 0) { if (errno == EINTR) continue; return false; }
         if (!n) break;
-        if (static_cast<size_t>(n) > localTaskRequestLimit-out->size()) return false;
+        if (static_cast<size_t>(n) > limit-out->size()) return false;
         out->append(data,static_cast<size_t>(n));
     }
 #endif
     return !out->empty();
 }
-bool writeLocalTaskOutput(const std::string &out) {
-    if (out.empty() || out.size() > localTaskResponseLimit) return false;
+bool writeLocalTaskOutput(const std::string &out, LocalTaskFrameProfile profile) {
+    const auto limit = localTaskFrameLimits(profile).response;
+    if (out.empty() || out.size() > limit) return false;
 #if defined(_WIN32)
     if (_setmode(_fileno(stdout),_O_BINARY) < 0) return false;
 #endif

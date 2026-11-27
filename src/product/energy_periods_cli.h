@@ -15,6 +15,7 @@ inline constexpr std::size_t maxEnergyReportRates = 24;
 struct EnergyPeriodsOptions {
     bool help = false;
     int stateDirArg = 0, policyArg = 0, cyclesArg = 0, throughArg = 0;
+    int tariffArg = 0, octopusRatesArg = 0;
     unsigned cycles = 1;
     int64_t throughUtcMs = 0;
     std::vector<int> flatRateArgs;
@@ -33,6 +34,8 @@ inline bool parseEnergyPeriodsCli(int argc, const char *const *argv, int first, 
         const std::string_view flag(argv[i]);
         if (flag == "--state-dir" && !options.stateDirArg) options.stateDirArg = i + 1;
         else if (flag == "--reset-policy" && !options.policyArg) options.policyArg = i + 1;
+        else if (flag == "--tariff" && !options.tariffArg) options.tariffArg = i + 1;
+        else if (flag == "--octopus-rates" && !options.octopusRatesArg) options.octopusRatesArg = i + 1;
         else if (flag == "--flat-rate" && options.flatRateArgs.size() < maxEnergyReportRates)
             options.flatRateArgs.push_back(i + 1);
         else if ((flag == "--cycles" && !options.cyclesArg) || (flag == "--through-utc-ms" && !options.throughArg)) {
@@ -52,14 +55,16 @@ inline bool parseEnergyPeriodsCli(int argc, const char *const *argv, int first, 
             }
         } else return false;
     }
-    return options.stateDirArg && options.policyArg;
+    return options.stateDirArg && options.policyArg &&
+        (options.tariffArg ? options.octopusRatesArg && options.flatRateArgs.empty() : !options.octopusRatesArg);
 }
 
 inline constexpr const char *energyPeriodsHelp =
     "canary-miner energy-periods --state-dir DIR --reset-policy FILE [--cycles N] [--through-utc-ms MS]\n"
-    "    [--flat-rate FILE ...]\n"
+    "    [--flat-rate FILE ... | --tariff FILE --octopus-rates FILE]\n"
     "Read the existing local GPU-board energy history by monthly, two-month or annual reset periods.\n"
-    "Use a reviewed reset policy and optionally up to 24 saved flat electricity declarations in one currency.\n"
+    "Use a reviewed reset policy and optionally saved flat declarations or a reviewed Octopus capture.\n"
+    "Octopus pricing requires its matching tariff declaration and the bundled London clock data.\n"
     "An energy-only estimate requires both a valid rate and a covered observation.\n"
     "N includes the current period and defaults to one. The maximum is twelve.\n"
     "The cutoff is UTC Unix milliseconds and defaults to the current time. A development energy-runtime build is required.";

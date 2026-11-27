@@ -65,6 +65,9 @@ struct EnergyHistoryAnchor {
     uint64_t sequence=0;
     std::string digest; // earlier committed head in this immutable source; not a queue ticket
 };
+struct EnergyHistoryRange {
+    int64_t beginUtcMs = 0, endUtcMs = 0;
+};
 struct EnergyHistoryTotals {
     EnergyHistoryStatus status = EnergyHistoryStatus::Storage;
     EnergyHistoryCoverage coverage = EnergyHistoryCoverage::Unavailable;
@@ -94,6 +97,9 @@ class EnergyHistoryLedger {
     EnergyHistoryStatus verifyAnchor(const EnergyHistoryAnchor &anchor,int64_t nowUtcMs); // expired ancestry is unavailable, never inferred from a larger sequence
     EnergyHistoryCheckpoint checkpoint(int64_t nowUtcMs) const;
     EnergyHistoryTotals query(int64_t beginUtcMs, int64_t endUtcMs, int64_t nowUtcMs) const;
+    // Ordered disjoint period ranges. Publishes all totals from this model, or none.
+    EnergyHistoryStatus queryPeriods(const std::vector<EnergyHistoryRange> &ranges, int64_t nowUtcMs,
+                                     std::vector<EnergyHistoryTotals> &totals) const;
     // Exact summed held watts, never average power. Capacity refuses rather than smoothing/partial trace publication.
     EnergyHistoryTrace queryTrace(int64_t beginUtcMs,int64_t endUtcMs,int64_t nowUtcMs,size_t maxIntervals=512) const;
     EnergyHistoryTotals registerTotal(const std::string &registerId, const std::string &periodId, int64_t throughUtcMs, int64_t nowUtcMs) const;
