@@ -528,23 +528,21 @@ def main(cli, bundle):
                         moved.rename(watched)
         assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
         # A supervisor can launch the quiet watch without a reader on stdout.
+        lease = watched / 'meter-billing.lock'
+        lease.unlink()
         with subprocess.Popen((*watch, '--watch-quiet'), cwd=watched, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE) as child:
             child.stdout.close()
             try:
                 deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    contender = subprocess.run((binary, 'meter-bill', '--roll-forward', watched_seed), cwd=watched,
-                                               capture_output=True, timeout=10)
-                    if contender.returncode == 3 and b'workspace is busy' in contender.stderr:
-                        break
-                    assert contender.returncode == 0 and child.poll() is None
+                while not lease.exists() and time.monotonic() < deadline:
+                    assert child.poll() is None
                     time.sleep(0.05)
-                else:
-                    raise AssertionError('quiet watcher never acquired the workspace')
+                assert lease.exists(), 'quiet watcher never acquired the workspace'
+                run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
                 watched_seed.write_bytes(b'damaged archive')
                 assert child.wait(timeout=10) == 3
-                assert child.stderr.read()
+                assert b'recurring review seed' in child.stderr.read()
             finally:
                 if child.poll() is None:
                     child.kill()

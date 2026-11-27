@@ -149,13 +149,7 @@ def main(installed, *, activate_default_target=False):
         (workspace / 'seed.cmr').rename(seed)
         saved = seed.read_bytes()
         deployed = manager(installed, seed, label)
-
-        def workspace_busy():
-            result = subprocess.run((miner, 'meter-bill', '--roll-forward', seed), cwd=workspace,
-                                    capture_output=True, timeout=30)
-            assert result.returncode in (0, 3), result
-            return result.returncode == 3 and b'workspace is busy' in result.stderr
-
+        lease = workspace / 'meter-billing.lock'
         target = workspace / f'cycle-{may}.cmr'
         try:
             if activate_default_target and os.name != 'nt':
@@ -164,7 +158,8 @@ def main(installed, *, activate_default_target=False):
                 execute('systemctl', '--user', 'restart', 'default.target')
             else:
                 deployed.start()
-            wait_until(workspace_busy)
+            wait_until(lease.exists)
+            bill('--roll-forward', seed, expected=3)
             stage(workspace / f'cycle-{may}.readings.json', following[1])
             stage(workspace / f'cycle-{may}.rates.json', following[2])
             wait_until(target.exists)
@@ -173,8 +168,10 @@ def main(installed, *, activate_default_target=False):
             archived = target.read_bytes()
             deployed.stop()
             assert b'1 verified, 0 saved' in bill('--roll-forward', seed)
+            lease.unlink()
             deployed.start()
-            wait_until(workspace_busy)
+            wait_until(lease.exists)
+            bill('--roll-forward', seed, expected=3)
             seed.write_bytes(b'changed seed')
             wait_until(deployed.refused)
             seed.write_bytes(saved)
