@@ -1207,13 +1207,15 @@ const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing
                                 std::string &details) {
     const auto name = "cycle-" + std::to_string(closing) + ".compared.cmr";
     std::string bytes;
-    const auto state = readCycleSlot(name, maxArchiveBytes, bytes);
+    auto state = readCycleSlot(name, maxArchiveBytes, bytes);
     if (state == LocalFileRead::Missing) {
         const auto temporary = localReviewPath(name + ".tmp");
         std::error_code error;
         if (!temporary || std::filesystem::symlink_status(*temporary, error).type() != std::filesystem::file_type::not_found)
             return "late invoice review has uncertain temporary output";
-        return nullptr;
+        // A publisher may have moved the temporary file after the first read.
+        state = readCycleSlot(name, maxArchiveBytes, bytes);
+        if (state == LocalFileRead::Missing) return nullptr;
     }
     ReviewOriginal comparison;
     if (state != LocalFileRead::Ok || !decodeReviewOriginal(bytes, comparison) || comparison.invoice.empty())
@@ -1524,6 +1526,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         priorReview = std::move(nextReview);
     }
     if (history) {
+        if (withInvoices && !refreshClock()) return "local clock changed during the billing review";
         std::string total;
         if (!historyTotal.format(6, &total)) return "cycle history amount exceeds the display range";
         report = "Octopus supply estimates from the selected seed (" + std::to_string(existing + 1) +

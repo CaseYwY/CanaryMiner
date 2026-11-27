@@ -409,12 +409,18 @@ def main(cli, bundle, clock_fixture=None):
                                          interim_supply_charges=[dict(begin_utc_ms=annual_begin,
                                                                       end_utc_ms=annual_end,
                                                                       supply_charge='1')])]))
-        run('--open-review', annual_seed, '--invoice', invoice, '--save-review',
-            f'cycle-{annual_end}.compared.cmr', cwd=annual_workspace)
+        annual_late = annual_workspace / f'cycle-{annual_end}.compared.cmr'
+        run('--open-review', annual_seed, '--invoice', invoice, '--save-review', annual_late.name, cwd=annual_workspace)
         annual_history = run('--cycle-history', annual_seed, '--with-invoices', cwd=annual_workspace)
         assert 'Invoice reviews available for 1 of 1 verified cycles' in annual_history
         assert f'Estimated annual adjustment {annual[3] - 1:.2f} GBP' in annual_history
         assert 'Stated annual adjustment' not in annual_history
+        if clock_fixture:
+            regression = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                              CANARY_TEST_SUCCESSOR_CUTOFF_MS=str(annual_end + 2 * HOUR),
+                              CANARY_TEST_COMPARISON_CLOCK_REGRESSION='1')
+            run('--cycle-history', annual_seed, '--with-invoices', cwd=annual_workspace, env=regression,
+                code=3, reason='local clock changed during the billing review')
 
         leap = cycle(annual_end, annual_next, GO_PRODUCT, None, 14, 6, 366, bundle=True)
         leap[0].update(schema_version=5, reset_policy=dict(annual_month=1, annual_day=1, clock=LONDON))
@@ -535,6 +541,11 @@ def main(cli, bundle, clock_fixture=None):
         assert run('--with-invoices', '--cycle-history', first_archive).endswith(
             'Invoice reviews available for 2 of 2 verified cycles\nEnd of verified archive chain\n')
         assert run(*history) == rollup and late.read_bytes() == late_bytes
+        if clock_fixture:
+            late.rename(temporary)
+            publishing = dict(os.environ, LD_PRELOAD=str(clock_fixture), CANARY_TEST_PUBLISH_COMPARISON=str(late))
+            assert run(*with_invoices, env=publishing) == comparison
+            assert late.read_bytes() == late_bytes and not temporary.exists()
 
         duplicate = root / f'cycle-{may}.compared.cmr'
         duplicate.write_bytes(late_bytes)
