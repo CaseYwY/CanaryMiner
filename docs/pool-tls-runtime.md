@@ -34,6 +34,18 @@ An explicit `stratum+ssl://` URL must contain an ASCII DNS name and port. The ch
 
 DNS, TCP and TLS setup share the ordinary ten-second budget, including the [bounded selection of a resolved address](pool-tls-check.md#native-connection-and-verification). The command retires its worker before reporting. Exit status 0 records verified TLS, 2 indicates invalid arguments, and 3 indicates an unavailable build or a connection failure. It prints a bounded failure category such as `dns`, `connect`, `verification` or `timeout`. Status 130 indicates cancellation with confirmed cleanup. Status 8 indicates that worker cleanup could not be confirmed.
 
+### Check a saved TLS configuration
+
+After [reviewing and saving a migration](pool-tls-migration.md), use a TLS-enabled installation:
+
+```text
+canary-miner pool-tls-check --config FILE
+```
+
+Use the same working directory as the planned mining launch so a relative `state_dir` selects the same preferences. The command reads the explicit config-v1 file and its saved pool declarations through the installed preferences worker. It uses the ordinary first-pool transport policy, including donation requirements and endpoint conflict checks. The configured first pool must use TLS without a plaintext fallback. The command accepts the file as its only input. Wallet and worker data are unnecessary for this check.
+
+The check verifies the resolved TLS peer and closes the connection. It leaves the config and declarations intact. A subsequent mining session resolves its own configuration, opens a fresh connection and authenticates separately.
+
 ## Connection and failure behavior
 
 The actual `runMiner` source construction owns a `PoolTlsRuntimeTransport` for the complete `PearlPoolSource` lifetime. Each open creates a fresh one-attempt process transport. The old helper is closed and settled first; the shared native admission epoch prevents replacement after unresolved ownership. Normal close permits a new TLS connection. Stop or loss of the original epoch permanently revokes this runtime owner. A caller from another scope cannot close or cancel the original owner's connection.

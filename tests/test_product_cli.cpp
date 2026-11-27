@@ -66,6 +66,18 @@ int main() {
                                         "--allow-public-tickers", "--pool", "kryptex"}));
     }
 
+    {
+        const char *argv[] = {"canary-miner", "run", "--config", "lossy-config.json", "--worker", "lossy-config.json"};
+        const int argc = sizeof(argv) / sizeof(argv[0]);
+        CliParse parsed;
+        CHECK(parseProductCli(argc, argv, &parsed, nullptr));
+        CHECK(parsed.configArg == 3 && parsed.ov.configPath == "lossy-config.json");
+        parsed.ov.configPath = "config-\xf0\x9f\xa7\xaa.json";
+        const auto forwarded = supervisorUserArguments(argc, argv, parsed, {});
+        CHECK((forwarded == std::vector<std::string>{"run", "--config", parsed.ov.configPath,
+                                                      "--worker", "lossy-config.json"}));
+    }
+
     // ---- pool forms: legacy/strict presets, explicit endpoints, and canonical protocol identity
     {
         PoolEntry e;

@@ -1,7 +1,10 @@
 #pragma once
 
 #include <algorithm>
+#include <filesystem>
 #include <initializer_list>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #if defined(_WIN32)
@@ -11,18 +14,24 @@
 
 namespace om {
 
+#if defined(_WIN32)
+struct NativeWideArguments {
+    int count = 0;
+    LPWSTR *values = CommandLineToArgvW(GetCommandLineW(), &count);
+    NativeWideArguments() = default;
+    NativeWideArguments(const NativeWideArguments &) = delete;
+    NativeWideArguments &operator=(const NativeWideArguments &) = delete;
+    ~NativeWideArguments() { if (values) LocalFree(values); }
+};
+#endif
+
 inline bool nativeCliArguments(int argc, const char *const *argv,
                                std::initializer_list<std::pair<int, std::string_view>> expected) {
 #if defined(_WIN32)
     (void)argv;
     // A best-fit conversion in the CRT must not turn other spellings into network options.
-    struct WideArguments {
-        LPWSTR *values;
-        ~WideArguments() { if (values) LocalFree(values); }
-    };
-    int count = 0;
-    const WideArguments args{CommandLineToArgvW(GetCommandLineW(), &count)};
-    if (!args.values || count != argc) return false;
+    const NativeWideArguments args;
+    if (!args.values || args.count != argc) return false;
 #else
     if (!argv) return false;
 #endif
@@ -36,6 +45,23 @@ inline bool nativeCliArguments(int argc, const char *const *argv,
 #endif
     }
     return true;
+}
+
+inline std::optional<std::string> nativeCliPathArgument(int argc, const char *const *argv, int index) {
+    if (index <= 0 || index >= argc) return std::nullopt;
+#if defined(_WIN32)
+    (void)argv;
+    const NativeWideArguments args;
+    if (!args.values || args.count != argc || !args.values[index][0]) return std::nullopt;
+    try {
+        return std::filesystem::path(args.values[index]).u8string();
+    } catch (const std::filesystem::filesystem_error &) {
+        return std::nullopt;
+    }
+#else
+    if (!argv || !argv[index] || !argv[index][0]) return std::nullopt;
+    return std::string(argv[index]);
+#endif
 }
 
 }  // namespace om

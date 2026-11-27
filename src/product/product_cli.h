@@ -54,7 +54,9 @@ enum class Command { Run, ListDevices, Selftest, Status, Version, Settings, Diag
 inline constexpr char poolTlsCheckHelp[] =
     "canary-miner pool-tls-check --pool stratum+ssl://HOST:PORT\n"
     "canary-miner pool-tls-check --pool kryptex-hk-tls\n"
-    "Supply one TLS URL or a strict TLS preset used by the miner.\n"
+    "canary-miner pool-tls-check --config FILE\n"
+    "Supply one TLS URL, strict TLS preset or config-v1 file.\n"
+    "Config mode checks the first user pool using its saved TLS declaration and requires TLS without a plaintext fallback.\n"
     "Check one TLS connection with system trust. Requires a TLS-enabled build.\n"
     "The check sends no mining login or share, and closes the connection before reporting.";
 
@@ -112,6 +114,7 @@ struct CliParse {
     MarketTickerOptions marketTicker;
     EnergyPeriodsOptions energyPeriods;
     std::string poolTlsCheckSpec;
+    int configArg = 0; // original argv index of the explicit config path
     std::vector<std::string> rest;  // untouched legacy arguments (argv[0] excluded)
     std::vector<int> restArgIndices; // corresponding original argv slots, including translated aliases
     std::vector<int> gpuIdArgIndices; // only consumed --gpu-id option/value pairs, for worker argument forwarding
@@ -175,11 +178,14 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
         const auto option = i < argc ? std::string_view(argv[i]) : std::string_view();
         r.help = argc == i + 1 && (option == "-h" || option == "--help");
         if (!r.help) {
-            if (argc != i + 2 || option != "--pool" || !argv[i + 1][0]) {
-                if (error) *error = "pool-tls-check: supply one TLS URL or strict TLS preset. See pool-tls-check --help";
+            if (argc != i + 2 || (option != "--pool" && option != "--config") || !argv[i + 1][0]) {
+                if (error) *error = "pool-tls-check: supply one --pool or --config argument. See pool-tls-check --help";
                 return false;
             }
-            r.poolTlsCheckSpec = argv[i + 1];
+            if (option == "--config") {
+                r.configArg = i + 1;
+                r.ov.configPath = argv[r.configArg];
+            } else r.poolTlsCheckSpec = argv[i + 1];
         }
         *out = std::move(r);
         return true;
@@ -294,10 +300,11 @@ inline bool parseProductCli(int argc, const char *const *argv, CliParse *out, st
             r.ov.noHistory = true;
         } else if (a == "--config") {
             if (!need(i, "--config", &v)) return false;
-            if (!r.ov.configPath.empty()) {
+            if (r.configArg) {
                 if (error) *error = "--config given twice";
                 return false;
             }
+            r.configArg = i;
             r.ov.configPath = v;
         } else if (a == "--pool" || a == "-o") {
             if (!need(i, a.c_str(), &v)) return false;
@@ -457,7 +464,11 @@ inline std::vector<std::string> supervisorUserArguments(int argc, const char *co
         if (std::find(parentOnlyIndices.begin(), parentOnlyIndices.end(), i) != parentOnlyIndices.end() ||
             std::find(cli.gpuIdArgIndices.begin(), cli.gpuIdArgIndices.end(), i) != cli.gpuIdArgIndices.end())
             continue;
-        result.emplace_back(argv[i]);
+        if (i == cli.configArg) {
+            // Keep an option-shaped relative filename distinct from worker options.
+            const auto &path = cli.ov.configPath;
+            result.push_back(path.rfind("--", 0) == 0 ? "./" + path : path);
+        } else result.emplace_back(argv[i]);
     }
     return result;
 }

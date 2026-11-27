@@ -25,7 +25,14 @@ class PreferencesLiveArtifactTests(unittest.TestCase):
             self.assertNotIn(forbidden, service)
         main = (ROOT / 'src/core/miner.cu').read_text(encoding='utf8')
         self.assertNotIn('loadProductConfig(', main)
-        self.assertLess(main.index('signal(SIGINT,onSignal);signal(SIGTERM,onSignal);', main.index('if (cli.command == Command::Version)')), main.index('inspectStartupConfig('))
+        ordinary = main[main.index('if (cli.command == Command::Version)'):]
+        self.assertLess(ordinary.index('signal(SIGINT,onSignal);signal(SIGTERM,onSignal);'),
+                        ordinary.index('inspectStartupConfig('))
+        preflight = main[main.index('if (cli.command == Command::PoolTlsCheck)'):
+                         main.index('if (cli.command == Command::MeterRates)')]
+        self.assertLess(preflight.index('signal(SIGINT, onSignal);'), preflight.index('NativeProcessScope original('))
+        self.assertLess(preflight.index('NativeProcessScope original('), preflight.index('inspectStartupConfig('))
+        self.assertLess(preflight.index('inspectStartupConfig('), preflight.index('transport.open('))
         self.assertLess(main.index('NativeProcessScope originalStartup('), main.index('// ---- devices: identity'))
         device = main.index('// ---- devices: identity')
         self.assertLess(main.index('if(!nativeProcessEpochCurrent(inspectedConfig.nativeEpoch))', device), main.index('if (!queryDevices(&present))', device))
