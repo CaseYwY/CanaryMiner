@@ -16,12 +16,14 @@ namespace om {
 inline constexpr int64_t meterBillMaxUtcMs = 253402300799999LL;
 inline constexpr std::size_t maxInvoiceBytes = 16 * 1024;
 
+enum class RecurringInspection { None, NextReadings, ScheduledReadings, History };
+
 struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
     int nextCycleArg = 0, previousCycleArg = 0, rollForwardArg = 0, watchArg = 0, quietWatchArg = 0;
-    int readingsPlanArg = 0;
-    bool scheduledReadingsPlan = false;
+    int inspectionArg = 0;
+    RecurringInspection inspection = RecurringInspection::None;
     unsigned watchSeconds = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
     int allowPublicRatesArg = 0, dnsServerArg = 0;
@@ -67,9 +69,12 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             else if (name == "--open-review" && !options.archiveArg) options.archiveArg = i+1;
             else if (name == "--prepare-next-cycle" && !options.prepareCycleArg) options.prepareCycleArg = i+1;
             else if (name == "--next-cycle-review" && !options.nextCycleArg) options.nextCycleArg = i+1;
-            else if ((name == "--next-readings-plan" || name == "--scheduled-readings-plan") && !options.readingsPlanArg) {
-                options.readingsPlanArg = i+1;
-                options.scheduledReadingsPlan = name == "--scheduled-readings-plan";
+            else if ((name == "--next-readings-plan" || name == "--scheduled-readings-plan" ||
+                      name == "--cycle-history") && !options.inspectionArg) {
+                options.inspectionArg = i+1;
+                options.inspection = name == "--cycle-history" ? RecurringInspection::History :
+                    name == "--scheduled-readings-plan" ? RecurringInspection::ScheduledReadings :
+                                                          RecurringInspection::NextReadings;
             }
             else if (name == "--roll-forward" && !options.rollForwardArg) options.rollForwardArg = i+1;
             else if (name == "--watch-every-seconds" && !options.watchArg) {
@@ -112,7 +117,7 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
                                           options.archiveArg || options.prepareCycleArg ||
                                           options.tariffArg || options.ratesArg || options.reviewCutoffArg)) return false;
         if (options.dnsServerArg && !options.allowPublicRatesArg) return false;
-        if (options.readingsPlanArg) {
+        if (options.inspectionArg) {
             if (operands != 2) return false;
         } else if (options.rollForwardArg) {
             if (operands != 2 + (options.reviewCutoffArg ? 2 : 0) + (options.allowPublicRatesArg ? 1 : 0) +

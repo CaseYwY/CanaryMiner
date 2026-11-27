@@ -728,6 +728,26 @@ new starting point.
 The command keeps estimated charges and optional local invoice comparisons in the same
 archive format as the individual review.
 
+#### Review the verified Octopus cycle history
+
+In the seed archive's workspace, run:
+
+~~~text
+canary-miner meter-bill --cycle-history march.cmr
+~~~
+
+The report includes the selected seed and each consecutive successor that passes replay and links
+to the preceding closing record. Each row shows the UTC cycle boundaries and the supply estimate.
+The total sums the exact estimates before rounding the display to six decimal places. Rows marked
+with an archived invoice comparison have an invoice inside the cycle archive. A separate comparison
+created later has its own archive and can be opened separately.
+
+The command reads the closed archives without starting the watcher or reading staged meter, rate
+or invoice inputs. A missing archive before a later one, an invalid link, a changed saved amount,
+or a temporary file at the next slot prevents a summary. The report covers up to 120 successors
+plus the selected seed. If it reaches that limit, use the last verified archive as the next seed
+and count the shared cycle only once when combining totals.
+
 #### Watch for new billing inputs
 
 Run the same command with a check interval between 1 and 86,400 seconds. The first check
