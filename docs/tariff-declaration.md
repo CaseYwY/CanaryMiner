@@ -632,7 +632,8 @@ payment method, input format and reset clock. Supply a new public rate capture a
 readings for the entire next cycle. Cumulative register readings must open at the absolute
 closing value in the previous archive. An Octopus electricity import bundle must cover every
 half hour of the new cycle exactly once. Both cycles must start with zero accrued charges and
-their own applicable rates. Use the existing [capture command](#review-publicly-listed-octopus-agile-prices)
+their own applicable rates. The captured prices include VAT. Annotations for charges already
+included in the captured price are accepted. Use the existing [capture command](#review-publicly-listed-octopus-agile-prices)
 for the new cycle's prices. The installed capture command accepts at most 8,192 half hours of
 elapsed time. Annual Go review requires a separately captured, compatible full-year snapshot.
 Annual Agile prices exceed the quantity limit. The current two-month tariff model supports

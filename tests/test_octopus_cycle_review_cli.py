@@ -204,6 +204,29 @@ def main(cli, bundle):
         assert run('--open-review', 'go-november.cmr', '--previous-cycle', 'go-october.cmr') == go
         inputs(cycle(november, december, GO_PRODUCT, Decimal(0), 20, 5, 30))
         refused('go-october.cmr', december + HOUR, 'payment method, meter or reset rule differs')
+        # Both Octopus captures already include VAT. Each cycle may annotate that included tax.
+        def vat(cycle, rate, *, added=False):
+            result = copy.deepcopy(cycle)
+            declaration = result[0]
+            opening = declaration['opening']
+            begin, end = opening['cycle_begin_utc_ms'], opening['cycle_end_utc_ms']
+            declaration['schema_version'] = 15
+            declaration['plan']['tax_periods'] = [dict(begin_utc_ms=begin, end_utc_ms=end, published_utc_ms=begin,
+                rules=[dict(key='vat', kind='fraction', rate=rate, components=['energy'] if added else [],
+                            prior_taxes=[], included_in=['daily_fee'] if added else ['energy', 'daily_fee'])])]
+            opening['tax_bases'] = dict.fromkeys(('energy', 'daily_fee', 'cycle_fee', 'demand', 'billed_kwh'), '0')
+            return result
+
+        inputs(vat(previous, '0.05'))
+        vat_first = save('vat-march.cmr', april + HOUR)
+        close(previous[3], vat_first)
+        inputs(vat(current, '0.2'))
+        vat_next = advance('vat-march.cmr', 'vat-april.cmr', may + HOUR)
+        close(current[3], vat_next)
+        assert run('--open-review', 'vat-april.cmr', '--previous-cycle', 'vat-march.cmr') == vat_next
+        assert run('--open-review', 'vat-march.cmr') == vat_first
+        inputs(vat(current, '0.2', added=True))
+        refused('vat-march.cmr', may + HOUR, 'already include VAT')
         print(f'Octopus adjacent cycle review passed {count} installed CLI commands.')
 
 

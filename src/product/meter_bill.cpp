@@ -754,7 +754,7 @@ std::optional<std::string> completeOctopusCycleBinding(const MeterReview &review
     const auto &meter = opening.evidence;
     const auto *series = std::get_if<std::vector<MeterImportInterval>>(&review.readings.series);
     if (!review.supplier || !declaration.resetSchedule || review.prepaid || plan.exportPayment ||
-        plan.restrictedCreditAtClose || !plan.taxPeriods.empty() ||
+        plan.restrictedCreditAtClose ||
         (review.readings.version != 2 && review.readings.version != 3) ||
         !series || series->empty() || opening.throughUtcMs != opening.cycleBeginUtcMs ||
         !opening.importedKwh.numerator.zero() || !opening.accruedSubtotal.numerator.zero() ||
