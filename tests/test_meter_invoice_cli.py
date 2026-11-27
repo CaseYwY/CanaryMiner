@@ -74,10 +74,30 @@ def main(cli):
         assert 'Difference (calculated minus invoice) -0.03 USD (mismatch)' in attached
         assert ordinary.read_bytes() == previous and previous.startswith(b'CANARY-METER-REVIEW-1\n')
         assert accept(run(*compare, '--save-review', archive.name)) == attached
+        late = root / 'late-invoice.cmr'
+        late_input = ('--open-review', ordinary.name, '--invoice', invoice.name, '--save-review')
+        assert accept(run(*late_input, late.name)) == attached
+        assert late.read_bytes() == archive.read_bytes()
+        refuse(run(*late_input, late.name), 'existing archive was preserved')
+        refuse(run(*late_input, ordinary.name), 'existing archive was preserved')
+        reserved = f'CyClE-{END}.cmr'
+        refuse(run(*late_input, reserved), 'reserved for recurring cycles')
+        assert not (root / reserved).exists()
+        assert ordinary.read_bytes() == previous
+        assert late.read_bytes() == archive.read_bytes()
+        assert not list(root.glob('*.cmr.tmp'))
+
+        changed_results = previous[:-66] + b'!'  # Change only the final byte of the original exact amounts.
+        damaged = root / 'damaged-original.cmr'
+        damaged.write_bytes(changed_results + sha256(changed_results).hexdigest().encode() + b'\n')
+        refuse(run('--open-review', damaged.name, '--invoice', invoice.name, '--save-review', 'rejected.cmr'),
+               'differ from the recalculated amounts')
+        assert not (root / 'rejected.cmr').exists()
         assert {path: path.read_bytes() for path in originals} == originals
         refuse(run('--open-review', archive.name, '--invoice', invoice.name), 'already contains an invoice')
         refuse(run('--open-review', archive.name, '--invoice', invoice.name, '--save-review', 'copy.cmr'),
-               'invalid options', 2)
+               'already contains an invoice')
+        assert not (root / 'copy.cmr').exists()
         refuse(run(*compare, '--invoice', invoice.name), 'invalid options', 2)
         result = run(*args, '--invoic\uff45', invoice.name)
         assert result.returncode in (2, 3) and not result.stdout
@@ -97,7 +117,8 @@ def main(cli):
         for path in originals:
             path.unlink()
         assert accept(run('--open-review', archive.name)) == attached
-        assert archive.read_bytes() == before
+        assert accept(run('--open-review', late.name)) == attached
+        assert late.read_bytes() == archive.read_bytes() == before
 
         # A valid checksum cannot make changed comparison amounts replay as the original.
         altered = before[:-65].replace(b'"supply_charge":"0.03"', b'"supply_charge":"0.04"')

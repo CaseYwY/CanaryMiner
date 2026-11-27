@@ -198,6 +198,14 @@ def main(cli, bundle, clock_fixture=None):
         assert derived == report
         assert (root / 'april-derived.cmr').read_bytes() == (root / 'april.cmr').read_bytes()
         assert run('--open-review', 'april-derived.cmr', '--previous-cycle', old) == derived
+        advance(old, 'april-uncompared.cmr', may + HOUR)
+        uncompared = root / 'april-uncompared.cmr'
+        uncompared_bytes = uncompared.read_bytes()
+        assert run('--open-review', uncompared, '--previous-cycle', old, '--invoice', invoice,
+                   '--save-review', 'april-compared.cmr') == report
+        assert uncompared.read_bytes() == uncompared_bytes
+        assert (root / 'april-compared.cmr').read_bytes() == (root / 'april.cmr').read_bytes()
+        assert run('--open-review', 'april-compared.cmr', '--previous-cycle', old) == report
         close(current[3], report)
         assert '(match)' in report and f'Previous Octopus cycle closed at {april}' in report
         old_hash = sha256(old_bytes).hexdigest()
@@ -431,6 +439,14 @@ def main(cli, bundle, clock_fixture=None):
         second_stem = root / f'cycle-{june}'
         first_archive = first_stem.with_suffix('.cmr')
         second_archive = second_stem.with_suffix('.cmr')
+        history = ('--cycle-history', old)
+        private_files = {path: path.read_bytes() for path in root.iterdir() if path.is_file()}
+        single = run(*history)
+        assert '1 verified cycle' in single and f'[{march}, {april})' in single
+        assert {path: path.read_bytes() for path in root.iterdir() if path.is_file()} == private_files
+        for extras in (('--watch-every-seconds', '1'), ('--save-review', 'extra.cmr'), ('--allow-public-rates',),
+                       ('--scheduled-readings-plan', old), ('--as-of-utc-ms', june + HOUR)):
+            run(*history, *extras, code=2, reason='invalid options')
         for extras in (('--intervals', readings), ('--tariff', tariff), ('--next-cycle-review', old),
                        ('--save-review', 'x.cmr'), ('--allow-public-rates',), ('--dns-server', '1.1.1.1')):
             run(*roll, *extras, code=2, reason='invalid options')
@@ -468,21 +484,44 @@ def main(cli, bundle, clock_fixture=None):
         first_stem.with_suffix('.readings.json').write_bytes(b'changed after publication')
         assert '2 verified, 0 saved' in run(*roll)
         assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
+        rollup = run(*history)
+        assert '3 verified cycles' in rollup
+        assert f'[{march}, {april})' in rollup and f'[{may}, {june})' in rollup
+        assert f'{current[3]:.6f} GBP (archived invoice comparison)' in rollup
+        assert f'Estimated total {(previous[3] + current[3] + following[3]):.6f} GBP' in rollup
+        rotated = run('--cycle-history', first_archive)
+        assert '2 verified cycles' in rotated and f'[{march}, {april})' not in rotated
+        assert f'Estimated total {(current[3] + following[3]):.6f} GBP' in rotated
+        assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
         run('--roll-forward', old, '--as-of-utc-ms', may + HOUR, code=3, reason='newer than the requested cutoff')
 
         write(first_stem.with_suffix('.readings.json'), current[1])
         first_archive.unlink()
         run(*roll, code=3, reason='archive gap')
+        run(*history, code=3, reason='archive gap')
         assert not first_archive.exists() and second_archive.read_bytes() == second_bytes
         first_archive.write_bytes(first_bytes)
 
+        body = second_bytes[:-65]
+        offset = body.index(b'\n', len(HEADER)) + 1
+        for _ in range(2):
+            end_length = body.index(b'\n', offset)
+            offset = end_length + 1 + int(body[offset:end_length])
+        results_offset = body.index(b'\n', offset) + 1
+        assert body[results_offset:results_offset + 1] != b'!'
+        damaged = body[:results_offset] + b'!' + body[results_offset + 1:]
+        second_archive.write_bytes(damaged + sha256(damaged).hexdigest().encode('ascii') + b'\n')
+        run(*history, code=3, reason='differ from the recalculated amounts')
+
         second_archive.write_bytes(first_bytes)
         run(*roll, code=3, reason='does not match the previous closing record')
+        run(*history, code=3, reason='does not match the previous closing record')
         assert second_archive.read_bytes() == first_bytes
         second_archive.unlink()
         uncertain = second_stem.with_suffix('.cmr.tmp')
         uncertain.write_bytes(second_bytes)
         run(*roll, code=3, reason='uncertain temporary output')
+        run(*history, code=3, reason='uncertain temporary output')
         assert not second_archive.exists() and uncertain.read_bytes() == second_bytes
         uncertain.unlink()
         second_archive.write_bytes(second_bytes)
@@ -611,6 +650,37 @@ def main(cli, bundle, clock_fixture=None):
         close(drift[3], save('utc-reset.cmr', march + HOUR))
         prepare('utc-reset.cmr', 'drift.json', code=3, reason='London local midnight')
         assert not (root / 'drift.json').exists()
+
+        historic = root / 'historic reset'
+        historic.mkdir()
+        historic_seed = historic / 'seed.cmr'
+        shutil.copyfile(root / 'utc-reset.cmr', historic_seed)
+        historical = run('--cycle-history', historic_seed, cwd=historic)
+        assert '1 verified cycle' in historical and f'Estimated total {drift[3]:.6f} GBP' in historical
+        assert list(historic.iterdir()) == [historic_seed]
+
+        fractional = root / 'fractional cycle totals'
+        fractional.mkdir()
+        fractional_seed = fractional / 'seed.cmr'
+        first = cycle(march, april, PRODUCT, None, 0, 1, 31, bundle=True)
+        second = cycle(april, may, PRODUCT, None, 0, 1, 30, bundle=True)
+
+        def tiny_standing_charge(record):
+            inputs(record)
+            text = rates.read_text(encoding='ascii')
+            assert text.count('"value_inc_vat":1,"value_exc_vat":1') == 1
+            rates.write_text(text.replace('"value_inc_vat":1,"value_exc_vat":1',
+                                          '"value_inc_vat":0.0000013,"value_exc_vat":0.0000013'),
+                             encoding='ascii')
+
+        tiny_standing_charge(first)
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates,
+            '--as-of-utc-ms', april + HOUR, '--save-review', fractional_seed.name, cwd=fractional)
+        tiny_standing_charge(second)
+        advance(fractional_seed, f'cycle-{may}.cmr', may + HOUR, cwd=fractional)
+        rounded = run('--cycle-history', fractional_seed, cwd=fractional)
+        assert rounded.count('UTC ms: 0.000000 GBP') == 2
+        assert 'Estimated total 0.000001 GBP' in rounded
         print(f'Octopus adjacent cycle review and preparation passed {count} installed CLI commands.')
 
 

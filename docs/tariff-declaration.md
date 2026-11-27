@@ -728,6 +728,26 @@ new starting point.
 The command keeps estimated charges and optional local invoice comparisons in the same
 archive format as the individual review.
 
+#### Review the verified Octopus cycle history
+
+In the seed archive's workspace, run:
+
+~~~text
+canary-miner meter-bill --cycle-history march.cmr
+~~~
+
+The report includes the selected seed and each consecutive successor that passes replay and links
+to the preceding closing record. Each row shows the UTC cycle boundaries and the supply estimate.
+The total sums the exact estimates before rounding the display to six decimal places. Rows marked
+with an archived invoice comparison have an invoice inside the cycle archive. A separate comparison
+created later has its own archive and can be opened separately.
+
+The command reads the closed archives without starting the watcher or reading staged meter, rate
+or invoice inputs. A missing archive before a later one, an invalid link, a changed saved amount,
+or a temporary file at the next slot prevents a summary. The report covers up to 120 successors
+plus the selected seed. If it reaches that limit, use the last verified archive as the next seed
+and count the shared cycle only once when combining totals.
+
 #### Watch for new billing inputs
 
 Run the same command with a check interval between 1 and 86,400 seconds. The first check
@@ -1218,12 +1238,18 @@ The file limit is 16 KiB. Use a local alias and put only the fields shown above 
 canary-miner meter-bill --tariff go-tariff.json --intervals march-usage.json --octopus-rates go-rates.json --invoice march-charges.json --save-review compared.cmr
 canary-miner meter-bill --open-review compared.cmr
 canary-miner meter-bill --open-review go.cmr --invoice march-charges.json
+canary-miner meter-bill --open-review go.cmr --invoice march-charges.json --save-review march-compared.cmr
 ```
 
 A version 3 archive keeps the exact invoice input and comparison along with the meter review. Reopening it
 recalculates both at the original meter cutoff. To compare an older archive that contains only a meter review,
-supply the invoice separately. This comparison is read-only and uses the archive's original meter cutoff. The
-supplied charges remain a local declaration, independent of the historical cutoff for meter and price data.
+supply the invoice separately. The comparison uses the archive's original meter cutoff. Add `--save-review`
+with a new basename to retain the invoice and its exact comparison in a separate archive. The miner verifies
+the saved meter amounts before publishing the comparison. The new archive retains the original inputs and
+any Octopus predecessor link. Use a descriptive name such as march-compared.cmr. The filename
+pattern cycle-END.cmr is reserved for the watcher. Keep the original `cycle-END.cmr` files in a recurring workspace so successor
+links still resolve to their original bytes. An archive with an invoice already attached refuses another.
+The supplied charges remain a local declaration, independent of the cutoff for meter and price data.
 
 ### Reconcile interim supply charges at annual close
 
@@ -1355,7 +1381,7 @@ canary-miner meter-bill --open-review april.cmr
 
 The archive keeps both input files byte for byte, the effective review cutoff, and the exact per-cycle usage and amount records. With no explicit cutoff, the command records the local UTC time sampled at the start of the review. Opening uses that saved cutoff and those exact inputs, verifies the archive checksum and recalculates the amounts before displaying the estimate. The original input files can move or change. A checksum detects damage and supports replay checking. It carries no supplier or meter authentication.
 
-Saving uses an exclusive, synced sibling file and publishes a complete archive without replacing an existing file. A save cancelled before publication or an interrupted verification returns exit status 130. A process interruption can leave a `.cmr.tmp` sibling. Its presence blocks a new save under that name. Reopen the archive to verify its outcome and choose a new name for another save. On Linux the local filesystem must support hard links. File sync can fail or stall, and this path has no physical power-loss certification. Opening is read-only. The archive preserves an estimate from imported readings and a declared tariff. Runtime billing, observed-source admission and economic-mode activation have separate requirements.
+Saving uses an exclusive, synced sibling file and publishes a complete archive without replacing an existing file. A save cancelled before publication or an interrupted verification returns exit status 130. A process interruption can leave a `.cmr.tmp` sibling. Its presence blocks a new save under that name. Reopen the archive to verify its outcome and choose a new name for another save. On Linux the local filesystem must support hard links. File sync can fail or stall, and this path has no physical power-loss certification. Opening without --save-review is read-only. The archive preserves an estimate from imported readings and a declared tariff. Runtime billing, observed-source admission and economic-mode activation have separate requirements.
 
 
 ## Persistence, privacy and rollback
