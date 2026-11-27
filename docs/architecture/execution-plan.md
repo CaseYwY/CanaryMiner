@@ -117,6 +117,10 @@ The [strict HeroMiners presets](../pool-tls-presets.md#herominers-regional-prese
 
 The [native connection path](../pool-tls-check.md#native-connection-and-verification) can move a waiting handshake to a ready address from the same DNS lookup under the original deadline. It preserves the DNS identity and trust policy across attempts. TLS errors and cancellation stop the check. After the TLS phase starts, later socket failures cannot authorize plaintext fallback.
 
+## P-12x Use received intermediates in Schannel private verification
+
+The [opt-in Schannel verifier](../pool-schannel.md#separate-normal-and-explicit-development-trust) uses intermediate certificates received during the handshake as supporting material for the configured root and CRLs. The combined input remains bounded. The Windows loopback fixture checks accepted chains and rejects missing support, an untrusted root and intermediate revocation.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

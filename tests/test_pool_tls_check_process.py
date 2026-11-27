@@ -249,11 +249,84 @@ def alternate_loopback(args, context, ca, crl):
     print('TLS address recovery: alternate opens after a stall, trust, protocol and cancel stop, one slow peer stays, original deadline holds')
 
 
-def loopback(args):
+def generate_material(args, mode):
     command = [sys.executable] if not args.wsl_distro else ['wsl', '-d', args.wsl_distro, '--exec', 'python3']
     # The returned JSON contains an ephemeral SYNTHETIC key. Never print subprocess output/material.
-    generated = subprocess.run([*command, str(args.generator_script), 'valid', 'localhost'], capture_output=True, timeout=30, check=True)
-    material = json.loads(generated.stdout)
+    generated = subprocess.run([*command, str(args.generator_script), mode, 'localhost'],
+                               capture_output=True, timeout=30, check=True)
+    return json.loads(generated.stdout)
+
+
+def schannel_chain_loopback(args):
+    other_anchor = base64.b64decode(generate_material(args, 'valid')['root'])
+    for mode in ('received', 'omitted', 'explicit', 'duplicate', 'untrusted-root', 'missing-crl', 'revoked', 'chain-cap'):
+        material = generate_material(args, 'chain-revoked' if mode == 'revoked' else 'chain')
+        ca = base64.b64decode(material['root'])
+        intermediate = ssl.PEM_cert_to_DER_cert(material['intermediate'])
+        crls = [base64.b64decode(material['crl'])]
+        if mode != 'missing-crl':
+            crls.append(base64.b64decode(material['intermediate_crl']))
+        explicit = [intermediate] if mode in ('explicit', 'duplicate') else []
+        chain = material['cert']
+        if mode not in ('omitted', 'explicit'):
+            chain += material['intermediate']
+        if mode in ('duplicate', 'untrusted-root'):
+            chain += ssl.DER_cert_to_PEM_cert(ca)
+        if mode == 'chain-cap':
+            for _ in range(16):
+                extra = base64.b64decode(generate_material(args, 'valid')['root'])
+                chain += ssl.DER_cert_to_PEM_cert(extra)
+        with tempfile.TemporaryDirectory(prefix='schannel-chain-', dir=args.scratch) as directory:
+            cert, key = Path(directory) / 'server.pem', Path(directory) / 'server.key'
+            cert.write_text(chain, encoding='ascii')
+            key.write_text(material['key'], encoding='ascii')
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.num_tickets = 0
+            try:
+                context.load_cert_chain(cert, key)
+            finally:
+                key.unlink(missing_ok=True)
+        del material
+
+        finished = threading.Event()
+        errors = []
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen(1)
+            listener.settimeout(5)
+
+            def serve():
+                try:
+                    channel, _ = listener.accept()
+                    with channel:
+                        channel.settimeout(5)
+                        with context.wrap_socket(channel, server_side=True) as peer:
+                            finished.set()
+                            assert not peer.recv(1), 'preflight sent an application byte'
+                except (ssl.SSLError, ConnectionResetError):
+                    pass  # Negative trust or the preflight worker's local abort.
+                except Exception as error:
+                    errors.append(type(error).__name__)
+
+            thread = threading.Thread(target=serve, daemon=True)
+            thread.start()
+            anchor = other_anchor if mode == 'untrusted-root' else ca
+            try:
+                reply = run(args.probe, args.native, packet('localhost', listener.getsockname()[1], 3500,
+                            private=([anchor], explicit, crls)))
+            finally:
+                thread.join(timeout=6)
+            assert not errors and not thread.is_alive(), (mode, errors)
+        expected = (0, 9, 4, 0) if mode in ('received', 'explicit', 'duplicate') else (0, 8, 3, 4)
+        assert (reply['transport'], reply['status'], reply['stage'], reply['tls']) == expected, (mode, reply)
+        if mode in ('received', 'explicit', 'duplicate'):
+            assert finished.is_set(), mode
+    print('Schannel peer chain: received and explicit intermediates, duplicates, missing chain and CRL, untrusted root, revoked intermediate, support limit')
+
+
+def loopback(args):
+    material = generate_material(args, 'valid')
     with tempfile.TemporaryDirectory(prefix='tls-check-loopback-', dir=args.scratch) as directory:
         root = Path(directory)
         cert, key = root / 'server.pem', root / 'server.key'
@@ -266,7 +339,7 @@ def loopback(args):
         finally:
             key.unlink(missing_ok=True)
         ca, crl = base64.b64decode(material['root']), base64.b64decode(material['crl'])
-        del material, generated
+        del material
         for mode in ('valid', 'tickets', 'untrusted', 'stall-timeout', 'stall-cancel'):
             # An inspection abort is not a promise that the peer consumed the final flight or
             # finished post-handshake ticket writes. Keep the stronger peer-completion assertion
@@ -321,6 +394,8 @@ def loopback(args):
             else:
                 assert result['transport'] == 5 and result['status'] == -1 and result['elapsedMs'] < 1500, (mode, result)
         alternate_loopback(args, context, ca, crl)
+    if os.name == 'nt':
+        schannel_chain_loopback(args)
     print('TLS check loopback: no-ticket peer completion, ticket local-verification scope, normal untrusted refusal, stalled handshake timeout/cancel; no application bytes or public endpoints')
 
 
