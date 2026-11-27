@@ -20,18 +20,18 @@ foreach ($file in @($archive, $miner)) {
     if ($file.FullName.Contains('%')) {
         throw 'Task Scheduler paths must not contain a percent sign.'
     }
-}
-$root = $archive.Directory.Root.FullName
-if ($root -notmatch '\A[A-Za-z]:\\\z' -or $archive.FullName.Substring(2).Contains(':')) {
-    throw 'The billing workspace must be on a local drive.'
-}
-$drive = [System.IO.DriveInfo]::new($root)
-if ($drive.DriveType -notin @('Fixed', 'Removable', 'Ram')) {
-    throw 'The billing workspace must be on a local drive.'
-}
-for ($directory = $archive.Directory; $directory.Parent; $directory = $directory.Parent) {
-    if ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-        throw 'The billing workspace path must not traverse a junction or symbolic link.'
+    $root = $file.Directory.Root.FullName
+    if ($root -notmatch '\A[A-Za-z]:\\\z' -or $file.FullName.Substring(2).Contains(':')) {
+        throw 'The billing workspace and installation must be on local drives.'
+    }
+    $drive = [System.IO.DriveInfo]::new($root)
+    if ($drive.DriveType -notin @('Fixed', 'Removable', 'Ram')) {
+        throw 'The billing workspace and installation must be on local drives.'
+    }
+    for ($directory = $file.Directory; $directory.Parent; $directory = $directory.Parent) {
+        if ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw 'The billing workspace and installation must use paths without junctions or symbolic links.'
+        }
     }
 }
 

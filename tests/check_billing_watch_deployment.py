@@ -14,9 +14,9 @@ from test_octopus_cycle_review_cli import cycle
 from test_octopus_meter_rates_cli import GO_PRODUCT
 
 
-def execute(*args, cwd=None, env=None, expected=0):
+def execute(*args, cwd=None, env=None, expected=0, reason=b''):
     result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, timeout=30)
-    assert result.returncode == expected, result
+    assert result.returncode == expected and reason in result.stderr, result
     return result.stdout
 
 
@@ -74,7 +74,13 @@ class ScheduledTask:
         wait_until(lambda: self.state() == b'Ready')
 
     def refused(self):
-        return self.state() == b'Ready' and self.manage('(Get-ScheduledTaskInfo', ').LastTaskResult').strip() == b'3'
+        return self.state() == b'Ready' and self.last_result() == b'3'
+
+    def last_result(self):
+        return self.manage('(Get-ScheduledTaskInfo', ').LastTaskResult').strip()
+
+    def status(self):
+        return self.state(), self.last_result()
 
     def remove(self):
         self.manage('Unregister-ScheduledTask', ' -Confirm:$false')
@@ -119,6 +125,9 @@ class UserUnit:
         return (self.manage('show', '-P', 'ActiveState').strip() == b'failed' and
                 self.manage('show', '-P', 'ExecMainStatus').strip() == b'3')
 
+    def status(self):
+        return self.manage('show', '-p', 'ActiveState', '-p', 'ExecMainStatus', '-p', 'Result')
+
     def remove(self):
         self.manage('disable')
         self.unit.unlink()
@@ -136,8 +145,8 @@ def main(installed, *, activate_default_target=False):
         workspace.mkdir()
         seed = workspace / 'march \u7535.cmr'
 
-        def bill(*args, expected=0):
-            return execute(miner, 'meter-bill', *args, cwd=workspace, expected=expected)
+        def bill(*args, **expectation):
+            return execute(miner, 'meter-bill', *args, cwd=workspace, **expectation)
 
         prior = cycle(march, april, GO_PRODUCT, Decimal(20), 12, 34, 31)
         following = cycle(april, may, GO_PRODUCT, Decimal('42.290'), 15, 40, 30)
@@ -159,7 +168,7 @@ def main(installed, *, activate_default_target=False):
             else:
                 deployed.start()
             wait_until(lease.exists)
-            bill('--roll-forward', seed, expected=3)
+            bill('--roll-forward', seed, expected=3, reason=b'workspace is busy')
             stage(workspace / f'cycle-{may}.readings.json', following[1])
             stage(workspace / f'cycle-{may}.rates.json', following[2])
             wait_until(target.exists)
@@ -171,7 +180,7 @@ def main(installed, *, activate_default_target=False):
             lease.unlink()
             deployed.start()
             wait_until(lease.exists)
-            bill('--roll-forward', seed, expected=3)
+            bill('--roll-forward', seed, expected=3, reason=b'workspace is busy')
             seed.write_bytes(b'changed seed')
             wait_until(deployed.refused)
             seed.write_bytes(saved)
@@ -179,6 +188,8 @@ def main(installed, *, activate_default_target=False):
             assert deployed.refused()  # Restoring the input does not restart the task.
             assert seed.read_bytes() == saved and target.read_bytes() == archived
             assert b'1 verified, 0 saved' in bill('--roll-forward', seed)
+        except AssertionError as error:
+            raise AssertionError(deployed.status()) from error
         finally:
             try:
                 deployed.stop()

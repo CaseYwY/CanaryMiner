@@ -773,8 +773,9 @@ the economy setting.
 
 On Windows, use PowerShell as the account that owns the workspace. Run from the installed
 release directory. The helper prints a unique task name and refuses to replace an existing
-task of that name. Keep the workspace on a local drive and use paths without junctions,
-symbolic links or percent signs. Task Scheduler expands percent-encoded environment variables.
+task of that name. Keep the workspace and installed candidate on local drives. Use paths
+without junctions, symbolic links or percent signs. Task Scheduler expands percent-encoded
+environment variables.
 
 If Windows has marked the helper as downloaded, verify the candidate SHA-256 and the
 installed helper against the manifest before using
