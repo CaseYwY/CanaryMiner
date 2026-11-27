@@ -73,6 +73,7 @@ def main(cli, mode, fixture, preferences, native=None):
             run('--pool', url, code=3, message=b'runtime is unavailable')
             run('--pool', 'kryptex-hk-tls', code=3, message=b'runtime is unavailable')
             run('--pool', 'herominers-tls', code=3, message=b'runtime is unavailable')
+            run('--pool', 'herominers-hk-tls', code=3, message=b'runtime is unavailable')
             run('--config', str(inputs[0]), code=3, message=b'runtime is unavailable')
             return
 
@@ -90,6 +91,16 @@ def main(cli, mode, fixture, preferences, native=None):
             ('kryptex-ru-tls', 'prl-ru.kryptex.network', 8048),
             ('kryptex-ae-tls', 'prl-ae.kryptex.network', 8048),
             ('herominers-tls', 'us2.pearl.herominers.com', 1200),
+            ('herominers-de-tls', 'de.pearl.herominers.com', 1200),
+            ('herominers-fr-tls', 'fr.pearl.herominers.com', 1200),
+            ('herominers-fi-tls', 'fi.pearl.herominers.com', 1200),
+            ('herominers-ru-tls', 'ru.pearl.herominers.com', 1200),
+            ('herominers-us-west-tls', 'us.pearl.herominers.com', 1200),
+            ('herominers-us-south-tls', 'us3.pearl.herominers.com', 1200),
+            ('herominers-br-tls', 'br.pearl.herominers.com', 1200),
+            ('herominers-hk-tls', 'hk.pearl.herominers.com', 1200),
+            ('herominers-jp-tls', 'jp.pearl.herominers.com', 1200),
+            ('herominers-sg-tls', 'sg.pearl.herominers.com', 1200),
         )
         marker = bundle / 'preflight-target'
         for alias, host, port in targets:

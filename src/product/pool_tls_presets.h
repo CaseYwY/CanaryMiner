@@ -7,7 +7,10 @@ namespace om {
 
 enum class PoolTlsMigrationCandidate {
     None, KryptexUsTcp7048, KryptexHkTcp7048, HeroMinersUsEastTcp1200,
-    KryptexGlobal, KryptexEurope, KryptexBrazil, KryptexSingapore, KryptexRussia, KryptexMiddleEast
+    KryptexGlobal, KryptexEurope, KryptexBrazil, KryptexSingapore, KryptexRussia, KryptexMiddleEast,
+    HeroMinersGermany, HeroMinersFrance, HeroMinersFinland, HeroMinersRussia,
+    HeroMinersUsWest, HeroMinersUsSouth, HeroMinersBrazil, HeroMinersHongKong,
+    HeroMinersJapan, HeroMinersSingapore
 };
 
 inline constexpr int kKryptexPoolTcpPort = 7048;
@@ -46,6 +49,26 @@ inline constexpr PoolTlsPreset kPoolTlsPresets[] = {
      "stratum+tcp://prl-ae.kryptex.network:7048", "stratum+ssl://prl-ae.kryptex.network:8048", kKryptexPoolTcpPort},
     {PoolTlsMigrationCandidate::HeroMinersUsEastTcp1200, "herominers-tls",
      "stratum+tcp://us2.pearl.herominers.com:1200", "stratum+ssl://us2.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersGermany, "herominers-de-tls",
+     "stratum+tcp://de.pearl.herominers.com:1200", "stratum+ssl://de.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersFrance, "herominers-fr-tls",
+     "stratum+tcp://fr.pearl.herominers.com:1200", "stratum+ssl://fr.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersFinland, "herominers-fi-tls",
+     "stratum+tcp://fi.pearl.herominers.com:1200", "stratum+ssl://fi.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersRussia, "herominers-ru-tls",
+     "stratum+tcp://ru.pearl.herominers.com:1200", "stratum+ssl://ru.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersUsWest, "herominers-us-west-tls",
+     "stratum+tcp://us.pearl.herominers.com:1200", "stratum+ssl://us.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersUsSouth, "herominers-us-south-tls",
+     "stratum+tcp://us3.pearl.herominers.com:1200", "stratum+ssl://us3.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersBrazil, "herominers-br-tls",
+     "stratum+tcp://br.pearl.herominers.com:1200", "stratum+ssl://br.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersHongKong, "herominers-hk-tls",
+     "stratum+tcp://hk.pearl.herominers.com:1200", "stratum+ssl://hk.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersJapan, "herominers-jp-tls",
+     "stratum+tcp://jp.pearl.herominers.com:1200", "stratum+ssl://jp.pearl.herominers.com:1200", kHeroMinersPoolPort},
+    {PoolTlsMigrationCandidate::HeroMinersSingapore, "herominers-sg-tls",
+     "stratum+tcp://sg.pearl.herominers.com:1200", "stratum+ssl://sg.pearl.herominers.com:1200", kHeroMinersPoolPort},
 };
 
 inline constexpr const PoolTlsPreset *findPoolTlsPreset(std::string_view alias) {

@@ -315,7 +315,7 @@ int main(){
         CHECK(source && sourceUrl == source);
         CHECK(target && targetUrl == target);
         for (const auto *other : {"us2.pearl.herominers.com:1201", "us2.pearl.herominers.com.example:1200",
-                                  "us.pearl.herominers.com:1200", "herominers-tls"}) {
+                                  "unlisted.pearl.herominers.com:1200", "herominers-tls"}) {
             auto otherFirst = legacy;
             otherFirst.pools.insert(otherFirst.pools.begin(), PoolEntry{});
             CHECK(parsePoolSpec(other, &otherFirst.pools.front(), &error));
@@ -338,6 +338,47 @@ int main(){
               worker.pools.front().port == legacy.pools.front().port && worker.pools.front().preset == "herominers" &&
               worker.pools.front().targetSemantics == "final-adjusted-bound" && worker.pools.front().compression == "off");
         CHECK(!legacy.pools.front().tls);
+    }
+
+    {
+        using Candidate = PoolTlsMigrationCandidate;
+        struct Region { const char *alias; const char *host; Candidate candidate; };
+        const Region regions[] = {
+            {"herominers-de-tls", "de.pearl.herominers.com", Candidate::HeroMinersGermany},
+            {"herominers-fr-tls", "fr.pearl.herominers.com", Candidate::HeroMinersFrance},
+            {"herominers-fi-tls", "fi.pearl.herominers.com", Candidate::HeroMinersFinland},
+            {"herominers-ru-tls", "ru.pearl.herominers.com", Candidate::HeroMinersRussia},
+            {"herominers-us-west-tls", "us.pearl.herominers.com", Candidate::HeroMinersUsWest},
+            {"herominers-us-south-tls", "us3.pearl.herominers.com", Candidate::HeroMinersUsSouth},
+            {"herominers-br-tls", "br.pearl.herominers.com", Candidate::HeroMinersBrazil},
+            {"herominers-hk-tls", "hk.pearl.herominers.com", Candidate::HeroMinersHongKong},
+            {"herominers-jp-tls", "jp.pearl.herominers.com", Candidate::HeroMinersJapan},
+            {"herominers-sg-tls", "sg.pearl.herominers.com", Candidate::HeroMinersSingapore},
+        };
+        for (const auto &region : regions) {
+            const std::string endpoint = std::string(region.host) + ":1200";
+            const std::string source = "stratum+tcp://" + endpoint;
+            const std::string target = "stratum+ssl://" + endpoint;
+            PoolEntry preset;
+            CHECK(parsePoolSpec(region.alias, &preset, &error) && preset.tls && preset.host == region.host &&
+                  preset.port == 1200 && preset.policyKnown && preset.preset == "herominers");
+            ProductConfig regional;
+            regional.donation = false;
+            regional.pools.resize(1);
+            CHECK(parsePoolSpec(source, &regional.pools.front(), &error));
+            CHECK(poolTlsMigrationCandidate(regional) == region.candidate);
+            const auto *shownSource = poolTlsMigrationSource(region.candidate);
+            const auto *shownTarget = poolTlsMigrationTarget(region.candidate);
+            CHECK(shownSource && shownTarget && source == shownSource && target == shownTarget);
+            PoolSecurityPreferences migration;
+            migration.users[0] = {PoolSecurityMode::StrictTls, target, {}, false};
+            PoolTlsRuntimePolicy resolved;
+            CHECK(resolvePoolTlsRuntimePolicy(regional, migration, true, true, &resolved, &error) &&
+                  resolved.tls && resolved.frozenUrl == target && resolved.fallbackUrl.empty());
+            CHECK(applyFrozenPoolTlsEndpoint(resolved.frozenUrl, &regional) &&
+                  regional.pools.front().tls && regional.pools.front().preset == "herominers");
+            CHECK(poolTlsMigrationCandidate(regional) == Candidate::None);
+        }
     }
 
     // The early refusal must precede every scheduler clock, storage or run callback, even if miscalled internally.

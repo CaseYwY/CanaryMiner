@@ -109,6 +109,10 @@ The [Linux TLS worker](../pool-native-tls.md#linux-certificate-status-in-the-han
 
 [`pool-tls-check --config FILE`](../pool-tls-runtime.md#check-a-saved-tls-configuration) uses the normal saved first-pool transport policy and native system-trust check. It verifies the configured TLS peer without requiring login data, starting devices or changing either file. The explicit mode refuses plaintext and fallback-enabled configurations. Actual share acceptance remains an installed GPU and pool test.
 
+## P-12v Regional HeroMiners presets and migration
+
+The [strict HeroMiners presets](../pool-tls-presets.md#herominers-regional-presets) cover all eleven official Pearl regions on port 1200. The [legacy first-pool review](../pool-tls-migration.md) proposes TLS on that region's exact DNS host and port, and saves only through the existing confirmation. The same preset drives normal startup and preflight. Donation TLS still depends on a separately verified F2Pool Pearl endpoint.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.
