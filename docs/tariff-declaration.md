@@ -909,12 +909,23 @@ An enabled watcher can then use the bundle together with the cycle's price captu
 The capture prompts for authorization each time. The watcher reads the local bundle
 and can run after the capture process exits.
 
+Use a dedicated workspace for each meter. Keep the first and subsequent captures
+for that meter in the same directory. When first connecting
+an existing archive, verify that the selected physical meter matches the archive.
+The first successful acquisition pins that selection and alias in a private
+`.canary-octopus-meter.json` file. The file holds a random salt and a digest. Keep it
+with the workspace when moving or backing up the data. Subsequent captures reject a
+different account, meter or alias. A replacement meter uses a new workspace and
+opening review. Rotating the API key does not require a new workspace.
+
 Enter credentials only at the prompts. The tool keeps the API key and account
 response in process memory for the capture and publishes a private bundle containing
-the alias, observation time and exact readings. Redirects and inherited HTTP proxies
+the alias, observation time and exact readings. Use a local folder with private
+permissions. Redirects and inherited HTTP proxies
 are disabled. The tool reconstructs pagination requests on the documented API host.
-An access refusal, incomplete cycle or conflicting meter leaves the workspace file
-absent. An existing file is preserved.
+An access refusal, incomplete cycle or conflicting meter leaves the readings file
+absent. An existing file is preserved. After validation, the binding is published
+before the readings, so a failed write can be retried with the same meter.
 
 ### Review cumulative meter readings
 

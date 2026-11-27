@@ -4,11 +4,16 @@ import base64
 import datetime as dt
 from decimal import InvalidOperation
 import getpass
+from hashlib import sha256
+from hmac import compare_digest
 from http.client import HTTPException
+import json
 import os
 from pathlib import Path
 import re
+from secrets import token_hex
 import ssl
+import stat
 import sys
 import time
 from urllib.error import HTTPError
@@ -20,14 +25,21 @@ import warnings
 if __name__ == '__main__' and sys.flags.isolated:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from capture_octopus_rates import EPOCH, HALF_HOUR, MAX_PAGE_BYTES, ONE_SECOND, ORIGIN, PAGE_SIZE, NoRedirect, iso_utc, publish, utc
-from prepare_octopus_consumption import MAX_BYTES, MAX_ROWS, MILLISECOND, Number, append_readings, decode_json, encode_bundle, local_path
+from capture_octopus_rates import (
+    EPOCH, HALF_HOUR, MAX_PAGE_BYTES, ONE_SECOND, PAGE_SIZE, NoRedirect, iso_utc, publish, utc,
+)
+from prepare_octopus_consumption import (
+    MAX_BYTES, MAX_ROWS, MILLISECOND, Number, append_readings, decode_json, encode_bundle, local_path, read_page,
+)
 
 
+# The credential destination is independent of the public price client's URL.
+ORIGIN = 'https://api.oegb-kraken.energy'
 MAX_ANNUAL_ROWS = 18432
 MAX_ANNUAL_BYTES = 1792 * 1024
 MAX_ACCOUNT_BYTES = 1024 * 1024
 PROVIDER_HOSTS = ('api.oegb-kraken.energy', 'api.octopus.energy')
+BINDING_NAME = '.canary-octopus-meter.json'
 
 
 class CaptureError(ValueError):
@@ -130,14 +142,69 @@ def records(document, key):
     return rows
 
 
+def validate_private_alias(scope, identity):
+    alias = scope.casefold()
+    for value in identity:
+        value = value.casefold()
+        # Short serials may occur inside unrelated words. Reject them as whole labels.
+        found = value in alias if len(value) >= 4 else re.search(
+            r'(?<![a-z0-9])' + re.escape(value) + r'(?![a-z0-9])', alias)
+        if found:
+            raise CaptureError('choose a private alias separate from the supplier identifiers')
+
+
+def binding_digest(salt, identity, scope):
+    # The key is deliberately excluded so it can be rotated. The salt stays local.
+    material = '\0'.join((*identity[:3], scope)).encode('ascii')
+    return sha256(bytes.fromhex(salt) + material).hexdigest()
+
+
+def check_binding(path, identity, scope):
+    try:
+        saved = read_page(path)
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, RecursionError):
+        raise CaptureError('could not read the local Octopus meter binding') from None
+    if (not isinstance(saved, dict) or set(saved) != {'schema_version', 'salt', 'digest'} or
+            type(saved['schema_version']) is not Number or saved['schema_version'] != '1' or
+            any(type(saved[field]) is not str or not re.fullmatch(r'[a-f0-9]{64}', saved[field])
+                for field in ('salt', 'digest'))):
+        raise CaptureError('invalid local Octopus meter binding')
+    if not compare_digest(saved['digest'], binding_digest(saved['salt'], identity, scope)):
+        raise CaptureError('the meter or alias differs from the local workspace binding')
+    return True
+
+
+def pin_binding(path, identity, scope):
+    if check_binding(path, identity, scope):
+        return
+    salt = token_hex(32)
+    pin = {'schema_version': 1, 'salt': salt, 'digest': binding_digest(salt, identity, scope)}
+    try:
+        publish(path, (json.dumps(pin) + '\n').encode('ascii'))
+    except FileExistsError:
+        # Another publisher won the first-use race. Its binding must agree.
+        if not check_binding(path, identity, scope):
+            raise CaptureError('could not confirm the local Octopus meter binding') from None
+
+
+def confirm_destination(output, parent_state):
+    current_parent = local_path(output).parent.stat()
+    if not os.path.samestat(parent_state, current_parent):
+        raise CaptureError('the destination workspace moved during capture')
+
+
 def verify_import_meter(data, account, mpan, serial, begin, end):
-    if not isinstance(data, dict) or data.get('number') != account:
+    if not isinstance(data, dict) or type(data.get('number')) is not str or data['number'] != account:
         raise CaptureError('unexpected Octopus account response')
     points = [point for prop in records(data, 'properties') if covers_window(prop, begin, end)
-              for point in records(prop, 'electricity_meter_points') if point.get('mpan') == mpan]
+              for point in records(prop, 'electricity_meter_points')
+              if type(point.get('mpan')) is str and point['mpan'] == mpan]
     if len(points) != 1 or points[0].get('is_export') is not False:
         raise CaptureError('could not verify one account import meter for the complete window')
-    meters = [meter for meter in records(points[0], 'meters') if meter.get('serial_number') == serial]
+    meters = [meter for meter in records(points[0], 'meters')
+              if type(meter.get('serial_number')) is str and meter['serial_number'] == serial]
     if len(meters) != 1:
         raise CaptureError('the selected meter serial is unavailable or ambiguous')
 
@@ -153,8 +220,7 @@ def matches_page_link(link, route, required):
 
 def capture_consumption(opener, identity, scope, begin, end, deadline):
     account, mpan, serial, key = identity
-    if scope.casefold() in {value.casefold() for value in identity}:
-        raise CaptureError('choose a private alias separate from the supplier identifiers')
+    validate_private_alias(scope, identity)
     authorization = 'Basic ' + base64.b64encode((key + ':').encode('ascii')).decode('ascii')
     document = fetch_json(opener, f'/v1/accounts/{account}/', authorization, MAX_ACCOUNT_BYTES, deadline)
     verify_import_meter(document, account, mpan, serial, begin, end)
@@ -199,10 +265,17 @@ def main():
     try:
         closing_ms = (args.end - EPOCH) // MILLISECOND
         output = local_path(args.output or args.workspace / f'cycle-{closing_ms}.readings.json')
-        if os.path.lexists(output) or not output.parent.is_dir():
+        parent_state = output.parent.stat()
+        if (output.name.casefold() == BINDING_NAME or os.path.lexists(output) or
+                not stat.S_ISDIR(parent_state.st_mode)):
             raise CaptureError('choose a new readings file in an existing local directory')
         identity = read_identity()
+        binding = output.parent / BINDING_NAME
+        check_binding(binding, identity, args.scope)
         bundle = capture_consumption(private_opener(), identity, args.scope, args.begin, args.end, time.monotonic() + 180)
+        confirm_destination(output, parent_state)
+        pin_binding(binding, identity, args.scope)
+        confirm_destination(output, parent_state)
         publish(output, bundle)
     except CaptureError as error:
         parser.exit(1, f'could not capture Octopus consumption: {error}\n')

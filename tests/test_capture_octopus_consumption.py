@@ -90,12 +90,12 @@ class AuthenticatedCaptureTests(unittest.TestCase):
     def capture(self, provider, scope=SCOPE):
         return capture.capture_consumption(provider, IDENTITY, scope, BEGIN, END, time.monotonic() + 10)
 
-    def command(self, provider, destination, *extra, workspace=False):
+    def command(self, provider, destination, *extra, workspace=False, identity=IDENTITY, scope=SCOPE):
         stdout, stderr = io.StringIO(), io.StringIO()
         args = ['capture_octopus_consumption.py', '--begin', capture.iso_utc(BEGIN), '--end', capture.iso_utc(END),
-                '--scope', SCOPE, '--workspace' if workspace else '--output', str(destination), *extra]
+                '--scope', scope, '--workspace' if workspace else '--output', str(destination), *extra]
         with (redirect_stderr(stderr), redirect_stdout(stdout), mock.patch.object(sys, 'argv', args),
-              mock.patch.object(capture, 'read_identity', return_value=IDENTITY) as prompt,
+              mock.patch.object(capture, 'read_identity', return_value=identity) as prompt,
               mock.patch.object(capture, 'private_opener', return_value=provider)):
             try:
                 capture.main()
@@ -158,6 +158,63 @@ class AuthenticatedCaptureTests(unittest.TestCase):
         self.assertEqual(len(report['consumption']), 366 * 48)
         self.assertLess(len(bundle), 1792 * 1024)
         self.assertEqual(len(provider.requests), 177)
+
+    def test_alias_must_not_embed_account_credentials_or_meter_identifiers(self):
+        for value in IDENTITY:
+            provider = Provider()
+            with self.subTest(identifier=value), self.assertRaises(capture.CaptureError):
+                self.capture(provider, f'home-{value.lower()}-import')
+            self.assertEqual(provider.requests, [])
+        capture.validate_private_alias('word-alias', (ACCOUNT, POINT, 'a', KEY))
+        with self.assertRaises(capture.CaptureError):
+            capture.validate_private_alias('meter-a', (ACCOUNT, POINT, 'a', KEY))
+
+    def test_workspace_pins_meter_and_alias_but_allows_key_rotation(self):
+        consent = '--confirm-electricity-import'
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            target = workspace / 'initial.json'
+            self.assertEqual(self.command(Provider(account(), *page_documents(BEGIN, END)), target, consent)[:2], (0, 1))
+            binding = workspace / capture.BINDING_NAME
+            saved = binding.read_bytes()
+            for value in (*IDENTITY, SCOPE):
+                self.assertNotIn(value.encode('ascii'), saved)
+            self.assertEqual(set(json.loads(saved)), {'schema_version', 'salt', 'digest'})
+            next_file = workspace / 'next.json'
+            for changed, alias in (((ACCOUNT, POINT, 'other-meter', KEY), SCOPE), (IDENTITY, 'different-alias')):
+                provider = Provider()
+                code, _, error = self.command(provider, next_file, consent, identity=changed, scope=alias)
+                self.assertEqual(code, 1)
+                self.assertIn('differs from the local workspace binding', error)
+                self.assertEqual(provider.requests, [])
+                self.assertFalse(next_file.exists())
+            rotated = (ACCOUNT, POINT, SERIAL, 'fixture-replacement-key')
+            self.assertEqual(self.command(Provider(account(), *page_documents(BEGIN, END)), next_file, consent,
+                                          identity=rotated)[:2], (0, 1))
+            self.assertEqual(binding.read_bytes(), saved)
+            self.assertTrue(next_file.is_file())
+
+    def test_workspace_replacement_during_capture_refuses_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original, moved = root / 'workspace', root / 'moved'
+            original.mkdir()
+            provider = Provider(account(), *page_documents(BEGIN, END))
+            open_page = provider.open
+
+            def move_on_last_page(request, *, timeout):
+                response = open_page(request, timeout=timeout)
+                if len(provider.requests) == 16:
+                    original.rename(moved)
+                    original.mkdir()
+                return response
+
+            with mock.patch.object(provider, 'open', side_effect=move_on_last_page):
+                code, _, error = self.command(provider, original, '--confirm-electricity-import', workspace=True)
+            self.assertEqual(code, 1)
+            self.assertIn('destination workspace moved', error)
+            self.assertEqual(list(original.iterdir()), [])
+            self.assertEqual(list(moved.iterdir()), [])
 
     def test_incomplete_or_wrong_meter_never_replaces_a_workspace_file(self):
         with tempfile.TemporaryDirectory() as directory:
