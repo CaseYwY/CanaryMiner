@@ -198,6 +198,14 @@ def main(cli, bundle, clock_fixture=None):
         assert derived == report
         assert (root / 'april-derived.cmr').read_bytes() == (root / 'april.cmr').read_bytes()
         assert run('--open-review', 'april-derived.cmr', '--previous-cycle', old) == derived
+        advance(old, 'april-uncompared.cmr', may + HOUR)
+        uncompared = root / 'april-uncompared.cmr'
+        uncompared_bytes = uncompared.read_bytes()
+        assert run('--open-review', uncompared, '--previous-cycle', old, '--invoice', invoice,
+                   '--save-review', 'april-compared.cmr') == report
+        assert uncompared.read_bytes() == uncompared_bytes
+        assert (root / 'april-compared.cmr').read_bytes() == (root / 'april.cmr').read_bytes()
+        assert run('--open-review', 'april-compared.cmr', '--previous-cycle', old) == report
         close(current[3], report)
         assert '(match)' in report and f'Previous Octopus cycle closed at {april}' in report
         old_hash = sha256(old_bytes).hexdigest()

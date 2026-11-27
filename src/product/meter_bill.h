@@ -122,7 +122,9 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             if (operands != 4 || (!options.saveTariffArg && !options.saveRegisterArg)) return false;
         } else if (options.saveTariffArg || options.saveRegisterArg) return false;
         else if (options.archiveArg) {
-            if (operands != 2 + (options.invoiceArg ? 2 : 0) + (options.previousCycleArg ? 2 : 0)) return false;
+            if ((options.saveArg && !options.invoiceArg) ||
+                operands != 2 + (options.invoiceArg ? 2 : 0) + (options.previousCycleArg ? 2 : 0) +
+                                (options.saveArg ? 2 : 0)) return false;
         } else if (options.previousCycleArg) return false;
         else if (options.nextCycleArg) {
             if (options.extendArg || options.prepaidArg || !options.intervalsArg || !options.saveArg ||

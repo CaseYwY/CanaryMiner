@@ -189,6 +189,13 @@ def main(cli, bundle=None):
             assert "Difference (calculated minus invoice) 0.00 USD (match)" in report
             assert "Modeled energy acquisition total 152.000000 USD" in report
             assert run("--open-review", "invoice.cmr") == report
+            review(policy, register(points[:6]), month, feb15, "--save-review", "prepaid-uncompared.cmr")
+            original = (root / "prepaid-uncompared.cmr").read_bytes()
+            assert run("--open-review", "prepaid-uncompared.cmr", "--invoice", invoice,
+                       "--save-review", "prepaid-compared.cmr") == report
+            assert (root / "prepaid-uncompared.cmr").read_bytes() == original
+            assert (root / "prepaid-compared.cmr").read_bytes() == (root / "invoice.cmr").read_bytes()
+            assert run("--open-review", "prepaid-compared.cmr") == report
 
             small = prepaid(begin, inventory="0", purchases=[(jan20, "100", "100")])
             review(policy, register(points[:2]), small, jan20, "--save-review", "overdrawn.cmr",
