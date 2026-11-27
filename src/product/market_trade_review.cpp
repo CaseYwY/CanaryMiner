@@ -85,17 +85,9 @@ MarketDataResult<Trade> latestTrade(const PublicJsonResponse &response,bool gate
 
     const JsonValue *rows=&document;
     if (!gate) {
-        const auto *errors=document.find("error"), *result=document.find("result");
-        if (!document.isObject() || !errors || !errors->isArray()) return {MarketDataStatus::Schema,{}};
-        if (!errors->items.empty()) {
-            bool limited=false;
-            for (const auto &error:errors->items) {
-                if (!error.isString()) return {MarketDataStatus::Schema,{}};
-                limited=limited || error.text=="EAPI:Rate limit exceeded";
-            }
-            return {limited ? MarketDataStatus::RateLimited : MarketDataStatus::ProviderError,{}};
-        }
-        if (!result || !result->isObject()) return {MarketDataStatus::Schema,{}};
+        const auto envelope = market_detail::krakenEnvelopeStatus(document);
+        if (envelope != MarketDataStatus::Ok) return {envelope,{}};
+        const auto *result=document.find("result");
         rows=result->find("USDTZUSD");
         const auto *cursor=result->find("last");
         if (!rows || result->members.size()!=2) return {MarketDataStatus::Identity,{}};

@@ -2,7 +2,9 @@
 #include "json_dom.h"
 #include "market_minute_window.h"
 #include <algorithm>
+#include <charconv>
 #include <set>
+#include <string_view>
 
 namespace om {
 const char *marketDataStatusName(MarketDataStatus status) {
@@ -18,6 +20,7 @@ const char *marketDataStatusName(MarketDataStatus status) {
         case MarketDataStatus::Arithmetic: return "exact market arithmetic limit exceeded";
         case MarketDataStatus::ProviderError: return "provider error envelope";
         case MarketDataStatus::RateLimited: return "provider rate limit envelope";
+        case MarketDataStatus::ProviderThrottled: return "provider throttle envelope";
     }
     return "unsupported market data";
 }
@@ -61,17 +64,40 @@ MarketDataStatus envelope(const PublicJsonResponse &r, const MarketParseContext 
     observation->receivedMonoMs = c.receivedMonoMs; observation->generation = c.generation;
     return MarketDataStatus::Ok;
 }
-const JsonValue *krakenResult(const JsonValue &root, MarketDataStatus *status) {
+constexpr std::string_view krakenThrottlePrefix = "EService: Throttled:";
+
+uint64_t throttleTime(std::string_view message) {
+    message.remove_prefix(krakenThrottlePrefix.size());
+    if (!message.empty() && message.front() == ' ') message.remove_prefix(1);
+    if (message.empty()) return 0;
+    uint64_t utc = 0;
+    const auto *end = message.data() + message.size();
+    const auto parsed = std::from_chars(message.data(), end, utc);
+    return parsed.ec == std::errc{} && parsed.ptr == end ? utc : 0;
+}
+
+const JsonValue *krakenResult(const JsonValue &root, MarketDataStatus *status, uint64_t *retryUtc = nullptr) {
     const auto *error = root.find("error"), *result = root.find("result");
     *status = MarketDataStatus::Schema;
     if (!root.isObject() || !error || !error->isArray()) return nullptr;
     if (!error->items.empty()) {
-        bool rate = false;
+        bool rate = false, throttled = false, invalidTime = false;
+        uint64_t notBefore = 0;
         for (const auto &message : error->items) {
             if (!message.isString()) return nullptr;
             if (message.text == "EAPI:Rate limit exceeded") rate = true;
+            if (message.text.compare(0, krakenThrottlePrefix.size(), krakenThrottlePrefix) == 0) {
+                throttled = true;
+                if (retryUtc) {
+                    const auto time = throttleTime(message.text);
+                    invalidTime = invalidTime || !time;
+                    notBefore = (std::max)(notBefore, time);
+                }
+            }
         }
-        *status = rate ? MarketDataStatus::RateLimited : MarketDataStatus::ProviderError;
+        if (retryUtc && !invalidTime) *retryUtc = notBefore;
+        *status = throttled ? MarketDataStatus::ProviderThrottled :
+            rate ? MarketDataStatus::RateLimited : MarketDataStatus::ProviderError;
         return nullptr;
     }
     if (!result || !result->isObject()) return nullptr;
@@ -125,6 +151,15 @@ MarketDataStatus market_detail::krakenEnvelopeStatus(const JsonValue &payload) {
     MarketDataStatus status;
     krakenResult(payload, &status);
     return status;
+}
+
+uint64_t market_detail::krakenThrottleUtc(const PublicJsonResponse &reply) {
+    JsonValue payload;
+    if (!parseJsonStrict(reply.body, &payload, nullptr)) return 0;
+    MarketDataStatus status;
+    uint64_t notBefore = 0;
+    krakenResult(payload, &status, &notBefore);
+    return status == MarketDataStatus::ProviderThrottled ? notBefore : 0;
 }
 
 MarketDataResult<MarketQuote> parseMarketQuote(const PublicJsonResponse &r, const MarketParseContext &c) {

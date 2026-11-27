@@ -248,7 +248,7 @@ int installedPath(const std::filesystem::path &fixture){
     const std::pair<const char *, bool> scenarios[] = {
         {"gap-fx", false}, {"full", true}, {"gap-pearl", true}, {"future", true},
         {"malformed", true}, {"gap-fx", true}, {"kraken-gap", true}, {"kraken-open-in-window", true},
-        {"kraken-limited-json", true}
+        {"kraken-limited-json", true}, {"kraken-throttled", true}
     };
     for (const auto &[mode, allowFallback] : scenarios) {
         const std::string_view scenario(mode);
@@ -263,6 +263,7 @@ int installedPath(const std::filesystem::path &fixture){
                 const auto label = "Kraken USDT/USD fallback: ";
                 const auto status = scenario == "kraken-open-in-window" ? "N/A (no fresh window) | ok/unsupported market response schema" :
                     scenario == "kraken-limited-json" ? "N/A (no fresh window) | ok/provider rate limit envelope" :
+                    scenario == "kraken-throttled" ? "N/A (no fresh window) | ok/provider throttle envelope" :
                     scenario == "kraken-gap" ? "59/60" : "60/60";
                 return text.find(std::string(label) + status) != text.npos;
             }

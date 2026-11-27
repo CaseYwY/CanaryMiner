@@ -10,13 +10,14 @@ enum class MarketSeries { GatePearlMainnetUsdtV1, KrakenUsdtUsdV1 };
 enum class MarketOrigin { ProviderResponse, SyntheticFixture, DeclaredPayload };
 // The documented candle time anchors are not yet production-qualified. Only offline fixtures can opt in.
 enum class MarketMinuteConvention { Unqualified, FixtureMinuteStart };
-enum class MarketDataStatus { Ok, Transport, Identity, Schema, Decimal, Timestamp, UnsupportedConvention, Coverage, Arithmetic, ProviderError, RateLimited };
+enum class MarketDataStatus { Ok, Transport, Identity, Schema, Decimal, Timestamp, UnsupportedConvention, Coverage, Arithmetic, ProviderError, RateLimited, ProviderThrottled };
 const char *marketDataStatusName(MarketDataStatus status);
 const char *marketSeriesName(MarketSeries series);
 
 struct JsonValue;
 namespace market_detail {
 MarketDataStatus krakenEnvelopeStatus(const JsonValue &payload);
+uint64_t krakenThrottleUtc(const PublicJsonResponse &reply);
 }
 
 struct MarketParseContext {

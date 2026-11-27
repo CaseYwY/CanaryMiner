@@ -203,6 +203,35 @@ int main() {
         }
     }
 
+    const auto serviceThrottle = [](std::string_view deadline) {
+        auto reply = okay();
+        reply.observedUtc = E + 11;
+        reply.body = R"({"error":["EService: Throttled: )" + std::string(deadline) + R"("]})";
+        return reply;
+    };
+    const auto throttle = serviceThrottle(std::to_string(E + 40));
+    MarketParseContext quoteContext{{PublicFeed::KrakenUsdtTicker}, E + 11, 1000, 1, MarketOrigin::ProviderResponse,
+        MarketMinuteConvention::Unqualified, E + 11};
+    const auto throttledQuote = parseMarketQuote(throttle, quoteContext);
+    CHECK(throttledQuote.status == MarketDataStatus::ProviderThrottled && !throttledQuote.value);
+    CHECK(market_detail::krakenThrottleUtc(throttle) == E + 40);
+    CHECK(!market_detail::krakenThrottleUtc(serviceThrottle("invalid")));
+
+    MarketPollingPlan quoteThrottle;
+    CHECK(quoteThrottle.start(1, 0, E + 10, fallbackPolicy, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = quoteThrottle.next(1000, E + 11);
+        CHECK(ticket && ticket->request.feed == feed);
+        const bool limited = feed == PublicFeed::KrakenUsdtTicker;
+        CHECK(ticket && quoteThrottle.complete(*ticket, limited ? throttle : okay(),
+            limited ? throttledQuote.status : MarketDataStatus::Ok, 1000, E + 11));
+    }
+    quoteThrottle.setPublicHourFallback(E);
+    CHECK(!quoteThrottle.next(30999, E + 40));
+    ticket = quoteThrottle.next(31000, E + 41);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+
     auto fastFallback = fallbackPolicy;
     fastFallback.quoteRefreshMs = 1000;
     MarketPollingPlan limitedOhlc;
@@ -231,6 +260,27 @@ int main() {
     CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
     CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 2000, E + 12));
     ticket = limitedOhlc.next(6000, E + 16);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+
+    MarketPollingPlan ohlcThrottle;
+    CHECK(ohlcThrottle.start(1, 0, E + 10, fastFallback, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = ohlcThrottle.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && ohlcThrottle.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+    }
+    ohlcThrottle.setPublicHourFallback(E);
+    ticket = ohlcThrottle.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+    const auto throttleStatus = market_detail::decodePublicHourPayload(throttle, market_detail::HourFeed::KrakenFx,
+        E - 3600, E, E + 11, E + 11, minutes);
+    CHECK(throttleStatus == MarketDataStatus::ProviderThrottled && minutes.empty());
+    CHECK(ticket && ohlcThrottle.complete(*ticket, throttle, throttleStatus, 1000, E + 11));
+    ticket = ohlcThrottle.next(30999, E + 40);
+    CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+    CHECK(ticket && ohlcThrottle.complete(*ticket, okay(), MarketDataStatus::Ok, 30999, E + 40));
+    ticket = ohlcThrottle.next(31000, E + 41);
     CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
 
     std::atomic<uint64_t> ms{0};

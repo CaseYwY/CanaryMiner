@@ -184,7 +184,24 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
     current_.reset(); h.inFlight = false; h.transport = r.status; h.data = data;
     const auto feed = index(ticket.request.feed);
     const auto refresh = fixtureCandles(feed) || publicHourFeed(feed) ? policy_.candleRefreshMs : policy_.quoteRefreshMs;
-    if (policy_.publicHourKrakenFallback && provider(feed) == provider(krakenHourFeed) &&
+    const bool sharedKrakenBudget = policy_.publicHourKrakenFallback && provider(feed) == provider(krakenHourFeed);
+    if (sharedKrakenBudget && r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::ProviderThrottled) {
+        const auto seconds = utcSeconds(policy_, utc);
+        const auto notBefore = krakenThrottleUtc(r);
+        const auto waitSeconds = notBefore > seconds ? notBefore - seconds : 0;
+        h.latched = !notBefore || waitSeconds >= 3600;
+        // UTC is quantized to seconds. Hold through the stated second on the monotonic clock.
+        auto &krakenDue = providerDue_[provider(feed)];
+        if (h.latched) {
+            krakenDue = UINT64_MAX;
+        } else {
+            const auto delay = (std::max)(policy_.retryBaseMs, (waitSeconds + 1) * 1000);
+            krakenDue = (std::max)(krakenDue, later(ms, delay));
+        }
+        h.nextDueMs = krakenDue;
+        return true;
+    }
+    if (sharedKrakenBudget &&
         (r.httpStatus == 429 || (r.retryAfterSeconds && transient(r)) ||
          (r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::RateLimited))) {
         auto &krakenDue = providerDue_[provider(feed)];

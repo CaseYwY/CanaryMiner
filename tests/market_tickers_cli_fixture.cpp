@@ -118,8 +118,10 @@ int main(int argc, char **argv) {
     const auto observed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     response.observedUtc = static_cast<uint64_t>(observed);
     if (krakenHour) {
-        response.body = mode == "kraken-limited-json" ? R"({"error":["EAPI:Rate limit exceeded"]})" :
-            krakenHourBody(from, observed, mode);
+        if (mode == "kraken-limited-json") response.body = R"({"error":["EAPI:Rate limit exceeded"]})";
+        else if (mode == "kraken-throttled")
+            response.body = R"({"error":["EService: Throttled: )" + std::to_string(observed + 30) + R"("]})";
+        else response.body = krakenHourBody(from, observed, mode);
         if (mode == "kraken-archive") {
             std::ofstream source(dir / "body-kraken", std::ios::binary);
             source << response.body;

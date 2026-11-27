@@ -131,7 +131,9 @@ canary-miner run --allow-public-tickers --allow-public-candles --kraken-fallback
 The Dashboard can ask Kraken for the same hour if MEXC supplies all 60 Pearl closes and
 a valid Coinbase response leaves an FX gap in that window. It attempts the Kraken request
 at most once for that UTC window, shares the Kraken provider budget with the quote
-request, and uses the launch's resolver. Coinbase remains the primary hourly FX source.
+request, and uses the launch's resolver. A Kraken service throttle holds both requests
+through the reported UTC deadline, or for the session when the deadline is invalid or
+outside the automatic wait limit. Coinbase remains the primary hourly FX source.
 A failed or invalid primary response gives no fallback permission.
 
 The Dashboard reports both venues' coverage. A Kraken USD average requires all 60 aligned
