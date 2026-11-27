@@ -98,6 +98,18 @@ system dependency and is absent from the archive.
 Archive verification cannot establish physical sensor accuracy or whole-meter coverage.
 The official release path retains its default-off build and refuses energy-enabled artifacts.
 
+## Version 5 billing watch layout
+
+Add `--with-billing-watch --with-named-tzdb` to the candidate pack command. The v5 manifest
+adds one file for the target platform. It verifies `deploy/Register-BillingWatch.ps1`
+on Windows or the executable `deploy/billing-watch.sh` on Linux. Public HTTPS and the
+energy runtime are independent options. A v5 candidate with both options has six native
+programs and 38 hashed payload files.
+
+Extraction and installation only copy files. Follow the [billing watch deployment guide](tariff-declaration.md#run-the-watcher-at-login)
+to register a Windows logon task or enable a Linux systemd user service. The v5 installer
+also verifies the earlier v1 through v4 profiles.
+
 ## Candidate evidence
 
 ### Version 3 clean installation

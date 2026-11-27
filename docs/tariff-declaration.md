@@ -756,6 +756,90 @@ Watch uses the current clock and cannot be combined with `--as-of-utc-ms`. The
 process when provided. Public capture can issue up to three successful captures per check.
 A capture failure terminates the watch. Use Ctrl+C or Ctrl+Break to stop a foreground run.
 
+#### Run the watcher at login
+
+A TLS candidate packed with `--with-billing-watch --with-named-tzdb` includes a user-level
+deployment helper for its platform. Extract or install into a permanent directory first.
+The watcher uses the seed's parent directory as its private workspace. Put the seed there
+with the staged cycle inputs. Use one watcher for that directory, and stop it before moving
+the workspace or replacing the installed release.
+
+The following examples use saved prices. To accept local supplier import pages, add
+`-ConfirmElectricityImport` on Windows or `--confirm-electricity-import` on Linux. To
+request public rates for missing captures, add `-AllowPublicRates` on Windows or
+`--allow-public-rates` on Linux with a public HTTPS candidate. The choices are independent.
+Registering the watcher does not grant supplier account access, start mining or change
+the economy setting.
+
+On Windows, use PowerShell as the account that owns the workspace. Run from the installed
+release directory. The helper prints a unique task name and refuses to replace an existing
+task of that name. Keep the workspace and installed candidate on local drives. Use paths
+without junctions, symbolic links or percent signs. Task Scheduler expands percent-encoded
+environment variables.
+
+If Windows has marked the helper as downloaded, verify the candidate SHA-256 and the
+installed helper against the manifest before using
+`Unblock-File -LiteralPath .\deploy\Register-BillingWatch.ps1`. A fresh PowerShell with
+`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned` selects a policy for that
+process only. An organization policy can still govern whether the script runs.
+
+~~~powershell
+$task = $null
+$task = .\deploy\Register-BillingWatch.ps1 -Name home -Seed 'D:\Bills\march.cmr' -Seconds 300
+if ($task) {
+    Start-ScheduledTask -TaskName $task
+    Get-ScheduledTask -TaskName $task
+    Get-ScheduledTaskInfo -TaskName $task
+}
+~~~
+
+The task runs with the current user's interactive token and starts again at that user's
+next logon if enabled. Task Scheduler launches the miner directly with `--watch-quiet` so
+the watcher can run without a terminal. A review refusal returns code 3 in the task's last
+result. Disable and stop the task, then run the same meter-bill command without
+`--watch-quiet` in the workspace to inspect the failure. A Scheduler stop may terminate the
+process immediately. If a temporary archive remains, inspect it before restarting.
+
+~~~powershell
+Disable-ScheduledTask -TaskName $task
+Stop-ScheduledTask -TaskName $task
+Unregister-ScheduledTask -TaskName $task
+~~~
+
+On Linux, use a systemd user session and run from the installed release directory. The
+helper prints a unit that you can inspect before installation. Use an unused unit filename.
+
+~~~bash
+(
+    set -e
+    umask 077
+    unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    unit=canaryminer-billing-home.service
+    mkdir -p -- "$unit_dir"
+    staged=$(mktemp -- "$unit_dir/.canaryminer-billing.XXXXXX")
+    trap 'rm -- "$staged"' EXIT
+    ./deploy/billing-watch.sh "$HOME/Bills/march.cmr" 300 > "$staged"
+    ln -T -- "$staged" "$unit_dir/$unit"
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$unit"
+)
+systemctl --user status canaryminer-billing-home.service
+journalctl --user -u canaryminer-billing-home.service
+~~~
+
+The enabled unit starts with the user manager. Session and linger policy are set by the OS.
+User journal history is available when the system keeps persistent user journals.
+systemd sends SIGTERM and allows up to 30 seconds to stop. Use
+`systemctl --user disable --now canaryminer-billing-home.service` to stop and prevent the
+next automatic start.
+To remove the deployment, also remove the unit file you installed and run
+`systemctl --user daemon-reload`. Both platforms leave the billing workspace intact and
+avoid restarting on input refusal until the next login or a manual start.
+
+See [Windows Task Scheduler task registration](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskfolder-registertaskdefinition),
+[PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
+and [systemd service settings](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html).
+
 ### Import Octopus consumption pages with the installed miner
 
 Use the local JSON responses from one meter's electricity import endpoint for the complete

@@ -438,6 +438,9 @@ def main(cli, bundle):
                       ('1', '--as-of-utc-ms', june + HOUR)):
             run('--roll-forward', old, '--watch-every-seconds', *extra, code=2, reason='invalid options')
         run('--open-review', old, '--watch-every-seconds', '1', code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-quiet', code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-every-seconds', '1', '--watch-quiet', '--watch-quiet',
+            code=2, reason='invalid options')
 
         watched = root / 'watched workspace'
         watched.mkdir()
@@ -523,6 +526,28 @@ def main(cli, bundle):
                         child.wait(timeout=5)
                     if moved.exists():
                         moved.rename(watched)
+        assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
+        # A supervisor can launch the quiet watch without a reader on stdout.
+        lease = watched / 'meter-billing.lock'
+        lease.unlink()
+        with subprocess.Popen((*watch, '--watch-quiet'), cwd=watched, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE) as child:
+            child.stdout.close()
+            try:
+                deadline = time.monotonic() + 10
+                while not lease.exists() and time.monotonic() < deadline:
+                    assert child.poll() is None
+                    time.sleep(0.05)
+                assert lease.exists(), 'quiet watcher never acquired the workspace'
+                run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
+                watched_seed.write_bytes(b'damaged archive')
+                assert child.wait(timeout=10) == 3
+                assert b'recurring review seed' in child.stderr.read()
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=5)
+                watched_seed.write_bytes(old_bytes)
         assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
 
         feb = utc('2023-02-01T00:00:00')

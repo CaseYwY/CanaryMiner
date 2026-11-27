@@ -8,7 +8,7 @@ Keep these three programs in the same bin directory:
   canary_preferences_worker
   canary_pool_tls_stream_worker
 A candidate with public HTTPS also keeps canary_public_json_worker in bin.
-A v4 energy candidate adds two fixed siblings in bin:
+A candidate with the energy runtime adds two fixed siblings in bin:
   canary_energy_authorization_worker
   canary_energy_collector_worker
 Windows adds .exe to each program name.
@@ -39,13 +39,19 @@ Public-ticker settings and economic mode start disabled. One-shot market
 commands require explicit flags for each invocation. Actual public-source
 validation and permission to distribute this build are separate gates.
 
-The v4 candidate reports energy-runtime=opt-in in the version command.
+An energy runtime candidate reports energy-runtime=opt-in in the version command.
 Energy persistence starts off and requires saved device enrollment and a new
 explicit mining parent. For read-only journal reporting use energy-periods
 --help. The collector loads system SQLite 3.31.0 or later at runtime. Use
 Windows System32 winsqlite3.dll or the distribution libsqlite3.so.0 on
 Linux. Use a serviced system library and protect the application and state
 directories. GPU-board history and whole-meter billing have separate inputs.
+
+A v5 billing watch candidate adds deploy/Register-BillingWatch.ps1 on
+Windows or deploy/billing-watch.sh on Linux. These tools use the installed
+miner to watch a private Octopus billing workspace on login. Installation
+creates no task or service. See "Run the watcher at login" in the repository's
+docs/tariff-declaration.md for setup, status and removal.
 
 See THIRD_PARTY.md and LICENSES for provenance and notices. GPU and mining
 acceptance and distribution approval are separate from this candidate check.

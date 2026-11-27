@@ -445,9 +445,9 @@ class CandidateTests(unittest.TestCase):
                 for name in CANDIDATE.PUBLIC_HTTPS_NOTICE_SHA256:
                     files[name] = (Path(__file__).resolve().parents[1] / name).read_bytes()
 
-                def check(payload, public_https, expected):
+                def check(payload, public_https, expected, billing_watch=False):
                     doc = CANDIDATE.manifest(platform, REVISION, glibc, payload, named_tzdb=True,
-                                             public_https=public_https, energy_runtime=True)
+                                             public_https=public_https, energy_runtime=True, billing_watch=billing_watch)
                     digest = self.archive(platform, {**payload, CANDIDATE.MANIFEST: json.dumps(doc).encode()}, archive)
                     if expected:
                         self.assertEqual(CANDIDATE.load(platform, archive, digest)[1], doc)
@@ -463,6 +463,47 @@ class CandidateTests(unittest.TestCase):
                     check(files, True, True)
                     for unexpected in (auth, collector):
                         check({**files, unexpected: files[unexpected] + CANDIDATE.PUBLIC_HTTPS_AGENT}, True, False)
+                    helper = CANDIDATE.billing_watch_path(platform)
+                    supplied = {**files, helper: b'billing watch deployment script'}
+                    check(supplied, True, False)
+                    check(supplied, True, False, billing_watch=True)  # Old miner.
+                    files[miner] += CANDIDATE.BILLING_WATCH_QUIET
+                    check(files, True, False, billing_watch=True)  # Missing helper.
+                    check({**files, helper: supplied[helper]}, True, True, billing_watch=True)
+
+    def test_billing_watch_installs_only_its_platform_helper_and_requires_named_clocks(self):
+        for platform in ('windows', 'linux'):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = root / ('watch' + CANDIDATE.suffix(platform))
+                files, fixture_pin = self.named_payload(platform)
+                files.pop(CANDIDATE.MANIFEST, None)
+                glibc = '2.40' if platform == 'linux' else None
+                miner = 'bin/' + CANDIDATE.images(platform)[0]
+                files[miner] += CANDIDATE.BILLING_WATCH_QUIET
+                helper = CANDIDATE.billing_watch_path(platform)
+                other_helper = CANDIDATE.billing_watch_path('linux' if platform == 'windows' else 'windows')
+                files[helper] = b'billing watch script'
+
+                def publish(payload, named):
+                    doc = CANDIDATE.manifest(platform, REVISION, glibc, payload, named_tzdb=named, billing_watch=True)
+                    return self.archive(platform, {**payload, CANDIDATE.MANIFEST: json.dumps(doc).encode()}, archive)
+
+                with patch.dict(CANDIDATE.TZDB_INVENTORY_SHA256, {platform: fixture_pin}), \
+                        patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+                    for bad, named in (({**files, other_helper: files[helper]}, True), (files, False)):
+                        digest = publish(bad, named)
+                        with self.assertRaises(ValueError):
+                            CANDIDATE.load(platform, archive, digest)
+                    digest = publish(files, True)
+                    if platform == 'windows' or os.name == 'posix':
+                        prefix = root / 'installation'
+                        doc, _ = CANDIDATE.install(platform, archive, digest, prefix)
+                        self.assertEqual(doc['schema'], CANDIDATE.BILLING_WATCH_SCHEMA)
+                        self.assertEqual((prefix / helper).read_bytes(), files[helper])
+                        self.assertFalse((prefix / other_helper).exists())
+                        if platform == 'linux':
+                            self.assertEqual(stat.S_IMODE((prefix / helper).stat().st_mode), 0o755)
 
     def test_refuses_wrong_hash_changed_file_extra_and_missing_members(self):
         for platform in ('linux', 'windows'):
