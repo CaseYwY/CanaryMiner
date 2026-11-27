@@ -90,10 +90,14 @@ class AuthenticatedCaptureTests(unittest.TestCase):
     def capture(self, provider, scope=SCOPE):
         return capture.capture_consumption(provider, IDENTITY, scope, BEGIN, END, time.monotonic() + 10)
 
-    def command(self, provider, destination, *extra, workspace=False, identity=IDENTITY, scope=SCOPE):
+    def command(self, provider, destination, *extra, workspace=False, identity=IDENTITY, scope=SCOPE,
+                from_seed=False, seed_mode='--next-cycle'):
         stdout, stderr = io.StringIO(), io.StringIO()
-        args = ['capture_octopus_consumption.py', '--begin', capture.iso_utc(BEGIN), '--end', capture.iso_utc(END),
-                '--scope', scope, '--workspace' if workspace else '--output', str(destination), *extra]
+        if from_seed:
+            args = ['capture_octopus_consumption.py', seed_mode, str(destination), *extra]
+        else:
+            args = ['capture_octopus_consumption.py', '--begin', capture.iso_utc(BEGIN), '--end', capture.iso_utc(END),
+                    '--scope', scope, '--workspace' if workspace else '--output', str(destination), *extra]
         with (redirect_stderr(stderr), redirect_stdout(stdout), mock.patch.object(sys, 'argv', args),
               mock.patch.object(capture, 'read_identity', return_value=identity) as prompt,
               mock.patch.object(capture, 'private_opener', return_value=provider)):
@@ -105,6 +109,133 @@ class AuthenticatedCaptureTests(unittest.TestCase):
         for secret in (*IDENTITY, 'fixture-private-property'):
             self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue())
         return code, prompt.call_count, stderr.getvalue()
+
+    def test_plan_drift_before_and_after_supplier_capture(self):
+        plan = (SCOPE, BEGIN, END, '0' * 64)
+        replacement = (*plan[:3], '1' * 64)
+        consent = '--confirm-electricity-import'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / 'seed.cmr'
+            seed.touch()
+            refused = capture.CaptureError('no next readings plan is available')
+            for results, requests, prompts, diagnostic in (
+                ((refused,), 0, 0, 'no next readings plan'),
+                ((plan, replacement), 0, 1, 'changed before capture'),
+                ((plan, plan, replacement), 16, 1, 'changed during capture'),
+            ):
+                provider = Provider(account(), *page_documents(BEGIN, END))
+                with mock.patch.object(capture, 'next_cycle_plan', side_effect=results):
+                    code, entered, error = self.command(provider, seed, consent, from_seed=True)
+                self.assertEqual((code, entered, len(provider.requests)), (1, prompts, requests))
+                self.assertIn(diagnostic, error)
+                self.assertEqual(list(root.iterdir()), [seed])
+            with mock.patch.object(capture, 'next_cycle_plan') as planner:
+                self.assertEqual(self.command(Provider(), seed, consent, '--scope', SCOPE, from_seed=True)[:2], (2, 0))
+                planner.assert_not_called()
+            binding = root / capture.BINDING_NAME
+            capture.pin_binding(binding, IDENTITY, SCOPE)
+            saved = binding.read_bytes()
+
+            def drift_during_publication(_):
+                if any(path != binding for path in root.glob('.canary-octopus-*')):
+                    return replacement
+                return plan
+
+            provider = Provider(account(), *page_documents(BEGIN, END))
+            with mock.patch.object(capture, 'next_cycle_plan', side_effect=drift_during_publication):
+                code, entered, error = self.command(provider, seed, consent, from_seed=True)
+            self.assertEqual((code, entered, len(provider.requests)), (1, 1, 16))
+            self.assertIn('changed during capture', error)
+            self.assertEqual(set(root.iterdir()), {seed, binding})
+            self.assertEqual(binding.read_bytes(), saved)
+
+    def test_scheduled_capture_is_bound_and_idle_does_not_unlock(self):
+        plan = (SCOPE, BEGIN, END, 'a' * 64, 'b' * 64, True)
+        consent = '--confirm-electricity-import'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / 'seed.cmr'
+            seed.touch()
+            binding, stored = (root / name for name in (capture.BINDING_NAME, capture.CREDENTIAL_NAME))
+            captured = capture.readings_path(root, END)
+            capture.pin_binding(binding, IDENTITY, SCOPE)
+            plaintext = []
+
+            def protect(data, *, decrypt=False):
+                if decrypt:
+                    self.assertEqual(data, b'sealed fixture')
+                    return plaintext[-1]
+                plaintext.append(data)
+                return b'sealed fixture'
+
+            with (mock.patch.object(capture, 'next_cycle_plan', return_value=plan) as planner,
+                  mock.patch.object(capture, 'protect_credential', side_effect=protect) as protector):
+                enrollment = Provider(account())
+                self.assertEqual(self.command(enrollment, seed, consent, from_seed=True,
+                                              seed_mode='--enroll-scheduled')[:2], (0, 1))
+                self.assertEqual(len(enrollment.requests), 1)
+                self.assertEqual(stored.read_bytes(), b'sealed fixture')
+                self.assertFalse(captured.exists())
+                self.assertEqual(self.command(Provider(), seed, consent, from_seed=True,
+                                              seed_mode='--enroll-scheduled')[:2], (1, 0))
+                provider = Provider()
+                planner.return_value = (*plan[:-1], False)
+                self.assertEqual(self.command(provider, seed, consent, from_seed=True,
+                                              seed_mode='--run-scheduled')[:2], (0, 0))
+                self.assertEqual(protector.call_count, 1)
+                self.assertEqual(provider.requests, [])
+                planner.return_value = (*plan[:4], 'c' * 64, True)
+                self.assertEqual(self.command(provider, seed, consent, from_seed=True,
+                                              seed_mode='--run-scheduled')[:2], (1, 0))
+                self.assertEqual(provider.requests, [])
+                planner.return_value = plan
+                pending = Provider(account(), dict(count=0, next=None, previous=None, results=[]))
+                with mock.patch.object(capture.time, 'sleep', side_effect=KeyboardInterrupt) as pause:
+                    self.assertEqual(self.command(pending, seed, consent, '--watch-every-seconds', '60',
+                                                  from_seed=True, seed_mode='--run-scheduled')[:2], (130, 0))
+                pause.assert_called_once_with(60)
+                self.assertFalse(captured.exists())
+                self.assertEqual(len(pending.requests), 2)
+                invalid = Provider(account(), dict(count=0, next='https://invalid.test', previous=None, results=[{}]))
+                with mock.patch.object(capture.time, 'sleep') as pause:
+                    self.assertEqual(self.command(invalid, seed, consent, '--watch-every-seconds', '60',
+                                                  from_seed=True, seed_mode='--run-scheduled')[:2], (1, 0))
+                pause.assert_not_called()
+                self.assertFalse(captured.exists())
+                row = page_documents(BEGIN, END)[0]['results'][0]
+                outside = dict(row, interval_start=capture.iso_utc(END),
+                               interval_end=capture.iso_utc(END + capture.HALF_HOUR))
+                for invalid_rows in ([outside], [row, row]):
+                    provider = Provider(account(), dict(count=len(invalid_rows), next=None, previous=None,
+                                                        results=invalid_rows))
+                    with mock.patch.object(capture.time, 'sleep') as pause:
+                        code, entered, error = self.command(provider, seed, consent, '--watch-every-seconds', '60',
+                                                            from_seed=True, seed_mode='--run-scheduled')
+                    self.assertEqual((code, entered), (1, 0))
+                    self.assertIn('exceed or overlap', error)
+                    pause.assert_not_called()
+                    self.assertFalse(captured.exists())
+                provider = Provider(account(), *page_documents(BEGIN, END))
+                self.assertEqual(self.command(provider, seed, consent, from_seed=True,
+                                              seed_mode='--run-scheduled')[:2], (0, 0))
+                self.assertEqual(len(provider.requests), 16)
+                self.assertTrue(captured.is_file())
+
+    @unittest.skipIf(os.name == 'nt', 'Windows can prevent a directory rename while its lease is open')
+    def test_scheduled_workspace_replacement_stops_the_held_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            path = workspace / capture.CAPTURE_LEASE_NAME
+            with capture.capture_lease(path) as verify:
+                verify()
+                workspace.rename(root / 'earlier')
+                workspace.mkdir()
+                path.touch()
+                with self.assertRaisesRegex(capture.CaptureError, 'destination workspace moved'):
+                    verify()
 
     def test_capture_fixes_endpoints_and_reads_full_spring_month(self):
         provider = Provider(account(), *page_documents(BEGIN, END))

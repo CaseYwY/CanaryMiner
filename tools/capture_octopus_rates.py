@@ -100,7 +100,7 @@ def capture_pages(opener, tariff_url, endpoint, begin, end, row_limit):
     return ',\n'.join(pages)
 
 
-def publish(output, bundle):
+def publish(output, bundle, *, before_publish=None):
     pending = None
     try:
         with tempfile.NamedTemporaryFile(dir=output.parent, prefix='.canary-octopus-', delete=False) as staging:
@@ -108,6 +108,8 @@ def publish(output, bundle):
             staging.write(bundle)
             staging.flush()
             os.fsync(staging.fileno())
+        if before_publish is not None:
+            before_publish()
         if os.name == 'nt':
             pending.rename(output)
         else:

@@ -909,6 +909,25 @@ An enabled watcher can then use the bundle together with the cycle's price captu
 The capture prompts for authorization each time. The watcher reads the local bundle
 and can run after the capture process exits.
 
+For a recurring workspace, an installed candidate can derive the alias and window
+from its seed archive:
+
+~~~text
+python -I -B tools/capture_octopus_consumption.py --confirm-electricity-import --next-cycle PRIVATE_DIRECTORY/march.cmr
+~~~
+
+The collector uses the installed miner to replay the local archive chain and find
+the next closed cycle missing readings. It stops before asking for credentials if
+that cycle has staged readings or pages, the chain has a gap, or the seed uses a
+cumulative register. The native planner can be inspected offline with
+`canary-miner meter-bill --next-readings-plan SEED.cmr` from the seed's directory.
+The planner reads archives while a watcher is active. It creates no files.
+The collector rechecks the same predecessor and window before fetching and
+again after staging the new bundle, just before publication. Use one producer
+for a cycle's inputs when staging provider pages or archives in the same
+workspace. The final publication preserves any readings bundle already at
+the target filename.
+
 Use a dedicated workspace for each meter. Keep the first and subsequent captures
 for that meter in the same directory. When first connecting
 an existing archive, verify that the selected physical meter matches the archive.
@@ -926,6 +945,62 @@ are disabled. The tool reconstructs pagination requests on the documented API ho
 An access refusal, incomplete cycle or conflicting meter leaves the readings file
 absent. An existing file is preserved. After validation, the binding is published
 before the readings, so a failed write can be retried with the same meter.
+
+### Schedule account readings for recurring bills
+
+Use the installed account capture tools. First complete an interactive capture
+in this workspace to verify and bind the meter. Enroll for a recurring seed
+after confirming the intended account and meter at the hidden input prompts.
+Enrollment checks the supplier account and the workspace binding, then saves
+`.canary-octopus-capture.cred` next to the seed. It uses Windows current-user
+DPAPI or the Linux systemd user credential broker (systemd 256 or newer).
+[Windows DPAPI](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)
+[systemd user credentials](https://www.freedesktop.org/software/systemd/man/latest/systemd-creds.html#--user)
+
+~~~text
+python -I -B tools/capture_octopus_consumption.py --confirm-electricity-import --enroll-scheduled PRIVATE_DIRECTORY/march.cmr
+python -I -B tools/capture_octopus_consumption.py --confirm-electricity-import --run-scheduled PRIVATE_DIRECTORY/march.cmr
+~~~
+
+The second command makes one scheduled check. Use the same seed and OS account
+as enrollment. The collector leaves the credential locked while the next cycle
+is open, already has staged inputs, or the watcher is publishing its archive.
+When an elapsed cycle needs readings,
+it verifies the encrypted seed binding and the workspace's meter binding before
+contacting the supplier. With the repeat interval enabled, a valid partial
+supplier count waits for the next check. Authorization and integrity failures
+stop the collector for review.
+
+Run the collector alongside the [billing watcher](#run-the-watcher-at-login).
+The collector supplies readings. The watcher supplies rates if authorized and
+completes the archive. Choose an interval from 60 to 86400 seconds. On Windows,
+register a separate task under the workspace owner's account using the installed
+`pythonw.exe`:
+
+~~~powershell
+$pythonw = (Get-Command pythonw.exe -ErrorAction Stop).Source
+$task = .\deploy\Register-BillingWatch.ps1 -Name home-capture -Seed 'D:\Bills\march.cmr' -Seconds 300 -AccountCapturePython $pythonw
+Start-ScheduledTask -TaskName $task
+~~~
+
+On Linux, render a separate user unit and enable it after inspection:
+
+~~~bash
+mkdir -p ~/.config/systemd/user
+(
+  set -o noclobber
+  ./deploy/billing-watch.sh "$seed" 300 --account-capture /usr/bin/python3 > ~/.config/systemd/user/canaryminer-octopus-capture.service
+)
+systemctl --user daemon-reload
+systemctl --user enable --now canaryminer-octopus-capture.service
+~~~
+
+Stop the collector before moving the workspace, changing its seed or rotating
+credentials. Keep the lease file in place while the collector runs. To rotate,
+move the encrypted credential aside in the private workspace, enroll the
+replacement, and restart the collector after successful verification. Keep the
+meter binding with the archive chain. Remove the separate task or user unit
+when scheduled account access is no longer wanted.
 
 ### Review cumulative meter readings
 

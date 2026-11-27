@@ -5,13 +5,25 @@ param(
     [Parameter(Mandatory)][string]$Seed,
     [ValidateRange(1, 86400)][int]$Seconds = 300,
     [switch]$ConfirmElectricityImport,
-    [switch]$AllowPublicRates
+    [switch]$AllowPublicRates,
+    [string]$AccountCapturePython
 )
 
 $ErrorActionPreference = 'Stop'
 $archive = Get-Item -LiteralPath $Seed -Force
 $miner = Get-Item -LiteralPath (Join-Path $PSScriptRoot '..\bin\canary-miner.exe') -Force
-foreach ($file in @($archive, $miner)) {
+$inputs = @($archive, $miner)
+if ($AccountCapturePython) {
+    if ($ConfirmElectricityImport -or $AllowPublicRates -or $Seconds -lt 60) {
+        throw 'Account capture requires a 60 to 86400 second interval and its own task.'
+    }
+    $python = Get-Item -LiteralPath $AccountCapturePython -Force
+    if ($python.Name -ine 'pythonw.exe') { throw 'Choose the installed pythonw.exe interpreter.' }
+    $capture = Get-Item -LiteralPath (Join-Path $PSScriptRoot '..\tools\capture_octopus_consumption.py') -Force
+    $credential = Get-Item -LiteralPath (Join-Path $archive.DirectoryName '.canary-octopus-capture.cred') -Force
+    $inputs += @($python, $capture, $credential)
+}
+foreach ($file in $inputs) {
     if ($file -isnot [System.IO.FileInfo] -or
         ($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
         throw 'The seed and installed miner must be regular files.'
@@ -37,11 +49,14 @@ foreach ($file in @($archive, $miner)) {
 
 $account = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $account.User.Value
-$taskName = "CanaryMiner-Billing-$Name-$sid"
+$taskType = if ($AccountCapturePython) { 'OctopusCapture' } else { 'Billing' }
+$taskName = "CanaryMiner-$taskType-$Name-$sid"
 $scheduler = New-Object -ComObject 'Schedule.Service'
 $scheduler.Connect()
 $task = $scheduler.NewTask(0)
-$task.RegistrationInfo.Description = 'CanaryMiner recurring Octopus billing review'
+$task.RegistrationInfo.Description = if ($AccountCapturePython) {
+    'CanaryMiner scheduled Octopus import readings'
+} else { 'CanaryMiner recurring Octopus billing review' }
 $task.Principal.UserId = $sid
 $task.Principal.LogonType = 3 # TASK_LOGON_INTERACTIVE_TOKEN
 $task.Principal.RunLevel = 0  # TASK_RUNLEVEL_LUA
@@ -53,12 +68,17 @@ $task.Settings.StopIfGoingOnBatteries = $false
 $trigger = $task.Triggers.Create(9) # TASK_TRIGGER_LOGON
 $trigger.UserId = $sid
 $action = $task.Actions.Create(0) # TASK_ACTION_EXEC
-$action.Path = $miner.FullName
 $action.WorkingDirectory = $archive.DirectoryName
 $interval = $Seconds.ToString([Globalization.CultureInfo]::InvariantCulture)
-$action.Arguments = 'meter-bill --roll-forward "{0}" --watch-every-seconds {1} --watch-quiet' -f $archive.FullName, $interval
-if ($ConfirmElectricityImport) { $action.Arguments += ' --confirm-electricity-import' }
-if ($AllowPublicRates) { $action.Arguments += ' --allow-public-rates' }
+if ($AccountCapturePython) {
+    $action.Path = $python.FullName
+    $action.Arguments = '-I -B "{0}" --confirm-electricity-import --run-scheduled "{1}" --watch-every-seconds {2}' -f $capture.FullName, $archive.FullName, $interval
+} else {
+    $action.Path = $miner.FullName
+    $action.Arguments = 'meter-bill --roll-forward "{0}" --watch-every-seconds {1} --watch-quiet' -f $archive.FullName, $interval
+    if ($ConfirmElectricityImport) { $action.Arguments += ' --confirm-electricity-import' }
+    if ($AllowPublicRates) { $action.Arguments += ' --allow-public-rates' }
+}
 
 # TASK_CREATE refuses a collision even if another process registers it first.
 $folder = $scheduler.GetFolder('\')
