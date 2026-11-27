@@ -1,6 +1,7 @@
 #include "pool_tls_connection.h"
 #if defined(CANARY_POOL_TLS_CHECK)
 #include <algorithm>
+#include <cstring>
 #include <memory>
 #include <vector>
 #if !defined(_WIN32)
@@ -136,6 +137,94 @@ bool connectResult(socket_t fd,int &error){
     socklen_t length=sizeof(error);return getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&length)==0&&length==sizeof(error);
 #endif
 }
+
+bool sameAddress(const addrinfo &first, const addrinfo &second) {
+    if (first.ai_family != second.ai_family) return false;
+    if (first.ai_family == AF_INET) {
+        const auto &a = *reinterpret_cast<const sockaddr_in *>(first.ai_addr);
+        const auto &b = *reinterpret_cast<const sockaddr_in *>(second.ai_addr);
+        return a.sin_port == b.sin_port && a.sin_addr.s_addr == b.sin_addr.s_addr;
+    }
+    const auto &a = *reinterpret_cast<const sockaddr_in6 *>(first.ai_addr);
+    const auto &b = *reinterpret_cast<const sockaddr_in6 *>(second.ai_addr);
+    return a.sin6_port == b.sin6_port && a.sin6_scope_id == b.sin6_scope_id &&
+        std::memcmp(&a.sin6_addr, &b.sin6_addr, sizeof(a.sin6_addr)) == 0;
+}
+
+class TcpCandidates {
+public:
+    explicit TcpCandidates(const addrinfo *addresses) {
+        constexpr size_t maxAddresses = 16;
+        for (auto *address = addresses; address && addresses_.size() < maxAddresses; address = address->ai_next) {
+            const auto requiredSize = address->ai_family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+            if ((address->ai_family != AF_INET && address->ai_family != AF_INET6) ||
+                address->ai_socktype != SOCK_STREAM || !address->ai_addr || address->ai_addrlen != requiredSize)
+                continue;
+            if (std::none_of(addresses_.begin(), addresses_.end(), [&](const addrinfo *seen) {
+                    return sameAddress(*seen, *address);
+                }))
+                addresses_.push_back(address);
+        }
+    }
+
+    // Progress existing TCP attempts and start at most one new nonblocking connect.
+    template<class Stopped>
+    std::unique_ptr<Socket> poll(uint64_t now, const Stopped &stopped) {
+        if (stopped()) return {};
+        for (auto it = pending_.begin(); it != pending_.end();) {
+            const auto ready = (*it)->waitWritable(0);
+            if (ready == W::Timeout) {
+                ++it;
+                continue;
+            }
+            int error = 0;
+            if (ready != W::Ready || !connectResult((*it)->fd, error)) localFailure = true;
+            else if (!error) {
+                auto socket = std::move(*it);
+                pending_.erase(it);
+                return socket;
+            } else if (networkConnectError(error)) networkFailure = true;
+            else localFailure = true;
+            it = pending_.erase(it);
+        }
+        if (next_ == addresses_.size() || (!pending_.empty() && now < nextStart_)) return {};
+        const auto &address = *addresses_[next_++];
+        auto candidate = std::make_unique<Socket>();
+#if defined(_WIN32)
+        candidate->fd = WSASocketW(address.ai_family, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_NO_HANDLE_INHERIT);
+#else
+        candidate->fd = ::socket(address.ai_family, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_TCP);
+#endif
+        if (!candidate->isOpen() || !candidate->setNonblocking(true)) {
+            localFailure = true;
+            return {};
+        }
+        if (stopped()) return {};
+        if (::connect(candidate->fd, address.ai_addr, static_cast<int>(address.ai_addrlen)) == 0) return candidate;
+        const int error = socketError();
+        if (pendingConnect(error)) {
+            pending_.push_back(std::move(candidate));
+            nextStart_ = now + 250;
+        } else if (networkConnectError(error)) networkFailure = true;
+        else localFailure = true;
+        return {};
+    }
+
+    bool remaining() const { return next_ < addresses_.size() || !pending_.empty(); }
+    uint64_t waitMs(uint64_t now, uint64_t maximum) const {
+        if (next_ == addresses_.size()) return maximum;
+        if (pending_.empty() || now >= nextStart_) return 0;
+        return (std::min)(maximum, nextStart_ - now);
+    }
+
+    bool localFailure = false, networkFailure = false;
+
+private:
+    std::vector<const addrinfo *> addresses_;
+    size_t next_ = 0;
+    std::vector<std::unique_ptr<Socket>> pending_;
+    uint64_t nextStart_ = 0;
+};
 }
 #endif
 static std::optional<PoolTlsCheckReply> nativeOpen(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel,std::unique_ptr<PoolTlsConnection> &owned,bool plaintext){
@@ -150,9 +239,9 @@ static std::optional<PoolTlsCheckReply> nativeOpen(const PoolTlsCheckRequest &r,
 #else
     using G=PoolTlsCheckStage;using E=PearlTlsError;
     const auto begin=nowMs();if(!begin||begin>UINT64_MAX-r.totalMs)return result(S::Invalid);const auto deadline=begin+r.totalMs;
-    bool localFailure=false,networkFailure=false;
+    bool localFailure=false;
     const auto unavailable=[&]{out={S::Unavailable,G::None,E::None};return out;};
-    const auto expired=[&]{if(cancel.load()){out.status=S::Cancelled;return true;}if(nowMs()>=deadline){
+    const auto expired=[&]{if(out.status==S::Cancelled||cancel.load()){out.status=S::Cancelled;return true;}if(nowMs()>=deadline){
         if(localFailure)out=unavailable();else out.status=S::Timeout;return true;}return false;};
     auto platform=std::make_shared<Platform>();
     if(!platform->ok)return result(S::Unavailable);
@@ -165,60 +254,77 @@ static std::optional<PoolTlsCheckReply> nativeOpen(const PoolTlsCheckRequest &r,
     if(expired())return out;
     if(resolved)return result(S::Dns);
     if(!addresses)return unavailable();
-    out.stage=G::Connect;std::unique_ptr<Socket> socket;std::vector<std::unique_ptr<Socket>> pending;
-    unsigned attempts=0;auto *next=addresses;uint64_t nextAttempt=0;
-    while(!socket){
-        if(expired())return out;
-        // A quiet first-family connect must not consume the entire shared deadline before another
-        // address is attempted. Keep at most sixteen owned candidates; stagger starts, never renew the budget.
-        for(auto i=pending.begin();i!=pending.end();){const auto ready=(*i)->waitWritable(0);
-            if(ready==W::Timeout){++i;continue;}
-            int error=0;
-            if(ready!=W::Ready||!connectResult((*i)->fd,error))localFailure=true;
-            else if(!error){socket=std::move(*i);pending.erase(i);break;}
-            else if(networkConnectError(error))networkFailure=true;else localFailure=true;
-            i=pending.erase(i);
-        }
-        if(socket)break;
-        while(next&&((next->ai_family!=AF_INET&&next->ai_family!=AF_INET6)||next->ai_socktype!=SOCK_STREAM||!next->ai_addr||next->ai_addrlen>sizeof(sockaddr_storage)))next=next->ai_next;
-        const auto current=nowMs();
-        if(next&&attempts<16&&(pending.empty()||current>=nextAttempt)){
-            auto *address=next;next=next->ai_next;++attempts;auto candidate=std::make_unique<Socket>();
-#if defined(_WIN32)
-            candidate->fd=WSASocketW(address->ai_family,SOCK_STREAM,IPPROTO_TCP,nullptr,0,WSA_FLAG_NO_HANDLE_INHERIT);
-#else
-            candidate->fd=::socket(address->ai_family,SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK,IPPROTO_TCP);
-#endif
-            if(!candidate->isOpen()||!candidate->setNonblocking(true)){localFailure=true;continue;}
-            if(expired())return out;
-            if(::connect(candidate->fd,address->ai_addr,static_cast<int>(address->ai_addrlen))==0){socket=std::move(candidate);break;}
-            const int error=socketError();
-            if(!pendingConnect(error)){if(networkConnectError(error))networkFailure=true;else localFailure=true;continue;}
-            pending.push_back(std::move(candidate));nextAttempt=current+250;continue;
-        }
-        if(pending.empty()&&(!next||attempts>=16))break;
-        const auto observed=nowMs();if(observed>=deadline)continue;
-        uint64_t wait=std::min<uint64_t>(25,deadline-observed);
-        if(next&&attempts<16&&nextAttempt>observed)wait=std::min(wait,nextAttempt-observed);
-        std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+    out.stage = G::Connect;
+    TcpCandidates candidates(addresses);
+    std::unique_ptr<Socket> socket;
+    for (;;) {
+        socket = candidates.poll(nowMs(), expired);
+        localFailure = candidates.localFailure;
+        if (socket) break;
+        const auto now = nowMs();
+        if (expired()) return out;
+        if (!candidates.remaining()) break;
+        const auto delay = candidates.waitMs(now, std::min<uint64_t>(25, deadline - now));
+        if (delay) std::this_thread::sleep_for(std::chrono::milliseconds(delay));
     }
-    if(expired())return out;
-    if(!socket)return localFailure||!networkFailure?unavailable():result(S::Connect);
-    pending.clear(); // losers never receive a ClientHello or application data
+    if (!socket) {
+        if (expired()) return out;
+        return localFailure || !candidates.networkFailure ? unavailable() : result(S::Connect);
+    }
+    localFailure = false;
+    if (!plaintext) out.stage = G::Handshake; // no later socket error can regain downgrade authority
+    if (expired()) return out;
     if(plaintext){owned=std::make_unique<PlainConnected>(platform,std::move(socket),cancel);return std::nullopt;}
-    localFailure=false; // connection succeeded; later failures belong exclusively to the handshake
-    out.stage=G::Handshake;auto retained=std::make_unique<Connected>(platform,std::move(socket),cancel);auto &tls=retained->tls;PearlTlsPolicy policy;
-    policy.enabled=true;policy.serverName=r.host;policy.caPem=r.caPem;policy.windowsPrivateTrust=r.windowsPrivateTrust;policy.handshakeDeadlineMonoMs=deadline;
-    const auto failed=[&]{if(expired())return out;out.tlsError=tls.error();if(out.tlsError==E::None)out.tlsError=E::Protocol;return result(S::Tls);};
-    if(!tls.begin(policy,nowMs()))return failed();
-    while(tls.state()==PearlTlsState::Handshaking){if(expired())return out;const auto step=tls.handshake(nowMs());
-        if(step.status==PearlPoolTransferStatus::Error)return failed();
-        if(step.status==PearlPoolTransferStatus::WouldBlock){if(expired())return out;const auto current=nowMs();if(current>=deadline)continue;
-            if(retained->waitFor(step.interest,static_cast<unsigned>(std::min<uint64_t>(deadline-current,25)))==W::Error){out.tlsError=E::Transport;return result(S::Tls);}}
+    PearlTlsPolicy policy;
+    policy.enabled = true;
+    policy.serverName = r.host;
+    policy.caPem = r.caPem;
+    policy.windowsPrivateTrust = r.windowsPrivateTrust;
+    policy.handshakeDeadlineMonoMs = deadline;
+    constexpr uint64_t minimumReserveMs = 500;
+    constexpr unsigned maxHandshakes = 4;
+    for (unsigned attempt = 1; ; ++attempt) {
+        if (expired()) return out;
+        const auto started = nowMs();
+        if (started >= deadline) return result(S::Timeout);
+        const auto switchAt = started + (deadline - started) / 2;
+        auto retained = std::make_unique<Connected>(platform, std::move(socket), cancel);
+        auto &tls = retained->tls;
+        const auto failed = [&] {
+            if (expired()) return out;
+            out.tlsError = tls.error() == E::None ? E::Protocol : tls.error();
+            return result(S::Tls);
+        };
+        if (!tls.begin(policy, started)) return failed();
+        while (tls.state() == PearlTlsState::Handshaking) {
+            if (expired()) return out;
+            const auto step = tls.handshake(nowMs());
+            if (step.status == PearlPoolTransferStatus::Error) return failed();
+            if (step.status != PearlPoolTransferStatus::WouldBlock) continue;
+            if (expired()) return out;
+            const auto current = nowMs();
+            if (current >= deadline) return result(S::Timeout);
+            const auto readiness = retained->waitFor(step.interest,
+                static_cast<unsigned>(std::min<uint64_t>(deadline - current, 25)));
+            if (expired()) return out;
+            if (readiness == W::Error) {
+                out.tlsError = E::Transport;
+                return result(S::Tls);
+            }
+            // Give readable TLS records priority. Only a waiting peer can yield to a
+            // ready alternate from the original lookup, under the same deadline.
+            const auto checked = nowMs();
+            if (readiness == W::Timeout && attempt < maxHandshakes && checked >= switchAt &&
+                checked < deadline && deadline - checked >= minimumReserveMs &&
+                (socket = candidates.poll(checked, expired)))
+                break;
+        }
+        if (socket) continue; // closes the stalled socket before the alternate sends ClientHello
+        if (expired()) return out;
+        if (tls.state() != PearlTlsState::VerifiedOpen) return failed();
+        owned = std::move(retained);
+        return std::nullopt;
     }
-    if(expired())return out;
-    if(tls.state()!=PearlTlsState::VerifiedOpen)return failed();
-    owned=std::move(retained);return std::nullopt;
 #endif
 }
 PoolTlsOpenResult openPoolTlsConnection(const PoolTlsCheckRequest &r,const std::atomic<bool> &cancel){PoolTlsOpenResult result;result.failure=nativeOpen(r,cancel,result.connection,false);return result;}
