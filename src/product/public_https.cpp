@@ -50,11 +50,15 @@ static bool curlReady() {
     return std::string(v->ssl_version).find("OpenSSL/") == 0;
 #endif
 }
+constexpr char cloudflareDohUrl[] = "https://1.1.1.1/dns-query";
+static bool dohTlsFloor() {
+    const auto *version = curl_version_info(CURLVERSION_NOW);
+    return version && version->version_num >= 0x081000;  // TLS 1.2 default since 8.16.0.
+}
 static bool cloudflareDohReady() {
     // libcurl's DoH subtransfer uses its own default TLS version and proxy options.
     // The installed parent starts this worker with a minimal, proxy-free environment.
-    const auto *version = curl_version_info(CURLVERSION_NOW);
-    if (!version || version->version_num < 0x081000) return false;  // TLS 1.2 default since 8.16.0.
+    if (!dohTlsFloor()) return false;
     for (const auto *name : {"https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"}) {
 #if defined(_WIN32)
         if (GetEnvironmentVariableA(name, nullptr, 0)) return false;
@@ -204,7 +208,10 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
         const bool dnsOverHttps = limits.dnsServer == publicCloudflareDoh;
         if (dnsOverHttps && !cloudflareDohReady()) return response;
         // Numeric bootstrap prevents the deployment resolver from choosing the DoH peer.
-        std::string dohUrl = "https://1.1.1.1/dns-query";
+        const char *dohUrl = cloudflareDohUrl;
+#ifdef CANARY_HTTPS_TESTING
+        std::string fixtureDohUrl;
+#endif
         Transfer t;
         t.response.status = PublicHttpsStatus::Ok; t.limits = limits;
         std::unique_ptr<curl_slist, ListDelete> headers, resolve, connectTo;
@@ -224,7 +231,8 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
             url = "https://" + name + ":" + std::to_string(impl_->port) + impl_->path;
             if (dnsOverHttps) {
                 if (impl_->dohPath.empty()) return response;
-                dohUrl = "https://127.0.0.1:" + std::to_string(impl_->port) + impl_->dohPath;
+                fixtureDohUrl = "https://127.0.0.1:" + std::to_string(impl_->port) + impl_->dohPath;
+                dohUrl = fixtureDohUrl.c_str();
             } else if (!append(resolve, (name + ":" + std::to_string(impl_->port) + ":127.0.0.1").c_str())) return response;
         }
 #endif
@@ -249,7 +257,7 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
         if (impl_->port && (!set(CURLOPT_RESOLVE, resolve.get()) || !set(CURLOPT_CAINFO, impl_->caFile.c_str()))) return response;
 #endif
         if (dnsOverHttps) {
-            if (!set(CURLOPT_DOH_URL, dohUrl.c_str()) || !set(CURLOPT_DOH_SSL_VERIFYPEER, 1L) ||
+            if (!set(CURLOPT_DOH_URL, dohUrl) || !set(CURLOPT_DOH_SSL_VERIFYPEER, 1L) ||
                 !set(CURLOPT_DOH_SSL_VERIFYHOST, 2L)) return response;
         } else if (!limits.dnsServer.empty()) {
             const auto resolver = limits.dnsServer.find(':') == std::string::npos
@@ -313,6 +321,16 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
 }
 
 #ifdef CANARY_HTTPS_TESTING
+bool PublicHttpsTestPeer::hasDohBackend() {
+#if defined(CANARY_PUBLIC_HTTPS)
+    if (!curlReady() || !dohTlsFloor()) return false;
+    std::unique_ptr<CURL, EasyDelete> easy(curl_easy_init());
+    return easy && curl_easy_setopt(easy.get(), CURLOPT_DOH_URL, cloudflareDohUrl) == CURLE_OK;
+#else
+    return false;
+#endif
+}
+
 std::unique_ptr<PublicJsonClient> PublicHttpsTestPeer::create(unsigned port, std::string path, std::string caFile,
                                                            bool wrongName, bool permitLoopback, std::string dohPath) {
     std::unique_ptr<PublicJsonClient> client(new PublicJsonClient());

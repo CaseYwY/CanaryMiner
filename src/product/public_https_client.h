@@ -29,6 +29,7 @@ class PublicJsonClient {
 #ifdef CANARY_HTTPS_TESTING
 // Compiled only in the separate loopback-integration library, never the production target.
 struct PublicHttpsTestPeer {
+    static bool hasDohBackend();
     static std::unique_ptr<PublicJsonClient> create(unsigned port, std::string path, std::string caFile,
                                                    bool wrongName = false, bool permitLoopback = true,
                                                    std::string dohPath = {});

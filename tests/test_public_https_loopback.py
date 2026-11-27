@@ -179,8 +179,16 @@ def main():
     parser.add_argument("probe", type=Path)
     parser.add_argument("--openssl", default="openssl")
     parser.add_argument("--fixture-worker", type=Path, help="Also test TLS requests through the real process boundary")
+    parser.add_argument("--require-doh", action="store_true", help="Require the encrypted resolver cases")
     args = parser.parse_args()
     args.probe = args.probe.resolve(strict=True)
+    capability = subprocess.run([str(args.probe), "--doh-capability"], capture_output=True, timeout=5)
+    assert capability.returncode in (0, 77), capability
+    has_doh = capability.returncode == 0
+    if args.require_doh:
+        assert has_doh, "the linked libcurl must support the encrypted resolver"
+    if not has_doh:
+        print("Encrypted resolver cases skipped for the linked libcurl")
     checks = 0
     with tempfile.TemporaryDirectory(prefix="canary-https-", dir=os.environ.get("CANARY_TEST_TMP")) as temp:
         root = Path(temp)
@@ -226,7 +234,10 @@ def main():
             assert result.returncode == 0, f"{path}/{ca}: {result.stdout} {result.stderr} exit={result.returncode}"
             requests = server.requests[before:]
             dns_requests = [r for r in requests if r.startswith(b"POST " + path.encode("ascii") + b" ")]
-            assert (1 <= len(dns_requests) <= 3) if received else not dns_requests
+            if received:
+                assert 1 <= len(dns_requests) <= 3
+            else:
+                assert not dns_requests
             leaves = [r for r in requests if r.startswith(b"GET /ok ")]
             assert len(leaves) == (1 if expected == "ok" else 0)
             assert len(dns_requests) + len(leaves) == len(requests)
@@ -247,14 +258,15 @@ def main():
             case(server, "/ok", "destination-blocked", mode="blocked")
             case(server, "/ok", "tls-verification", mode="wrong-name")
             case(server, "/ok", "tls-verification", ca="untrusted")
-            doh_case(server, "/doh-ok", "ok")
-            doh_case(server, "/doh-refused", "network")
-            doh_case(server, "/doh-redirect", "network")
-            doh_case(server, "/doh-reserved", "destination-blocked")
-            doh_case(server, "/doh-slow", "timeout")
-            doh_case(server, "/doh-ok", "network", ca="untrusted", received=False)
-            if not helper:
-                doh_case(server, "/doh-ok", "unavailable", ambient_proxy=True, received=False)
+            if has_doh:
+                doh_case(server, "/doh-ok", "ok")
+                doh_case(server, "/doh-refused", "network")
+                doh_case(server, "/doh-redirect", "network")
+                doh_case(server, "/doh-reserved", "destination-blocked")
+                doh_case(server, "/doh-slow", "timeout")
+                doh_case(server, "/doh-ok", "network", ca="untrusted", received=False)
+                if not helper:
+                    doh_case(server, "/doh-ok", "unavailable", ambient_proxy=True, received=False)
         with serve(root, cert="expired") as server:
             case(server, "/ok", "tls-verification")
             assert not server.requests
@@ -262,6 +274,9 @@ def main():
             # No CRL/OCSP is advertised in this synthetic subordinate certificate. Keep native policy visible:
             # strict Schannel refuses unknown revocation; OpenSSL's default verification does not fetch revocation.
             case(server, "/ok", "tls-verification" if sys.platform == "win32" else "ok")
+            if has_doh:
+                # The trusted leaf has the provider DNS SAN and lacks the resolver IP SAN.
+                doh_case(server, "/doh-ok", "network", received=False)
         with serve(root, raw=True) as server:
             case(server, "/ok", "tls-protocol")
             assert not server.requests

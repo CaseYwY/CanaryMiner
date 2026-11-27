@@ -6,6 +6,8 @@
 #include <thread>
 
 int main(int argc, char **argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--doh-capability")
+        return om::PublicHttpsTestPeer::hasDohBackend() ? 0 : 77;
     if (argc != 7 && argc != 8) return 2;
     const auto port = static_cast<unsigned>(std::stoul(argv[1]));
     const std::string path = argv[2];
