@@ -316,6 +316,10 @@ int main(int argc, char **argv) {
         if constexpr (kPublicTickerRuntimeBuilt) {
             return commandPublicMarketHour(cli.marketHour, std::filesystem::u8path(selfExecutablePath()), argc, argv, &g_stop);
         }
+        if (!nativePublicMarketHourInvocation(cli.marketHour, argc, argv)) {
+            std::fputs("market-hour: exact --allow-public-candles required\n", stderr);
+            return kExitUsage;
+        }
         std::fputs("market-hour: public HTTPS unavailable in this build\n", stderr);
         return kExitConfig;
     }

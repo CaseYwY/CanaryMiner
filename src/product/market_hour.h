@@ -72,6 +72,7 @@ inline bool parseMarketHourCli(int argc,const char *const *argv,int begin,Market
 
 int commandMarketHour(const MarketHourOptions &options, int argc, const char *const *argv,
                       const volatile sig_atomic_t *stop);
+bool nativePublicMarketHourInvocation(const MarketHourOptions &options, int argc, const char *const *argv);
 int commandPublicMarketHour(const MarketHourOptions &options, const std::filesystem::path &module,
                             int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop);

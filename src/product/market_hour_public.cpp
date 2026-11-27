@@ -23,14 +23,7 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
     const bool capture = options.action == MarketHourAction::PublicCapture;
     const bool saving = options.action == MarketHourAction::PublicSave || capture;
     const bool allowFallback = options.krakenFallbackFlag != 0;
-    const auto operandCount=3+(saving ? 2 : 0)+(options.dnsFlag ? 2 : 0)+(allowFallback ? 1 : 0);
-    if (argc!=operandCount ||
-        !nativeMarketArgumentPair(argc,argv,1,"market-hour",2,"--allow-public-candles") ||
-        (saving && !nativeMarketArgumentPair(argc,argv,options.saveFlag,capture ? "--save-sample" : "--save-review",
-                                              options.saveFlag+1,options.archiveName)) ||
-        (options.dnsFlag && !nativeMarketArgumentPair(argc,argv,options.dnsFlag,"--dns-server",
-                                                      options.dnsFlag+1,options.dnsServer)) ||
-        (allowFallback && !nativeMarketArguments(argc, argv, {{options.krakenFallbackFlag, "--kraken-fallback"}})))
+    if (!nativePublicMarketHourInvocation(options, argc, argv))
         return hourError("exact --allow-public-candles required", 2);
     if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
     const auto ownershipUncertain = [] { return hourError("helper ownership uncertain"); };

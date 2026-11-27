@@ -4,6 +4,7 @@
 #include "local_review_archive.h"
 #include "market_hour_capture.h"
 #include "market_hour_payload.h"
+#include "market_native_arguments.h"
 #include "public_json_process.h"
 
 #include <algorithm>
@@ -606,6 +607,22 @@ local_review_archive::ReviewSave market_detail::savePublicHourReview(const std::
     body += std::to_string(report.size()) + '\n' + report;
     return local_review_archive::saveWhileActive(name, marketReviewExtension, body + sha256Hex(body) + '\n',
                                                 maxPublicArchiveBytes, stopped);
+}
+
+bool nativePublicMarketHourInvocation(const MarketHourOptions &options, int argc, const char *const *argv) {
+    using market_detail::nativeMarketArgumentPair;
+    if (!options.samplesPublic()) return false;
+    const bool capture = options.action == MarketHourAction::PublicCapture;
+    const bool saving = options.action == MarketHourAction::PublicSave || capture;
+    const bool fallback = options.krakenFallbackFlag != 0;
+    const int expected = 3 + (saving ? 2 : 0) + (options.dnsFlag ? 2 : 0) + (fallback ? 1 : 0);
+    return argc == expected &&
+        nativeMarketArgumentPair(argc, argv, 1, "market-hour", 2, "--allow-public-candles") &&
+        (!saving || nativeMarketArgumentPair(argc, argv, options.saveFlag, capture ? "--save-sample" : "--save-review",
+                                              options.saveFlag + 1, options.archiveName)) &&
+        (!options.dnsFlag || nativeMarketArgumentPair(argc, argv, options.dnsFlag, "--dns-server",
+                                                        options.dnsFlag + 1, options.dnsServer)) &&
+        (!fallback || nativeCliArguments(argc, argv, {{options.krakenFallbackFlag, "--kraken-fallback"}}));
 }
 
 int commandMarketHour(const MarketHourOptions &options, int argc, const char *const *argv,
