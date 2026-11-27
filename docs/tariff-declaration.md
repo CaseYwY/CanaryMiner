@@ -773,13 +773,23 @@ the economy setting.
 
 On Windows, use PowerShell as the account that owns the workspace. Run from the installed
 release directory. The helper prints a unique task name and refuses to replace an existing
-task of that name. Use a local path without percent signs because Task Scheduler expands them.
+task of that name. Keep the workspace on a local drive and use paths without junctions,
+symbolic links or percent signs. Task Scheduler expands percent-encoded environment variables.
+
+If Windows has marked the helper as downloaded, verify the candidate SHA-256 and the
+installed helper against the manifest before using
+`Unblock-File -LiteralPath .\deploy\Register-BillingWatch.ps1`. A fresh PowerShell with
+`powershell.exe -NoProfile -ExecutionPolicy RemoteSigned` selects a policy for that
+process only. An organization policy can still govern whether the script runs.
 
 ~~~powershell
+$task = $null
 $task = .\deploy\Register-BillingWatch.ps1 -Name home -Seed 'D:\Bills\march.cmr' -Seconds 300
-Start-ScheduledTask -TaskName $task
-Get-ScheduledTask -TaskName $task
-Get-ScheduledTaskInfo -TaskName $task
+if ($task) {
+    Start-ScheduledTask -TaskName $task
+    Get-ScheduledTask -TaskName $task
+    Get-ScheduledTaskInfo -TaskName $task
+}
 ~~~
 
 The task runs with the current user's interactive token and starts again at that user's
@@ -799,24 +809,34 @@ On Linux, use a systemd user session and run from the installed release director
 helper prints a unit that you can inspect before installation. Use an unused unit filename.
 
 ~~~bash
-unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-unit=canaryminer-billing-home.service
-mkdir -p -- "$unit_dir"
-(umask 077; set -C; ./deploy/billing-watch.sh "$HOME/Bills/march.cmr" 300 > "$unit_dir/$unit")
-systemctl --user daemon-reload
-systemctl --user enable --now "$unit"
-systemctl --user status "$unit"
-journalctl --user -u "$unit"
+(
+    set -e
+    umask 077
+    unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    unit=canaryminer-billing-home.service
+    mkdir -p -- "$unit_dir"
+    staged=$(mktemp -- "$unit_dir/.canaryminer-billing.XXXXXX")
+    trap 'rm -- "$staged"' EXIT
+    ./deploy/billing-watch.sh "$HOME/Bills/march.cmr" 300 > "$staged"
+    ln -T -- "$staged" "$unit_dir/$unit"
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$unit"
+)
+systemctl --user status canaryminer-billing-home.service
+journalctl --user -u canaryminer-billing-home.service
 ~~~
 
 The enabled unit starts with the user manager. Session and linger policy are set by the OS.
+User journal history is available when the system keeps persistent user journals.
 systemd sends SIGTERM and allows up to 30 seconds to stop. Use
-`systemctl --user disable --now "$unit"` to stop and prevent the next automatic start.
+`systemctl --user disable --now canaryminer-billing-home.service` to stop and prevent the
+next automatic start.
 To remove the deployment, also remove the unit file you installed and run
 `systemctl --user daemon-reload`. Both platforms leave the billing workspace intact and
 avoid restarting on input refusal until the next login or a manual start.
 
-See [Windows Task Scheduler task registration](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskfolder-registertaskdefinition)
+See [Windows Task Scheduler task registration](https://learn.microsoft.com/en-us/windows/win32/taskschd/taskfolder-registertaskdefinition),
+[PowerShell execution policies](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies)
 and [systemd service settings](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html).
 
 ### Import Octopus consumption pages with the installed miner

@@ -37,7 +37,7 @@ def stage(path, value):
 
 class ScheduledTask:
     def __init__(self, installed, seed, label):
-        self.powershell = ('powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass')
+        self.powershell = ('powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned')
         command = (*self.powershell, '-File', str(installed / 'deploy' / 'Register-BillingWatch.ps1'),
                    '-Name', label, '-Seed', str(seed), '-Seconds', '1')
         name = execute(*command).decode('ascii').strip()
@@ -47,10 +47,13 @@ class ScheduledTask:
             duplicate = subprocess.run(command, capture_output=True, timeout=30)
             assert duplicate.returncode != 0, duplicate
             xml = self.manage('Export-ScheduledTask').decode('ascii', errors='ignore')
-            for property_value in ('LogonTrigger', 'InteractiveToken', 'LeastPrivilege', 'IgnoreNew', 'PT0S',
-                                   '--watch-quiet'):
+            for property_value in ('LogonTrigger', '--watch-quiet'):
                 assert property_value in xml, property_value
             assert '--allow-public-rates' not in xml and '--confirm-electricity-import' not in xml
+            assert self.manage('(Get-ScheduledTask', ').Principal.LogonType').strip() == b'Interactive'
+            assert self.manage('(Get-ScheduledTask', ').Principal.RunLevel').strip() == b'Limited'
+            assert self.manage('(Get-ScheduledTask', ').Settings.MultipleInstances').strip() == b'IgnoreNew'
+            assert self.manage('(Get-ScheduledTask', ').Settings.ExecutionTimeLimit').strip() == b'PT0S'
         except BaseException:
             self.remove()
             raise
@@ -122,7 +125,7 @@ class UserUnit:
         execute('systemctl', '--user', 'daemon-reload')
 
 
-def main(installed):
+def main(installed, *, activate_default_target=False):
     manager = ScheduledTask if os.name == 'nt' else UserUnit
     miner = installed / 'bin' / ('canary-miner.exe' if os.name == 'nt' else 'canary-miner')
     march, april, may = map(utc, ('2023-03-01T00:00:00', '2023-03-31T23:00:00', '2023-04-30T23:00:00'))
@@ -155,7 +158,12 @@ def main(installed):
 
         target = workspace / f'cycle-{may}.cmr'
         try:
-            deployed.start()
+            if activate_default_target and os.name != 'nt':
+                # The disposable fixture owns the user manager. Let its
+                # session target pull in the enabled watcher.
+                execute('systemctl', '--user', 'restart', 'default.target')
+            else:
+                deployed.start()
             wait_until(workspace_busy)
             stage(workspace / f'cycle-{may}.readings.json', following[1])
             stage(workspace / f'cycle-{may}.rates.json', following[2])

@@ -21,6 +21,19 @@ foreach ($file in @($archive, $miner)) {
         throw 'Task Scheduler paths must not contain a percent sign.'
     }
 }
+$root = $archive.Directory.Root.FullName
+if ($root -notmatch '\A[A-Za-z]:\\\z' -or $archive.FullName.Substring(2).Contains(':')) {
+    throw 'The billing workspace must be on a local drive.'
+}
+$drive = [System.IO.DriveInfo]::new($root)
+if ($drive.DriveType -notin @('Fixed', 'Removable', 'Ram')) {
+    throw 'The billing workspace must be on a local drive.'
+}
+for ($directory = $archive.Directory; $directory.Parent; $directory = $directory.Parent) {
+    if ($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw 'The billing workspace path must not traverse a junction or symbolic link.'
+    }
+}
 
 $account = [System.Security.Principal.WindowsIdentity]::GetCurrent()
 $sid = $account.User.Value
