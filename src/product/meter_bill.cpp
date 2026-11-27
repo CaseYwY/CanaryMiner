@@ -453,13 +453,18 @@ struct CompletedSupplyCycle {
     ElectricityAmount charge;
 };
 
+struct InvoiceReviewDetails {
+    std::string report;
+    std::optional<SupplyInvoiceComparison> supply;
+};
+
 template<class Interval>
 const char *reviewReadings(const std::vector<Interval> &readings, const TariffDeclaration &declaration, int64_t cutoff,
                            const std::function<bool()> &stopped, std::string &report, std::string &exactResults,
                            const MeterInvoice *invoice, std::string *exactInvoice,
                            std::string *meterOnlyExact = nullptr,
                            std::vector<CompletedSupplyCycle> *completedSupply = nullptr,
-                           std::string *invoiceDetails = nullptr) {
+                           InvoiceReviewDetails *invoiceDetails = nullptr) {
     constexpr bool isRegister = std::is_same_v<Interval, MeterImportInterval>;
     using Trace = std::conditional_t<isRegister, MeterImportTrace, PowerTrace>;
     auto opening = declaration.opening;
@@ -503,9 +508,10 @@ const char *reviewReadings(const std::vector<Interval> &readings, const TariffDe
         if (invoice) {
             const auto start = report.size();
             if (const auto *problem = appendInvoiceComparison(*invoice, cycle - 1, opening, accrual,
-                                                              declaration.plan.currency, report, exactInvoice))
+                                                              declaration.plan.currency, report, exactInvoice,
+                                                              invoiceDetails ? &invoiceDetails->supply : nullptr))
                 return problem;
-            if (invoiceDetails) invoiceDetails->append(report, start);
+            if (invoiceDetails) invoiceDetails->report.append(report, start);
         }
         if (next < readings.size()) {
             opening = *accrual.ending;
@@ -554,7 +560,8 @@ template<class Interval>
 const char *reviewIndependentInvoice(const IndependentInvoice &invoice, const std::vector<CompletedSupplyCycle> &completed,
                                      const std::vector<Interval> &readings, const TariffDeclaration &declaration,
                                      int64_t cutoff, const std::function<bool()> &stopped,
-                                     std::string &report, std::string *exact) {
+                                     std::string &report, std::string *exact,
+                                     std::optional<SupplyInvoiceComparison> *supplyComparison) {
     const auto &currency = declaration.plan.currency;
     const auto netPeriod = commonStatementPeriod(invoice);
     InvoiceTotals supply, exported;
@@ -566,7 +573,7 @@ const char *reviewIndependentInvoice(const IndependentInvoice &invoice, const st
         });
         if (found == completed.end()) return "supply statement must match a complete reviewed billing cycle from a zero opening";
         if (!appendStatement("supply charge", "supply_statement", invoice.supply.precision, statement, found->charge,
-                             currency, netPeriod ? &supply : nullptr, report, exact))
+                             currency, (netPeriod || supplyComparison) ? &supply : nullptr, report, exact))
             return "invoice comparison amount exceeds arithmetic capacity";
     }
     for (const auto &statement : invoice.exported.periods) {
@@ -584,6 +591,8 @@ const char *reviewIndependentInvoice(const IndependentInvoice &invoice, const st
     const auto places = (std::max)(invoice.supply.precision.places, invoice.exported.precision.places);
     if (!appendStatementNet(netPeriod, places, supply, exported, currency, report, exact))
         return "invoice comparison amount exceeds arithmetic capacity";
+    if (supplyComparison && !invoice.supply.periods.empty())
+        *supplyComparison = SupplyInvoiceComparison{supply, invoice.supply.precision.places};
     return nullptr;
 }
 
@@ -697,7 +706,7 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
                                  const std::function<bool()> &stopped, MeterReview &review,
                                  std::string *meterOnlyExact = nullptr,
                                  std::vector<CompletedSupplyCycle> *supplyPeriods = nullptr,
-                                 std::string *invoiceDetails = nullptr) {
+                                 InvoiceReviewDetails *invoiceDetails = nullptr) {
     std::optional<MeterInvoice> invoice;
     if (!original.invoice.empty()) {
         if (const auto *problem = decodeMeterInvoice(original.invoice, review.declaration, invoice.emplace()))
@@ -709,7 +718,7 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
                                                                         "Invoice comparison uses ";
             review.report += std::to_string(invoice->places) + " decimal places with ties ";
             review.report += invoice->ties == DecimalTies::ToEven ? "rounded to even.\n" : "rounded away from zero.\n";
-            if (invoiceDetails) *invoiceDetails += "  " + review.report.substr(start);
+            if (invoiceDetails) invoiceDetails->report += "  " + review.report.substr(start);
         }
     }
     return std::visit([&](const auto &series) {
@@ -724,8 +733,9 @@ const char *calculateMeterReview(const ReviewOriginal &original, bool includeInv
         if (independent) {
             const auto start = review.report.size();
             if (const auto *invoiceProblem = reviewIndependentInvoice(*independent, *completed, series, review.declaration,
-                    original.cutoff, stopped, review.report, exactInvoice)) return invoiceProblem;
-            if (invoiceDetails) invoiceDetails->append(review.report, start);
+                    original.cutoff, stopped, review.report, exactInvoice,
+                    invoiceDetails ? &invoiceDetails->supply : nullptr)) return invoiceProblem;
+            if (invoiceDetails) invoiceDetails->report.append(review.report, start);
         }
         if (!review.prepaid) return static_cast<const char *>(nullptr);
         const auto start=review.exact.size();
@@ -881,7 +891,7 @@ const char *replaySavedReview(const ReviewOriginal &original, int64_t now, const
                              const std::function<bool()> &stopped, MeterReview &review,
                              std::string *meterOnlyExact = nullptr,
                              std::vector<CompletedSupplyCycle> *supplyPeriods = nullptr,
-                             std::string *invoiceDetails = nullptr) {
+                             InvoiceReviewDetails *invoiceDetails = nullptr) {
     if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, review)) return problem;
     if (const auto *problem = verifyMeterPrefix(original, review, stopped)) return problem;
     if (const auto *problem = verifyCycleLink(original, review)) return problem;
@@ -1204,7 +1214,7 @@ bool sameCycleReviewInputs(const ReviewOriginal &a, const ReviewOriginal &b) {
 
 const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing, int64_t now,
                                 const char *lateReadingError, const std::function<bool()> &stopped,
-                                std::string &details) {
+                                InvoiceReviewDetails &details) {
     const auto name = "cycle-" + std::to_string(closing) + ".compared.cmr";
     std::string bytes;
     auto state = readCycleSlot(name, maxArchiveBytes, bytes);
@@ -1231,9 +1241,15 @@ const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing
     return nullptr;
 }
 
+struct CycleInvoiceHistory {
+    size_t reviews = 0, comparableCycles = 0;
+    InvoiceTotals totals;
+    unsigned places = 0;
+};
+
 const char *appendCycleHistory(const ReviewOriginal &original, const MeterReview &review,
                                const std::vector<CompletedSupplyCycle> &periods, ElectricityAmount &total,
-                               const std::string *invoiceDetails, size_t &invoiceCount, std::string &rows) {
+                               const InvoiceReviewDetails *details, CycleInvoiceHistory &invoices, std::string &rows) {
     if (periods.size() != 1) return "cycle history requires a complete supply cycle";
     const auto &cycle = periods.front();
     std::string amount;
@@ -1242,11 +1258,19 @@ const char *appendCycleHistory(const ReviewOriginal &original, const MeterReview
     rows += "[" + std::to_string(cycle.period.begin) + ", " + std::to_string(cycle.period.end) + ") UTC ms: " +
         amount + " " + review.declaration.plan.currency;
     if (!original.invoice.empty()) rows += " (archived invoice comparison)";
-    else if (invoiceDetails) rows += invoiceDetails->empty() ? " (no invoice review)" : " (late invoice comparison)";
+    else if (details) rows += details->report.empty() ? " (no invoice review)" : " (late invoice comparison)";
     rows += '\n';
-    if (invoiceDetails && !invoiceDetails->empty()) {
-        ++invoiceCount;
-        rows += *invoiceDetails;
+    if (details && !details->report.empty()) {
+        ++invoices.reviews;
+        rows += details->report;
+        if (details->supply) {
+            const auto &supply = *details->supply;
+            if (!invoices.totals.calculated.add(supply.totals.calculated, &invoices.totals.calculated) ||
+                !invoices.totals.stated.add(supply.totals.stated, &invoices.totals.stated))
+                return "cycle invoice totals exceed arithmetic capacity";
+            ++invoices.comparableCycles;
+            invoices.places = (std::max)(invoices.places, supply.places);
+        }
     }
     return nullptr;
 }
@@ -1316,8 +1340,9 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
     if (requestedCutoff > now) return "review cutoff is in the future";
     std::vector<CompletedSupplyCycle> periods;
     ElectricityAmount historyTotal;
-    std::string historyRows, invoiceDetails;
-    size_t invoiceCount = 0;
+    std::string historyRows;
+    InvoiceReviewDetails invoiceDetails;
+    CycleInvoiceHistory invoiceHistory;
     if (const auto *problem = replaySavedReview(previous, now, lateReadingError, stopped, priorReview,
                                                  nullptr, history ? &periods : nullptr,
                                                  withInvoices ? &invoiceDetails : nullptr))
@@ -1351,7 +1376,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                 progress.closing = 0;
             }
             if (const auto *problem = appendCycleHistory(previous, priorReview, periods, historyTotal,
-                                                         withInvoices ? &invoiceDetails : nullptr, invoiceCount, historyRows))
+                                                         withInvoices ? &invoiceDetails : nullptr, invoiceHistory, historyRows))
                 return problem;
         }
         if (existing + progress.saved >= maxHistory) {
@@ -1409,7 +1434,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (next.cutoff > (refreshInspection ? now : cutoff))
                 return "successor archive is newer than the requested cutoff";
             periods.clear();
-            invoiceDetails.clear();
+            invoiceDetails = {};
             if (const auto *problem = replaySavedReview(next, now, lateReadingError, stopped, nextReview,
                                                          nullptr, history ? &periods : nullptr,
                                                          withInvoices ? &invoiceDetails : nullptr))
@@ -1532,9 +1557,27 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         report = "Octopus supply estimates from the selected seed (" + std::to_string(existing + 1) +
             (existing ? " verified cycles)\n" : " verified cycle)\n") + historyRows +
             "Estimated total " + total + " " + priorReview.declaration.plan.currency + "\n";
-        if (withInvoices)
-            report += "Invoice reviews available for " + std::to_string(invoiceCount) + " of " +
+        if (withInvoices) {
+            report += "Invoice reviews available for " + std::to_string(invoiceHistory.reviews) + " of " +
                 std::to_string(existing + 1) + " verified cycles\n";
+            report += "Supply invoice totals cover " + std::to_string(invoiceHistory.comparableCycles) + " of " +
+                std::to_string(existing + 1) + " verified cycles\n";
+            if (invoiceHistory.comparableCycles) {
+                std::string calculated, stated, change;
+                ExactDecimal difference;
+                const auto &totals = invoiceHistory.totals;
+                const auto places = invoiceHistory.places;
+                if (!totals.calculated.formatRatio(1, places, &calculated) ||
+                    !totals.stated.formatRatio(1, places, &stated) ||
+                    !totals.calculated.subtract(totals.stated, &difference) ||
+                    !difference.formatRatio(1, places, &change))
+                    return "cycle invoice totals exceed the display range";
+                const auto &currency = priorReview.declaration.plan.currency;
+                report += "  Stated supply charges total " + stated + " " + currency + "\n";
+                report += "  Calculated at each invoice precision " + calculated + " " + currency + "\n";
+                report += "  Total difference (calculated minus invoice) " + change + " " + currency + "\n";
+            }
+        }
         report += std::string(waiting) + "\n";
         return nullptr;
     }

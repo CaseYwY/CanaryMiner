@@ -413,6 +413,8 @@ def main(cli, bundle, clock_fixture=None):
         run('--open-review', annual_seed, '--invoice', invoice, '--save-review', annual_late.name, cwd=annual_workspace)
         annual_history = run('--cycle-history', annual_seed, '--with-invoices', cwd=annual_workspace)
         assert 'Invoice reviews available for 1 of 1 verified cycles' in annual_history
+        assert 'Supply invoice totals cover 0 of 1 verified cycles' in annual_history
+        assert 'Stated supply charges total' not in annual_history
         assert f'Estimated annual adjustment {annual[3] - 1:.2f} GBP' in annual_history
         assert 'Stated annual adjustment' not in annual_history
         if clock_fixture:
@@ -421,6 +423,16 @@ def main(cli, bundle, clock_fixture=None):
                               CANARY_TEST_COMPARISON_CLOCK_REGRESSION='1')
             run('--cycle-history', annual_seed, '--with-invoices', cwd=annual_workspace, env=regression,
                 code=3, reason='local clock changed during the billing review')
+        settled = json.loads(invoice.read_bytes())
+        settled['cycles'][0]['true_up_charge'] = '-0.25'
+        write(invoice, settled)
+        annual_late.unlink()
+        run('--open-review', annual_seed, '--invoice', invoice, '--save-review', annual_late.name, cwd=annual_workspace)
+        annual_history = run('--cycle-history', annual_seed, '--with-invoices', cwd=annual_workspace)
+        assert 'Supply invoice totals cover 1 of 1 verified cycles' in annual_history
+        assert 'Stated supply charges total 0.75 GBP' in annual_history
+        assert f'Calculated at each invoice precision {annual[3]:.2f} GBP' in annual_history
+        assert f'Total difference (calculated minus invoice) {annual[3] - Decimal("0.75"):.2f} GBP' in annual_history
 
         leap = cycle(annual_end, annual_next, GO_PRODUCT, None, 14, 6, 366, bundle=True)
         leap[0].update(schema_version=5, reset_policy=dict(annual_month=1, annual_day=1, clock=LONDON))
@@ -516,8 +528,13 @@ def main(cli, bundle, clock_fixture=None):
         assert f'Estimated total {(current[3] + following[3]):.6f} GBP' in rotated
 
         with_invoices = (*history, '--with-invoices')
+        rounded_invoices = Decimal('3.23') + current[3]
         embedded = run(*with_invoices)
         assert 'Invoice reviews available for 2 of 3 verified cycles' in embedded
+        assert 'Supply invoice totals cover 2 of 3 verified cycles' in embedded
+        assert f'Stated supply charges total {rounded_invoices:.2f} GBP' in embedded
+        assert f'Calculated at each invoice precision {rounded_invoices:.2f} GBP' in embedded
+        assert 'Total difference (calculated minus invoice) 0.00 GBP' in embedded
         assert embedded.count('(match)') == 2 and embedded.count('(no invoice review)') == 1
         late = root / f'cycle-{june}.compared.cmr'
         temporary = late.with_suffix('.cmr.tmp')
@@ -534,12 +551,19 @@ def main(cli, bundle, clock_fixture=None):
         late_bytes = late.read_bytes()
         comparison = run(*with_invoices)
         assert 'Invoice reviews available for 3 of 3 verified cycles' in comparison
+        assert 'Supply invoice totals cover 3 of 3 verified cycles' in comparison
+        assert f'Stated supply charges total {rounded_invoices - Decimal("0.125"):.3f} GBP' in comparison
+        assert f'Calculated at each invoice precision {rounded_invoices:.3f} GBP' in comparison
+        assert 'Total difference (calculated minus invoice) 0.125 GBP' in comparison
         assert '0.000000 GBP (late invoice comparison)' in comparison
         assert 'Invoice comparison uses 3 decimal places with ties rounded away from zero.' in comparison
         assert 'Difference (calculated minus invoice) 0.125 GBP (mismatch)' in comparison
         assert f'Estimated total {(previous[3] + current[3] + following[3]):.6f} GBP' in comparison
-        assert run('--with-invoices', '--cycle-history', first_archive).endswith(
-            'Invoice reviews available for 2 of 2 verified cycles\nEnd of verified archive chain\n')
+        rotated_comparison = run('--with-invoices', '--cycle-history', first_archive)
+        assert 'Invoice reviews available for 2 of 2 verified cycles' in rotated_comparison
+        assert 'Supply invoice totals cover 2 of 2 verified cycles' in rotated_comparison
+        assert f'Stated supply charges total {current[3] - Decimal("0.125"):.3f} GBP' in rotated_comparison
+        assert rotated_comparison.endswith('End of verified archive chain\n')
         assert run(*history) == rollup and late.read_bytes() == late_bytes
         if clock_fixture:
             late.rename(temporary)
@@ -573,6 +597,8 @@ def main(cli, bundle, clock_fixture=None):
         independent_history = run(*with_invoices)
         assert 'Independent supply and export statements' in independent_history
         assert 'Difference for supply charge (calculated minus invoice) 0.00 GBP (match)' in independent_history
+        assert 'Supply invoice totals cover 3 of 3 verified cycles' in independent_history
+        assert f'Stated supply charges total {rounded_invoices:.2f} GBP' in independent_history
         late.unlink()
 
         assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
