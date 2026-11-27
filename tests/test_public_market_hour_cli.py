@@ -95,6 +95,10 @@ def main(cli_path, fixture, enabled, sample_only=False):
             ([allow], "Dashboard candles require --allow-public-tickers as well"),
             ([ticker, allow, allow], "--allow-public-candles is accepted once, for run only"),
             ([ticker, allow + "=true"], "--allow-public-candles takes no value"),
+            ([ticker, fallback], "--kraken-fallback requires --allow-public-candles at the Dashboard parent"),
+            ([ticker, allow, fallback, fallback], "--kraken-fallback is accepted once without a value"),
+            ([ticker, allow, fallback + "=true"], "--kraken-fallback is accepted once without a value"),
+            ([ticker, allow, fallback, "--worker-child"], "--kraken-fallback requires --allow-public-candles at the Dashboard parent"),
             (["--pass", ticker, allow], "Dashboard candles require --allow-public-tickers as well"),
             ([dashboard_dns, resolver], dns_required),
             (["--pass", ticker, dashboard_dns, resolver], dns_required),
@@ -120,7 +124,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
             for source in (ticker, trades):
                 admitted = subprocess.run([cli, "run", "--algo", "pearl-pow", "--pool", "kryptex",
                                            "--wallet", "prl1" + "q" * 59, "--no-donation",
-                                           source, allow, dashboard_dns, resolver],
+                                           source, allow, fallback, dashboard_dns, resolver],
                                           cwd=operator, capture_output=True, text=True, timeout=8)
                 if older_linux:
                     assert admitted.returncode == 3 and "Pre-run preferences unavailable" in admitted.stderr, admitted
@@ -131,7 +135,8 @@ def main(cli_path, fixture, enabled, sample_only=False):
             for args in (("--allow-public-ticker\uff53", dashboard_dns, resolver),
                          ("--allow-public-trade\uff53", dashboard_dns, resolver),
                          (ticker, "\u00ad-market-dns-server", resolver),
-                         (ticker, "--market-dns-\u017ferver", resolver)):
+                         (ticker, "--market-dns-\u017ferver", resolver),
+                         (ticker, allow, "--kraken-fallbac\u212a")):
                 rejected = call("run", *args)
                 assert rejected.returncode in (1, 2) and not rejected.stdout
             for command in ("status", "version", "settings", "list-devices", "selftest"):
@@ -276,7 +281,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert result.returncode == 3 and expected in result.stdout and "Kraken" not in result.stdout, result
             launched(["4", "5"])
         for mode, expected in (("kraken-gap", "59/60"), ("kraken-open-in-window", "invalid minute response schema"),
-                               ("kraken-disordered", "invalid minute response schema")):
+                               ("kraken-disordered", "invalid minute response schema"),
+                               ("kraken-limited-json", "provider rate limited"),
+                               ("kraken-throttled", "provider throttled the request")):
             scenario.write_text(mode, encoding="ascii")
             result = run(allow, fallback)
             assert result.returncode == 3 and f"Kraken USDT/USD fallback: {expected}" in result.stdout, result

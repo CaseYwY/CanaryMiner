@@ -242,24 +242,43 @@ int installedPath(const std::filesystem::path &fixture){
     const std::string resolver = "fd00::53";
     auto launch = PublicTickerLaunch{true,true,true,true,false,true,resolver};
     const auto withHour = installedPublicTickerFactory(directory/"synthetic-module",launch);
-    launch.dnsServer = "192.168.50.53";  // an installed factory has already frozen its input
-    for (const auto *mode : {"full", "gap-fx", "gap-pearl", "future"}) {
+    launch.krakenHourPermitted = true;
+    const auto withFallback = installedPublicTickerFactory(directory/"synthetic-module",launch);
+    launch.dnsServer = "192.168.50.53";  // the installed factories have already frozen their inputs
+    const std::pair<const char *, bool> scenarios[] = {
+        {"gap-fx", false}, {"full", true}, {"gap-pearl", true}, {"future", true},
+        {"malformed", true}, {"gap-fx", true}, {"kraken-gap", true}, {"kraken-open-in-window", true},
+        {"kraken-limited-json", true}, {"kraken-throttled", true}
+    };
+    for (const auto &[mode, allowFallback] : scenarios) {
+        const std::string_view scenario(mode);
+        const bool queriesFallback = allowFallback && (scenario == "gap-fx" || scenario.rfind("kraken-", 0) == 0);
         std::ofstream(directory / "candle-scenario") << mode;
-        auto session = withHour();
+        auto session = allowFallback ? withFallback() : withHour();
         CHECK(session->start(1));
         CHECK(waitUntil([&] {
             const auto text = view(*session);
             const auto fxAt = text.find("Coinbase USDT-USD: ");
-            return fxAt != text.npos && (text.find("60/60", fxAt) != text.npos ||
-                text.find("59/60", fxAt) != text.npos || text.find("ok/invalid market observation/minute time", fxAt) != text.npos);
+            if (queriesFallback) {
+                const auto label = "Kraken USDT/USD fallback: ";
+                const auto status = scenario == "kraken-open-in-window" ? "N/A (no fresh window) | ok/unsupported market response schema" :
+                    scenario == "kraken-limited-json" ? "N/A (no fresh window) | ok/provider rate limit envelope" :
+                    scenario == "kraken-throttled" ? "N/A (no fresh window) | ok/provider throttle envelope" :
+                    scenario == "kraken-gap" ? "59/60" : "60/60";
+                return text.find(std::string(label) + status) != text.npos;
+            }
+            if (fxAt == text.npos) return false;
+            const auto expected = scenario == "malformed" ? "ok/unsupported market response schema" :
+                scenario == "future" ? "ok/invalid market observation/minute time" :
+                scenario == "gap-fx" ? "59/60" : "60/60";
+            return text.substr(fxAt, text.find('\n', fxAt) - fxAt).find(expected) != text.npos;
         }));
-        const std::string_view scenario(mode);
         const auto text = view(*session);
         CHECK(text.find(resolver) == text.npos);
         {
             std::ifstream reader(resolverRequests);
             std::string line;
-            for (unsigned n = 0; n < 4; ++n)
+            for (unsigned n = 0; n < (queriesFallback ? 5u : 4u); ++n)
                 CHECK(std::getline(reader, line) && line == resolver);
             CHECK(!std::getline(reader, line));
         }
@@ -269,7 +288,8 @@ int installedPath(const std::filesystem::path &fixture){
         CHECK(text.find("TWAP approximation | candidate data, finality unverified") != text.npos);
         const auto mean = "1h mean of minute closes: " +
             std::string(scenario == "gap-pearl" ? "N/A" : "3.000000") + " USDT/PRL | " +
-            (scenario == "full" ? "3.500000" : "N/A") + " USD/PRL";
+            (scenario == "full" ? "3.500000" : allowFallback && scenario == "gap-fx" ? "8.000000" : "N/A") + " USD/PRL";
+        CHECK((text.find("(Kraken fallback)") != text.npos) == (allowFallback && scenario == "gap-fx"));
         CHECK(text.find(mean) != text.npos);
         CHECK(text.find(scenario == "gap-pearl" ? "MEXC PEARLUSDT: 59/60" : "MEXC PEARLUSDT: 60/60") != text.npos);
         if (scenario == "gap-fx") CHECK(text.find("Coinbase USDT-USD: 59/60") != text.npos);
@@ -279,6 +299,12 @@ int installedPath(const std::filesystem::path &fixture){
         uint64_t pearlStart=0, pearlEnd=0, fxStart=0, fxEnd=0;
         CHECK(bool(input >> pearlFeed >> pearlStart >> pearlEnd >> fxFeed >> fxStart >> fxEnd));
         CHECK(pearlFeed == 4 && fxFeed == 5 && pearlStart == fxStart && pearlEnd == fxEnd && pearlEnd - pearlStart == 3600);
+        if (queriesFallback) {
+            unsigned krakenFeed = 0;
+            uint64_t krakenStart = 0, krakenEnd = 0;
+            CHECK(bool(input >> krakenFeed >> krakenStart >> krakenEnd));
+            CHECK(krakenFeed == 3 && krakenStart == pearlStart && krakenEnd == pearlEnd);
+        }
         unsigned unexpected=0;
         CHECK(!(input >> unexpected));
         input.close();
@@ -301,6 +327,8 @@ int installedPath(const std::filesystem::path &fixture){
     const auto tickerRequests=directory/"ticker-requests";
     const auto originalTickerBytes=std::filesystem::file_size(tickerRequests);
     launch.hourPermitted=false;
+    CHECK(!installedPublicTickerFactory(directory/"synthetic-module",launch));
+    launch.krakenHourPermitted=false;
     launch.tradesPermitted=true;
     launch.dnsServer=resolver;
     const auto withTrades=installedPublicTickerFactory(directory/"synthetic-module",launch);

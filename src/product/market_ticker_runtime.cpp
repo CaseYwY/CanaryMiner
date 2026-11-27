@@ -15,15 +15,18 @@ std::filesystem::path installedPublicTickerHelper(const std::filesystem::path &m
 
 MarketReferenceFactory installedPublicTickerFactory(const std::filesystem::path &module, PublicTickerLaunch launch) {
     if (!launch.available || !launch.requested || !launch.permitted || !launch.dashboard || launch.suppressed ||
+        (launch.krakenHourPermitted && !launch.hourPermitted) ||
         (!launch.dnsServer.empty() && !validPublicDnsServer(launch.dnsServer))) return {};
     const auto helper = installedPublicTickerHelper(module);
     if (helper.empty()) return {};
     // A caller may bind a path before startup. Only the owned background worker launches the helper.
-    return [helper, enableHour = launch.hourPermitted, enableTrades = launch.tradesPermitted, dns = std::move(launch.dnsServer)] {
+    return [helper, enableHour = launch.hourPermitted, enableTrades = launch.tradesPermitted,
+            enableFallback = launch.krakenHourPermitted, dns = std::move(launch.dnsServer)] {
         MarketPollingPolicy policy;
         policy.scheduleEconomicRequests = false;
         policy.publicHour = enableHour;
         policy.publicTrades = enableTrades;
+        policy.publicHourKrakenFallback = enableFallback;
         policy.https.dnsServer = dns;
         return makeMarketReferenceRuntime(marketProcessFetch(helper), policy);
     };

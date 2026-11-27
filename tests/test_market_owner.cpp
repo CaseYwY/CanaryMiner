@@ -1,4 +1,5 @@
 #include "product/market_owner.h"
+#include "product/market_hour_payload.h"
 #include "product_test_util.h"
 #include <chrono>
 #include <thread>
@@ -130,6 +131,205 @@ int main() {
     CHECK(ticket && hourPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 102000, E + 166));
     CHECK(!hourPlan.takeEconomicRequest(102000, E + 166));
     hourPlan.stop();
+
+    auto fallbackPolicy = hours;
+    fallbackPolicy.publicHourKrakenFallback = true;
+    auto invalidFallback = fallbackPolicy;
+    invalidFallback.publicHour = false;
+    CHECK(!validMarketPollingPolicy(invalidFallback));
+    invalidFallback = fallbackPolicy;
+    invalidFallback.scheduleEconomicRequests = true;
+    CHECK(!validMarketPollingPolicy(invalidFallback));
+    MarketPollingPlan fallbackPlan;
+    CHECK(fallbackPlan.start(1, 0, E + 10, fallbackPolicy, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = fallbackPlan.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && fallbackPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+    }
+    fallbackPlan.setPublicHourFallback(E);
+    CHECK(!fallbackPlan.next(999, E + 10)); // same Kraken endpoint budget as quotes
+    ticket = fallbackPlan.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles &&
+          ticket->request.fromUtc == E - 3600 && ticket->request.toUtc == E);
+    failure.retryAfterSeconds = 100;
+    CHECK(ticket && fallbackPlan.complete(*ticket, failure, MarketDataStatus::Transport, 1000, E + 11));
+    CHECK(!fallbackPlan.next(59000, E + 69));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = fallbackPlan.next(60000, E + 70);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && fallbackPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 60000, E + 70));
+    }
+    CHECK(!fallbackPlan.next(100999, E + 110));
+    ticket = fallbackPlan.next(101000, E + 111);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+    CHECK(ticket && fallbackPlan.complete(*ticket, okay(), MarketDataStatus::Ok, 101000, E + 111));
+    CHECK(!fallbackPlan.next(102000, E + 112));  // a rate-limited hour gets no second attempt
+    fallbackPlan.stop();
+
+    for (const auto &[http, retryAfter] : {std::pair{429, 30u}, std::pair{429, 3600u},
+                                             std::pair{200, 0u}, std::pair{503, 30u}}) {
+        MarketPollingPlan limitedQuote;
+        CHECK(limitedQuote.start(1, 0, E + 10, fallbackPolicy, false));
+        for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                          PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+            ticket = limitedQuote.next(0, E + 10);
+            CHECK(ticket && ticket->request.feed == feed);
+            auto rateLimit = failure;
+            rateLimit.httpStatus = http;
+            rateLimit.retryAfterSeconds = retryAfter;
+            if (http == 200) rateLimit.status = PublicHttpsStatus::Ok;
+            const bool quoteLimited = feed == PublicFeed::KrakenUsdtTicker;
+            const auto data = quoteLimited ? (http == 200 ? MarketDataStatus::RateLimited : MarketDataStatus::Transport) :
+                MarketDataStatus::Ok;
+            CHECK(ticket && limitedQuote.complete(*ticket, quoteLimited ? rateLimit : okay(), data, 0, E + 10));
+        }
+        limitedQuote.setPublicHourFallback(E);
+        CHECK(!limitedQuote.next(1000, E + 11));  // a quote's refusal also holds the Kraken fallback lane
+        if (retryAfter < 3600) {
+            const auto delay = retryAfter ? retryAfter : 5;
+            CHECK(!limitedQuote.next(delay * 1000 - 1, E + 9 + delay));
+            ticket = limitedQuote.next(delay * 1000, E + 10 + delay);
+            CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+        } else {
+            limitedQuote.setPublicHourFallback(E + 3600);
+            for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+                ticket = limitedQuote.next(3600000, E + 3610);
+                CHECK(ticket && ticket->request.feed == feed);
+                CHECK(ticket && limitedQuote.complete(*ticket, okay(), MarketDataStatus::Ok, 3600000, E + 3610));
+            }
+            CHECK(!limitedQuote.next(3600000, E + 3610));  // capped Retry-After latches the provider budget
+        }
+    }
+
+    const auto serviceThrottle = [](std::string_view deadline) {
+        auto reply = okay();
+        reply.observedUtc = E + 11;
+        reply.body = R"({"error":["EService: Throttled: )" + std::string(deadline) + R"("]})";
+        return reply;
+    };
+    const auto throttle = serviceThrottle(std::to_string(E + 40));
+    MarketParseContext quoteContext{{PublicFeed::KrakenUsdtTicker}, E + 11, 1000, 1, MarketOrigin::ProviderResponse,
+        MarketMinuteConvention::Unqualified, E + 11};
+    const auto throttledQuote = parseMarketQuote(throttle, quoteContext);
+    CHECK(throttledQuote.status == MarketDataStatus::ProviderThrottled && !throttledQuote.value);
+    const auto throttledTrade = parsePublicTrade(throttle, PublicFeed::KrakenUsdtTrades,
+        (E + 11) * 1000, (E + 11) * 1000, 1000);
+    CHECK(throttledTrade.status == MarketDataStatus::ProviderThrottled && !throttledTrade.value);
+    CHECK(market_detail::krakenThrottleUtc(throttle) == E + 40);
+    CHECK(!market_detail::krakenThrottleUtc(serviceThrottle("invalid")));
+
+    MarketPollingPlan quoteThrottle;
+    CHECK(quoteThrottle.start(1, 0, E + 10, fallbackPolicy, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = quoteThrottle.next(1000, E + 11);
+        CHECK(ticket && ticket->request.feed == feed);
+        const bool limited = feed == PublicFeed::KrakenUsdtTicker;
+        CHECK(ticket && quoteThrottle.complete(*ticket, limited ? throttle : okay(),
+            limited ? throttledQuote.status : MarketDataStatus::Ok, 1000, E + 11,
+            limited ? market_detail::krakenThrottleUtc(throttle) : 0));
+    }
+    quoteThrottle.setPublicHourFallback(E);
+    CHECK(!quoteThrottle.next(30999, E + 40));
+    ticket = quoteThrottle.next(31000, E + 41);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+
+    for (const auto &deadline : {std::string("invalid"), std::to_string(E + 3610)}) {
+        MarketPollingPlan planWithHold;
+        CHECK(planWithHold.start(1, 0, E + 10, fallbackPolicy, false));
+        ticket = planWithHold.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+        CHECK(ticket && planWithHold.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+        ticket = planWithHold.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+        const auto reply = serviceThrottle(deadline);
+        CHECK(ticket && planWithHold.complete(*ticket, reply, MarketDataStatus::ProviderThrottled, 0, E + 10,
+              market_detail::krakenThrottleUtc(reply)));
+        planWithHold.setPublicHourFallback(E + 3600);
+        for (auto feed : {PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour, PublicFeed::GatePearlTicker}) {
+            ticket = planWithHold.next(3600000, E + 3610);
+            CHECK(ticket && ticket->request.feed == feed);
+            CHECK(ticket && planWithHold.complete(*ticket, okay(), MarketDataStatus::Ok, 3600000, E + 3610));
+        }
+        CHECK(!planWithHold.next(3600000, E + 3610));
+    }
+
+    auto fastFallback = fallbackPolicy;
+    fastFallback.quoteRefreshMs = 1000;
+    MarketPollingPlan limitedOhlc;
+    CHECK(limitedOhlc.start(1, 0, E + 10, fastFallback, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = limitedOhlc.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+    }
+    limitedOhlc.setPublicHourFallback(E);
+    ticket = limitedOhlc.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+    auto limitedReply = okay();
+    limitedReply.observedUtc = E + 11;
+    limitedReply.body = R"({"error":["EAPI:Rate limit exceeded"]})";
+    std::vector<market_detail::ReviewMinute> minutes;
+    const auto limitedStatus = market_detail::decodePublicHourPayload(limitedReply, market_detail::HourFeed::KrakenFx,
+        E - 3600, E, E + 11, E + 11, minutes);
+    CHECK(limitedStatus == MarketDataStatus::RateLimited && minutes.empty());
+    CHECK(ticket && limitedOhlc.complete(*ticket, limitedReply, limitedStatus, 1000, E + 11));
+    ticket = limitedOhlc.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+    CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 1000, E + 11));
+    ticket = limitedOhlc.next(2000, E + 12);
+    CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+    CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 2000, E + 12));
+    ticket = limitedOhlc.next(6000, E + 16);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+
+    MarketPollingPlan ohlcThrottle;
+    CHECK(ohlcThrottle.start(1, 0, E + 10, fastFallback, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = ohlcThrottle.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && ohlcThrottle.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+    }
+    ohlcThrottle.setPublicHourFallback(E);
+    ticket = ohlcThrottle.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+    const auto throttleStatus = market_detail::decodePublicHourPayload(throttle, market_detail::HourFeed::KrakenFx,
+        E - 3600, E, E + 11, E + 11, minutes);
+    CHECK(throttleStatus == MarketDataStatus::ProviderThrottled && minutes.empty());
+    CHECK(ticket && ohlcThrottle.complete(*ticket, throttle, throttleStatus, 1000, E + 11,
+        market_detail::krakenThrottleUtc(throttle)));
+    ticket = ohlcThrottle.next(30999, E + 40);
+    CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+    CHECK(ticket && ohlcThrottle.complete(*ticket, okay(), MarketDataStatus::Ok, 30999, E + 40));
+    ticket = ohlcThrottle.next(31000, E + 41);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+
+    MarketPollingPlan recurringThrottle;
+    CHECK(recurringThrottle.start(1, 0, E + 10, fastFallback, false));
+    const auto elapsedDeadline = serviceThrottle(std::to_string(E + 10));
+    for (const uint64_t tick : {0u, 5000u, 15000u}) {
+        const auto utc = E + 10 + tick / 1000;
+        ticket = recurringThrottle.next(tick, utc);
+        CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+        CHECK(ticket && recurringThrottle.complete(*ticket, okay(), MarketDataStatus::Ok, tick, utc));
+        ticket = recurringThrottle.next(tick, utc);
+        CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+        CHECK(ticket && recurringThrottle.complete(*ticket, elapsedDeadline, MarketDataStatus::ProviderThrottled, tick, utc,
+            market_detail::krakenThrottleUtc(elapsedDeadline)));
+        if (!tick) {
+            for (auto feed : {PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+                ticket = recurringThrottle.next(tick, utc);
+                CHECK(ticket && ticket->request.feed == feed);
+                CHECK(ticket && recurringThrottle.complete(*ticket, okay(), MarketDataStatus::Ok, tick, utc));
+            }
+        }
+    }
+    const auto &heldTicker = recurringThrottle.health()[static_cast<unsigned>(PublicFeed::KrakenUsdtTicker)];
+    CHECK(!heldTicker.latched && heldTicker.attempts == 3 && heldTicker.nextDueMs == 315000);
 
     std::atomic<uint64_t> ms{0};
     std::atomic<unsigned> pearlCalls{0}, fxCalls{0};

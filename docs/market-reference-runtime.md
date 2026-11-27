@@ -119,6 +119,29 @@ no data from this display.
 The installed-path test uses a synthetic helper beside an inert executable. Live provider requests, source-use
 approval and helper trust/deployment qualification require separate evidence.
 
+### Allow a separate Kraken hourly FX fallback
+
+Add `--kraken-fallback` to the same Dashboard launch, alongside `--allow-public-candles`
+and one latest-price permission. The normal saved public ticker request still applies.
+
+```sh
+canary-miner run --allow-public-tickers --allow-public-candles --kraken-fallback
+```
+
+The Dashboard can ask Kraken for the same hour if MEXC supplies all 60 Pearl closes and
+a valid Coinbase response leaves an FX gap in that window. It attempts the Kraken request
+at most once for that UTC window, shares the Kraken provider budget with the quote
+request, and uses the launch's resolver. A Kraken service throttle holds both requests
+through the reported UTC deadline, or for the session when the deadline is invalid or
+outside the automatic wait limit. Coinbase remains the primary hourly FX source.
+A failed or invalid primary response gives no fallback permission.
+
+The Dashboard reports both venues' coverage. A Kraken USD average requires all 60 aligned
+Kraken closes and fresh receipts for the primary observations and the fallback. Its
+label identifies Kraken. It uses the existing Kraken candidate decoder, which excludes the
+open terminal OHLC row. The display remains a candidate reference and economic mode defaults off.
+[Kraken Spot REST OHLC contract](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
+
 ### Check public tickers without mining
 
 Run `canary-miner market-tickers --allow-public-tickers` from a build with public HTTPS enabled. The explicit flag permits one request each to the existing Gate Pearl mainnet ticker and Kraken USDT/USD ticker. The command exits after the sample. It leaves Dashboard and economic-mode settings untouched.
@@ -130,7 +153,7 @@ The [Gate Spot REST contract](https://www.gate.com/docs/developers/apiv4/en/spot
 unambiguous returned time anchor and consistent candle row definition. [Kraken Spot REST](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
 identifies the last row as provisional and leaves the other rows' timestamps unspecified as start or end.
 [Kraken WebSocket v2](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ohlc) defines its own
-`interval_begin` field. The WebSocket contract applies to that transport. Neither candle adapter is admitted for public polling.
+`interval_begin` field. The WebSocket contract applies to that transport. The generic Gate and Kraken candle adapters remain unqualified. The opt-in hourly Kraken FX fallback uses the separate candidate decoder.
 
 The [2026-11-06 primary-source recheck](research/market-source-qualification-2026-11.md) does not settle Gate's REST candle
 shape or either REST minute time anchor. Public-feed use rights, regional/deployment/trust approval and any required

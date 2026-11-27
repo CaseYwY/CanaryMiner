@@ -21,6 +21,12 @@ HourSample decodeHourReply(const PublicJsonResponse &reply, HourFeed feed, uint6
         const auto status = decodePublicHourPayload(reply, feed, start, end, sentUtc, receivedUtc, sample.minutes);
         if (status == MarketDataStatus::Timestamp)
             sample.problem = "invalid response observation time";
+        else if (status == MarketDataStatus::RateLimited)
+            sample.problem = "provider rate limited the request";
+        else if (status == MarketDataStatus::ProviderThrottled)
+            sample.problem = "provider throttled the request";
+        else if (status == MarketDataStatus::ProviderError)
+            sample.problem = "provider error envelope";
         else if (status != MarketDataStatus::Ok)
             sample.problem = "invalid minute response schema or timestamp";
         else

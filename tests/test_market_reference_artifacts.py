@@ -16,7 +16,7 @@ class MarketReferenceArtifacts(unittest.TestCase):
         self.assertIn('publicLatestArg=publicTradePermissionArg ? publicTradePermissionArg : publicTickerPermissionArg', native)
         self.assertIn('market_detail::validDashboardMarketArguments(argc, argv, publicLatestArg,', native)
         self.assertIn('so.userArgs = supervisorUserArguments(argc, argv, cli,', native)
-        self.assertIn('{publicLatestArg, publicHourPermissionArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0}', native)
+        self.assertIn('{publicLatestArg, publicHourPermissionArg, publicKrakenFallbackArg, publicDnsArg, publicDnsArg ? publicDnsArg + 1 : 0}', native)
         self.assertEqual(native.count('installedPublicTickerFactory('), 1)
         self.assertNotIn('makeMarketReferenceRuntime', native)
         self.assertNotIn('publicFeedUrl(', native)
@@ -24,6 +24,7 @@ class MarketReferenceArtifacts(unittest.TestCase):
         self.assertIn('module.parent_path() / "canary_public_json_worker', factory)
         self.assertIn('policy.scheduleEconomicRequests = false', factory)
         self.assertIn('policy.publicHour = enableHour', factory)
+        self.assertIn('policy.publicHourKrakenFallback = enableFallback', factory)
         self.assertIn('policy.publicTrades = enableTrades', factory)
         self.assertIn('policy.https.dnsServer = dns', factory)
         for marker in ('getenv(', 'publicFeedUrl(', 'PublicJsonClient', '.get('):

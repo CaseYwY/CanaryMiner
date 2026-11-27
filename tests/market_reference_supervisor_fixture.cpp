@@ -38,7 +38,8 @@ int main(int argc,char **argv){
     }
     const std::string_view mode=argc>=3 ? argv[2] : "";
     const bool trade=mode=="--trade-hour-fixture";
-    const bool hourly=mode=="--hour-fixture" || trade;
+    const bool fallback=mode=="--kraken-hour-fixture";
+    const bool hourly=mode=="--hour-fixture" || trade || fallback;
     if(argc<2||argc>4||(argc==4&&!hourly))return 2;
     const auto dir=std::filesystem::u8path(argv[1]);std::filesystem::create_directories(dir);Counts counts;
     if(!platformInit())return 3;
@@ -54,7 +55,7 @@ int main(int argc,char **argv){
     MarketReferenceFactory installed;
     if(hourly){
         installed=installedPublicTickerFactory(std::filesystem::u8path(options.exe),
-            {true,true,true,true,false,true,argc==4?argv[3]:"",trade});
+            {true,true,true,true,false,true,argc==4?argv[3]:"",trade,fallback});
         if(!installed){local.stop();platformShutdown();return 2;}
     }
     options.marketReferenceFactory=[&]()->std::unique_ptr<MarketReferenceSink>{
