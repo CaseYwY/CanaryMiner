@@ -739,14 +739,34 @@ canary-miner meter-bill --cycle-history march.cmr
 The report includes the selected seed and each consecutive successor that passes replay and links
 to the preceding closing record. Each row shows the UTC cycle boundaries and the supply estimate.
 The total sums the exact estimates before rounding the display to six decimal places. Rows marked
-with an archived invoice comparison have an invoice inside the cycle archive. A separate comparison
-created later has its own archive and can be opened separately.
+with an archived invoice comparison have an invoice inside the cycle archive.
 
 The command reads the closed archives without starting the watcher or reading staged meter, rate
 or invoice inputs. A missing archive before a later one, an invalid link, a changed saved amount,
 or a temporary file at the next slot prevents a summary. The report covers up to 120 successors
 plus the selected seed. If it reaches that limit, use the last verified archive as the next seed
 and count the shared cycle only once when combining totals.
+
+Add `--with-invoices` to see the saved invoice comparisons and the number of verified cycles
+with an invoice review. Each comparison uses its original invoice precision and rounding. The
+total continues to sum the estimated supply costs for all verified cycles. A cycle can have a
+recorded mismatch or an annual comparison with no stated adjustment.
+
+For an invoice that arrives after a cycle was archived, save a separate comparison named
+`cycle-END.compared.cmr`, substituting the cycle's UTC closing milliseconds for `END`. Use
+[the existing invoice review command](#compare-reviewed-cycles-with-supply-charges) with the
+original archive as input. Leave the original archive at its existing filename.
+
+~~~text
+canary-miner meter-bill --open-review cycle-1685574000000.cmr --invoice june-charges.json --save-review cycle-1685574000000.compared.cmr
+canary-miner meter-bill --cycle-history march.cmr --with-invoices
+~~~
+
+The history checks the original tariff, readings, captured rates, review cutoff, and predecessor
+link in a late comparison against the corresponding cycle. It recalculates the saved estimates
+and invoice comparison. An invalid, conflicting or unfinished comparison prevents the report in
+this mode. The command only reads comparison files for cycles in the selected history. Raw staged
+invoice files are used by the recurring review when a cycle is first saved.
 
 #### Watch for new billing inputs
 

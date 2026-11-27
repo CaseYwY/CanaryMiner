@@ -401,6 +401,20 @@ def main(cli, bundle, clock_fixture=None):
         close(annual[3], save('annual.cmr', annual_end + HOUR))
         annual_saved = prepare('annual.cmr', 'annual-next.json')
         assert f'[{annual_end}, {annual_next})' in annual_saved and 'exceeds the installed public rate capture bounds' in annual_saved
+        annual_workspace = root / 'annual invoice history'
+        annual_workspace.mkdir()
+        annual_seed = Path(shutil.copy2(root / 'annual.cmr', annual_workspace / 'seed.cmr'))
+        write(invoice, dict(schema_version=2, scope=SCOPE, currency='GBP', decimal_places=2, rounding='half_even',
+                            cycles=[dict(begin_utc_ms=annual_begin, end_utc_ms=annual_end, true_up_charge=None,
+                                         interim_supply_charges=[dict(begin_utc_ms=annual_begin,
+                                                                      end_utc_ms=annual_end,
+                                                                      supply_charge='1')])]))
+        run('--open-review', annual_seed, '--invoice', invoice, '--save-review',
+            f'cycle-{annual_end}.compared.cmr', cwd=annual_workspace)
+        annual_history = run('--cycle-history', annual_seed, '--with-invoices', cwd=annual_workspace)
+        assert 'Invoice reviews available for 1 of 1 verified cycles' in annual_history
+        assert f'Estimated annual adjustment {annual[3] - 1:.2f} GBP' in annual_history
+        assert 'Stated annual adjustment' not in annual_history
 
         leap = cycle(annual_end, annual_next, GO_PRODUCT, None, 14, 6, 366, bundle=True)
         leap[0].update(schema_version=5, reset_policy=dict(annual_month=1, annual_day=1, clock=LONDON))
@@ -445,10 +459,12 @@ def main(cli, bundle, clock_fixture=None):
         assert '1 verified cycle' in single and f'[{march}, {april})' in single
         assert {path: path.read_bytes() for path in root.iterdir() if path.is_file()} == private_files
         for extras in (('--watch-every-seconds', '1'), ('--save-review', 'extra.cmr'), ('--allow-public-rates',),
+                       ('--with-invoices', '--with-invoices'), ('--with-invoices', '--invoice', invoice),
                        ('--scheduled-readings-plan', old), ('--as-of-utc-ms', june + HOUR)):
             run(*history, *extras, code=2, reason='invalid options')
         for extras in (('--intervals', readings), ('--tariff', tariff), ('--next-cycle-review', old),
-                       ('--save-review', 'x.cmr'), ('--allow-public-rates',), ('--dns-server', '1.1.1.1')):
+                       ('--save-review', 'x.cmr'), ('--allow-public-rates',), ('--dns-server', '1.1.1.1'),
+                       ('--with-invoices',)):
             run(*roll, *extras, code=2, reason='invalid options')
         run('--roll-forward', 'partial.cmr', code=3, reason='previous review must be a complete')
         run('--roll-forward', old, '--as-of-utc-ms', april, code=3, reason='precedes the saved cutoff')
@@ -492,6 +508,62 @@ def main(cli, bundle, clock_fixture=None):
         rotated = run('--cycle-history', first_archive)
         assert '2 verified cycles' in rotated and f'[{march}, {april})' not in rotated
         assert f'Estimated total {(current[3] + following[3]):.6f} GBP' in rotated
+
+        with_invoices = (*history, '--with-invoices')
+        embedded = run(*with_invoices)
+        assert 'Invoice reviews available for 2 of 3 verified cycles' in embedded
+        assert embedded.count('(match)') == 2 and embedded.count('(no invoice review)') == 1
+        late = root / f'cycle-{june}.compared.cmr'
+        temporary = late.with_suffix('.cmr.tmp')
+        temporary.write_bytes(b'in progress')
+        run(*with_invoices, code=3, reason='late invoice review has uncertain temporary output')
+        assert run(*history) == rollup
+        temporary.unlink()
+        write(invoice, dict(schema_version=1, scope=SCOPE, currency='GBP',
+                            decimal_places=3, rounding='half_away_from_zero',
+                            cycles=[dict(begin_utc_ms=may, end_utc_ms=june, supply_charge='-0.125')]))
+        late_report = run('--open-review', second_archive, '--previous-cycle', first_archive,
+                          '--invoice', invoice, '--save-review', late.name)
+        assert 'Difference (calculated minus invoice) 0.125 GBP (mismatch)' in late_report
+        late_bytes = late.read_bytes()
+        comparison = run(*with_invoices)
+        assert 'Invoice reviews available for 3 of 3 verified cycles' in comparison
+        assert '0.000000 GBP (late invoice comparison)' in comparison
+        assert 'Invoice comparison uses 3 decimal places with ties rounded away from zero.' in comparison
+        assert 'Difference (calculated minus invoice) 0.125 GBP (mismatch)' in comparison
+        assert f'Estimated total {(previous[3] + current[3] + following[3]):.6f} GBP' in comparison
+        assert run('--with-invoices', '--cycle-history', first_archive).endswith(
+            'Invoice reviews available for 2 of 2 verified cycles\nEnd of verified archive chain\n')
+        assert run(*history) == rollup and late.read_bytes() == late_bytes
+
+        duplicate = root / f'cycle-{may}.compared.cmr'
+        duplicate.write_bytes(late_bytes)
+        run(*with_invoices, code=3, reason='cycle already contains an archived invoice comparison')
+        duplicate.unlink()
+        late.write_bytes(second_bytes)
+        run(*with_invoices, code=3, reason='late invoice review unavailable or invalid')
+        body = late_bytes[:-65]
+        invoice_result = b'","-0.125","0.125"]\n'
+        assert body.count(invoice_result) == 1
+        changed = body.replace(invoice_result, b'","-0.125","0.126"]\n')
+        late.write_bytes(changed + sha256(changed).hexdigest().encode('ascii') + b'\n')
+        run(*with_invoices, code=3, reason='saved review amounts differ from the recalculated amounts')
+        changed = body.replace(str(june + HOUR).encode() + b'\n', str(june + HOUR + 1).encode() + b'\n', 1)
+        assert changed != body
+        late.write_bytes(changed + sha256(changed).hexdigest().encode('ascii') + b'\n')
+        run(*with_invoices, code=3, reason='late invoice review does not match the original cycle inputs')
+        assert run(*history) == rollup
+        late.unlink()
+        write(invoice, dict(schema_version=4, scope=SCOPE, currency='GBP',
+                            supply=dict(decimal_places=2, rounding='half_even',
+                                        periods=[dict(begin_utc_ms=may, end_utc_ms=june, supply_charge='0')]),
+                            export=dict(decimal_places=2, rounding='half_even', periods=[])))
+        run('--open-review', second_archive, '--invoice', invoice, '--save-review', late.name)
+        independent_history = run(*with_invoices)
+        assert 'Independent supply and export statements' in independent_history
+        assert 'Difference for supply charge (calculated minus invoice) 0.00 GBP (match)' in independent_history
+        late.unlink()
+
         assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
         run('--roll-forward', old, '--as-of-utc-ms', may + HOUR, code=3, reason='newer than the requested cutoff')
 
