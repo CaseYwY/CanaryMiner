@@ -5,8 +5,10 @@ int main(int argc,char **argv){
     (void)packageRole[0];
     using namespace om;
     try{
-        std::string wire;if(!readLocalTaskInput(argc,argv,&wire))return 2;
-        if (wire.rfind(energyPeriodsRequestHeader, 0) == 0) return serveEnergyPeriods(wire);
+        std::string wire;if(!readLocalTaskInput(argc,argv,&wire,LocalTaskFrameProfile::EnergyPeriods))return 2;
+        if (wire.rfind(energyPeriodsRequestHeader, 0) == 0 ||
+            wire.rfind(energyDynamicPeriodsRequestHeader, 0) == 0) return serveEnergyPeriods(wire);
+        if (wire.size() > localTaskRequestLimit) return 2;
         EnergyCollectorLeaseRequest lease;if(decodeEnergyCollectorLeaseRequest(wire,&lease))return serveEnergyCollectorLease(lease);
         EnergyCollectorGuardRequest guard;if(!decodeEnergyCollectorGuardRequest(wire,&guard))return 2;
         const auto reply=executeEnergyCollectorGuard(guard);wire.clear();

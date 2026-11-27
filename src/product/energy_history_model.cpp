@@ -126,6 +126,30 @@ EnergyHistoryStatus Model::advance(const EnergyHistoryBinding &binding,const Ene
     batchIds.insert(b.id);
     return S::Ok;
 }
+namespace {
+
+bool accumulateEnergy(EnergyHistoryTotals &total, int64_t begin, int64_t end,
+                      uint64_t milliwatts, unsigned coveredChannels, const ExactDecimal &milli) {
+    const auto first = (std::max)(begin, total.beginUtcMs);
+    const auto last = (std::min)(end, total.endUtcMs);
+    if (first >= last) return true;
+    const auto duration = static_cast<uint64_t>(last - first);
+    ExactDecimal energy;
+    if (!decimal(milliwatts).multiply(decimal(duration), &energy) || !energy.multiply(milli, &energy) ||
+        !total.knownKwh.numerator.add(energy, &total.knownKwh.numerator))
+        return false;
+    total.coveredDeviceMs += duration * coveredChannels;
+    return true;
+}
+
+void finishCoverage(EnergyHistoryTotals &total) {
+    total.coverage = total.coveredDeviceMs == total.requestedDeviceMs ? EnergyHistoryCoverage::Complete :
+        total.coveredDeviceMs ? EnergyHistoryCoverage::Partial : EnergyHistoryCoverage::Unavailable;
+    if (total.coverage == EnergyHistoryCoverage::Complete) total.completeKwh = total.knownKwh;
+}
+
+} // namespace
+
 EnergyHistoryTotals Model::query(const EnergyHistoryBinding &binding,int64_t begin,int64_t end,int64_t now) const {
     EnergyHistoryTotals t;t.beginUtcMs=begin;t.endUtcMs=end;
     if(!instant(now)||!instant(begin)||!instant(end)||begin>=end||end>now){t.status=EnergyHistoryStatus::Invalid;return t;}
@@ -133,22 +157,62 @@ EnergyHistoryTotals Model::query(const EnergyHistoryBinding &binding,int64_t beg
     t.status=EnergyHistoryStatus::Ok;t.observedAtMs=head.observedAtMs;
     t.requestedDeviceMs=static_cast<uint64_t>(end-begin)*binding.channels.size();
     ExactDecimal milli;ExactDecimal::parse("0.001",&milli);
-    for(const auto &i:segments){const auto a=(std::max)(begin,i.begin),z=(std::min)(end,i.end);if(a>=z)continue;
-        const auto dt=static_cast<uint64_t>(z-a);ExactDecimal n;
-        if(!decimal(i.milliwatts).multiply(decimal(dt),&n)||!n.multiply(milli,&n)||!t.knownKwh.numerator.add(n,&t.knownKwh.numerator)){
-            EnergyHistoryTotals fail;fail.status=EnergyHistoryStatus::Capacity;fail.beginUtcMs=begin;fail.endUtcMs=end;return fail;}
-        t.coveredDeviceMs+=dt*i.coveredChannels;
-    }
-    for(const auto &i:intervals){const auto a=(std::max)(begin,i.begin),z=(std::min)(end,i.end);if(a>=z)continue;
-        const auto dt=static_cast<uint64_t>(z-a);ExactDecimal n;
-        if(!decimal(i.milliwatts).multiply(decimal(dt),&n)||!n.multiply(milli,&n)||!t.knownKwh.numerator.add(n,&t.knownKwh.numerator)){
-            EnergyHistoryTotals fail;fail.status=EnergyHistoryStatus::Capacity;fail.beginUtcMs=begin;fail.endUtcMs=end;return fail;}
-        t.coveredDeviceMs+=dt;
-    }
-    t.coverage=t.coveredDeviceMs==t.requestedDeviceMs?EnergyHistoryCoverage::Complete:t.coveredDeviceMs?EnergyHistoryCoverage::Partial:EnergyHistoryCoverage::Unavailable;
-    if(t.coverage==EnergyHistoryCoverage::Complete)t.completeKwh=t.knownKwh;
+    const auto fail = [&] {
+        EnergyHistoryTotals result;
+        result.status = EnergyHistoryStatus::Capacity;
+        result.beginUtcMs = begin;
+        result.endUtcMs = end;
+        return result;
+    };
+    for (const auto &segment : segments)
+        if (!accumulateEnergy(t, segment.begin, segment.end, segment.milliwatts, segment.coveredChannels, milli)) return fail();
+    for (const auto &interval : intervals)
+        if (!accumulateEnergy(t, interval.begin, interval.end, interval.milliwatts, 1, milli)) return fail();
+    finishCoverage(t);
     return t;
 }
+
+EnergyHistoryStatus Model::queryPeriods(const EnergyHistoryBinding &binding, const std::vector<EnergyHistoryRange> &ranges,
+                                        int64_t now, std::vector<EnergyHistoryTotals> &totals) const {
+    using S = EnergyHistoryStatus;
+    if (!instant(now)) return S::Invalid;
+    if (now < head.observedAtMs) return S::Clock;
+    std::vector<EnergyHistoryTotals> result;
+    result.reserve(ranges.size());
+    int64_t previousEnd = 0;
+    for (const auto &range : ranges) {
+        if (!instant(range.beginUtcMs) || !instant(range.endUtcMs) || range.beginUtcMs < previousEnd ||
+            range.beginUtcMs >= range.endUtcMs || range.endUtcMs > now) return S::Invalid;
+        auto &total = result.emplace_back();
+        total.status = S::Ok;
+        total.observedAtMs = head.observedAtMs;
+        total.beginUtcMs = range.beginUtcMs;
+        total.endUtcMs = range.endUtcMs;
+        total.requestedDeviceMs = static_cast<uint64_t>(range.endUtcMs - range.beginUtcMs) * binding.channels.size();
+        previousEnd = range.endUtcMs;
+    }
+    ExactDecimal milli;
+    ExactDecimal::parse("0.001", &milli);
+    // Raw intervals across channels can overlap. Search the sorted report ranges, not the raw history.
+    const auto add = [&](int64_t begin, int64_t end, uint64_t milliwatts, unsigned coveredChannels) {
+        auto range = std::upper_bound(result.begin(), result.end(), begin, [](int64_t at, const auto &total) {
+            return at < total.endUtcMs;
+        });
+        for (; range != result.end() && range->beginUtcMs < end; ++range)
+            if (!accumulateEnergy(*range, begin, end, milliwatts, coveredChannels, milli)) return false;
+        return true;
+    };
+    if (!result.empty()) {
+        for (const auto &segment : segments)
+            if (!add(segment.begin, segment.end, segment.milliwatts, segment.coveredChannels)) return S::Capacity;
+        for (const auto &interval : intervals)
+            if (!add(interval.begin, interval.end, interval.milliwatts, 1)) return S::Capacity;
+    }
+    for (auto &total : result) finishCoverage(total);
+    totals = std::move(result);
+    return S::Ok;
+}
+
 EnergyHistoryTrace Model::trace(const EnergyHistoryBinding &binding,int64_t begin,int64_t end,int64_t now,size_t maximum) const {
     using S=EnergyHistoryStatus;EnergyHistoryTrace result;
     if(!maximum||maximum>512){result.status=S::Invalid;return result;}
