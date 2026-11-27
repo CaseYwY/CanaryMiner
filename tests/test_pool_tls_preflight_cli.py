@@ -48,7 +48,8 @@ def main(cli, mode, fixture, native=None):
         help_result = run('--help', code=0, message=b'--pool stratum+ssl://')
         assert b'--pool kryptex-hk-tls' in help_result.stdout
         for options in ([], ['--pool'], ['--help', '--pool', 'stratum+ssl://echo.test:443'],
-                        ['--pool', 'stratum+tcp://echo.test:443'], ['--pool', 'kryptex-hk'],
+                        ['--pool', 'stratum+tcp://echo.test:443'], ['--pool', 'kryptex'],
+                        ['--pool', 'kryptex-hk'], ['--poo\uff4c', 'kryptex-hk-tls'],
                         ['--pool', 'herominers'], ['--pool', 'f2pool'], ['--pool', 'KRYPTEX-HK-TLS'],
                         ['--pool', 'kryptex-hk-tl\uff53'], ['--pool', 'unknown-tls'],
                         ['--pool', 'kryptex-hk-tls:8048'], ['--pool', 'kryptex-hk-tls', '--pool', 'kryptex-tls'],
