@@ -68,6 +68,48 @@ struct SchannelEngine final:PearlTlsEngine {
         }
         return ok;
     }
+#if defined(CANARY_POOL_TLS_PRIVATE_TRUST_WINDOWS)
+    bool verifyPrivatePeer(PCCERT_CONTEXT peer) const {
+        if (!peer->pbCertEncoded || !peer->cbCertEncoded || peer->cbCertEncoded > limit) return false;
+        auto observed = *trust;
+        observed.leaf.assign(peer->pbCertEncoded, peer->pbCertEncoded + peer->cbCertEncoded);
+        if (peer->hCertStore) {
+            constexpr size_t maxIntermediates = 16;
+            constexpr size_t maxPeerCertificates = maxIntermediates + 2; // leaf and root can be in the store
+            size_t bytes = observed.leaf.size();
+            for (const auto *group : {&observed.anchors, &observed.intermediates, &observed.crls})
+                for (const auto &der : *group) bytes += der.size();
+            std::unique_ptr<const CERT_CONTEXT, decltype(&CertFreeCertificateContext)>
+                current(nullptr, CertFreeCertificateContext);
+            for (size_t count = 0; ; ++count) {
+                if (cancel.load()) return false;
+                // The enumeration takes ownership of the previous context, even on failure.
+                current.reset(CertEnumCertificatesInStore(peer->hCertStore, current.release()));
+                if (!current) {
+                    const auto error = GetLastError();
+                    if (error != static_cast<DWORD>(CRYPT_E_NOT_FOUND) && error != ERROR_NO_MORE_FILES)
+                        return false;
+                    break;
+                }
+                const auto *der = current->pbCertEncoded;
+                const auto length = current->cbCertEncoded;
+                if (count >= maxPeerCertificates || !der || !length || length > limit) return false;
+                const auto same = [&](const PearlTlsDer &item) {
+                    return item.size() == length && std::memcmp(item.data(), der, length) == 0;
+                };
+                if (same(observed.leaf) ||
+                    std::any_of(observed.anchors.begin(), observed.anchors.end(), same) ||
+                    std::any_of(observed.intermediates.begin(), observed.intermediates.end(), same)) continue;
+                if (observed.intermediates.size() >= maxIntermediates || bytes + length > 8 * limit)
+                    return false;
+                // Treat the peer's certificates only as chain-building inputs.
+                observed.intermediates.emplace_back(der, der + length);
+                bytes += length;
+            }
+        }
+        return inspectPearlTlsPrivateTrust(observed, cancel).status == PearlTlsPrivateTrustStatus::Verified;
+    }
+#endif
     bool verifyPeer(){
         SecPkgContext_ConnectionInfo connection{};
         if(QueryContextAttributesW(&context,SECPKG_ATTR_CONNECTION_INFO,&connection)!=SEC_E_OK||
@@ -84,9 +126,9 @@ struct SchannelEngine final:PearlTlsEngine {
                     if(alt->cAltEntry<=64)for(DWORD i=0;i<alt->cAltEntry;++i)if(alt->rgAltEntry[i].dwAltNameChoice==CERT_ALT_NAME_DNS_NAME&&alt->rgAltEntry[i].pwszDNSName)ok=true;
                 }
             }
-            if(ok&&trust){if(!peer->cbCertEncoded||peer->cbCertEncoded>limit)ok=false;
-                else{auto observed=*trust;observed.leaf.assign(peer->pbCertEncoded,peer->pbCertEncoded+peer->cbCertEncoded);
-                    ok=inspectPearlTlsPrivateTrust(observed,cancel).status==PearlTlsPrivateTrustStatus::Verified;}}
+#if defined(CANARY_POOL_TLS_PRIVATE_TRUST_WINDOWS)
+            if (ok && trust) ok = verifyPrivatePeer(peer);
+#endif
         }catch(...){CertFreeCertificateContext(peer);throw;}
         CertFreeCertificateContext(peer);return ok;
     }
