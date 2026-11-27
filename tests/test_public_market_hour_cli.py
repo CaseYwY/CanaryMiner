@@ -1,5 +1,6 @@
 """One-shot hour sample using only an inert installed sibling."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
     libc = os.confstr("CS_GNU_LIBC_VERSION") if sys.platform == "linux" else None
     older_linux = libc and tuple(map(int, libc.split()[1].split(".")[:2])) < (2, 40)
     allow = "--allow-public-candles"
+    fallback = "--kraken-fallback"
     with tempfile.TemporaryDirectory(prefix="canary-hour-sample-") as directory:
         root = Path(directory)
         installed = root / "installed"
@@ -68,7 +70,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
                           ("--allow-public-candle\uff53",), ("--url", "private-sentinel"), dns,
                           (allow, "--dns-server"), (allow, "--dns-server", "hostname"),
                           (allow, *dns, *dns), ("--file", config.name, *dns),
-                          ("--open-review", archive.name, *dns), (allow, "--dn\uff53-server", resolver)):
+                          ("--open-review", archive.name, *dns), (allow, "--dn\uff53-server", resolver),
+                          (fallback,), (allow, fallback, fallback), (allow, fallback + "=true"),
+                          (allow, "--kraken-fallbac\u212a"), ("--open-review", archive.name, fallback)):
             result = run(*arguments)
             assert result.returncode == 2 and not result.stdout and not requests.exists(), result
         result = call("market-hou\uff52", allow)
@@ -142,7 +146,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
 
         assert not resolver_requests.exists()
         if not enabled:
-            for args in ((allow,), save, (allow, *dns)):
+            for args in ((allow,), save, (allow, *dns), (allow, fallback, *dns)):
                 result = run(*args)
                 assert result.returncode == 3 and not result.stdout and "HTTPS unavailable in this build" in result.stderr
             assert not requests.exists()
@@ -202,7 +206,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert not archive.exists() and not temporary.exists()
 
         scenario.write_text("archive", encoding="ascii")
-        saved = run(*save)
+        saved = run(*save, fallback)
         assert saved.returncode == 0 and not saved.stderr, saved
         start, end = launched(["4", "5"])
         data = archive.read_bytes()
@@ -264,20 +268,82 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert not requests.exists()
         archive.write_bytes(data)
 
-        if os.name != "nt":
-            scenario.write_text("slow", encoding="ascii")
-            with subprocess.Popen([cli, "market-hour", allow, "--save-review", "cancelled.cmh"],
+        for mode, expected in (("gap-pearl", "59/60"), ("malformed", "invalid minute response schema"),
+                               ("future", "invalid response observation time"), ("limited", "rate limited"),
+                               ("blocked", "non-public destination refused")):
+            scenario.write_text(mode, encoding="ascii")
+            result = run(allow, fallback)
+            assert result.returncode == 3 and expected in result.stdout and "Kraken" not in result.stdout, result
+            launched(["4", "5"])
+        for mode, expected in (("kraken-gap", "59/60"), ("kraken-open-in-window", "invalid minute response schema"),
+                               ("kraken-disordered", "invalid minute response schema")):
+            scenario.write_text(mode, encoding="ascii")
+            result = run(allow, fallback)
+            assert result.returncode == 3 and f"Kraken USDT/USD fallback: {expected}" in result.stdout, result
+            assert "180 / 60" in result.stdout and "Mean USD per PRL (exact sum / minutes): N/A" in result.stdout
+            launched(["4", "5", "3"])
+
+        fallback_archive = operator / "fallback.cmh"
+        scenario.write_text("kraken-archive", encoding="ascii")
+        captured = run(allow, *dns, fallback, "--save-review", fallback_archive.name)
+        assert captured.returncode == 0 and not captured.stderr, captured
+        assert "Coinbase USDT/USD: 59/60" in captured.stdout
+        assert "Kraken USDT/USD fallback: 60/60" in captured.stdout
+        assert "FX source for USD mean: Kraken USDT/USD" in captured.stdout
+        assert "180 / 60" in captured.stdout and "480 / 60" in captured.stdout
+        _, fallback_end = launched(["4", "5", "3"])
+        assert resolver_requests.read_text(encoding="ascii").splitlines() == [resolver] * 3
+        resolver_requests.unlink()
+        fallback_data = fallback_archive.read_bytes()
+        assert fallback_data.startswith(b"CANARY-MARKET-HOUR-REVIEW-3\n")
+        assert resolver.encode("ascii") not in fallback_data
+        fallback_body = fallback_data[:-65]
+        details = fallback_body.split(b"\n", 3)[-1]
+        receipts = []
+        for side in ("pearl", "fx", "kraken"):
+            sent, observed, received, size, details = details.split(b"\n", 4)
+            payload_size = int(size)
+            payload, details = details[:payload_size], details[payload_size:]
+            side_path = installed / ("body-" + side)
+            assert payload == side_path.read_bytes()
+            receipts.append((sent, observed, received, payload))
+            side_path.unlink()
+        assert int(receipts[1][2]) <= int(receipts[2][0])
+        assert details.split(b"\n", 1)[1].decode() == captured.stdout
+        kraken_payload = receipts[2][-1]
+        coinbase_payload = receipts[1][-1]
+        coinbase_full = json.loads(coinbase_payload)
+        coinbase_full["candles"].append(dict(start=str(fallback_end - 60), open="1.5", high="1.5",
+                                             low="1.5", close="1.5", volume="1"))
+        for payload, forged in ((kraken_payload, kraken_payload.replace(b"USDTZUSD", b"USDCZUSD")),
+                                (kraken_payload, kraken_payload.replace(b'"error":[]', b'"error":["fixture failure"]')),
+                                (coinbase_payload, json.dumps(coinbase_full).encode("ascii"))):
+            prefix = str(len(payload)).encode("ascii") + b"\n" + payload
+            revised = str(len(forged)).encode("ascii") + b"\n" + forged
+            assert prefix in fallback_body and forged != payload
+            fallback_archive.write_bytes(signed(fallback_body.replace(prefix, revised, 1)))
+            refused = run("--open-review", fallback_archive.name)
+            assert refused.returncode == 3 and not refused.stdout and "saved Kraken fallback" in refused.stderr, refused
+            assert not requests.exists()
+        fallback_archive.write_bytes(fallback_data)
+        scenario.unlink()
+
+        cancellations = (("slow", (), ("4",)), ("slow-kraken", (fallback,), ("4", "5", "3")))
+        for mode, flags, feeds in cancellations if os.name != "nt" else ():
+            scenario.write_text(mode, encoding="ascii")
+            with subprocess.Popen([cli, "market-hour", allow, *flags, "--save-review", "cancelled.cmh"],
                                   cwd=operator, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True) as child:
                 try:
                     deadline = time.monotonic() + 4
                     while time.monotonic() < deadline:
-                        if requests.exists() and requests.read_text().startswith("4 "):
+                        if requests.exists() and any(line.startswith(feeds[-1] + " ")
+                                                     for line in requests.read_text().splitlines()):
                             break
                         assert child.poll() is None
                         time.sleep(0.02)
                     else:
-                        raise AssertionError("first helper did not launch")
+                        raise AssertionError(f"expected helper {feeds[-1]} did not launch")
                     child.send_signal(signal.SIGINT)
                     out, error = child.communicate(timeout=4)
                     assert child.returncode == 130 and not out and "sample cancelled" in error
@@ -285,7 +351,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
                     if child.poll() is None:
                         child.kill()
                         child.wait(timeout=3)
-            launched(["4"])
+            launched(list(feeds))
             assert not (operator / "cancelled.cmh").exists() and not (operator / "cancelled.cmh.tmp").exists()
 
         helper.unlink()
@@ -293,12 +359,16 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert reopened.returncode == 0 and reopened.stdout == saved.stdout and not reopened.stderr, reopened
         assert not requests.exists() and archive.read_bytes() == data
         archive.unlink()
+        reopened = run("--open-review", fallback_archive.name)
+        assert reopened.returncode == 0 and reopened.stdout == captured.stdout and not reopened.stderr, reopened
+        assert not requests.exists() and fallback_archive.read_bytes() == fallback_data
+        fallback_archive.unlink()
         result = run(allow)
         assert result.returncode == 3 and unavailable in result.stdout and "180 / 60" not in result.stdout
         assert not requests.exists() and not (operator / requests.name).exists()
         assert {p.name for p in operator.iterdir()} == {"config.json", worker_name}
         assert config.read_text() == "private-sentinel"
-    print("Public hour: bounded requests, exact means, archive raw bytes and replay, error/cancellation and consent")
+    print("Public hour: bounded requests, independent FX fallback, exact means, archive replay, error/cancellation and consent")
     return 0
 
 

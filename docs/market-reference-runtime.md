@@ -245,6 +245,17 @@ Run `canary-miner market-hour --allow-public-candles` from a public-HTTPS-enable
 
 The report names each source, the UTC window, minute coverage, local receipt times and ages, and exact sums divided by 60. The USDT mean requires every Pearl minute. The USD mean additionally requires a valid FX close for each of those exact minutes. The report labels candle finality as unverified. A missing or malformed response gets a bounded reason, while an independent complete Pearl series can still supply the USDT mean.
 
+Add `--kraken-fallback` to authorize one optional request for Kraken `USDTZUSD` OHLC data.
+The helper makes the request only after a valid, complete MEXC response and a valid Coinbase
+response with fewer than 60 in-window minutes. It uses the same requested hour, DNS selection,
+15-second per-request budget and 64 KiB body limit. Kraken must supply its own 60 aligned minutes.
+The command checks that the timestamp of Kraken's uncommitted last row matches the current UTC
+minute at receipt, then excludes that row. A mismatch, including one caused by a UTC minute rollover
+during delivery, makes the Kraken response unusable for the sample. The report identifies the source
+used for the USD mean and shows both FX outcomes. Use is subject to the terms and source limits in
+the [provider review](research/market-source-qualification-2026-11.md).
+[Kraken Spot REST OHLC](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
+
 Exit code 0 indicates both means were available, 3 means a mean or the helper was unavailable, and 130 indicates a cancelled sample with confirmed helper cleanup. If cleanup is uncertain, the command exits with 3, withholds both means and admits no further request. The command leaves Settings, Dashboard polling and economic mode alone. Live provider response qualification and deployment acceptance remain open.
 
 ### Save and replay a public hour
@@ -253,6 +264,7 @@ Run the save command from a trusted private local directory. Use a new, simple A
 
 ```text
 canary-miner market-hour --allow-public-candles --save-review capture.cmh
+canary-miner market-hour --allow-public-candles --kraken-fallback --save-review capture-with-fallback.cmh
 canary-miner market-hour --open-review capture.cmh
 ```
 
@@ -263,11 +275,14 @@ A source marked `non-public destination refused` reached the address check befor
 Check the DNS response for that provider. Benchmark, private and other non-public
 ranges remain refused. The version 2 archive holds both original response bodies byte for byte,
 the selected window, command start and per-request times, the calculated report, and a SHA-256 checksum.
+When the USD calculation uses Kraken, version 3 adds the original Kraken body and receipt times
+alongside the MEXC and incomplete Coinbase receipts. Coinbase success still produces version 2.
 The save preserves any existing archive or temporary sibling. If the command reports uncertain publication or cleanup,
 check the archive and its temporary sibling. Reopen any published archive to verify it.
 
 Opening the archived hour works in builds with public HTTPS disabled. It reads only the supplied archive,
-checks the checksum, revalidates both source formats and request-time bounds, and recalculates both means.
+checks the checksum, revalidates the source formats and request-time bounds, and recalculates both means.
+For version 3 it also checks the original Coinbase gap and the full Kraken coverage.
 The ages in the report are measured at its recorded capture time. The archive and checksum provide a way to
 check the stored calculation and detect corruption. They carry no provider signature or current freshness claim.
 Existing [user-declared reviews](manual-market.md#save-and-reopen-a-local-hour-review) remain readable.

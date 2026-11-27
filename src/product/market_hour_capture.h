@@ -4,6 +4,7 @@
 #include "market_hour_payload.h"
 
 #include <functional>
+#include <optional>
 
 namespace om::market_detail {
 
@@ -20,8 +21,14 @@ struct PublicHourReceipt {
 
 struct PublicHourOriginal {
     uint64_t initialUtc = 0, endUtc = 0;
-    PublicHourReceipt pearl, fx;
+    PublicHourReceipt pearl, coinbase;
+    std::optional<PublicHourReceipt> kraken;
 };
+
+inline bool canFallbackHourFx(const HourSample &pearl, const HourSample &coinbase) {
+    return !pearl.problem && pearl.minutes.size() == marketHourMinutes &&
+           !coinbase.problem && coinbase.minutes.size() < marketHourMinutes;
+}
 
 inline uint64_t publicHourEnd(uint64_t initialUtc) {
     constexpr uint64_t settlementGuardSeconds = 5;
@@ -29,10 +36,11 @@ inline uint64_t publicHourEnd(uint64_t initialUtc) {
         ? (initialUtc - settlementGuardSeconds) / 60 * 60 : 0;
 }
 
-std::string publicHourCoverage(uint64_t end,uint64_t cutoff,const HourSample &pearl,const HourSample &fx);
+std::string publicHourCoverage(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &coinbase,
+                               const HourSample *kraken);
 
-bool renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &fx,
-                      std::string &report);
+bool renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &coinbase,
+                      const HourSample *kraken, std::string &report);
 
 inline std::string publicHourCaptureTime(uint64_t cutoff) {
     return "Capture UTC " + std::to_string(cutoff) + " (ages at capture)\n";

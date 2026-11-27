@@ -20,6 +20,7 @@ struct MarketHourOptions {
     std::string dnsServer;
     int saveFlag = 0;
     int dnsFlag = 0;
+    int krakenFallbackFlag = 0;
 
     bool samplesPublic() const {
         return action == MarketHourAction::PublicSample || action == MarketHourAction::PublicSave;
@@ -33,11 +34,16 @@ inline bool parseMarketHourCli(int argc,const char *const *argv,int begin,Market
     MarketHourOptions parsed;
     if (count==1 && (option=="--help" || option=="-h")) {
         parsed.action=MarketHourAction::Help;
-    } else if (option=="--allow-public-candles" && (count==1 || count==3 || count==5)) {
+    } else if (option=="--allow-public-candles" && count<=6) {
         parsed.action=MarketHourAction::PublicSample;
-        for (int i=begin+1;i<argc;i+=2) {
+        for (int i=begin+1;i<argc;++i) {
             const std::string_view flag(argv[i]);
-            const char *value = argv[i + 1];
+            if (!parsed.krakenFallbackFlag && flag=="--kraken-fallback") {
+                parsed.krakenFallbackFlag=i;
+                continue;
+            }
+            if (i+1>=argc) return false;
+            const char *value = argv[i+1];
             if (!parsed.saveFlag && flag=="--save-review" && localExportName(value,marketReviewExtension)) {
                 parsed.action=MarketHourAction::PublicSave;
                 parsed.archiveName=value;
@@ -46,6 +52,7 @@ inline bool parseMarketHourCli(int argc,const char *const *argv,int begin,Market
                 parsed.dnsServer=value;
                 parsed.dnsFlag=i;
             } else return false;
+            ++i;
         }
     } else if (count==2 && argv[begin+1][0] && option=="--file") {
         parsed.action=MarketHourAction::Review;
