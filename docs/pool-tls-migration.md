@@ -20,7 +20,7 @@ The review shows the configured TCP source, proposed TLS endpoint, disabled plai
 
 Save writes the first user declaration to `pool-security-preferences.json`. The main configuration remains the source for the wallet, protocol parameters and configured first pool. The dashboard still shows the running session's frozen policy and observed connection. The next explicit start reads the saved Strict TLS declaration and applies the ordinary first-pool admission rules, including a matching DNS host, a TLS-enabled build and donation off.
 
-The proposal uses the configured first-pool tuple captured after command-line overrides. Each proposal shares its target with the corresponding strict TLS preset and keeps the configured region. [Strict TLS presets](pool-tls-presets.md)
+The proposal uses the configured first-pool tuple captured after command-line overrides. ASCII DNS names in the table match regardless of letter case. The review shows the same host in lowercase, and saving retains the pool protocol and the original spelling in the main configuration. Each proposal shares its target with the corresponding strict TLS preset and keeps the configured region. [Strict TLS presets](pool-tls-presets.md)
 
 If the independent preferences file changes after it was loaded, the save can become UNKNOWN. The original review cannot be replayed by restoring the old file bytes. Explicit inspection can establish a new editable baseline, after which **M** and **Enter** are separate actions again.
 

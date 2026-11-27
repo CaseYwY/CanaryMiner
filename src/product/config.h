@@ -203,13 +203,18 @@ inline bool parsePoolSpec(const std::string &spec, PoolEntry *out, std::string *
         if (error) *error = "pool must be a known preset, HOST:PORT, stratum+tcp://HOST:PORT, or stratum+ssl://DNS:PORT; rejected original omitted";
         return false;
     }
-    if(e.tls&&!normalizePoolTlsDns(&e.host)){
-        if(error)*error="strict pool TLS requires an explicit ASCII DNS host and port; private original omitted; no TCP fallback";
+    std::string dnsHost = e.host;
+    const bool validDns = normalizePoolTlsDns(&dnsHost);
+    if (e.tls && !validDns) {
+        if (error) *error = "strict pool TLS requires an explicit ASCII DNS host and port; private original omitted; no TCP fallback";
         return false;
     }
-    if (hostInDomain(e.host, "kryptex.network")) e.preset = "kryptex";
-    else if (hostInDomain(e.host, "herominers.com")) e.preset = "herominers";
-    else if (hostInDomain(e.host, "f2pool.com")) e.preset = "f2pool";
+    const bool knownLegacyEndpoint = validDns && findLegacyPoolTlsPreset(dnsHost, e.port);
+    const auto &protocolHost = e.tls || knownLegacyEndpoint ? dnsHost : e.host;
+    if (hostInDomain(protocolHost, "kryptex.network")) e.preset = "kryptex";
+    else if (hostInDomain(protocolHost, "herominers.com")) e.preset = "herominers";
+    else if (hostInDomain(protocolHost, "f2pool.com")) e.preset = "f2pool";
+    if (e.tls) e.host = std::move(dnsHost);
     e.policyKnown = !e.preset.empty();
     *out = e;
     return true;

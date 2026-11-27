@@ -9,9 +9,10 @@ inline PoolTlsMigrationCandidate poolTlsMigrationCandidate(const ProductConfig &
     if (config.pools.empty()) return PoolTlsMigrationCandidate::None;
     const auto &first = config.pools.front();
     if (first.tls) return PoolTlsMigrationCandidate::None;
-    for (const auto &preset : kPoolTlsPresets)
-        if (first.port == preset.tcpPort && first.host == preset.host()) return preset.migration;
-    return PoolTlsMigrationCandidate::None;
+    auto dnsHost = first.host;
+    if (!normalizePoolTlsDns(&dnsHost)) return PoolTlsMigrationCandidate::None;
+    const auto *preset = findLegacyPoolTlsPreset(dnsHost, first.port);
+    return preset ? preset->migration : PoolTlsMigrationCandidate::None;
 }
 
 inline constexpr const char *poolTlsMigrationSource(PoolTlsMigrationCandidate candidate) {
