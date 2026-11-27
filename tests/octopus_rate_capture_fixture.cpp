@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <thread>
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
@@ -23,7 +24,14 @@ int main(int argc, char **argv) {
         if (!log) return 2;
     }
     const auto name = std::string(argv[1]) + '-' + argv[10] + ".json";
-    std::ifstream source(root / name, std::ios::binary);
+    const auto pause = root / "pause";
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    while (std::filesystem::exists(pause)) {
+        if (std::chrono::steady_clock::now() >= deadline) return 2;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto window = root / (std::string(argv[2]) + "-" + name);
+    std::ifstream source(std::filesystem::exists(window) ? window : root / name, std::ios::binary);
     if (!source) return 2;
     om::PublicJsonResponse reply;
     reply.status = om::PublicHttpsStatus::Ok;

@@ -300,6 +300,69 @@ def main(cli, bundle):
         annual_saved = prepare('annual.cmr', 'annual-next.json')
         assert f'[{annual_end}, {annual_next})' in annual_saved and 'exceeds the installed public rate capture bounds' in annual_saved
 
+        old.write_bytes(old_bytes)
+        roll = ('--roll-forward', old, '--as-of-utc-ms', june + HOUR)
+        first_stem = root / f'cycle-{may}'
+        second_stem = root / f'cycle-{june}'
+        first_archive = first_stem.with_suffix('.cmr')
+        second_archive = second_stem.with_suffix('.cmr')
+        for extras in (('--intervals', readings), ('--tariff', tariff), ('--next-cycle-review', old),
+                       ('--save-review', 'x.cmr'), ('--allow-public-rates',), ('--dns-server', '1.1.1.1')):
+            run(*roll, *extras, code=2, reason='invalid options')
+        run('--roll-forward', 'partial.cmr', code=3, reason='previous review must be a complete')
+        run('--roll-forward', old, '--as-of-utc-ms', april, code=3, reason='precedes the saved cutoff')
+        write(second_stem.with_suffix('.rates.json'), following[2])
+        assert 'waiting for complete meter readings' in run(*roll)
+        assert not first_archive.exists() and not second_archive.exists()
+        write(first_stem.with_suffix('.readings.json'), current[1])
+        assert 'waiting for a saved Octopus rate capture' in run(*roll)
+        assert 'waiting for the cycle to close' in run('--roll-forward', old, '--as-of-utc-ms', may - 1)
+
+        write(first_stem.with_suffix('.rates.json'), current[2])
+        write(first_stem.with_suffix('.invoice.json'), dict(schema_version=1, scope=SCOPE, currency='GBP',
+            decimal_places=2, rounding='half_even',
+            cycles=[dict(begin_utc_ms=april, end_utc_ms=may, supply_charge=str(current[3]))]))
+        bad_readings = copy.deepcopy(following[1])
+        bad_readings['register_readings'][0]['imported_kwh'] = '0'
+        write(second_stem.with_suffix('.readings.json'), bad_readings)
+        run(*roll, code=3, reason=f'cycle closing {june} UTC ms\nmeter-bill: this run committed 1 new cycle\n'
+                                 'meter-bill: the new opening register differs')
+        assert first_archive.exists() and not second_archive.exists()
+        assert not second_stem.with_suffix('.cmr.tmp').exists()
+        first_bytes = first_archive.read_bytes()
+        first_report = run('--open-review', first_archive, '--previous-cycle', old)
+        close(current[3], first_report)
+        assert '(match)' in first_report
+
+        write(second_stem.with_suffix('.readings.json'), following[1])
+        resumed = run(*roll)
+        assert '1 verified, 1 saved' in resumed and f'Last verified closing {june}' in resumed
+        assert first_archive.read_bytes() == first_bytes
+        close(following[3], run('--open-review', second_archive, '--previous-cycle', first_archive))
+        second_bytes = second_archive.read_bytes()
+        first_stem.with_suffix('.readings.json').write_bytes(b'changed after publication')
+        assert '2 verified, 0 saved' in run(*roll)
+        assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
+        run('--roll-forward', old, '--as-of-utc-ms', may + HOUR, code=3, reason='newer than the requested cutoff')
+
+        write(first_stem.with_suffix('.readings.json'), current[1])
+        first_archive.unlink()
+        run(*roll, code=3, reason='archive gap')
+        assert not first_archive.exists() and second_archive.read_bytes() == second_bytes
+        first_archive.write_bytes(first_bytes)
+
+        second_archive.write_bytes(first_bytes)
+        run(*roll, code=3, reason='does not match the previous closing record')
+        assert second_archive.read_bytes() == first_bytes
+        second_archive.unlink()
+        uncertain = second_stem.with_suffix('.cmr.tmp')
+        uncertain.write_bytes(second_bytes)
+        run(*roll, code=3, reason='uncertain temporary output')
+        assert not second_archive.exists() and uncertain.read_bytes() == second_bytes
+        uncertain.unlink()
+        second_archive.write_bytes(second_bytes)
+        assert '2 verified, 0 saved' in run(*roll)
+
         feb = utc('2023-02-01T00:00:00')
         drift = cycle(feb, march, GO_PRODUCT, Decimal(100), 14, 6, 28)
         drift[0]['reset_policy']['clock'] = dict(kind='utc', fixed_offset_seconds=0)
