@@ -224,7 +224,7 @@ int commandEnergyPeriods(const EnergyPeriodsOptions &options, int argc, const ch
         JsonValue policy;
         if (!readLocalReviewInput(paths->policy, 4096, raw) || !boundedPublicJson(raw) ||
             !parseJsonStrict(raw, &policy, nullptr) || !policy.isObject())
-            return fail("monthly reset policy unavailable or invalid");
+            return fail("reset policy unavailable or invalid");
 
         const auto utcNow = [] {
             return std::chrono::duration_cast<std::chrono::milliseconds>(

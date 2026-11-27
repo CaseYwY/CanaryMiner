@@ -90,6 +90,8 @@ def main(host, ordinary, auth, collector, fixture, tzdb=None):
                         '{"monthly_day":0,"clock":{}}', '{"monthly_day":1,"clock":{},"unknown":false}'):
             file.write_text(invalid, encoding='ascii')
             report(code=3)
+        file.write_text('[]', encoding='ascii')
+        report(code=3, message='energy-periods: reset policy unavailable or invalid')
         policy()
         empty = root / 'empty'
         seed(empty, 'empty')
