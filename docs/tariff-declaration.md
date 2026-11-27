@@ -617,6 +617,43 @@ extension time. Keep that file if you want to audit its own invoice or check the
 Publication creates a new archive name and preserves all inputs. Each command covers at most twelve cycles under the
 original tariff and rate window. A changed tariff or earlier reading needs a separate review.
 
+### Review the next Octopus billing cycle
+
+Use a complete saved Octopus Agile or Go cycle with a declared recurring reset rule.
+For London monthly billing, replace the example declaration's `reset_policy` value with this object
+before saving the first cycle.
+
+```json
+{"monthly_day":1,"clock":{"kind":"named_iana","zone":"Europe/London","time_database_version":"2026e"}}
+```
+
+Start the next declaration at the previous closing time and use the same meter alias, product, region,
+payment method, input format and reset clock. Supply a new public rate capture and new meter
+readings for the entire next cycle. Cumulative register readings must open at the absolute
+closing value in the previous archive. An Octopus electricity import bundle must cover every
+half hour of the new cycle exactly once. Both cycles must start with zero accrued charges and
+their own applicable rates. Use the existing [capture command](#review-publicly-listed-octopus-agile-prices)
+for the new cycle's prices. The installed capture command accepts at most 8,192 half hours of
+elapsed time. Annual Go review requires a separately captured, compatible full-year snapshot.
+Annual Agile prices exceed the quantity limit. The current two-month tariff model supports
+all-units bands with constant rates, so it cannot roll an Octopus dynamic review.
+
+```text
+canary-miner meter-bill --next-cycle-review march.cmr --tariff april-tariff.json --intervals april-usage.json --octopus-rates april-rates.json --save-review april.cmr
+canary-miner meter-bill --open-review april.cmr --previous-cycle march.cmr
+```
+
+The command replays the prior archive at its own cutoff before calculating the new cycle. It
+prices April using April's capture, so March's usage, charges and invoice keep their archived
+figures. Set the new cutoff at or after the previous cutoff and the new capture and reading
+observations. Add `--invoice FILE` to compare the new cycle against its supply charges.
+
+The version 6 archive includes the previous archive's SHA-256 and the verified closing record.
+You can reopen the new cycle independently to reproduce its calculation. Pass `--previous-cycle`
+to verify the closing record against the original archive. Keep each archive to verify the
+entire chain. Meter identity uses the declared local alias and the existing input evidence.
+Supplier-account authentication and invoice settlement require separate evidence.
+
 ### Review cumulative meter readings
 
 Use the same command with an interval file in schema version 2:
