@@ -222,6 +222,17 @@ int main(int argc, char **argv) {
     if (cli.command == Command::MeterBill) {
         signal(SIGINT, onSignal);
         signal(SIGTERM, onSignal);
+        if constexpr (kPublicTickerRuntimeBuilt) {
+            if (cli.meterBill.allowPublicRatesArg) {
+#if defined(SIGBREAK)
+                signal(SIGBREAK, onSignal);
+#endif
+#if defined(SIGPIPE)
+                signal(SIGPIPE, SIG_IGN);
+#endif
+                return commandMeterBill(cli.meterBill, argc, argv, &g_stop, std::filesystem::u8path(selfExecutablePath()));
+            }
+        }
         return commandMeterBill(cli.meterBill, argc, argv, &g_stop);
     }
     if (cli.command == Command::EnergyPeriods) {

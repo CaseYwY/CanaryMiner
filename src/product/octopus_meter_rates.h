@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <csignal>
+#include <filesystem>
 #include <string>
 
 namespace om {
@@ -17,6 +19,18 @@ struct OctopusRateImport {
     std::string paymentMethod;
     bool go = false;
 };
+
+class NativeProcessLifetime;
+struct OctopusRateCapture {
+    std::string bytes;
+    OctopusRateImport summary;
+};
+
+// Capture and verify original pages under the caller's lifetime. The caller owns publication.
+const char *capturePublicOctopusRates(TariffDeclaration declaration, const std::string &payment,
+                                      const std::string &dns, const std::filesystem::path &module,
+                                      const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
+                                      OctopusRateCapture &out);
 
 // Validate the placeholder before reading or acquiring rate pages.
 const char *checkOctopusRateDeclaration(const TariffDeclaration &declaration);

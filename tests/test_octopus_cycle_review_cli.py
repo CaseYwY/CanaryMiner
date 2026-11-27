@@ -149,10 +149,17 @@ def main(cli, bundle):
         refused('partial.cmr', may + HOUR, 'previous review must be a complete')
         refused(old, april + HOUR - 1, 'precedes the saved cutoff')
         refused(old, may + HOUR - 1, 'rates observed after')
-        for flags in (('--next-cycle-review', old, '--intervals', readings, '--tariff', tariff, '--save-review', 'x.cmr'),
-                      ('--next-cycle-review', old, '--intervals', readings, '--octopus-rates', rates, '--save-review', 'x.cmr'),
+        next_review = ('--next-cycle-review', old, '--intervals', readings, '--save-review', 'x.cmr')
+        for flags in (next_review, (*next_review, '--tariff', tariff),
+                      (*next_review, '--allow-public-rates', '--allow-public-rates'),
+                      (*next_review, '--allow-public-rates', '--tariff', tariff),
+                      (*next_review, '--allow-public-rates', '--octopus-rates', rates),
+                      (*next_review, '--allow-public-rates', '--as-of-utc-ms', may + HOUR),
+                      (*next_review, '--allow-public-rates', '--dns-server', 'invalid'),
+                      (*next_review, '--octopus-rates', rates, '--dns-server', '1.1.1.1'),
                       ('--previous-cycle', old, '--tariff', tariff, '--intervals', readings)):
             run(*flags, code=2, reason='invalid options')
+        assert not (root / 'x.cmr').exists() and not (root / 'x.cmr.tmp').exists()
         for modify, diagnostic in (
             (lambda c: c[1]['register_readings'].pop(), 'requires one complete'),
             (lambda c: [point.update(imported_kwh=decimal_text(Decimal(point['imported_kwh']) + 10))
@@ -180,6 +187,11 @@ def main(cli, bundle):
         write(invoice, dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2, rounding='half_even',
                             cycles=[dict(begin_utc_ms=april, end_utc_ms=may, supply_charge=str(current[3]))]))
         report = advance(old, 'april.cmr', may + HOUR, '--invoice', invoice)
+        derived = run('--next-cycle-review', old, '--intervals', readings, '--octopus-rates', rates,
+                      '--as-of-utc-ms', may + HOUR, '--invoice', invoice, '--save-review', 'april-derived.cmr')
+        assert derived == report
+        assert (root / 'april-derived.cmr').read_bytes() == (root / 'april.cmr').read_bytes()
+        assert run('--open-review', 'april-derived.cmr', '--previous-cycle', old) == derived
         close(current[3], report)
         assert '(match)' in report and f'Previous Octopus cycle closed at {april}' in report
         old_hash = sha256(old_bytes).hexdigest()
