@@ -627,8 +627,25 @@ before saving the first cycle.
 {"monthly_day":1,"clock":{"kind":"named_iana","zone":"Europe/London","time_database_version":"2026e"}}
 ```
 
-Start the next declaration at the previous closing time and use the same meter alias, product, region,
-payment method, input format and reset clock. Supply a new public rate capture and new meter
+Prepare the next declaration directly from the saved review.
+
+```text
+canary-miner meter-bill --prepare-next-cycle march.cmr --save-tariff april-tariff.json
+canary-miner meter-bill --prepare-next-cycle march.cmr --save-register april-usage.json
+canary-miner meter-rates --allow-public-rates --tariff april-tariff.json --payment-method DIRECT_DEBIT --save-rates april-rates.json
+```
+
+The preparation command replays the archive before writing a new local file. It uses the saved
+reset rule to derive the next window and carries forward the declared meter alias, product,
+region, clock and confirmation of those terms. The declaration opens with zero accrued usage and
+charges. Use the payment method printed by the command and capture new prices once the cycle
+ends. Review any included-price tax annotations for the new period. For a cumulative register
+archive, append the new readings to the file produced by `--save-register`. It holds the exact prior
+closing register as its first point. Use a new Octopus import bundle for an archive based on supplier
+intervals. Each output is a separate exclusive write in the current directory.
+
+A manually prepared declaration must start at the previous closing time and use the same meter
+alias, product, region, payment method, input format and reset clock. Supply a new public rate capture and new meter
 readings for the entire next cycle. Cumulative register readings must open at the absolute
 closing value in the previous archive. An Octopus electricity import bundle must cover every
 half hour of the new cycle exactly once. Both cycles must start with zero accrued charges and

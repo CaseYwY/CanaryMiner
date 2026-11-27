@@ -19,7 +19,8 @@ struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
     int nextCycleArg = 0, previousCycleArg = 0;
-    std::string archiveName;
+    int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
+    std::string outputName;
     int64_t reviewCutoffUtcMs = 0;
     bool help = false;
 };
@@ -42,12 +43,17 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             else if (name == "--invoice" && !options.invoiceArg) options.invoiceArg = i+1;
             else if (name == "--prepaid" && !options.prepaidArg) options.prepaidArg = i+1;
             else if (name == "--open-review" && !options.archiveArg) options.archiveArg = i+1;
+            else if (name == "--prepare-next-cycle" && !options.prepareCycleArg) options.prepareCycleArg = i+1;
             else if (name == "--next-cycle-review" && !options.nextCycleArg) options.nextCycleArg = i+1;
             else if (name == "--previous-cycle" && !options.previousCycleArg) options.previousCycleArg = i+1;
             else if (name == "--extend-review" && !options.extendArg) options.extendArg = i+1;
-            else if (name == "--save-review" && !options.saveArg && localExportName(value, ".cmr")) {
-                options.saveArg = i+1;
-                options.archiveName = value;
+            else if (options.outputName.empty() &&
+                     ((name == "--save-review" && localExportName(value, ".cmr")) ||
+                      ((name == "--save-tariff" || name == "--save-register") && localExportName(value, ".json")))) {
+                if (name == "--save-tariff") options.saveTariffArg = i+1;
+                else if (name == "--save-register") options.saveRegisterArg = i+1;
+                else options.saveArg = i+1;
+                options.outputName = value;
             } else if (name == "--as-of-utc-ms" && !options.reviewCutoffArg) {
                 const auto *end = value.data() + value.size();
                 const auto parsed = std::from_chars(value.data(), end, options.reviewCutoffUtcMs);
@@ -56,7 +62,10 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
                 options.reviewCutoffArg = i+1;
             } else return false;
         }
-        if (options.archiveArg) {
+        if (options.prepareCycleArg) {
+            if (operands != 4 || (!options.saveTariffArg && !options.saveRegisterArg)) return false;
+        } else if (options.saveTariffArg || options.saveRegisterArg) return false;
+        else if (options.archiveArg) {
             if (operands != 2 + (options.invoiceArg ? 2 : 0) + (options.previousCycleArg ? 2 : 0)) return false;
         } else if (options.previousCycleArg) return false;
         else if (options.nextCycleArg) {
