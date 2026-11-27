@@ -42,7 +42,8 @@ struct MeterBillPaths {
 };
 
 std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, int argc, const char *const *argv) {
-    const auto archiveIndex = options.rollForwardArg ? options.rollForwardArg :
+    const auto archiveIndex = options.readingsPlanArg ? options.readingsPlanArg :
+        options.rollForwardArg ? options.rollForwardArg :
         options.prepareCycleArg ? options.prepareCycleArg : options.archiveArg ? options.archiveArg :
         options.nextCycleArg ? options.nextCycleArg : options.extendArg;
     for (int index : {archiveIndex, options.tariffArg, options.intervalsArg, options.reviewCutoffArg,
@@ -70,6 +71,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         !matches(options.tariffArg, L"--tariff") || !matches(options.intervalsArg, L"--intervals") ||
         !matches(options.invoiceArg, L"--invoice") || !matches(options.ratesArg, L"--octopus-rates") ||
         !matches(options.nextCycleArg, L"--next-cycle-review") || !matches(options.rollForwardArg, L"--roll-forward") ||
+        !matches(options.readingsPlanArg, L"--next-readings-plan") ||
         !matches(options.prepareCycleArg, L"--prepare-next-cycle") || !matches(options.importPagesArg, L"--import-octopus-pages") ||
         !matches(options.previousCycleArg, L"--previous-cycle") || !matches(options.prepaidArg, L"--prepaid"))
         return std::nullopt;
@@ -1156,13 +1158,35 @@ struct RecurringCycleWatch {
     std::string seedDigest, latestName, latestDigest;
 };
 
+const char *describeOctopusReadingsPlan(const MeterReview &prior, const PreparedOctopusCycle &draft,
+                                      const std::string &previousDigest, const std::string &stem,
+                                      std::string &report) {
+    const auto begin = draft.bounds.beginUtcMs;
+    const auto end = draft.bounds.endUtcMs;
+    if (prior.readings.version != 3 ||
+        (end - begin) / octopus_detail::halfHourMs > static_cast<int64_t>(maxAnnualMeterIntervals))
+        return "account capture requires an eligible Octopus half-hour import cycle";
+    for (const auto *suffix : {".readings.json", ".pages"}) {
+        const auto path = localReviewPath(stem + suffix);
+        if (!path) return "could not inspect staged readings";
+        std::error_code error;
+        if (std::filesystem::symlink_status(*path, error).type() != std::filesystem::file_type::not_found)
+            return "readings are already staged or unavailable";
+    }
+    report = "{\"schema_version\":1,\"scope\":" + jsonQuote(prior.declaration.opening.evidence.scope) +
+        ",\"begin_utc_ms\":" + std::to_string(begin) + ",\"end_utc_ms\":" + std::to_string(end) +
+        ",\"predecessor_sha256\":" + jsonQuote(previousDigest) + "}\n";
+    return nullptr;
+}
+
 const char *rollOctopusCycles(const std::filesystem::path &seed, const std::filesystem::path &workspace,
                              int64_t requestedCutoff, int64_t now,
                              bool confirmImport,
                              const OctopusRateCaptureSource *source, const std::string &dns,
                              NativeProcessLifetime &lifetime, const market_detail::MarketSampleClock &started,
                              const volatile sig_atomic_t *stop, const std::function<bool()> &stopped,
-                             RecurringCycleWatch *watch, RecurringCycleProgress &progress, std::string &report) {
+                             RecurringCycleWatch *watch, bool readingsPlan,
+                             RecurringCycleProgress &progress, std::string &report) {
     constexpr size_t maxHistory = 120;
     constexpr size_t maxNew = 24;
     constexpr size_t maxCaptures = 3;
@@ -1205,6 +1229,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         if (!link) return "previous review must be a complete recurring Octopus cycle and matching rate window";
         if (previous.cutoff > cutoff) return "new review cutoff precedes the saved cutoff";
         if (existing + progress.saved >= maxHistory) {
+            if (readingsPlan) return "archive replay limit reached; use the latest verified archive as the seed";
             progress.historyLimit = true;
             waiting = "archive replay limit reached; use the latest verified archive as the next seed";
             break;
@@ -1215,6 +1240,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             return problem;
         progress.closing = draft.bounds.endUtcMs;
         if (progress.closing > cutoff) {
+            if (readingsPlan) return "the next billing cycle has not closed";
             waiting = "waiting for the cycle to close";
             break;
         }
@@ -1249,6 +1275,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             std::error_code error;
             if (!temporary || std::filesystem::symlink_status(*temporary, error).type() != std::filesystem::file_type::not_found)
                 return "recurring review successor has uncertain temporary output";
+            if (readingsPlan) return describeOctopusReadingsPlan(priorReview, draft, previousDigest, stem, report);
             if (progress.saved >= maxNew) {
                 waiting = "new archive limit reached; run again to continue";
                 break;
@@ -1371,6 +1398,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "    --allow-public-rates [--dns-server IP|cloudflare-doh] [--invoice FILE]\n"
                   "canary-miner meter-bill --roll-forward SEED.cmr [--confirm-electricity-import]\n"
                   "    [--watch-every-seconds SECONDS [--watch-quiet]] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP|cloudflare-doh]]\n"
+                  "canary-miner meter-bill --next-readings-plan SEED.cmr\n"
                   "canary-miner meter-bill --import-octopus-pages DIR --tariff FILE --save-readings NAME.json\n"
                   "    --confirm-electricity-import\n"
                   "canary-miner meter-bill --extend-review FILE --intervals FILE --save-review NAME.cmr\n"
@@ -1390,6 +1418,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Omit --tariff to derive it from the archive. Live capture requires --allow-public-rates.\n"
                   "Roll forward uses cycle-END.readings.json, cycle-END.rates.json and optional cycle-END.invoice.json.\n"
                   "END is the cycle closing UTC millisecond. Each verified cycle commits to cycle-END.cmr.\n"
+                  "Use --next-readings-plan in the seed's workspace to identify the next closed cycle that needs readings.\n"
                   "Watch checks again after 1 to 86400 seconds. It requires the current clock and holds the workspace lease.\n"
                   "Use --watch-quiet for a supervised watch without a standard output stream.\n"
                   "With electricity import confirmed, use cycle-END.pages if the readings file is absent.\n"
@@ -1408,8 +1437,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
     };
     const auto stopResult = [&]() {
         if (!options.saveArg && !options.archiveArg && !options.invoiceArg && !options.prepareCycleArg &&
-            !options.rollForwardArg && !options.importPagesArg) return 0;
+            !options.rollForwardArg && !options.importPagesArg && !options.readingsPlanArg) return 0;
         std::fputs(options.importPagesArg ? "meter-bill: Octopus page import stopped before publication\n" :
+                   options.readingsPlanArg ? "meter-bill: readings plan cancelled\n" :
                    options.rollForwardArg ? "meter-bill: recurring review stopped; saved cycles remain available\n" :
                    options.prepareCycleArg ? "meter-bill: next-cycle preparation stopped before publication\n" :
                    options.saveArg ? "meter-bill: archive save stopped before publication\n" :
@@ -1460,18 +1490,25 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             return std::printf("Saved Octopus electricity imports for closing %lld UTC ms\n",
                                static_cast<long long>(window.endUtcMs)) < 0 || std::fflush(stdout) != 0 ? 1 : 0;
         }
-        if (options.rollForwardArg) {
+        if (options.rollForwardArg || options.readingsPlanArg) {
+            const bool planning = options.readingsPlanArg != 0;
             const auto leasePath = localReviewPath("meter-billing.lock");
             constexpr auto unavailable = "recurring review workspace is busy or unavailable";
             if (!leasePath) return fail(unavailable);
             const auto workspace = leasePath->parent_path();
+            if (planning) {
+                std::error_code error;
+                const auto parent = std::filesystem::absolute(paths->archive, error).parent_path();
+                if (error || !std::filesystem::equivalent(parent, workspace, error))
+                    return fail("run the readings plan in the seed archive's workspace");
+            }
 #if !defined(_WIN32)
             // An unlinked lock file can be recreated while its original inode remains leased.
             LocalStoreLease directoryLease;
-            if (!directoryLease.acquireDirectory(workspace)) return fail(unavailable);
+            if (!planning && !directoryLease.acquireDirectory(workspace)) return fail(unavailable);
 #endif
             LocalStoreLease lease;
-            if (!lease.acquire(*leasePath)) return fail(unavailable);
+            if (!planning && !lease.acquire(*leasePath)) return fail(unavailable);
             RecurringCycleWatch watch;
             auto previousSample = started;
             std::string lastReport;
@@ -1488,7 +1525,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                 if (const auto *problem = rollOctopusCycles(paths->archive, workspace,
                         options.reviewCutoffUtcMs, watching ? static_cast<int64_t>(sample.second) : now,
                         options.confirmImportArg != 0, live ? publicRates : nullptr, options.dnsServer,
-                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, progress, report)) {
+                        captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, planning, progress, report)) {
                     if (progress.closing)
                         std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
                     if (progress.saved)
@@ -1496,6 +1533,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                                      watching ? "check" : "run", progress.saved, progress.saved == 1 ? "" : "s");
                     return fail(problem);
                 }
+                if (planning && stopped()) return stopResult();
                 if (!options.quietWatchArg && report != lastReport) {
                     if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
                         return 1;

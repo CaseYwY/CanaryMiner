@@ -14,6 +14,7 @@ import re
 from secrets import token_hex
 import ssl
 import stat
+import subprocess
 import sys
 import time
 from urllib.error import HTTPError
@@ -29,7 +30,8 @@ from capture_octopus_rates import (
     EPOCH, HALF_HOUR, MAX_PAGE_BYTES, ONE_SECOND, PAGE_SIZE, NoRedirect, iso_utc, publish, utc,
 )
 from prepare_octopus_consumption import (
-    MAX_BYTES, MAX_ROWS, MILLISECOND, Number, append_readings, decode_json, encode_bundle, local_path, read_page,
+    MAX_BYTES, MAX_ROWS, MILLISECOND, REPARSE_POINT, Number, append_readings, decode_json, encode_bundle,
+    local_path, read_page,
 )
 
 
@@ -246,23 +248,73 @@ def capture_consumption(opener, identity, scope, begin, end, deadline):
     return encode_bundle(rows, scope, begin, end, byte_limit=limit)
 
 
+def next_cycle_plan(seed):
+    miner = Path(__file__).resolve().parent.parent / 'bin' / ('canary-miner.exe' if os.name == 'nt' else 'canary-miner')
+    try:
+        installed = local_path(miner)
+        info = installed.lstat()
+        if not stat.S_ISREG(info.st_mode) or getattr(info, 'st_file_attributes', 0) & REPARSE_POINT:
+            raise CaptureError('the installed miner beside the capture tools is unavailable')
+        operand = f'.{os.sep}{seed.name}'
+        result = subprocess.run([installed, 'meter-bill', '--next-readings-plan', operand],
+                                cwd=seed.parent, stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
+    except CaptureError:
+        raise
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        raise CaptureError('could not run the installed billing planner') from None
+    if result.returncode != 0 or result.stderr:
+        raise CaptureError('no next readings plan is available from this workspace')
+    try:
+        if len(result.stdout) > 4096:
+            raise ValueError('oversized plan')
+        plan = decode_json(result.stdout)
+        if (not isinstance(plan, dict) or set(plan) != {
+                'schema_version', 'scope', 'begin_utc_ms', 'end_utc_ms', 'predecessor_sha256'} or
+                type(plan['schema_version']) is not Number or plan['schema_version'] != '1' or
+                type(plan['scope']) is not str or type(plan['predecessor_sha256']) is not str or
+                not re.fullmatch(r'[a-f0-9]{64}', plan['predecessor_sha256'])):
+            raise ValueError('invalid plan')
+        boundaries = [plan['begin_utc_ms'], plan['end_utc_ms']]
+        if any(type(value) is not Number or not re.fullmatch(r'[1-9][0-9]{0,14}', value)
+               or int(value) % 1800000 for value in boundaries):
+            raise ValueError('unaligned plan')
+        begin, end = (EPOCH + int(value) * MILLISECOND for value in boundaries)
+        return plan['scope'], begin, end, plan['predecessor_sha256']
+    except (ValueError, OverflowError, RecursionError):
+        raise CaptureError('invalid readings plan from the installed miner') from None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument('--confirm-electricity-import', action='store_true', required=True,
                         help='authorize read-only access to the selected electricity import meter')
-    parser.add_argument('--scope', required=True, help='local alias matching the tariff opening')
-    parser.add_argument('--begin', type=utc, required=True, help='inclusive UTC half-hour boundary')
-    parser.add_argument('--end', type=utc, required=True, help='exclusive UTC half-hour boundary')
-    destination = parser.add_mutually_exclusive_group(required=True)
+    parser.add_argument('--scope', help='local alias matching the tariff opening')
+    parser.add_argument('--begin', type=utc, help='inclusive UTC half-hour boundary')
+    parser.add_argument('--end', type=utc, help='exclusive UTC half-hour boundary')
+    parser.add_argument('--next-cycle', type=Path, help='derive the next missing readings window from a recurring seed archive')
+    destination = parser.add_mutually_exclusive_group()
     destination.add_argument('--output', type=Path, help='new local readings file')
     destination.add_argument('--workspace', type=Path, help='existing recurring review directory')
     args = parser.parse_args()
-    if not re.fullmatch(r'[ -~]{1,128}', args.scope) or args.scope != args.scope.strip(' '):
-        parser.error('choose a valid private meter alias')
-    if (not args.begin < args.end <= dt.datetime.now(dt.timezone.utc) or
-            (args.end - args.begin) // HALF_HOUR > MAX_ANNUAL_ROWS):
-        parser.error('choose an elapsed window of up to 18,432 half hours')
+    if args.next_cycle:
+        if any(value is not None for value in (args.scope, args.begin, args.end, args.output, args.workspace)):
+            parser.error('--next-cycle supplies the alias, cycle and workspace')
+    elif not (args.scope and args.begin and args.end and (args.output or args.workspace)):
+        parser.error('provide --scope, --begin, --end and one destination or use --next-cycle')
     try:
+        seed = local_path(args.next_cycle) if args.next_cycle else None
+        plan = None
+        if seed:
+            if seed.suffix.lower() != '.cmr':
+                raise CaptureError('choose a recurring seed review archive')
+            plan = next_cycle_plan(seed)
+            args.scope, args.begin, args.end, _ = plan
+            args.workspace = seed.parent
+        if not re.fullmatch(r'[ -~]{1,128}', args.scope) or args.scope != args.scope.strip(' '):
+            parser.error('choose a valid private meter alias')
+        if (not args.begin < args.end <= dt.datetime.now(dt.timezone.utc) or
+                (args.end - args.begin) // HALF_HOUR > MAX_ANNUAL_ROWS):
+            parser.error('choose an elapsed window of up to 18,432 half hours')
         closing_ms = (args.end - EPOCH) // MILLISECOND
         output = local_path(args.output or args.workspace / f'cycle-{closing_ms}.readings.json')
         parent_state = output.parent.stat()
@@ -271,12 +323,24 @@ def main():
             raise CaptureError('choose a new readings file in an existing local directory')
         identity = read_identity()
         binding = output.parent / BINDING_NAME
-        check_binding(binding, identity, args.scope)
+        already_bound = check_binding(binding, identity, args.scope)
+        if seed and next_cycle_plan(seed) != plan:
+            raise CaptureError('the readings plan changed before capture')
         bundle = capture_consumption(private_opener(), identity, args.scope, args.begin, args.end, time.monotonic() + 180)
+
+        def verify_publication_plan():
+            confirm_destination(output, parent_state)
+            if next_cycle_plan(seed) != plan:
+                raise CaptureError('the readings plan changed during capture')
+            confirm_destination(output, parent_state)
+
+        # Check before creating a first binding and again at the readings publication boundary.
         confirm_destination(output, parent_state)
+        if seed and not already_bound:
+            verify_publication_plan()
         pin_binding(binding, identity, args.scope)
         confirm_destination(output, parent_state)
-        publish(output, bundle)
+        publish(output, bundle, before_publish=verify_publication_plan if seed else None)
     except CaptureError as error:
         parser.exit(1, f'could not capture Octopus consumption: {error}\n')
     except (OSError, ValueError, InvalidOperation, OverflowError, RecursionError):
