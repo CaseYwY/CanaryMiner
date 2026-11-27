@@ -54,4 +54,10 @@ inline constexpr const PoolTlsPreset *findPoolTlsPreset(std::string_view alias) 
     return nullptr;
 }
 
+inline constexpr const PoolTlsPreset *findLegacyPoolTlsPreset(std::string_view dnsHost, int port) {
+    for (const auto &preset : kPoolTlsPresets)
+        if (port == preset.tcpPort && dnsHost == preset.host()) return &preset;
+    return nullptr;
+}
+
 } // namespace om

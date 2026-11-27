@@ -172,6 +172,8 @@ int main(){
         CHECK(!poolTlsMigrationSource(PoolTlsMigrationCandidate::None)&&!poolTlsMigrationTarget(PoolTlsMigrationCandidate::None));
         for(const auto &other:{"prl-us.kryptex.network:7000","prl-us.kryptex.network.example:7048",
                               "prl-hk.kryptex.network:8048","prl-hk.kryptex.network.example:7048",
+                              "PRL-HK.KRYPTEX.NETWORK:8048","PRL-HK.KRYPTEX.NETWORK.:7048",
+                              "PRL-HK.KRYPTEX.NETWORK.example:7048",
                               "stratum+ssl://prl-hk.kryptex.network:7048","stratum+ssl://prl-us.kryptex.network:7048",
                               "kryptex-tls","kryptex-hk-tls"}){
             auto changed=legacy;
@@ -214,6 +216,37 @@ int main(){
         CHECK(resolvePoolTlsRuntimePolicy(hongKong,migration,true,true,&resolved,&error));
         CHECK(resolved.tls&&resolved.host=="prl-hk.kryptex.network"&&resolved.port==8048&&resolved.fallbackUrl.empty());
         CHECK(!resolvePoolTlsRuntimePolicy(legacy,migration,true,true,&resolved,&error));
+
+        const std::string mixedHost = "PRL-HK.Kryptex.NETWORK";
+        CHECK(parsePoolSpec("stratum+tcp://" + mixedHost + ":7048", &hongKong.pools.front(), &error));
+        auto &mixed = hongKong.pools.front();
+        CHECK(mixed.host == mixedHost && mixed.preset == "kryptex" && mixed.policyKnown);
+        CHECK(poolTlsMigrationCandidate(hongKong) == hk);
+        mixed.account = "synthetic-account";
+        mixed.compression = "off";
+        mixed.targetSemantics = "final-adjusted-bound";
+        CHECK(resolvePoolTlsRuntimePolicy(hongKong, migration, true, true, &resolved, &error));
+        CHECK(resolved.frozenUrl == migration.users[0].tlsUrl && resolved.fallbackUrl.empty());
+
+        auto mixedWorkerConfig = hongKong;
+        CHECK(applyFrozenPoolTlsEndpoint(resolved.frozenUrl, &mixedWorkerConfig));
+        const auto &mixedWorker = mixedWorkerConfig.pools.front();
+        CHECK(mixedWorker.host == "prl-hk.kryptex.network" && mixedWorker.port == 8048 &&
+              mixedWorker.tls && poolPresetSpeaksV2(mixedWorker.preset));
+        CHECK(mixedWorker.network == mixed.network && mixedWorker.targetSemantics == mixed.targetSemantics &&
+              mixedWorker.compression == mixed.compression && mixedWorker.account == mixed.account);
+        CHECK(mixed.host == mixedHost && mixed.port == 7048 && !mixed.tls);
+
+        for (const auto &[host, port] : {std::pair{"PRL-HK.KRYPTEX.NETWORK", 1234},
+                                          std::pair{"OTHER.KRYPTEX.NETWORK", 7048},
+                                          std::pair{"PEARL.F2POOL.COM", 5500}}) {
+            ProductConfig custom;
+            custom.pools.resize(1);
+            auto &entry = custom.pools.front();
+            CHECK(parsePoolSpec(std::string(host) + ":" + std::to_string(port), &entry, &error));
+            CHECK(entry.host == host && entry.port == port && entry.preset.empty() && !entry.policyKnown);
+            CHECK(poolTlsMigrationCandidate(custom) == PoolTlsMigrationCandidate::None);
+        }
     }
 
     {
@@ -277,6 +310,10 @@ int main(){
             CHECK(parsePoolSpec(other, &otherFirst.pools.front(), &error));
             CHECK(poolTlsMigrationCandidate(otherFirst) == Candidate::None);
         }
+        const std::string mixedHeroHost = "US2.Pearl.HeroMiners.COM";
+        CHECK(parsePoolSpec(mixedHeroHost + ":1200", &legacy.pools.front(), &error));
+        CHECK(legacy.pools.front().host == mixedHeroHost && legacy.pools.front().preset == "herominers");
+        CHECK(poolTlsMigrationCandidate(legacy) == candidate);
         legacy.pools.front().targetSemantics = "final-adjusted-bound";
         legacy.pools.front().compression = "off";
         PoolSecurityPreferences migration;
@@ -286,7 +323,7 @@ int main(){
         CHECK(resolved.tls && resolved.port == 1200 && resolved.frozenUrl == targetUrl && resolved.fallbackUrl.empty());
         auto worker = legacy;
         CHECK(applyFrozenPoolTlsEndpoint(resolved.frozenUrl, &worker));
-        CHECK(worker.pools.front().tls && worker.pools.front().host == legacy.pools.front().host &&
+        CHECK(worker.pools.front().tls && worker.pools.front().host == "us2.pearl.herominers.com" &&
               worker.pools.front().port == legacy.pools.front().port && worker.pools.front().preset == "herominers" &&
               worker.pools.front().targetSemantics == "final-adjusted-bound" && worker.pools.front().compression == "off");
         CHECK(!legacy.pools.front().tls);

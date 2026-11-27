@@ -31,11 +31,14 @@ def main():
     }
     pool, host, tcp_port, tls_port = {
         "us": ("kryptex", "prl-us.kryptex.network", 7048, 8048),
-        "hk": ("stratum+tcp://prl-hk.kryptex.network:7048", "prl-hk.kryptex.network", 7048, 8048),
+        "hk": ("stratum+tcp://PRL-HK.Kryptex.NETWORK:7048", "prl-hk.kryptex.network", 7048, 8048),
         "hero": ("herominers", "us2.pearl.herominers.com", 1200, 1200),
         **{region: (f"stratum+tcp://{host}:7048", host, 7048, 8048)
            for region, host in regional_hosts.items()},
     }[sys.argv[2] if len(sys.argv) > 2 else "us"]
+    configured_host = host
+    if pool.startswith("stratum+tcp://"):
+        configured_host = pool.split("://", 1)[1].rsplit(":", 1)[0]
     source = f"stratum+tcp://{host}:{tcp_port}"
     target = f"stratum+ssl://{host}:{tls_port}"
     checks = 0
@@ -149,7 +152,7 @@ def main():
             text = " ".join(frame.split())
             assert f"First user pool transport: Plaintext (port {tcp_port})" in text
             assert "Effective first-user policy: Plaintext" in text
-            assert f"First-user host (frozen): {host}" in text
+            assert f"First-user host (frozen): {configured_host}" in text
             assert "Verified TLS" not in text
 
         def finish(self):
