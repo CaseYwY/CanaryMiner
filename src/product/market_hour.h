@@ -12,7 +12,7 @@ namespace om {
 
 inline constexpr std::string_view marketReviewExtension = ".cmh";
 
-enum class MarketHourAction { Help, PublicSample, PublicSave, Review, Save, Open };
+enum class MarketHourAction { Help, PublicSample, PublicSave, PublicCapture, Review, Save, Open };
 
 struct MarketHourOptions {
     MarketHourAction action = MarketHourAction::Review;
@@ -23,7 +23,8 @@ struct MarketHourOptions {
     int krakenFallbackFlag = 0;
 
     bool samplesPublic() const {
-        return action == MarketHourAction::PublicSample || action == MarketHourAction::PublicSave;
+        return action == MarketHourAction::PublicSample || action == MarketHourAction::PublicSave ||
+            action == MarketHourAction::PublicCapture;
     }
 };
 
@@ -44,8 +45,9 @@ inline bool parseMarketHourCli(int argc,const char *const *argv,int begin,Market
             }
             if (i+1>=argc) return false;
             const char *value = argv[i+1];
-            if (!parsed.saveFlag && flag=="--save-review" && localExportName(value,marketReviewExtension)) {
-                parsed.action=MarketHourAction::PublicSave;
+            if (!parsed.saveFlag && (flag=="--save-review" || flag=="--save-sample") &&
+                localExportName(value,marketReviewExtension)) {
+                parsed.action=flag=="--save-sample" ? MarketHourAction::PublicCapture : MarketHourAction::PublicSave;
                 parsed.archiveName=value;
                 parsed.saveFlag=i;
             } else if (!parsed.dnsFlag && flag=="--dns-server" && validPublicDnsServer(value)) {

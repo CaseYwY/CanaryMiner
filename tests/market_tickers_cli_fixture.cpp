@@ -152,6 +152,10 @@ int main(int argc, char **argv) {
             response.httpStatus = 429;
             response.retryAfterSeconds = 1;
         }
+        if (!pearl && mode == "cancelled") {
+            response = {};
+            response.status = om::PublicHttpsStatus::Cancelled;
+        }
     } else if (reward) {
         if (mode == "timeout" || (mode == "timeout-index" && indexedHash)) {
             response = {};

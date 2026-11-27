@@ -10,31 +10,6 @@ namespace {
 
 using namespace market_detail;
 
-HourSample decodeHourReply(const PublicJsonResponse &reply, HourFeed feed, uint64_t start, uint64_t end,
-                          uint64_t sentUtc, uint64_t receivedUtc) {
-    HourSample sample;
-    if (reply.status != PublicHttpsStatus::Ok) {
-        sample.problem = reply.httpStatus == 429 ? "provider rate limited the request" : publicHttpsStatusName(reply.status);
-    } else if (reply.httpStatus != 200) {
-        sample.problem = "unexpected HTTP status";
-    } else {
-        const auto status = decodePublicHourPayload(reply, feed, start, end, sentUtc, receivedUtc, sample.minutes);
-        if (status == MarketDataStatus::Timestamp)
-            sample.problem = "invalid response observation time";
-        else if (status == MarketDataStatus::RateLimited)
-            sample.problem = "provider rate limited the request";
-        else if (status == MarketDataStatus::ProviderThrottled)
-            sample.problem = "provider throttled the request";
-        else if (status == MarketDataStatus::ProviderError)
-            sample.problem = "provider error envelope";
-        else if (status != MarketDataStatus::Ok)
-            sample.problem = "invalid minute response schema or timestamp";
-        else
-            sample.observedUtc = reply.observedUtc;
-    }
-    return sample;
-}
-
 int hourError(const char *message, int code = 3) {
     std::fprintf(stderr, "market-hour: %s\n", message);
     return code;
@@ -45,12 +20,13 @@ int hourError(const char *message, int code = 3) {
 int commandPublicMarketHour(const MarketHourOptions &options, const std::filesystem::path &module,
                             int argc, const char *const *argv,
                             const volatile sig_atomic_t *stop) {
-    const bool saving = options.action == MarketHourAction::PublicSave;
+    const bool capture = options.action == MarketHourAction::PublicCapture;
+    const bool saving = options.action == MarketHourAction::PublicSave || capture;
     const bool allowFallback = options.krakenFallbackFlag != 0;
     const auto operandCount=3+(saving ? 2 : 0)+(options.dnsFlag ? 2 : 0)+(allowFallback ? 1 : 0);
     if (argc!=operandCount ||
         !nativeMarketArgumentPair(argc,argv,1,"market-hour",2,"--allow-public-candles") ||
-        (saving && !nativeMarketArgumentPair(argc,argv,options.saveFlag,"--save-review",
+        (saving && !nativeMarketArgumentPair(argc,argv,options.saveFlag,capture ? "--save-sample" : "--save-review",
                                               options.saveFlag+1,options.archiveName)) ||
         (options.dnsFlag && !nativeMarketArgumentPair(argc,argv,options.dnsFlag,"--dns-server",
                                                       options.dnsFlag+1,options.dnsServer)) ||
@@ -74,7 +50,10 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
         limits.dnsServer=options.dnsServer;
         auto previous = initial;
         HourSample pearl, coinbase;
-        PublicHourOriginal original{initial.second, end, {}, {}, {}};
+        PublicHourOriginal original;
+        original.initialUtc = initial.second;
+        original.endUtc = end;
+        if (capture) original.captureFallbackAllowed = allowFallback;
         const auto sample = [&](PublicFeed source, HourFeed decoder, HourSample &result, PublicHourReceipt &receipt) {
             if (!lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
@@ -85,13 +64,14 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
             auto reply = awaitPublicMarketReply(fetch, request, limits, lifetime, stop);
             if (reply.status == PublicHttpsStatus::Unreaped || !lifetime.permitted()) return ownershipUncertain();
             if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
+            if (capture && reply.status == PublicHttpsStatus::Cancelled) return hourError("sample cancelled", 130);
             const auto received = marketSystemClock();
             if (!marketSampleClockContinuous(initial, sent, received))
                 return hourError("local clock changed during sampling");
             previous = received;
-            result = decodeHourReply(reply, decoder, start, end, sent.second, received.second);
-            if (saving)
-                receipt = PublicHourReceipt{sent.second, received.second, std::move(reply)};
+            PublicHourReceipt observed{sent.second, received.second, std::move(reply)};
+            result = decodePublicHourReply(observed, decoder, start, end);
+            if (saving) receipt = std::move(observed);
             return 0;
         };
         if (const int result = sample(PublicFeed::MexcPearlHour, HourFeed::MexcPearl, pearl, original.pearl))
@@ -107,12 +87,12 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
 
         std::string report;
         const auto *fallback = kraken ? &*kraken : nullptr;
-        const bool complete = renderPublicHour(end, previous.second, pearl, coinbase, fallback, report);
+        const bool complete = renderPublicHour(end, previous.second, pearl, coinbase, fallback, report, capture);
         if (!lifetime.permitted()) return ownershipUncertain();
         if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
         if (saving) {
             using local_review_archive::ReviewSave;
-            if (!complete) {
+            if (!complete && !capture) {
                 const auto details=publicHourCoverage(end,previous.second,pearl,coinbase,fallback);
                 if (!lifetime.permitted()) return ownershipUncertain();
                 if (marketSampleStopped(stop)) return hourError("sample cancelled",130);

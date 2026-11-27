@@ -313,6 +313,30 @@ The ages in the report are measured at its recorded capture time. The archive an
 check the stored calculation and detect corruption. They carry no provider signature or current freshness claim.
 Existing [user-declared reviews](manual-market.md#save-and-reopen-a-local-hour-review) remain readable.
 
+### Keep a public hour with incomplete coverage
+
+Use `--save-sample` when you need an offline record of the attempt, including gaps or provider errors.
+
+```text
+canary-miner market-hour --allow-public-candles --kraken-fallback --save-sample sample.cmh
+canary-miner market-hour --open-review sample.cmh
+```
+
+The version 4 archive records the frozen window, request and receipt times, fallback permission,
+and the bounded response for each attempted source. It keeps admitted JSON bodies byte for byte.
+An HTTP request failure carries its recorded status and no body. For each usable minute series,
+the report lists contiguous missing UTC ranges. A series with an invalid or unavailable response
+shows the failure instead of attributing a missing-minute count to the provider.
+
+A saved complete sample exits with 0. A saved incomplete sample prints its report and exits with 3.
+A save failure prints an error on stderr. Opening a valid archive exits with 0 and recalculates the
+original report with its captured clock and completeness status. Cancellation, uncertain helper
+cleanup, or a discontinuous clock during sampling prevent publication.
+
+Use a new private local basename. `--save-review` keeps its complete-coverage requirement.
+`--save-sample` and `--save-review` are mutually exclusive. Treat the archive as local market-data
+evidence, subject to the same provider access and use terms.
+
 ### Choose a resolver for one public sample
 
 A public sample can use one explicitly selected DNS server if the deployment's resolver returns a

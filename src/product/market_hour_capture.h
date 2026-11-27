@@ -23,6 +23,7 @@ struct PublicHourOriginal {
     uint64_t initialUtc = 0, endUtc = 0;
     PublicHourReceipt pearl, coinbase;
     std::optional<PublicHourReceipt> kraken;
+    std::optional<bool> captureFallbackAllowed; // present only in a sample archive
 };
 
 inline bool canFallbackHourFx(const HourSample &pearl, const HourSample &coinbase) {
@@ -38,8 +39,10 @@ inline uint64_t publicHourEnd(uint64_t initialUtc) {
 std::string publicHourCoverage(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &coinbase,
                                const HourSample *kraken);
 
+HourSample decodePublicHourReply(const PublicHourReceipt &receipt, HourFeed feed, uint64_t start, uint64_t end);
+
 bool renderPublicHour(uint64_t end, uint64_t cutoff, const HourSample &pearl, const HourSample &coinbase,
-                      const HourSample *kraken, std::string &report);
+                      const HourSample *kraken, std::string &report, bool capture = false);
 
 inline std::string publicHourCaptureTime(uint64_t cutoff) {
     return "Capture UTC " + std::to_string(cutoff) + " (ages at capture)\n";
