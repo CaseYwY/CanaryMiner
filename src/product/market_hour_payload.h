@@ -28,8 +28,13 @@ inline MarketDataStatus decodePublicHourPayload(const PublicJsonResponse &reply,
     if (reply.status != PublicHttpsStatus::Ok || reply.httpStatus != 200) return MarketDataStatus::Transport;
     if (!sentUtc || reply.observedUtc < sentUtc || reply.observedUtc > receivedUtc) return MarketDataStatus::Timestamp;
     JsonValue payload;
-    if (reply.body.size() > marketHourBodyBytes || !parseJsonStrict(reply.body, &payload, nullptr) ||
-        !readMarketHourPayload(payload, feed, start, end, reply.observedUtc, minutes))
+    if (reply.body.size() > marketHourBodyBytes || !parseJsonStrict(reply.body, &payload, nullptr))
+        return MarketDataStatus::Schema;
+    if (feed == HourFeed::KrakenFx) {
+        const auto status = krakenEnvelopeStatus(payload);
+        if (status != MarketDataStatus::Ok) return status;
+    }
+    if (!readMarketHourPayload(payload, feed, start, end, reply.observedUtc, minutes))
         return MarketDataStatus::Schema;
     return MarketDataStatus::Ok;
 }

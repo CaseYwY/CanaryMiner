@@ -281,7 +281,8 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert result.returncode == 3 and expected in result.stdout and "Kraken" not in result.stdout, result
             launched(["4", "5"])
         for mode, expected in (("kraken-gap", "59/60"), ("kraken-open-in-window", "invalid minute response schema"),
-                               ("kraken-disordered", "invalid minute response schema")):
+                               ("kraken-disordered", "invalid minute response schema"),
+                               ("kraken-limited-json", "provider rate limited")):
             scenario.write_text(mode, encoding="ascii")
             result = run(allow, fallback)
             assert result.returncode == 3 and f"Kraken USDT/USD fallback: {expected}" in result.stdout, result

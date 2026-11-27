@@ -1,4 +1,5 @@
 #include "product/market_owner.h"
+#include "product/market_hour_payload.h"
 #include "product_test_util.h"
 #include <chrono>
 #include <thread>
@@ -201,6 +202,36 @@ int main() {
             CHECK(!limitedQuote.next(3600000, E + 3610));  // capped Retry-After latches the provider budget
         }
     }
+
+    auto fastFallback = fallbackPolicy;
+    fastFallback.quoteRefreshMs = 1000;
+    MarketPollingPlan limitedOhlc;
+    CHECK(limitedOhlc.start(1, 0, E + 10, fastFallback, false));
+    for (auto feed : {PublicFeed::GatePearlTicker, PublicFeed::KrakenUsdtTicker,
+                      PublicFeed::MexcPearlHour, PublicFeed::CoinbaseUsdtHour}) {
+        ticket = limitedOhlc.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == feed);
+        CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+    }
+    limitedOhlc.setPublicHourFallback(E);
+    ticket = limitedOhlc.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+    auto limitedReply = okay();
+    limitedReply.observedUtc = E + 11;
+    limitedReply.body = R"({"error":["EAPI:Rate limit exceeded"]})";
+    std::vector<market_detail::ReviewMinute> minutes;
+    const auto limitedStatus = market_detail::decodePublicHourPayload(limitedReply, market_detail::HourFeed::KrakenFx,
+        E - 3600, E, E + 11, E + 11, minutes);
+    CHECK(limitedStatus == MarketDataStatus::RateLimited && minutes.empty());
+    CHECK(ticket && limitedOhlc.complete(*ticket, limitedReply, limitedStatus, 1000, E + 11));
+    ticket = limitedOhlc.next(1000, E + 11);
+    CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+    CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 1000, E + 11));
+    ticket = limitedOhlc.next(2000, E + 12);
+    CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+    CHECK(ticket && limitedOhlc.complete(*ticket, okay(), MarketDataStatus::Ok, 2000, E + 12));
+    ticket = limitedOhlc.next(6000, E + 16);
+    CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
 
     std::atomic<uint64_t> ms{0};
     std::atomic<unsigned> pearlCalls{0}, fxCalls{0};

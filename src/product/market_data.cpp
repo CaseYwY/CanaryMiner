@@ -121,6 +121,12 @@ MarketFreshness freshness(const MarketQuote *q,MarketSeries series,uint64_t utc,
 }
 }  // namespace
 
+MarketDataStatus market_detail::krakenEnvelopeStatus(const JsonValue &payload) {
+    MarketDataStatus status;
+    krakenResult(payload, &status);
+    return status;
+}
+
 MarketDataResult<MarketQuote> parseMarketQuote(const PublicJsonResponse &r, const MarketParseContext &c) {
     if (c.request.feed != PublicFeed::GatePearlTicker && c.request.feed != PublicFeed::KrakenUsdtTicker) return failure<MarketQuote>(MarketDataStatus::Identity);
     JsonValue root;

@@ -14,6 +14,11 @@ enum class MarketDataStatus { Ok, Transport, Identity, Schema, Decimal, Timestam
 const char *marketDataStatusName(MarketDataStatus status);
 const char *marketSeriesName(MarketSeries series);
 
+struct JsonValue;
+namespace market_detail {
+MarketDataStatus krakenEnvelopeStatus(const JsonValue &payload);
+}
+
 struct MarketParseContext {
     PublicJsonRequest request;
     uint64_t requestStartedUtc = 0, receivedMonoMs = 0, generation = 0;
