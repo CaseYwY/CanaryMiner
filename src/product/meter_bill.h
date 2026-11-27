@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <csignal>
 #include <cstdint>
-#include <filesystem>
 #include <string>
 #include <utility>
 
@@ -94,7 +93,9 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
     return true;
 }
 
+struct OctopusRateCaptureSource;
+
 int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv,
-                     const volatile sig_atomic_t *stop, const std::filesystem::path &publicModule = {});
+                     const volatile sig_atomic_t *stop, const OctopusRateCaptureSource *publicRates = nullptr);
 
 }  // namespace om

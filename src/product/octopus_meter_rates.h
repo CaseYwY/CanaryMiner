@@ -32,6 +32,11 @@ const char *capturePublicOctopusRates(TariffDeclaration declaration, const std::
                                       const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
                                       OctopusRateCapture &out);
 
+struct OctopusRateCaptureSource {
+    std::filesystem::path module;
+    decltype(&capturePublicOctopusRates) fetch = nullptr;
+};
+
 // Validate the placeholder before reading or acquiring rate pages.
 const char *checkOctopusRateDeclaration(const TariffDeclaration &declaration);
 

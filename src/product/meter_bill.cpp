@@ -5,6 +5,7 @@
 #include "meter_invoice.h"
 #include "market_public_sample.h"
 #include "octopus_meter_consumption.h"
+#include "octopus_meter_rates.h"
 #include "public_https.h"
 
 #include <algorithm>
@@ -988,7 +989,7 @@ int refuse(const char *reason) {
 }  // namespace
 
 int commandMeterBill(const MeterBillOptions &options, int argc, const char *const *argv,
-                     const volatile sig_atomic_t *stop, const std::filesystem::path &publicModule) {
+                     const volatile sig_atomic_t *stop, const OctopusRateCaptureSource *publicRates) {
     if (options.help) {
         std::puts("canary-miner meter-bill --tariff FILE --intervals FILE [--octopus-rates FILE] [--as-of-utc-ms MS]\n"
                   "    [--invoice FILE] [--prepaid FILE] [--save-review NAME.cmr]\n"
@@ -1044,7 +1045,9 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
         const auto paths = meterBillPaths(options, argc, argv);
         if (!paths) return fail(options.reviewCutoffArg ? "invalid review cutoff or input file arguments" :
                                                          "could not resolve input file arguments");
-        if (live && publicModule.empty()) return fail("public HTTPS unavailable in this build");
+        if (live && !publicRates) return fail("public HTTPS unavailable in this build");
+        if (live && (!publicRates->fetch || publicRates->module.empty()))
+            return fail("installed helper path unavailable");
         ReviewOriginal original;
         std::string inheritedPayment;
         const bool reopening = options.archiveArg != 0;
@@ -1158,8 +1161,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (stopped() || !captureLifetime.begin()) return fail("helper ownership uncertain");
 
             OctopusRateCapture captured;
-            if (const auto *problem = capturePublicOctopusRates(std::move(preview.declaration), inheritedPayment,
-                    options.dnsServer, publicModule, captureLifetime, stop, captured)) return fail(problem);
+            if (const auto *problem = publicRates->fetch(std::move(preview.declaration), inheritedPayment,
+                    options.dnsServer, publicRates->module, captureLifetime, stop, captured)) return fail(problem);
             const auto finished = market_detail::marketTradeClock();
             if (!market_detail::marketTradeClockContinuous(started, started, finished) ||
                 captured.summary.observedUtcMs < now ||
