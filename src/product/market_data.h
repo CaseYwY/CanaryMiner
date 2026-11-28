@@ -13,6 +13,8 @@ enum class MarketMinuteConvention { Unqualified, FixtureMinuteStart };
 enum class MarketDataStatus { Ok, Transport, Identity, Schema, Decimal, Timestamp, UnsupportedConvention, Coverage, Arithmetic, ProviderError, RateLimited, ProviderThrottled };
 const char *marketDataStatusName(MarketDataStatus status);
 const char *marketSeriesName(MarketSeries series);
+inline constexpr size_t maxMarketAssetBodyBytes = 16 * 1024;
+bool marketIdentityMatches(PublicFeed feed, const std::string &body);
 
 struct JsonValue;
 namespace market_detail {

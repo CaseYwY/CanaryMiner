@@ -2,6 +2,7 @@
 #include "hash.h"
 #include "json_dom.h"
 #include "local_review_archive.h"
+#include "market_asset_evidence.h"
 #include "market_hour_capture.h"
 #include "market_hour_payload.h"
 #include "market_native_arguments.h"
@@ -27,12 +28,13 @@ constexpr size_t maxInputBytes = 64 * 1024;
 constexpr size_t maxReportBytes = 4 * 1024;
 constexpr size_t maxArchiveBytes = maxInputBytes + maxReportBytes + 256;
 constexpr size_t maxSampleResponseBytes = market_detail::marketHourBodyBytes + 128;
-constexpr size_t maxPublicArchiveBytes = 3 * maxSampleResponseBytes + maxReportBytes + 512;
+constexpr size_t maxPublicArchiveBytes = 3 * maxSampleResponseBytes + maxMarketAssetBodyBytes + maxReportBytes + 512;
 static_assert(maxPublicArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-MARKET-HOUR-REVIEW-1\n";
 constexpr std::string_view publicArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-2\n";
 constexpr std::string_view fallbackArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-3\n";
 constexpr std::string_view sampleArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-4\n";
+constexpr std::string_view evidenceArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-5\n";
 constexpr char pearlSeriesId[] = "gate-pearl-mainnet-usdt-v1";
 constexpr char fxSeriesId[] = "kraken-usdt-usd-v1";
 constexpr char mexcSeriesId[] = "mexc-pearl-mainnet-usdt-v1";
@@ -358,24 +360,36 @@ bool readSampleReceipt(const std::string &bytes, size_t &offset, market_detail::
 bool decodePublicHourReview(const std::string &bytes, market_detail::PublicHourOriginal &original,
                             std::string &savedReport) {
     const auto header = std::string_view(bytes).substr(0, publicArchiveHeader.size());
-    const bool sample = header == sampleArchiveHeader;
     size_t offset = header.size();
     int64_t initial = 0, end = 0;
     if (!local_review_archive::readArchiveNumber(bytes, offset, marketUtcLimit, initial) ||
         !local_review_archive::readArchiveNumber(bytes, offset, marketUtcLimit, end))
         return false;
+    original.withIdentityEvidence = header == evidenceArchiveHeader;
+    bool sample = header == sampleArchiveHeader;
     bool fallback = header == fallbackArchiveHeader;
-    if (sample) {
-        int64_t permission = 0, receipts = 0;
-        if (!local_review_archive::readArchiveNumber(bytes, offset, 2, permission) ||
-            !local_review_archive::readArchiveNumber(bytes, offset, 3, receipts) || receipts < 2)
-            return false;
-        original.captureFallbackAllowed = permission == 2;
+    if (original.withIdentityEvidence) {
+        int64_t mode = 0, receipts = 0;
+        if (!local_review_archive::readArchiveNumber(bytes, offset, 2, mode) ||
+            !local_review_archive::readArchiveNumber(bytes, offset, 3, receipts) || receipts < 2) return false;
+        sample = mode == 2;
         fallback = receipts == 3;
+    }
+    if (sample) {
+        int64_t permission = 0;
+        if (!local_review_archive::readArchiveNumber(bytes, offset, 2, permission)) return false;
+        original.captureFallbackAllowed = permission == 2;
+        if (!original.withIdentityEvidence) {
+            int64_t receipts = 0;
+            if (!local_review_archive::readArchiveNumber(bytes, offset, 3, receipts) || receipts < 2) return false;
+            fallback = receipts == 3;
+        }
     }
     const auto readReceipt = sample ? readSampleReceipt : readPublicHourReceipt;
     if (!readReceipt(bytes, offset, original.pearl) || !readReceipt(bytes, offset, original.coinbase) ||
         (fallback && !readReceipt(bytes, offset, original.kraken.emplace())) ||
+        (original.withIdentityEvidence && !market_detail::readMarketAssetEvidence(bytes, offset, marketUtcLimit,
+                                                                                  original.pearl.response)) ||
         !local_review_archive::readArchivePart(bytes, offset, maxReportBytes, savedReport) ||
         bytes.size() - offset != 65 || bytes.back() != '\n' ||
         bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) != 0)
@@ -415,6 +429,9 @@ const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::stri
     if (!complete && !captured)
         return "saved public hour requires complete aligned minute coverage and exact means";
     report += publicHourCaptureTime(cutoff);
+    if (original.withIdentityEvidence && !appendMarketAssetEvidence(report, "MEXC Pearl spot pair", PublicFeed::MexcPearlPair,
+            original.pearl.response, original.pearl.sentUtc, original.pearl.receivedUtc))
+        return "saved MEXC pair metadata evidence is invalid";
     if (savedReport != report) return "saved review report differs from the recalculated report";
     return nullptr;
 }
@@ -436,7 +453,8 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
             return refuse("review archive unavailable or invalid");
         publicArchive = std::string_view(bytes).substr(0, publicArchiveHeader.size()) == publicArchiveHeader ||
                         std::string_view(bytes).substr(0, fallbackArchiveHeader.size()) == fallbackArchiveHeader ||
-                        std::string_view(bytes).substr(0, sampleArchiveHeader.size()) == sampleArchiveHeader;
+                        std::string_view(bytes).substr(0, sampleArchiveHeader.size()) == sampleArchiveHeader ||
+                        std::string_view(bytes).substr(0, evidenceArchiveHeader.size()) == evidenceArchiveHeader;
         if (!publicArchive && (bytes.size() > maxArchiveBytes || !decodeHourReview(bytes, original)))
             return refuse("review archive unavailable or invalid");
     } else if (!readLocalReviewInput(path, maxInputBytes, original.input)) {
@@ -581,12 +599,11 @@ local_review_archive::ReviewSave market_detail::savePublicHourReview(const std::
     using local_review_archive::ReviewSave;
     if (report.empty() || report.size() > maxReportBytes) return ReviewSave::Unavailable;
     const bool capture = original.captureFallbackAllowed.has_value();
-    std::string body(capture ? sampleArchiveHeader : original.kraken ? fallbackArchiveHeader : publicArchiveHeader);
+    std::string body(evidenceArchiveHeader);
     body += std::to_string(original.initialUtc) + '\n' + std::to_string(original.endUtc) + '\n';
-    if (capture) {
-        body += *original.captureFallbackAllowed ? "2\n" : "1\n";
-        body += original.kraken ? "3\n" : "2\n";
-    }
+    body += capture ? "2\n" : "1\n";
+    body += original.kraken ? "3\n" : "2\n";
+    if (capture) body += *original.captureFallbackAllowed ? "2\n" : "1\n";
     const auto appendReceipt = [&](const PublicHourReceipt &receipt) {
         if (receipt.response.body.size() > marketHourBodyBytes) return false;
         body += std::to_string(receipt.sentUtc) + '\n';
@@ -604,6 +621,7 @@ local_review_archive::ReviewSave market_detail::savePublicHourReview(const std::
     };
     if (!appendReceipt(original.pearl) || !appendReceipt(original.coinbase) ||
         (original.kraken && !appendReceipt(*original.kraken))) return ReviewSave::Unavailable;
+    encodeMarketAssetEvidence(body, original.pearl.response);
     body += std::to_string(report.size()) + '\n' + report;
     return local_review_archive::saveWhileActive(name, marketReviewExtension, body + sha256Hex(body) + '\n',
                                                 maxPublicArchiveBytes, stopped);

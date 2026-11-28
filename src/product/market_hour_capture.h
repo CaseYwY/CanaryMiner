@@ -26,6 +26,7 @@ struct PublicHourOriginal {
     PublicHourReceipt pearl, coinbase;
     std::optional<PublicHourReceipt> kraken;
     std::optional<bool> captureFallbackAllowed; // present only in a sample archive
+    bool withIdentityEvidence = false;
 };
 
 inline bool canFallbackHourFx(const HourSample &pearl, const HourSample &coinbase) {

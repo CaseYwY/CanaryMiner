@@ -53,12 +53,17 @@ enum class PublicHttpsStatus {
     AssetIdentity  // market metadata contradicted the configured asset or pair
 };
 const char *publicHttpsStatusName(PublicHttpsStatus status);
+struct PublicAssetEvidence {
+    uint64_t observedUtc = 0;
+    std::string body;
+};
 struct PublicJsonResponse {
     PublicHttpsStatus status = PublicHttpsStatus::Unavailable;
     long httpStatus = 0;
     std::string body;  // published only after complete HTTPS/HTTP/JSON validation, not a financial fact
     uint64_t observedUtc = 0;
     unsigned retryAfterSeconds = 0;
+    std::optional<PublicAssetEvidence> assetEvidence{};  // parent-side evidence, outside the helper wire protocol
 };
 
 // No DNS, sockets or side effects. Conservative public-address and bounded JSON contracts.

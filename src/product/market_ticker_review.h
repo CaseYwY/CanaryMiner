@@ -14,7 +14,7 @@ struct PublicTickerCapture {
     PublicTickerReceipt gate, kraken;
     bool trades = false;  // Parent UTC fields, including receipt sent/received, use milliseconds for trades.
 };
-enum class PublicQuoteReport { InvalidClock, Incomplete, Complete };
+enum class PublicQuoteReport { InvalidClock, InvalidEvidence, Incomplete, Complete };
 PublicQuoteReport renderPublicTradeSample(const PublicTickerCapture &capture, std::string &report,
                                           bool withReceipts = false);
 void appendPublicQuoteReceipt(std::string &report, const PublicTickerReceipt &receipt, bool trades);
