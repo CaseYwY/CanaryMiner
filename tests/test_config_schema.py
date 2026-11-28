@@ -474,6 +474,22 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         example['demand_charge']['ratchet']['fraction'] = '1.1'
         self.assertTrue(validate(example, schema, schema))
 
+    def test_demand_eligibility_requires_v17_and_an_explicit_nonempty_calendar(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 17
+        example['demand_charge'] = dict(window_minutes=15, offset_minutes=0, published_utc_ms=0,
+                                        rate_per_kw='5', eligible_periods=[])
+        example['opening']['peak_demand_kw'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+        periods = example['demand_charge']['eligible_periods']
+        periods.append(dict(begin_minute=960, end_minute=1260, weekday_mask=31,
+                            month_mask=4095, date=None, eligible=True))
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 9}, schema, schema))
+        periods[0]['weekday_mask'] = 0
+        self.assertTrue(validate(example, schema, schema))
+
     def test_apparent_demand_uses_v11_and_unit_specific_fields(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -635,7 +651,7 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'plan': {'export_payment', 'tax_periods', 'tax_allocation'},
                     'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'exported_kwh',
                                 'accrued_export_payment', 'tax_bases', 'tax_segments'},
-                    'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places'},
+                    'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places', 'eligible_periods'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
                 }.get(name, set())
                 self.assertEqual(set(definition['required']), set(definition['properties']) - optional)

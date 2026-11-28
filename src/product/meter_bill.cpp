@@ -307,6 +307,8 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             !demandSubtotal.format(6,&amount)) return false;
         const std::string unit = demand->unit();
         report += "  Peak demand " + peak + " " + unit + " over " + std::to_string(demand->windowMinutes) + " minute windows\n";
+        if (!demand->eligiblePeriods.empty())
+            report += "  Demand uses only windows in the declared eligibility periods\n";
         if (demand->ratchet) {
             std::string floor,billable;
             if (!ratchetFloor.format(6,&floor) || !billablePeak.format(6,&billable)) return false;

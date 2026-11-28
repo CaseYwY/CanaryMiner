@@ -124,7 +124,61 @@ ExportPeriodEstimate estimateExportPeriodImpl(const ExportPaymentRule &rule, con
     return result;
 }
 constexpr int64_t meterHalfHourMs = 30 * 60 * 1000;
-ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &opening,int64_t end,int64_t decision) {
+struct DemandRange { int64_t begin, end; };
+
+ElectricityStatus demandRanges(const CivilClock &clock, const DemandChargeRule &rule, int64_t begin,
+                               int64_t end, std::vector<DemandRange> &ranges) {
+    if (rule.eligiblePeriods.size() > maxDemandPeriods) return ElectricityStatus::Capacity;
+    for (const auto &period : rule.eligiblePeriods)
+        if (period.beginMinute >= period.endMinute || period.endMinute > 1440 ||
+            !period.weekdayMask || period.weekdayMask > 127 || !period.monthMask || period.monthMask > 4095 ||
+            (period.date && !validCivilDate(*period.date))) return ElectricityStatus::Invalid;
+    const int64_t span = rule.windowMinutes * minuteMs, offset = rule.offsetMinutes * minuteMs;
+    int64_t opened = 0;
+    bool rangeOpen = false;
+    const auto close = [&](int64_t boundary) {
+        if ((opened - offset) % span || (boundary - offset) % span) return false;
+        ranges.push_back({opened, boundary});
+        rangeOpen = false;
+        return true;
+    };
+    size_t cuts = 0;
+    for (auto cursor = begin; cursor < end;) {
+        if (++cuts > maxCuts) return ElectricityStatus::Capacity;
+        const auto stamp = civilAt(clock, cursor);
+        if (stamp.status != CivilStatus::Ok) return ElectricityStatus::Unavailable;
+        const auto localMidnight = cursor - stamp.millisecondOfDay;
+        auto next = (std::min)(end, localMidnight + dayMs);
+        if (const auto transition = civilNextTransition(clock, cursor); transition && *transition > cursor)
+            next = (std::min)(next, *transition);
+        bool recurring = false, recurringExclude = false, dated = false, datedExclude = false;
+        for (const auto &period : rule.eligiblePeriods) {
+            if (!(period.weekdayMask & (1u << (stamp.isoWeekday - 1))) ||
+                !(period.monthMask & (1u << (stamp.date.month - 1))) ||
+                (period.date && !sameCivilDate(*period.date, stamp.date))) continue;
+            const auto first = localMidnight + period.beginMinute * minuteMs;
+            const auto last = localMidnight + period.endMinute * minuteMs;
+            if (cursor < first) next = (std::min)(next, first);
+            if (cursor >= last) continue;
+            next = (std::min)(next, last);
+            if (cursor < first) continue;
+            if (period.date) (period.eligible ? dated : datedExclude) = true;
+            else (period.eligible ? recurring : recurringExclude) = true;
+        }
+        const bool eligible = dated || datedExclude ? !datedExclude : recurring && !recurringExclude;
+        if (eligible && !rangeOpen) {
+            opened = cursor;
+            rangeOpen = true;
+        }
+        if (!eligible && rangeOpen && !close(cursor)) return ElectricityStatus::DemandWindowBoundary;
+        cursor = next;
+    }
+    if (rangeOpen && !close(end)) return ElectricityStatus::DemandWindowBoundary;
+    return ElectricityStatus::Ok;
+}
+
+ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &opening,int64_t end,int64_t decision,
+                                 std::vector<DemandRange> &eligible) {
     if (!plan.demandCharge)
         return opening.apparentDemand || opening.peakDemand || !opening.demandHistory.empty()
             ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
@@ -147,15 +201,22 @@ ElectricityStatus validateDemand(const TariffPlan &plan,const BillOpening &openi
     const int64_t span=rule.windowMinutes*minuteMs, offset=rule.offsetMinutes*minuteMs;
     for (const auto t:{opening.cycleBeginUtcMs,opening.throughUtcMs,opening.cycleEndUtcMs,end})
         if ((t-offset)%span) return ElectricityStatus::DemandWindowBoundary;
-    // Total window energy bounds the peak from both sides.
+    const bool scheduled = !rule.eligiblePeriods.empty();
+    if (scheduled) {
+        const auto status = demandRanges(plan.clock, rule, opening.cycleBeginUtcMs, opening.cycleEndUtcMs, eligible);
+        if (status != ElectricityStatus::Ok) return status;
+    }
+    // For scheduled demand, total import can include energy outside eligible windows.
     ExactDecimal scaledImport, maximumScaledImport;
     const auto &peak=opening.peakDemand->numerator;
     const auto windows=(opening.throughUtcMs-opening.cycleBeginUtcMs)/span;
+    const bool allElapsedEligible = !scheduled || (!eligible.empty() &&
+        eligible.front().begin == opening.cycleBeginUtcMs && eligible.front().end >= opening.throughUtcMs);
     if (!opening.importedKwh.numerator.multiply(number(60/rule.windowMinutes),&scaledImport) ||
-        !peak.multiply(number(windows),&maximumScaledImport)) return ElectricityStatus::Capacity;
-    // Active imports bound the apparent peak from below. With no elapsed windows its peak is zero.
-    if (scaledImport.compare(maximumScaledImport)>0 ||
-        ((!rule.apparent() || !windows) && peak.compare(scaledImport)>0))
+        (allElapsedEligible && !peak.multiply(number(windows),&maximumScaledImport))) return ElectricityStatus::Capacity;
+    const bool hadEligibleWindow = scheduled ? !eligible.empty() && eligible.front().begin < opening.throughUtcMs : windows > 0;
+    if ((!hadEligibleWindow && !peak.zero()) || (allElapsedEligible && scaledImport.compare(maximumScaledImport)>0) ||
+        (!rule.apparent() && peak.compare(scaledImport)>0))
         return ElectricityStatus::Invalid;
     return rule.publishedUtcMs>decision ? ElectricityStatus::NotYetKnown : ElectricityStatus::Ok;
 }
@@ -217,6 +278,38 @@ ElectricityStatus measureDemand(const DemandChargeRule &rule,const Trace &trace,
         windowEnd=through+span;
         if (interval.endUtcMs>through&&!energyFor(interval.endUtcMs-through,integrated))
             return ElectricityStatus::Capacity;
+    }
+    return ElectricityStatus::Ok;
+}
+
+template<class Trace>
+ElectricityStatus measureScheduledDemand(const DemandChargeRule &rule, const Trace &trace,
+                                         int64_t begin, int64_t end, const std::vector<DemandRange> &ranges,
+                                         ElectricityAmount &peak, const std::atomic<bool> *cancel,
+                                         const std::function<bool()> &stop) {
+    auto first = trace.intervals.begin();
+    Trace selected;
+    for (const auto &range : ranges) {
+        const auto left = (std::max)(begin, range.begin), right = (std::min)(end, range.end);
+        if (left >= right) continue;
+        while (first != trace.intervals.end() && first->endUtcMs <= left) ++first;
+        selected.intervals.clear();
+        for (auto it = first; it != trace.intervals.end() && it->beginUtcMs < right; ++it) {
+            if ((cancel && cancel->load(std::memory_order_relaxed)) || (stop && stop()))
+                return ElectricityStatus::Unavailable;
+            const auto start = (std::max)(left, it->beginUtcMs), finish = (std::min)(right, it->endUtcMs);
+            if constexpr (std::is_same_v<Trace, MeterImportTrace>) {
+                if ((start != it->beginUtcMs || finish != it->endUtcMs) &&
+                    (!it->importedKwh.numerator.zero() ||
+                     (it->apparentKvah && rule.apparent() && !it->apparentKvah->numerator.zero())))
+                    return ElectricityStatus::DemandWindowBoundary;
+            }
+            auto &part = selected.intervals.emplace_back(*it);
+            part.beginUtcMs = start;
+            part.endUtcMs = finish;
+        }
+        const auto status = measureDemand(rule, selected, left, peak, cancel, stop);
+        if (status != ElectricityStatus::Ok) return status;
     }
     return ElectricityStatus::Ok;
 }
@@ -468,7 +561,7 @@ bool calculateTaxes(const TariffPlan &p, const std::vector<TaxSlice> &slices, co
 }
 
 ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_t end, int64_t decision,bool accrual=false,
-                              std::vector<TaxSlice> *taxSlices=nullptr) {
+                              std::vector<TaxSlice> *taxSlices=nullptr, std::vector<DemandRange> *demand=nullptr) {
     if (!p.declared || !s.declared) return ElectricityStatus::Unavailable;
     const bool roundMeter = p.rounding == TariffRounding::MeterHalfHourKwhHalfEven2;
     if (p.unsupportedRules || (!roundMeter && p.rounding != TariffRounding::FinalDisplayOnly) ||
@@ -513,7 +606,8 @@ ElectricityStatus validatePlan(const TariffPlan &p, const BillOpening &s, int64_
         const auto status = validateExportRule(exportRule, decision);
         if (status != ElectricityStatus::Ok) return status;
     }
-    const auto demandStatus=validateDemand(p,s,end,decision);
+    std::vector<DemandRange> checkedDemand;
+    const auto demandStatus=validateDemand(p,s,end,decision,demand ? *demand : checkedDemand);
     if (demandStatus!=ElectricityStatus::Ok) return demandStatus;
     std::vector<TaxSlice> selectedTaxes;
     auto taxStatus = selectTaxPeriods(p, s, end, decision, selectedTaxes);
@@ -859,6 +953,17 @@ bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecim
     return true;
 }
 
+ElectricityStatus validateHistoricalDemandPeak(const CivilClock &clock,const DemandChargeRule &rule,
+                                               int64_t begin,int64_t end,bool positivePeak) {
+    if (rule.eligiblePeriods.empty()) return ElectricityStatus::Ok;
+    if (!rule.windowMinutes || !instant(begin) || !instant(end) || begin>=end || end-begin>370*dayMs)
+        return ElectricityStatus::Invalid;
+    std::vector<DemandRange> ranges;
+    const auto status=demandRanges(clock,rule,begin,end,ranges);
+    if (status!=ElectricityStatus::Ok) return status;
+    return positivePeak&&ranges.empty() ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
+}
+
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
                     ElectricityAmount &peak,ElectricityAmount &ratchetFloor) {
     if (opening.apparentDemand!=rule.apparent() || !opening.peakDemand) return false;
@@ -935,7 +1040,8 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         if (roundMeter) { result.status = ElectricityStatus::Unsupported; return result; }
     }
     std::vector<TaxSlice> taxSlices;
-    result.status = validatePlan(p,opening,end,decision,accrual,&taxSlices);
+    std::vector<DemandRange> demand;
+    result.status = validatePlan(p,opening,end,decision,accrual,&taxSlices,&demand);
     if (result.status != ElectricityStatus::Ok) return result;
     if (dailyFeeAllocation != DailyFeeAllocation::WholeDay &&
         (dailyFeeAllocation != DailyFeeAllocation::ProrateByCycleMinutes ||
@@ -979,7 +1085,10 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
     }
     ExactDecimal cost, billedQuantity, quantity = state.importedKwh.numerator;
     if (p.demandCharge) {
-        result.status=measureDemand(*p.demandCharge,trace,opening.throughUtcMs,*state.peakDemand,cancel,stop);
+        const auto &rule = *p.demandCharge;
+        result.status = rule.eligiblePeriods.empty()
+            ? measureDemand(rule, trace, opening.throughUtcMs, *state.peakDemand, cancel, stop)
+            : measureScheduledDemand(rule, trace, opening.throughUtcMs, end, demand, *state.peakDemand, cancel, stop);
         if (result.status!=ElectricityStatus::Ok) return result;
         ElectricityAmount nextBillable, openingBillable, floor;
         ExactDecimal increase, demandCharge;

@@ -307,8 +307,43 @@ window. Two loads considered together can increase the bill even when each alone
 within the existing peak.
 
 The peak resets at the declared cycle boundary. This covers fixtures T18–T20. Separate
-demand-reset calendars, eligible time bands and supplier qualification remain open.
+demand-reset calendars and supplier qualification remain open.
 The two-month monthly-average rule has no demand allocation.
+
+### Limit demand to eligible time periods
+
+With `demand_charge` selected, press **H** to add or remove eligibility periods. Open
+`eligible_periods` and edit its rows, then use the normal review and save. Adding
+periods writes declaration version 17. Removing the periods restores the all-day
+rule under the appropriate earlier schema. A change requires a new reviewed plan and
+opening. Mid-cycle openings use the established peak under the new schedule. A
+historical floor uses prior actual peaks measured under that schedule.
+
+Each row gives local start and end minutes in the plan clock, a weekday mask
+(Monday has value 1, all seven days are 127) and a month mask (January has value 1, all
+twelve months are 4095). The end is exclusive, with 1440 denoting midnight.
+For instance, minutes 960–1260 and weekday mask 31 cover 16:00–21:00 from
+Monday through Friday. Split overnight periods at midnight. Set `date` to an
+exact local date or leave it empty to repeat. Set `eligible` false to exclude
+the matched time. Exact-date rows override recurring rows over the time they
+match, and exclusions win among matches of the same specificity. Times with
+no match are ineligible.
+
+Only complete eligible windows contribute to the single maximum in each
+cycle. The UTC demand grid remains authoritative. A change in eligibility must
+fall on its boundary, including during daylight-saving changes. A repeated
+civil hour is evaluated for each actual window. A skipped hour has no
+measurement window. Nonzero cumulative readings must resolve each eligible
+window they intersect. Ineligible-only intervals may be aggregated if the
+energy pricing rules allow it. Average-power inputs keep the existing uniform
+load assumption.
+
+The `meter-bill` report names the use of declared eligibility and archives
+keep the schedule with the original meter input. The schedule changes the
+demand maximum. The meter's total import and its energy charges still cover
+all hours. This models one scheduled demand maximum per cycle. A supplier
+tariff can also use separate peaks, rounding and additional demand components,
+which require their own verified rules.
 
 ### Use a historical demand floor
 

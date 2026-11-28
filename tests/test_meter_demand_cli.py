@@ -28,6 +28,10 @@ def modeled(*intervals):
         {"begin_utc_ms": a, "end_utc_ms": b, "average_watts": power} for a, b, power in intervals
     ]}
 
+def eligible(begin, end, weekdays=127, months=4095, date=None, included=True):
+    return dict(begin_minute=begin, end_minute=end, weekday_mask=weekdays, month_mask=months,
+                date=date, eligible=included)
+
 
 def main(cli, bundle=None):
     with TemporaryDirectory(prefix="canary-demand-meter-") as directory:
@@ -78,6 +82,25 @@ def main(cli, bundle=None):
             totals(report, "8.000000", "53.000000")
             assert "Reviewed IANA time database 2026e" in report
             assert run("--open-review", "named.cmr") == report
+            policy["schema_version"] = 17
+            policy["demand_charge"]["eligible_periods"] = [eligible(60, 120)]
+            # Both occurrences of 01:00 are eligible. The following local hour is excluded.
+            folded = register([(begin, "0"), (begin + HOUR, "1"), (begin + 2 * HOUR, "5"),
+                               (begin + 3 * HOUR, "13"), (end, "40")])
+            report = review(policy, folded, end, archive="fold.cmr")
+            totals(report, "8.000000", "80.000000")
+            assert run("--open-review", "fold.cmr") == report
+
+            spring = utc("2024-03-10T06:00:00")
+            spring_end = spring + 2 * HOUR
+            policy = declaration(spring, spring_end, named("America/New_York"), minutes=60)
+            policy["schema_version"] = 17
+            policy["demand_charge"]["eligible_periods"] = [eligible(120, 180)]
+            # The complete local 02:00 hour does not exist.
+            totals(review(policy, register([(spring, "0"), (spring_end, "30")]), spring_end),
+                   "0.000000", "30.000000")
+            policy["demand_charge"]["eligible_periods"] = [eligible(120, 210)]
+            review(policy, modeled((spring, spring_end, "4000")), spring_end, error="saved tariff declaration")
         else:
             begin = utc("2024-01-01")
             cut, end = begin + 5 * MINUTE, begin + 15 * MINUTE
@@ -197,6 +220,73 @@ def main(cli, bundle=None):
             legacy["opening"].pop("peak_demand_kw")
             original = review(legacy, power, end)
             assert "Peak demand" not in original and "Cycle estimate at closing 1.000000 USD" in original
+            # Monday only, January only. Two aligned eligible windows from 00:30 to 01:00.
+            start_peak = begin + 30 * MINUTE
+            end_peak = begin + HOUR
+            after = begin + 2 * HOUR
+            scheduled = declaration(begin, after)
+            scheduled["schema_version"] = 17
+            scheduled["demand_charge"]["eligible_periods"] = [eligible(30, 60, 1, 1)]
+            readings = register([(begin, "0"), (start_peak, "8"), (start_peak + 15 * MINUTE, "9"),
+                                 (end_peak, "11"), (after, "31")])
+            report = review(scheduled, readings, after, archive="scheduled.cmr")
+            totals(report, "8.000000", "71.000000")
+            assert "Demand uses only windows in the declared eligibility periods" in report
+            assert run("--open-review", "scheduled.cmr") == report
+
+            # Uniform-power intervals can cross the boundary, unlike a nonzero register delta.
+            report = review(scheduled, modeled((begin, after, "4000")), after)
+            totals(report, "4.000000", "28.000000")
+            apparent = copy.deepcopy(scheduled)
+            apparent["demand_charge"]["rate_per_kva"] = apparent["demand_charge"].pop("rate_per_kw")
+            apparent["demand_charge"]["power_factor_va_places"] = None
+            apparent["opening"]["peak_demand_kva"] = apparent["opening"].pop("peak_demand_kw")
+            apparent_load = modeled((begin, after, "4000"))
+            apparent_load["schema_version"] = 4
+            apparent_load["intervals"][0]["average_va"] = "6000"
+            report = review(apparent, apparent_load, after)
+            assert "Peak demand 6.000000 kVA" in report and "Cycle estimate at closing 38.000000 USD" in report
+            review(scheduled, register([(begin, "0"), (end_peak, "11"), (after, "31")]), after,
+                   error=boundary)
+
+            holiday = copy.deepcopy(scheduled)
+            holiday["demand_charge"]["eligible_periods"].append(
+                eligible(0, 1440, date="2024-01-01", included=False))
+            totals(review(holiday, register([(begin, "0"), (after, "31")]), after),
+                   "0.000000", "31.000000")
+            redundant = copy.deepcopy(scheduled)
+            redundant["demand_charge"]["eligible_periods"].append(eligible(31, 47, 1, 1))
+            totals(review(redundant, readings, after), "8.000000", "71.000000")
+            out_of_month = copy.deepcopy(scheduled)
+            out_of_month["demand_charge"]["eligible_periods"] = [eligible(30, 60, 1, 2)]
+            totals(review(out_of_month, register([(begin, "0"), (after, "31")]), after),
+                   "0.000000", "31.000000")
+
+            unaligned = copy.deepcopy(scheduled)
+            unaligned["demand_charge"]["eligible_periods"] = [eligible(31, 60)]
+            review(unaligned, readings, after, error="saved tariff declaration")
+            excluded_opening = copy.deepcopy(scheduled)
+            excluded_opening["opening"].update(through_utc_ms=start_peak, imported_kwh="8",
+                                               accrued_subtotal="8", peak_demand_kw="1")
+            review(excluded_opening, modeled((start_peak, after, "4000")), after,
+                   error="saved tariff declaration")
+            excluded_opening["opening"]["peak_demand_kw"] = "0"
+            totals(review(excluded_opening, modeled((start_peak, after, "4000")), after),
+                   "4.000000", "34.000000")
+            full_opening = copy.deepcopy(excluded_opening)
+            full_opening["demand_charge"]["eligible_periods"] = [eligible(0, 1440)]
+            review(full_opening, modeled((start_peak, after, "4000")), after, error="saved tariff declaration")
+
+            history = declaration(begin, feb, reset={"monthly_day": 1, "clock": UTC})
+            history["schema_version"] = 17
+            history["plan"]["revisions"][0]["base_rate_per_kwh"] = "0"
+            history["demand_charge"].update(eligible_periods=[eligible(0, 1440, months=1)],
+                                            ratchet={"lookback_months": 1, "fraction": "0.8"})
+            history["opening"]["demand_history"] = [{"cycle_end_utc_ms": begin, "peak_kw": "5"}]
+            review(history, modeled((begin, feb, "1000")), feb, error="saved tariff declaration")
+            history["opening"]["demand_history"][0]["peak_kw"] = "0"
+            totals(review(history, modeled((begin, feb, "1000")), feb), "1.000000", "5.000000")
+
             for change in (
                 lambda x: x["demand_charge"].update(unit="kVA"),
                 lambda x: x["demand_charge"].update(rate_per_kw="-1"),
