@@ -132,7 +132,7 @@ bool nativeOctopusRateInvocation(const OctopusRateOptions &options, int argc, co
 const char *checkOctopusRateDeclaration(const TariffDeclaration &declaration) {
     const auto &plan = declaration.plan;
     if (!validOctopusRateProduct(plan.product)) return "tariff declaration is unsuitable for an Octopus rate import";
-    if (declaration.componentMultipliers || plan.demandCharge || !compatiblePlan(plan))
+    if (declaration.componentMultipliers || plan.hasDemand() || !compatiblePlan(plan))
         return plan.product.compare(0, 7, "GO-VAR-") == 0 ?
             "tariff declaration is unsuitable for an Octopus Go rate import" :
             "tariff declaration is unsuitable for an Octopus Agile rate import";

@@ -4,6 +4,7 @@
 #include "startup_config_service.h"
 #include "console_output_service.h"
 #include "civil_time.h"
+#include <algorithm>
 #include <chrono>
 #include <thread>
 int main(int argc,char **argv){using namespace om;
@@ -17,7 +18,7 @@ int main(int argc,char **argv){using namespace om;
         PreferencesService service;std::string input,output;size_t sent=0;bool first=true;
         while(channel.parentAlive()){
             if(!output.empty()){
-                const auto result=channel.send(output.data()+sent,output.size()-sent);
+                const auto result=channel.send(output.data()+sent,std::min<std::size_t>(4096,output.size()-sent));
                 if(result.status==DuplexTaskIO::Closed||result.status==DuplexTaskIO::Error)return 1;
                 if(result.status==DuplexTaskIO::Bytes){sent+=result.bytes;if(sent==output.size()){output.clear();sent=0;}}
             }else{

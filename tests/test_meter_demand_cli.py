@@ -32,6 +32,18 @@ def eligible(begin, end, weekdays=127, months=4095, date=None, included=True):
     return dict(begin_minute=begin, end_minute=end, weekday_mask=weekdays, month_mask=months,
                 date=date, eligible=included)
 
+def concurrent(value, second_rule):
+    value = copy.deepcopy(value)
+    value["schema_version"] = 18
+    value["demand_charges"] = [
+        {"key": "private-facility", "rule": value.pop("demand_charge")},
+        {"key": "private-time", "rule": copy.deepcopy(second_rule)},
+    ]
+    value["opening"]["demand_peaks"] = [
+        {"key": "private-facility", "peak": value["opening"].pop("peak_demand_kw")},
+        {"key": "private-time", "peak": "0"},
+    ]
+    return value
 
 def main(cli, bundle=None):
     with TemporaryDirectory(prefix="canary-demand-meter-") as directory:
@@ -82,6 +94,12 @@ def main(cli, bundle=None):
             totals(report, "8.000000", "53.000000")
             assert "Reviewed IANA time database 2026e" in report
             assert run("--open-review", "named.cmr") == report
+            both = concurrent(policy, dict(policy["demand_charge"], rate_per_kw="3",
+                                           eligible_periods=[eligible(60, 120)]))
+            report = review(both, readings, end, archive="concurrent-fold.cmr")
+            totals(report, "8.000000", "77.000000")
+            assert "Combined demand charge before subtotal multiplier 64.000000 USD" in report
+            assert run("--open-review", "concurrent-fold.cmr") == report
             policy["schema_version"] = 17
             policy["demand_charge"]["eligible_periods"] = [eligible(60, 120)]
             # Both occurrences of 01:00 are eligible. The following local hour is excluded.
@@ -286,6 +304,94 @@ def main(cli, bundle=None):
             review(history, modeled((begin, feb, "1000")), feb, error="saved tariff declaration")
             history["opening"]["demand_history"][0]["peak_kw"] = "0"
             totals(review(history, modeled((begin, feb, "1000")), feb), "1.000000", "5.000000")
+
+            close = begin + HOUR
+            quarters = [begin + i * 15 * MINUTE for i in range(5)]
+            multiple = concurrent(declaration(begin, close, minutes=30), dict(
+                window_minutes=15, offset_minutes=0, published_utc_ms=begin, rate_per_kw="3",
+                eligible_periods=[eligible(15, 45)]))
+            quarterly = modeled(*zip(quarters, quarters[1:], ("12000", "4000", "2000", "10000")))
+            register_points = list(zip(quarters, ("0", "3", "4", "4.5", "7")))
+            report = review(multiple, quarterly, close, archive="concurrent.cmr")
+            totals(report, "8.000000", "59.000000")
+            assert "Peak demand 4.000000 kW" in report and "Imported usage 7.000000 kWh" in report
+            assert "Combined demand charge before subtotal multiplier 52.000000 USD" in report
+            assert "private-facility" not in report and "private-time" not in report
+            assert run("--open-review", "concurrent.cmr") == report
+            cumulative = review(multiple, register(register_points), close)
+            assert cumulative[cumulative.index("\nCycle "):] == report[report.index("\nCycle "):]
+            review(multiple, register(register_points[:1] + register_points[2:]), close, error=boundary)
+
+            existing = copy.deepcopy(multiple)
+            existing["opening"].update(through_utc_ms=quarters[2], imported_kwh="4", accrued_subtotal="4",
+                                       demand_peaks=[{"key": "private-time", "peak": "4"},
+                                                     {"key": "private-facility", "peak": "8"}])
+            report = review(existing, register(register_points[2:]), close)
+            totals(report, "8.000000", "59.000000")
+            assert "Change from imported readings 3.000000 USD" in report
+            contradicts = copy.deepcopy(existing)
+            contradicts["demand_charges"][0]["rule"]["window_minutes"] = 15
+            contradicts["opening"]["demand_peaks"][0]["peak"] = "9"
+            review(contradicts, register(register_points[2:]), close, error="saved tariff declaration")
+            disjoint = copy.deepcopy(existing)
+            disjoint["demand_charges"][0]["rule"].update(window_minutes=15, eligible_periods=[eligible(0, 15)])
+            disjoint["demand_charges"][1]["rule"]["eligible_periods"] = [eligible(15, 30)]
+            disjoint["opening"].update(imported_kwh="3", accrued_subtotal="3")
+            for state in disjoint["opening"]["demand_peaks"]:
+                state["peak"] = "8"
+            review(disjoint, register(register_points[2:]), close, error="saved tariff declaration")
+            disjoint["opening"].update(imported_kwh="4", accrued_subtotal="4")
+            report = review(disjoint, register(register_points[2:]), close)
+            totals(report, "8.000000", "71.000000")
+            taxed = copy.deepcopy(existing)
+            taxed["plan"]["tax_periods"] = [dict(
+                begin_utc_ms=begin, end_utc_ms=close, published_utc_ms=begin,
+                rules=[dict(key="tax-demand", kind="fraction", rate="0.1",
+                            components=["demand"], included_in=[], prior_taxes=[])])]
+            taxed["opening"]["tax_bases"] = dict(energy="4", daily_fee="0", cycle_fee="0", demand="52", billed_kwh="0")
+            report = review(taxed, register(register_points[2:]), close, archive="concurrent-tax.cmr")
+            assert "Cycle estimate at closing 64.200000 USD" in report
+            assert run("--open-review", "concurrent-tax.cmr") == report
+            taxed["opening"]["tax_bases"]["demand"] = "40"
+            review(taxed, register(register_points[2:]), close, error="saved tariff declaration")
+
+            mixed = copy.deepcopy(multiple)
+            second = mixed["demand_charges"][1]["rule"]
+            second["rate_per_kva"] = second.pop("rate_per_kw")
+            second["power_factor_va_places"] = None
+            review(mixed, quarterly, close, error="apparent")
+            apparent_quarters = copy.deepcopy(quarterly)
+            apparent_quarters["schema_version"] = 4
+            for row, va in zip(apparent_quarters["intervals"], ("16000", "6000", "3500", "15000")):
+                row["average_va"] = va
+            report = review(mixed, apparent_quarters, close)
+            assert "Peak demand 6.000000 kVA" in report and "Cycle estimate at closing 65.000000 USD" in report
+            march = utc("2024-03-01")
+            monthly = concurrent(declaration(begin, feb, reset={"monthly_day": 1, "clock": UTC}, rates_end=march),
+                                 multiple["demand_charges"][1]["rule"])
+            monthly["plan"]["revisions"][0]["base_rate_per_kwh"] = "0"
+            for item, state, peak in zip(monthly["demand_charges"], monthly["opening"]["demand_peaks"], ("20", "12")):
+                item["rule"]["ratchet"] = {"lookback_months": 1, "fraction": "0.5"}
+                state["history"] = [{"cycle_end_utc_ms": begin, "peak_kw": peak}]
+            report = review(monthly, modeled((begin, feb, "6000"), (feb, march, "2000")), march,
+                            archive="concurrent-months.cmr")
+            assert "Cycle estimate at closing 68.000000 USD" in report
+            assert "Cycle estimate at closing 24.000000 USD" in report
+            assert run("--open-review", "concurrent-months.cmr") == report
+            monthly["opening"]["demand_peaks"][1]["history"][0]["peak_kw"] = "21"
+            review(monthly, modeled((begin, feb, "6000"), (feb, march, "2000")), march, error="saved tariff declaration")
+
+            for change in (
+                lambda x: x.update(schema_version=17),
+                lambda x: x.update(demand_charge=x["demand_charges"][0]["rule"]),
+                lambda x: x["demand_charges"][1].update(key="private-facility"),
+                lambda x: x["opening"]["demand_peaks"][1].update(key="private-facility"),
+                lambda x: x["opening"]["demand_peaks"].pop(),
+                lambda x: x["demand_charges"][1]["rule"].update(eligible_periods=[eligible(16, 45)]),
+            ):
+                invalid = copy.deepcopy(multiple)
+                change(invalid)
+                review(invalid, quarterly, close, error="saved tariff declaration")
 
             for change in (
                 lambda x: x["demand_charge"].update(unit="kVA"),

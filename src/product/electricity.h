@@ -91,7 +91,7 @@ struct DemandRatchet {
     unsigned lookbackMonths = 0;
     ExactDecimal fraction;
 };
-inline constexpr size_t maxDemandPeriods = 16;
+inline constexpr size_t maxDemandPeriods = 16, maxDemandCharges = 8;
 struct DemandPeriod {
     unsigned beginMinute = 0, endMinute = 1440, weekdayMask = 127, monthMask = 4095;
     std::optional<CivilDate> date{};
@@ -111,6 +111,15 @@ struct DemandChargeRule {
     bool charge(const ElectricityAmount &peak, ElectricityAmount *out) const {
         return peak.numerator.multiply(ratePerUnit, &out->numerator);
     }
+};
+struct NamedDemandCharge {
+    std::string key;
+    DemandChargeRule rule;
+};
+struct NamedDemandOpening {
+    std::string key;
+    ElectricityAmount peak;
+    std::vector<ElectricityAmount> history{};
 };
 struct ExportPaymentRule {
     int64_t publishedUtcMs = 0;
@@ -155,6 +164,10 @@ struct TariffPlan {
     bool restrictedCreditAtClose = false;
     std::vector<TariffTaxPeriod> taxPeriods{};
     bool taxByServiceTime = false;
+    std::vector<NamedDemandCharge> demandCharges{};
+    bool hasDemand() const { return demandCharge || !demandCharges.empty(); }
+    const DemandChargeRule *apparentDemandRule() const;
+    bool hasDemandHistory() const;
 };
 struct BillTaxOpening {
     std::array<ElectricityAmount, taxComponentCount - 1> components;
@@ -205,14 +218,21 @@ struct BillOpening {
     std::optional<BillRestrictedCreditOpening> restrictedCredit{};
     std::optional<BillTaxOpening> tax{};
     std::optional<std::vector<BillTaxSegment>> taxSegments{};
+    std::vector<NamedDemandOpening> demandOpenings{};
 };
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
                                    const ExactDecimal &factor,ExactDecimal &voltAmps);
 ElectricityStatus validateHistoricalDemandPeak(const CivilClock &clock,const DemandChargeRule &rule,
                                                int64_t begin,int64_t end,bool positivePeak);
+ElectricityStatus validateDemandHistoryMonth(const TariffPlan &plan,const BillOpening &opening,
+                                             size_t monthsBack,int64_t begin,int64_t end);
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
                     ElectricityAmount &peak,ElectricityAmount &ratchetFloor);
+bool billableDemand(const DemandChargeRule &rule, const ElectricityAmount &measured,
+                    const std::vector<ElectricityAmount> &history,
+                    ElectricityAmount &peak, ElectricityAmount &ratchetFloor);
+bool demandSubtotal(const TariffPlan &plan, const BillOpening &opening, ElectricityAmount &amount);
 struct BillEstimate {
     ElectricityStatus status = ElectricityStatus::Unavailable;
     std::optional<ElectricityAmount> charge;

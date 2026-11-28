@@ -134,9 +134,7 @@ class TariffComparisonSettings {
     std::shared_ptr<Job> job_;
 
     const DemandChargeRule *apparentRule() const {
-        if (!declaration_ || !declaration_->plan.demandCharge || !declaration_->plan.demandCharge->apparent())
-            return nullptr;
-        return &*declaration_->plan.demandCharge;
+        return declaration_ ? declaration_->plan.apparentDemandRule() : nullptr;
     }
 
     static bool parsePower(const std::string &text, ExactDecimal &value, bool signedNet=false) {
