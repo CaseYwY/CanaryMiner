@@ -98,6 +98,19 @@ int main(int argc, char **argv) {
     if (module.empty()) return 2;
     std::string mode;
     std::ifstream(module.parent_path() / "sample-lifetime-mode") >> mode;
+    if (mode == "identity-pacing" || mode == "identity-pacing-deadline") {
+        const auto fetch = om::marketProcessFetch(om::installedPublicTickerHelper(module));
+        const std::atomic<bool> cancel{false};
+        if (mode == "identity-pacing-deadline") {
+            const auto reply = fetch({om::PublicFeed::GatePearlTicker}, cancel, {500, 500});
+            return reply.status == om::PublicHttpsStatus::Timeout ? 0 : 5;
+        }
+        for (int i = 0; i < 2; ++i) {
+            const auto reply = fetch({om::PublicFeed::GatePearlTicker}, cancel, {});
+            if (reply.status != om::PublicHttpsStatus::Ok) return 6;
+        }
+        return 0;
+    }
     const auto epoch = om::nativeProcessEpoch();
     if (mode == "stale") advanceEpoch();
 #if defined(__linux__)

@@ -160,7 +160,7 @@ def main(cli_path, fixture, capable):
         identity_scenario.write_text('budget', encoding='ascii')
         shared_budget = run(allow)
         assert shared_budget.returncode == 0 and 'Latest PRL/USD reference: 2.45' in shared_budget.stdout
-        assert 0 < int((install / 'ticker-budget').read_text()) <= int((install / 'identity-budget').read_text()) - 150
+        assert 0 < int((install / 'ticker-budget').read_text()) <= int((install / 'identity-budget').read_text()) - 1150
         assert_requests(['0', '2'])
         assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
         identity_requests.unlink()

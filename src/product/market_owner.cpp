@@ -21,6 +21,7 @@ using namespace market_detail;
 constexpr auto krakenHourFeed = static_cast<unsigned>(PublicFeed::KrakenUsdtCandles);
 constexpr auto pearlHourFeed = static_cast<unsigned>(PublicFeed::MexcPearlHour);
 constexpr auto fxHourFeed = static_cast<unsigned>(PublicFeed::CoinbaseUsdtHour);
+constexpr unsigned providerSpacingMs = 1000;
 uint64_t later(uint64_t now, uint64_t delay) { return delay > UINT64_MAX - now ? UINT64_MAX : now + delay; }
 bool tradeFeed(PublicFeed feed) { return feed==PublicFeed::GatePearlTrades || feed==PublicFeed::KrakenUsdtTrades; }
 std::optional<PublicFeed> marketIdentityFeed(PublicFeed feed) {
@@ -58,6 +59,32 @@ bool marketIdentityMatches(PublicFeed feed, const std::string &body) {
         textIs(symbol, "quoteAsset", "USDT") && textIs(symbol, "status", "1") &&
         boolIs(symbol, "isSpotTradingAllowed", true);
 }
+
+struct MarketProcessFetchState {
+    explicit MarketProcessFetchState(std::filesystem::path helper) : client(std::move(helper)) {}
+
+    PublicJsonResponse sample(const PublicJsonRequest &request, const std::atomic<bool> &cancel,
+                              const PublicHttpsLimits &limits, uint64_t epoch, size_t provider) {
+        using Clock = std::chrono::steady_clock;
+        auto &next = nextProviderRequest[provider];
+        for (;;) {
+            if (!nativeProcessEpochCurrent(epoch)) return marketSampleFailure(PublicHttpsStatus::Unreaped);
+            if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
+            const auto now = Clock::now();
+            if (now >= limits.parentDeadline) return marketSampleFailure(PublicHttpsStatus::Timeout);
+            if (now >= next) break;
+            const auto remaining = (std::min)(next, limits.parentDeadline) - now;
+            std::this_thread::sleep_for((std::min)(remaining, Clock::duration(std::chrono::milliseconds(25))));
+        }
+        auto reply = client.get(request, cancel, limits);
+        next = Clock::now() + std::chrono::milliseconds(providerSpacingMs);
+        return reply;
+    }
+
+    PublicJsonProcessClient client;
+    std::mutex mutex;
+    std::array<std::chrono::steady_clock::time_point, 2> nextProviderRequest{};
+};
 unsigned index(PublicFeed feed) {
     if (feed==PublicFeed::GatePearlTrades) return 0;
     if (feed==PublicFeed::KrakenUsdtTrades) return 2;
@@ -114,11 +141,13 @@ bool validMarketPollingPolicy(const MarketPollingPolicy &p) {
         p.https.bodyBytes > 0 && p.https.bodyBytes <= 1024 * 1024 && p.https.headerBytes >= 64 && p.https.headerBytes <= 32768;
 }
 MarketFetch marketProcessFetch(std::filesystem::path helper) {
-    auto client = std::make_shared<PublicJsonProcessClient>(std::move(helper));
-    return [client](const PublicJsonRequest &request, const std::atomic<bool> &cancel, PublicHttpsLimits limits) {
+    auto state = std::make_shared<MarketProcessFetchState>(std::move(helper));
+    return [state](const PublicJsonRequest &request, const std::atomic<bool> &cancel, PublicHttpsLimits limits) {
+        if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
+        std::unique_lock<std::mutex> lock(state->mutex, std::try_to_lock);
+        if (!lock) return marketSampleFailure(PublicHttpsStatus::Busy);
         const auto identity = marketIdentityFeed(request.feed);
         if (identity) {
-            if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
             std::string url;
             if (!publicFeedUrl(request, &url)) return marketSampleFailure(PublicHttpsStatus::InvalidRequest);
             const auto epoch = nativeProcessAdmissionEpoch();
@@ -127,7 +156,8 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
                 std::chrono::steady_clock::now() + std::chrono::milliseconds(limits.totalMs));
             auto metadataLimits = limits;
             metadataLimits.bodyBytes = (std::min)(limits.bodyBytes, size_t{16384});
-            auto metadata = client->get({*identity}, cancel, metadataLimits);
+            const size_t provider = *identity == PublicFeed::GatePearlAsset ? 0 : 1;
+            auto metadata = state->sample({*identity}, cancel, metadataLimits, epoch, provider);
             if (metadata.status != PublicHttpsStatus::Ok) return metadata;
             const bool verified = marketIdentityMatches(*identity, metadata.body);
             if (!nativeProcessEpochCurrent(epoch)) return marketSampleFailure(PublicHttpsStatus::Unreaped);
@@ -139,9 +169,9 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
                 failure.httpStatus = metadata.httpStatus;
                 return failure;
             }
-            return client->get(request, cancel, limits);
+            return state->sample(request, cancel, limits, epoch, provider);
         }
-        return client->get(request, cancel, limits);
+        return state->client.get(request, cancel, limits);
     };
 }
 bool MarketPollingPlan::start(uint64_t generation, uint64_t ms, uint64_t utc, const MarketPollingPolicy &policy, bool fixture) {
@@ -235,7 +265,7 @@ std::optional<MarketFetchTicket> MarketPollingPlan::next(uint64_t ms, uint64_t u
         lastFallbackEnd_ = pendingFallbackEnd_;
     }
     h.inFlight = true;
-    providerDue_[provider(choice)] = later(ms, 1000);  // shared endpoint/IP budget; never evade with concurrency
+    providerDue_[provider(choice)] = later(ms, providerSpacingMs);  // shared endpoint/IP budget; never evade with concurrency
     current_ = ticket; return ticket;
 }
 bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJsonResponse &r, MarketDataStatus data,

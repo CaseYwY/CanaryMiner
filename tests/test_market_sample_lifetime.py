@@ -34,6 +34,26 @@ def main(cli, worker):
         )
         (root / "reward-response.json").write_text(json.dumps(status(PUBLIC_HEIGHT, int(time.time()) - 1)), encoding="ascii")
         (root / "reward-indexed.json").write_text(json.dumps({"blockHash": TIP_HASH}), encoding="ascii")
+        (root / "sample-lifetime-mode").write_text("identity-pacing", encoding="ascii")
+        (root / "identity-scenario").write_text("pacing", encoding="ascii")
+        paced = subprocess.run([fixture, "market-tickers", "--allow-public-tickers"], cwd=root,
+                               capture_output=True, text=True, timeout=8)
+        if paced.returncode == 77:
+            return 77
+        assert paced.returncode == 0 and not paced.stdout and not paced.stderr, paced
+        attempts = [line.split() for line in (root / "market-attempts").read_text().splitlines()]
+        assert [feed for feed, _ in attempts] == ["12", "0", "12", "0"], attempts
+        times = [int(stamp) for _, stamp in attempts]
+        assert all(b - a >= 1000 for a, b in zip(times, times[1:])), times
+        (root / "identity-scenario").unlink()
+        (root / "identity-requests").unlink()
+        (root / "ticker-requests").unlink()
+        (root / "sample-lifetime-mode").write_text("identity-pacing-deadline", encoding="ascii")
+        expired = subprocess.run([fixture, "market-tickers", "--allow-public-tickers"], cwd=root,
+                                  capture_output=True, text=True, timeout=4)
+        assert expired.returncode == 0 and not expired.stdout and not expired.stderr, expired
+        assert (root / "identity-requests").read_text().splitlines() == ["12"]
+        assert not (root / "ticker-requests").exists()
         cases += (("market-reward", ["--allow-public-reward", "--save-review", "capture.cmr"],
                    "reward-requests", ["6", "9", "6"], "tip verified across three requests"),)
         for command, args, log, feeds, expected_report in cases:

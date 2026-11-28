@@ -68,6 +68,12 @@ int sendReceipt(const om::PublicJsonResponse &response) {
     return std::fwrite(wire.data(), 1, wire.size(), stdout) == wire.size() && std::fflush(stdout) == 0 ? 0 : 7;
 }
 
+void recordMarketStart(const std::filesystem::path &dir, std::string_view feed) {
+    const auto stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    std::ofstream(dir / "market-attempts", std::ios::app) << feed << ' ' << stamp << '\n';
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -99,6 +105,7 @@ int main(int argc, char **argv) {
     if (gateIdentity || mexcIdentity) {
         std::string mode;
         std::ifstream(dir / "identity-scenario") >> mode;
+        if (mode == "pacing") recordMarketStart(dir, feed);
         std::ofstream log(dir / "identity-requests", std::ios::app);
         log << feed;
         if (argc == 9) log << ' ' << argv[8];
@@ -237,6 +244,7 @@ int main(int argc, char **argv) {
     } else if (feed == "0") {
         std::string identityMode;
         std::ifstream(dir / "identity-scenario") >> identityMode;
+        if (identityMode == "pacing") recordMarketStart(dir, feed);
         if (identityMode == "budget") std::ofstream(dir / "ticker-budget") << argv[5] << '\n';
         response.body = R"([{"currency_pair":"PEARL_USDT","last":"2.50"}])";
         if (mode == "future") response.observedUtc += 3600;
