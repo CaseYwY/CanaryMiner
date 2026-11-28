@@ -1,6 +1,7 @@
 // Actual inherited local helper + owned synthetic preference files. No production miner, device, game, provider or network.
 #include "product/preferences_protocol.h"
 #include "product/duplex_task_process.h"
+#include "product/pool_security_preferences.h"
 #include "product/tariff_declaration.h"
 #include "product_test_util.h"
 #include <atomic>
@@ -58,6 +59,19 @@ int main(int argc,char **argv){using namespace om;if(argc!=2)return 2;
     request={};request.ticket=++ticket;CHECK(exchange(process,request,&reply)&&reply.status==PreferencesReplyStatus::Loaded);const auto review=reply.review;
     request={};request.ticket=++ticket;request.operation=PreferencesOperation::Save;request.review=review;request.document=documents[0];
     CHECK(exchange(process,request,&reply)&&reply.status==PreferencesReplyStatus::Saved&&read(fs::u8path(paths[0]))==documents[0]);
+
+    // Successful native Save and Load replies both cross a transport chunk boundary.
+    PoolSecurityPreferences large;
+    const auto host=std::string(60,'a')+"."+std::string(60,'b')+"."+std::string(60,'c')+"."+std::string(40,'d')+".invalid";
+    large.users.assign(8,{PoolSecurityMode::PreferTls,"stratum+ssl://"+host+":443","stratum+tcp://"+host+":444",true});
+    large.donation=large.users.front();
+    documents[5]=poolSecurityPreferencesJson(large);
+    CHECK(documents[5].size()>4096&&validPoolSecurityPreferences(large));
+    request={};request.ticket=++ticket;request.kind=PreferencesKind::Pool;request.operation=PreferencesOperation::Save;
+    request.review=reviews[5];request.document=documents[5];
+    CHECK(exchange(process,request,&reply)&&reply.status==PreferencesReplyStatus::Saved&&reply.document==documents[5]);
+    request={};request.ticket=++ticket;request.kind=PreferencesKind::Pool;
+    CHECK(exchange(process,request,&reply)&&reply.status==PreferencesReplyStatus::Loaded&&reply.document==documents[5]);
     process.requestStop();CHECK(process.terminate(1000));
     for(unsigned i=0;i<8;++i)CHECK(read(fs::u8path(paths[i]))==documents[i]);
     return finishTests("actual local preference helper, all eight stores, partial frames and conservative unknown/reopen");
