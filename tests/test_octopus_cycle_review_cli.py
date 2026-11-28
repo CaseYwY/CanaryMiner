@@ -685,6 +685,22 @@ def main(cli, bundle, clock_fixture=None):
         original_seed.rename(canonical_seed)
         run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, code=3,
             reason='canonical cycle archive does not match the selected seed')
+        run('--open-review', alternate_seed, '--invoice', seed_invoice, '--save-review', seed_comparison.name,
+            cwd=alternate_workspace, code=3, reason='canonical cycle archive does not match the selected seed')
+        run('--open-review', canonical_seed, '--invoice', seed_invoice, '--save-review', seed_comparison.name,
+            code=3, reason="original archive's workspace")
+        run('--open-review', canonical_seed, '--invoice', seed_invoice, '--save-review', f'cycle-{may}.compared.cmr',
+            cwd=alternate_workspace, code=3, reason='recurring comparison filename must match')
+        run('--open-review', canonical_seed, '--invoice', seed_invoice, '--save-review',
+            f'CYCLE-{april}.compared.cmr', cwd=alternate_workspace, code=3, reason='lowercase recurring archive name')
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--invoice', seed_invoice,
+            '--save-review', seed_comparison.name, cwd=alternate_workspace, code=3,
+            reason='a recurring comparison requires an invoice attached to a saved cycle')
+        inputs(current)
+        run('--next-cycle-review', alternate_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', first_archive.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='canonical cycle archive does not match the selected seed')
+        assert not (alternate_workspace / first_archive.name).exists()
         assert not seed_comparison.exists()
         assert (canonical_seed.read_bytes(), alternate_seed.read_bytes()) == originals
         canonical_seed.rename(original_seed)
@@ -707,14 +723,53 @@ def main(cli, bundle, clock_fixture=None):
         mislabeled.unlink()
         inputs(current)
         run('--next-cycle-review', original_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', second_archive.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='recurring archive filename must match')
+        run('--next-cycle-review', original_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', f'CYCLE-{may}.cmr', '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='lowercase recurring archive name')
+        run('--next-cycle-review', original_seed, '--tariff', tariff, '--intervals', readings,
             '--octopus-rates', rates, '--save-review', first_archive.name, '--as-of-utc-ms', may + HOUR,
             cwd=alternate_workspace)
+        selected_successor = alternate_workspace / first_archive.name
+        held_successor = selected_successor.with_suffix('.cmr.held')
         run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, code=3,
             reason='successor does not match the previous closing record')
+        run('--open-review', alternate_seed, '--invoice', seed_invoice, '--save-review', seed_comparison.name,
+            cwd=alternate_workspace, code=3, reason='successor does not match the previous closing record')
+        inputs(previous)
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--save-review', canonical_seed.name,
+            '--as-of-utc-ms', april + 2 * HOUR, cwd=alternate_workspace, code=3,
+            reason='successor does not match the previous closing record')
+        assert not canonical_seed.exists()
+        inputs(current)
         assert not seed_comparison.exists()
+        if clock_fixture:
+            selected_successor.rename(held_successor)
+            publishing = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                              CANARY_TEST_PUBLISH_ON_INVOICE_INPUT=str(seed_invoice),
+                              CANARY_TEST_PUBLISH_SUCCESSOR_ON_INVOICE=str(selected_successor))
+            run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, env=publishing, code=3,
+                reason='a successor archive appeared before invoice publication')
+            assert selected_successor.exists() and not held_successor.exists() and not seed_comparison.exists()
         assert '1 saved, 0 already compared, 1 without a staged invoice' in run(
             '--reconcile-invoices', original_seed, cwd=alternate_workspace)
         assert seed_comparison.is_file() and (original_seed.read_bytes(), alternate_seed.read_bytes()) == originals
+        selected_successor.rename(held_successor)
+        run('--next-cycle-review', alternate_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', selected_successor.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='late invoice review does not match the original cycle inputs')
+        assert not selected_successor.exists() and not selected_successor.with_suffix('.cmr.tmp').exists()
+        selected_successor.with_suffix('.readings.json').write_bytes(readings.read_bytes())
+        selected_successor.with_suffix('.rates.json').write_bytes(rates.read_bytes())
+        run('--roll-forward', alternate_seed, '--as-of-utc-ms', may + HOUR, cwd=alternate_workspace, code=3,
+            reason='late invoice review does not match the original cycle inputs')
+        assert not selected_successor.exists() and not selected_successor.with_suffix('.cmr.tmp').exists()
+        held_successor.rename(selected_successor)
+        inputs(previous)
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--save-review', canonical_seed.name,
+            '--as-of-utc-ms', april + HOUR, cwd=alternate_workspace)
+        assert canonical_seed.read_bytes() == originals[0]
 
         assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
         run('--roll-forward', old, '--as-of-utc-ms', may + HOUR, code=3, reason='newer than the requested cutoff')
@@ -792,6 +847,8 @@ def main(cli, bundle, clock_fixture=None):
                 assert output.read_text(encoding='ascii').count('waiting for complete meter readings') == 1
                 run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
                 run('--reconcile-invoices', watched_seed, cwd=watched, code=3, reason='workspace is busy')
+                run('--next-cycle-review', watched_seed, '--intervals', readings, '--octopus-rates', rates,
+                    '--save-review', first_target.name, cwd=watched, code=3, reason='workspace is busy')
                 if os.name != 'nt':
                     (watched / 'meter-billing.lock').unlink()
                     run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')

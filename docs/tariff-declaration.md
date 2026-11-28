@@ -805,8 +805,12 @@ chain stay staged until their meter reviews exist. If a cycle or invoice fails v
 already saved by this run stay available and the error reports the saved count. Correct the reported
 problem and rerun to resume. The same replay limit as cycle history applies.
 
-This command uses the recurring workspace lease. Run it when the watcher is stopped. It works offline
-with locally reviewed invoices.
+This command shares the workspace lease with the watcher and with single-cycle commands that save
+to the recurring archive names. Run it when the watcher is stopped. It works offline with locally
+reviewed invoices. New cycle archives must agree with any comparisons already saved for them or
+their predecessor.
+The reserved recurring filenames use lowercase and the cycle's verified closing time. To save a
+single comparison under a reserved name, attach the invoice to a saved cycle in the same workspace.
 
 #### Watch for new billing inputs
 
