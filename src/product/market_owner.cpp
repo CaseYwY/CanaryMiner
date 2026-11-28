@@ -3,6 +3,7 @@
 #include "market_public_sample.h"
 #include "public_json_process.h"
 #include "native_process_admission.h"
+#include "json_dom.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -22,6 +23,41 @@ constexpr auto pearlHourFeed = static_cast<unsigned>(PublicFeed::MexcPearlHour);
 constexpr auto fxHourFeed = static_cast<unsigned>(PublicFeed::CoinbaseUsdtHour);
 uint64_t later(uint64_t now, uint64_t delay) { return delay > UINT64_MAX - now ? UINT64_MAX : now + delay; }
 bool tradeFeed(PublicFeed feed) { return feed==PublicFeed::GatePearlTrades || feed==PublicFeed::KrakenUsdtTrades; }
+std::optional<PublicFeed> marketIdentityFeed(PublicFeed feed) {
+    switch (feed) {
+        case PublicFeed::GatePearlTicker:
+        case PublicFeed::GatePearlTrades:
+        case PublicFeed::GatePearlCandles: return PublicFeed::GatePearlAsset;
+        case PublicFeed::MexcPearlHour: return PublicFeed::MexcPearlPair;
+        default: return std::nullopt;
+    }
+}
+
+bool marketIdentityMatches(PublicFeed feed, const std::string &body) {
+    JsonValue root;
+    if (!parseJsonStrict(body, &root, nullptr, {16384, 64}) || !root.isObject()) return false;
+    const auto textIs = [](const JsonValue &obj, const char *field, std::string_view expected) {
+        const auto *value = obj.find(field);
+        return value && value->isString() && value->text == expected;
+    };
+    const auto boolIs = [](const JsonValue &obj, const char *field, bool expected) {
+        const auto *value = obj.find(field);
+        return value && value->isBool() && value->boolean == expected;
+    };
+    if (feed == PublicFeed::GatePearlAsset) {
+        const auto *chains = root.find("chains");
+        return textIs(root, "currency", "PEARL") && textIs(root, "name", "Pearl") &&
+            textIs(root, "chain", "PEARL") && boolIs(root, "delisted", false) &&
+            boolIs(root, "trade_disabled", false) && chains && chains->isArray() && chains->items.size() == 1 &&
+            textIs(chains->items.front(), "name", "PEARL") && textIs(chains->items.front(), "addr", "");
+    }
+    const auto *symbols = root.find("symbols");
+    if (!symbols || !symbols->isArray() || symbols->items.size() != 1) return false;
+    const auto &symbol = symbols->items.front();
+    return textIs(symbol, "symbol", "PEARLUSDT") && textIs(symbol, "baseAsset", "PEARL") &&
+        textIs(symbol, "quoteAsset", "USDT") && textIs(symbol, "status", "1") &&
+        boolIs(symbol, "isSpotTradingAllowed", true);
+}
 unsigned index(PublicFeed feed) {
     if (feed==PublicFeed::GatePearlTrades) return 0;
     if (feed==PublicFeed::KrakenUsdtTrades) return 2;
@@ -80,6 +116,31 @@ bool validMarketPollingPolicy(const MarketPollingPolicy &p) {
 MarketFetch marketProcessFetch(std::filesystem::path helper) {
     auto client = std::make_shared<PublicJsonProcessClient>(std::move(helper));
     return [client](const PublicJsonRequest &request, const std::atomic<bool> &cancel, PublicHttpsLimits limits) {
+        const auto identity = marketIdentityFeed(request.feed);
+        if (identity) {
+            if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
+            std::string url;
+            if (!publicFeedUrl(request, &url)) return marketSampleFailure(PublicHttpsStatus::InvalidRequest);
+            const auto epoch = nativeProcessAdmissionEpoch();
+            const NativeProcessScope scope(epoch);
+            limits.parentDeadline = (std::min)(limits.parentDeadline,
+                std::chrono::steady_clock::now() + std::chrono::milliseconds(limits.totalMs));
+            auto metadataLimits = limits;
+            metadataLimits.bodyBytes = (std::min)(limits.bodyBytes, size_t{16384});
+            auto metadata = client->get({*identity}, cancel, metadataLimits);
+            if (metadata.status != PublicHttpsStatus::Ok) return metadata;
+            const bool verified = marketIdentityMatches(*identity, metadata.body);
+            if (!nativeProcessEpochCurrent(epoch)) return marketSampleFailure(PublicHttpsStatus::Unreaped);
+            if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
+            if (std::chrono::steady_clock::now() >= limits.parentDeadline)
+                return marketSampleFailure(PublicHttpsStatus::Timeout);
+            if (!verified) {
+                auto failure = marketSampleFailure(PublicHttpsStatus::AssetIdentity);
+                failure.httpStatus = metadata.httpStatus;
+                return failure;
+            }
+            return client->get(request, cancel, limits);
+        }
         return client->get(request, cancel, limits);
     };
 }
@@ -347,6 +408,14 @@ struct MarketDataOwner::Impl {
                         std::lock_guard<std::mutex> commit(commitMutex);
                         if (!nativeCurrent()||cancel.load()) break;
                         if (plan.complete(*ticket, response, status, now.first, now.second, notBefore)) {
+                            const bool metadataMismatch = response.status == PublicHttpsStatus::AssetIdentity;
+                            if (metadataMismatch && feed == pearlHourFeed) current.pearlHour.reset();
+                            if ((metadataMismatch || status == MarketDataStatus::Identity) &&
+                                marketIdentityFeed(ticket->request.feed) == PublicFeed::GatePearlAsset) {
+                                current.pearlTrade.reset();
+                                current.pearlQuote.reset();
+                                current.pearlCandles.reset();
+                            }
                             if (quote.value) {
                                 if (ticket->request.feed == PublicFeed::GatePearlTicker) current.pearlQuote = std::move(quote.value);
                                 else current.fxQuote = std::move(quote.value);

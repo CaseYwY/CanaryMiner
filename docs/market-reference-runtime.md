@@ -45,6 +45,14 @@ nor a supplied public factory, the manual display follows its saved settings.
 one-hour evidence separately, and the use/deployment status. The review is read-only and works with `--no-market`.
 The manual reference editor keeps its own entry and save target.
 
+### Check the provider asset before sampling
+
+Gate lists Pearl mainnet under `PEARL_USDT` and Perle under `PRL_USDT`. Before fetching Gate Pearl prices, trades or candles, the native market client asks Gate for the `PEARL` currency record. It checks the currency name, the Pearl network, the absence of a token contract and the currency's listing and trading status. The one-hour MEXC path checks that `PEARLUSDT` is the enabled spot pair with `PEARL` as its base and `USDT` as its quote. The MEXC public pair record does not establish a deposit or withdrawal network. [Gate Pearl listing](https://www.gate.com/announcements/article/102410) · [Gate Perle listing](https://www.gate.com/announcements/article/50405) · [MEXC Pearl listing](https://www.mexc.com/announcements/article/mexc-to-list-pearl-pearl-in-assessment-zone-17827791539927)
+
+Each metadata check and its data request share the original time limit, resolver choice and cancellation. If a provider reports a different identity, the client withholds the new Pearl price. The Dashboard discards current Pearl values from that provider. A separate FX source can still report its own observation, while Pearl/USD requires an eligible Pearl price. Builds with older public HTTPS helpers cannot fetch the new metadata requests.
+
+New sample captures retain an identity refusal as a source outcome. Existing review archives still open with their original data and format. An older build needs an update to open a capture containing the new refusal code. Replay is historical and does not recheck the exchange's current asset metadata.
+
 ### Save a public ticker request
 
 **Settings → Market and timing → Public ticker request** configures the request for Gate PRL/USDT and Kraken

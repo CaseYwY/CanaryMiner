@@ -172,6 +172,19 @@ def main(cli_path, fixture, capable):
         assert f"event UTC {now-2}.123456700" in first.stdout and f"event UTC {now-3}.456789001" in first.stdout
         assert "receipt age " in first.stdout and "event age " in first.stdout and not first.stderr
         assert_requests()
+        identity_requests = dest / "identity-requests"
+        assert identity_requests.read_text(encoding="ascii").splitlines() == ["12"]
+        identity_requests.unlink()
+        identity_scenario = dest / "identity-scenario"
+        identity_scenario.write_text("perle", encoding="ascii")
+        denied = call(3, ALLOW)
+        assert "public market asset identity could not be verified" in denied.stdout
+        assert "PRL/USD trade reference at capture: 2.45" not in denied.stdout
+        assert requests.read_text(encoding="ascii").splitlines() == ["8"]
+        requests.unlink()
+        assert identity_requests.read_text(encoding="ascii").splitlines() == ["12"]
+        identity_requests.unlink()
+        identity_scenario.unlink()
 
         save = (ALLOW, "--save-review", archive.name)
         captured = call(0, *save, "--dns-server", RESOLVER)

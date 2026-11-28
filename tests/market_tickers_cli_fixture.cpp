@@ -59,30 +59,78 @@ std::string krakenHourBody(int64_t start, int64_t observed, std::string_view mod
     return body;
 }
 
+int sendReceipt(const om::PublicJsonResponse &response) {
+    std::string wire;
+    if (!om::encodePublicJsonResponse(response, &wire)) return 5;
+#if defined(_WIN32)
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 6;
+#endif
+    return std::fwrite(wire.data(), 1, wire.size(), stdout) == wire.size() && std::fflush(stdout) == 0 ? 0 : 7;
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
     if (argc != 8 && argc != 9) return 2;
     if (argc == 9 && !om::validPublicDnsServer(argv[8])) return 2;
     const std::string_view feed(argv[1]);
+    const bool gateIdentity = feed == "12";
+    const bool mexcIdentity = feed == "13";
     const bool krakenHour = feed == "3";
     const bool candles = feed == "4" || feed == "5" || krakenHour;
     const bool indexedHash = feed == "9";
     const bool reward = feed == "6" || indexedHash;
     const bool trades = feed == "7" || feed == "8";
-    if (!candles && !reward && !trades && feed != "0" && feed != "2") return 3;
+    if (!candles && !reward && !trades && !gateIdentity && !mexcIdentity && feed != "0" && feed != "2") return 3;
     int64_t from = 0, to = 0;
     if (!readTime(argv[2], from) || !readTime(argv[3], to) ||
         (candles ? from < 60 || from % 60 || to - from != 3600 || to > 253402300799LL :
             to || (indexedHash ? from > om::maxPearlRewardTipHeight : from != 0))) return 2;
-    if ((candles || trades) && (std::string_view(argv[4]) != "5000" || std::string_view(argv[5]) != "15000" ||
-                    std::string_view(argv[6]) != "65536")) return 2;
     int64_t connect = 0, total = 0;
+    if ((candles || trades || gateIdentity || mexcIdentity) &&
+        (!readTime(argv[4], connect) || !readTime(argv[5], total) || total < 50 || total > 15000 ||
+         connect != (std::min)(total, int64_t{5000}) ||
+         std::string_view(argv[6]) != (gateIdentity || mexcIdentity ? "16384" : "65536"))) return 2;
     if (reward && (!readTime(argv[4], connect) || !readTime(argv[5], total) ||
                    total < 50 || total > 15000 || connect != (std::min)(total, int64_t{5000}) ||
                    std::string_view(argv[6]) != "16384")) return 2;
     const char *family = candles ? "candle" : reward ? "reward" : trades ? "trade" : "ticker";
     const auto dir = std::filesystem::u8path(om::selfExecutablePath()).parent_path();
+    if (gateIdentity || mexcIdentity) {
+        std::string mode;
+        std::ifstream(dir / "identity-scenario") >> mode;
+        std::ofstream log(dir / "identity-requests", std::ios::app);
+        log << feed;
+        if (argc == 9) log << ' ' << argv[8];
+        log << '\n';
+        log.flush();
+        if (!log) return 4;
+        if (mode == "old-helper") return 2;
+        if (mode == "slow") std::this_thread::sleep_for(std::chrono::seconds(10));
+        if (mode == "budget") {
+            std::ofstream(dir / "identity-budget") << total << '\n';
+            std::this_thread::sleep_for(std::chrono::milliseconds(180));
+        }
+        om::PublicJsonResponse response;
+        if (mode == "limited") {
+            response.status = om::PublicHttpsStatus::HttpStatus;
+            response.httpStatus = 429;
+            response.retryAfterSeconds = 5;
+        } else {
+            response.status = om::PublicHttpsStatus::Ok;
+            response.httpStatus = 200;
+            response.observedUtc = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+            if (gateIdentity)
+                response.body = mode == "perle" ? R"({"currency":"PRL","name":"Perle","chain":"SOL","delisted":false,"trade_disabled":false,"chains":[{"name":"SOL","addr":"synthetic"}]})" :
+                    mode == "wrapped" ? R"({"currency":"PEARL","name":"Pearl","chain":"SOL","delisted":false,"trade_disabled":false,"chains":[{"name":"SOL","addr":"synthetic"}]})" :
+                    R"({"currency":"PEARL","name":"Pearl","chain":"PEARL","delisted":false,"trade_disabled":false,"chains":[{"name":"PEARL","addr":""}]})";
+            else
+                response.body = mode == "wrong-pair" ?
+                    R"({"symbols":[{"symbol":"PRLUSDT","baseAsset":"PRL","quoteAsset":"USDT","status":"1","isSpotTradingAllowed":true}]})" :
+                    R"({"symbols":[{"symbol":"PEARLUSDT","baseAsset":"PEARL","quoteAsset":"USDT","status":"1","isSpotTradingAllowed":true,"filters":[],"baseAssetPrecision":2,"quotePrecision":3,"fullName":"PEARL"}]})";
+        }
+        return sendReceipt(response);
+    }
     std::string mode;
     unsigned rewardStep = 0;
     {
@@ -187,6 +235,9 @@ int main(int argc, char **argv) {
             if (mode == "future") response.observedUtc += 60;
         }
     } else if (feed == "0") {
+        std::string identityMode;
+        std::ifstream(dir / "identity-scenario") >> identityMode;
+        if (identityMode == "budget") std::ofstream(dir / "ticker-budget") << argv[5] << '\n';
         response.body = R"([{"currency_pair":"PEARL_USDT","last":"2.50"}])";
         if (mode == "future") response.observedUtc += 3600;
         if (mode == "limited") {
@@ -210,12 +261,7 @@ int main(int argc, char **argv) {
     }
     if (!candles && !reward && !trades && mode == "clock-rollback")
         response.observedUtc = feed == "0" ? 1760000061 : 1760000062;
-    std::string wire;
-    if (!om::encodePublicJsonResponse(response, &wire)) return 5;
-#if defined(_WIN32)
-    if (_setmode(_fileno(stdout), _O_BINARY) == -1) return 6;
-#endif
-    if (std::fwrite(wire.data(), 1, wire.size(), stdout) != wire.size() || std::fflush(stdout) != 0) return 7;
+    if (const int status = sendReceipt(response)) return status;
     if (mode == "lagged" && feed == "0") std::this_thread::sleep_for(std::chrono::seconds(2));
     return 0;
 }

@@ -131,6 +131,40 @@ def main(cli_path, fixture, capable):
             assert field in result.stdout, result
         assert '1h' not in result.stdout
         assert_requests(['0', '2'])
+        identity_requests = install / 'identity-requests'
+        identity_scenario = install / 'identity-scenario'
+        assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+        identity_requests.unlink()
+
+        for case in ('perle', 'wrapped', 'old-helper', 'limited'):
+            identity_scenario.write_text(case, encoding='ascii')
+            denied = run(allow)
+            assert denied.returncode == 3 and not denied.stderr, denied
+            assert 'Latest PRL/USD reference: N/A' in denied.stdout
+            assert 'Latest USDT/USD [Kraken USDTZUSD]: 0.98' in denied.stdout
+            if case in ('perle', 'wrapped'):
+                assert 'public market asset identity could not be verified' in denied.stdout
+            assert_requests(['2'])
+            assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+            identity_requests.unlink()
+        identity_scenario.write_text('perle', encoding='ascii')
+        denied = run(*sample)
+        assert denied.returncode == 3 and 'public market asset identity could not be verified' in denied.stdout
+        assert run('--open-review', archive).stdout == denied.stdout
+        assert_requests(['2'])
+        archive.unlink()
+        assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+        identity_requests.unlink()
+        identity_scenario.unlink()
+
+        identity_scenario.write_text('budget', encoding='ascii')
+        shared_budget = run(allow)
+        assert shared_budget.returncode == 0 and 'Latest PRL/USD reference: 2.45' in shared_budget.stdout
+        assert 0 < int((install / 'ticker-budget').read_text()) <= int((install / 'identity-budget').read_text()) - 150
+        assert_requests(['0', '2'])
+        assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+        identity_requests.unlink()
+        identity_scenario.unlink()
 
         assert not resolver_requests.exists()
         resolved = run(allow, *dns)
@@ -138,6 +172,8 @@ def main(cli_path, fixture, capable):
         assert 'Latest PRL/USD reference: 2.45' in resolved.stdout
         assert_requests(['0', '2'])
         assert resolver_requests.read_text(encoding='ascii').splitlines() == [resolver, resolver]
+        assert identity_requests.read_text(encoding='ascii').splitlines() == [f'12 {resolver}']
+        identity_requests.unlink()
         resolver_requests.unlink()
 
         scenario.write_text('archive', encoding='ascii')
@@ -248,26 +284,33 @@ def main(cli_path, fixture, capable):
             archive.unlink()
 
         if os.name != 'nt':
-            scenario.write_text('slow', encoding='ascii')
-            with subprocess.Popen([str(cli), 'market-tickers', *sample], cwd=work, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True) as child:
-                deadline = time.monotonic() + 4
-                try:
-                    while time.monotonic() < deadline and child.poll() is None:
-                        if requests.exists() and requests.read_text().splitlines() == ['0']:
-                            break
-                        time.sleep(0.02)
-                    else:
-                        raise AssertionError('no first helper launch observed before interruption')
-                    child.send_signal(signal.SIGINT)
-                    output, error = child.communicate(timeout=4)
-                    assert child.returncode == 130 and not output and error == 'market-tickers: sample cancelled\n'
-                finally:
-                    if child.poll() is None:
-                        child.kill()
-                        child.wait(timeout=3)
-            assert_requests(['0'])
-            assert not archive.exists() and not temporary.exists()
+            for mode, launch_log, feed in ((identity_scenario, identity_requests, '12'), (scenario, requests, '0')):
+                identity_requests.unlink(missing_ok=True)
+                mode.write_text('slow', encoding='ascii')
+                with subprocess.Popen([str(cli), 'market-tickers', *sample], cwd=work, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True) as child:
+                    deadline = time.monotonic() + 4
+                    try:
+                        while time.monotonic() < deadline and child.poll() is None:
+                            if launch_log.exists() and launch_log.read_text().splitlines() == [feed]:
+                                break
+                            time.sleep(0.02)
+                        else:
+                            raise AssertionError(f'no helper launch for feed {feed} before interruption')
+                        child.send_signal(signal.SIGINT)
+                        output, error = child.communicate(timeout=4)
+                        assert child.returncode == 130 and not output and error == 'market-tickers: sample cancelled\n'
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                            child.wait(timeout=3)
+                mode.unlink()
+                assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+                if feed == '0':
+                    assert_requests(['0'])
+                else:
+                    assert not requests.exists()
+                assert not archive.exists() and not temporary.exists()
 
         helper.unlink()
         result = run(allow)

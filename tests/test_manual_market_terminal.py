@@ -84,7 +84,7 @@ def main():
             until(b"CanaryMiner / Settings")
             send(b"\x1b[C" * 3 + b"\t\x1b[B\r")
             gate = until(b"Public polling requires", True)
-            assert b"Gate Spot REST | PRL/USDT" in gate and b"candle response shape" in gate
+            assert b"Gate Spot REST | PEARL_USDT" in gate and b"candle response shape" in gate
             send(b"\t")
             kraken = until(b"The final REST candle is provisional", True)
             assert b"Kraken Spot REST | USDT/USD" in kraken and b"Trade timestamp unavailable" in kraken

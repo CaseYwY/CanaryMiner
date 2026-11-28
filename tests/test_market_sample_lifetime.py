@@ -75,6 +75,14 @@ def main(cli, worker):
             if "--kraken-fallback" in args:
                 (root / "candle-scenario").unlink()
         if sys.platform.startswith("linux"):
+            (root / "sample-lifetime-mode").write_text("identity-between", encoding="ascii")
+            (root / "ticker-requests").unlink(missing_ok=True)
+            (root / "identity-requests").unlink(missing_ok=True)
+            split = subprocess.run([fixture, "market-tickers", "--allow-public-tickers"], cwd=root,
+                                   capture_output=True, text=True, timeout=8)
+            assert split.returncode == 0 and not split.stdout and not split.stderr, split
+            assert (root / "identity-requests").read_text().splitlines() == ["12"]
+            assert not (root / "ticker-requests").exists()
             (root / "sample-lifetime-mode").write_text("clock-rollback", encoding="ascii")
             (root / "ticker-scenario").write_text("clock-rollback", encoding="ascii")
             requests = root / "ticker-requests"
