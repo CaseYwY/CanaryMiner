@@ -127,6 +127,15 @@ struct NamedDemandOpening {
     ElectricityAmount peak;
     std::vector<ElectricityAmount> history{};
 };
+struct DemandResetSchedule {
+    unsigned day = 0;
+    CivilClock clock;
+};
+struct MonthlyDemandOpening {
+    std::string timeDatabaseVersion;
+    ElectricityAmount importedKwh;  // current demand month only
+    ElectricityAmount postedSubtotal;  // closed demand fees within this supply cycle
+};
 struct ExportPaymentRule {
     int64_t publishedUtcMs = 0;
     ExactDecimal ratePerKwh;
@@ -171,6 +180,7 @@ struct TariffPlan {
     std::vector<TariffTaxPeriod> taxPeriods{};
     bool taxByServiceTime = false;
     std::vector<NamedDemandCharge> demandCharges{};
+    std::optional<DemandResetSchedule> demandReset{};
     bool hasDemand() const { return demandCharge || !demandCharges.empty(); }
     const DemandChargeRule *apparentDemandRule() const;
     bool hasDemandHistory() const;
@@ -225,7 +235,9 @@ struct BillOpening {
     std::optional<BillTaxOpening> tax{};
     std::optional<std::vector<BillTaxSegment>> taxSegments{};
     std::vector<NamedDemandOpening> demandOpenings{};
+    std::optional<MonthlyDemandOpening> monthlyDemand{};
 };
+void resetDemandPeak(const DemandChargeRule &rule, ElectricityAmount &peak, std::vector<ElectricityAmount> &history);
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
                                    const ExactDecimal &factor,ExactDecimal &voltAmps);

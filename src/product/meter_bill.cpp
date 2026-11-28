@@ -298,6 +298,20 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         }
     }
     if (seasonal) report += "  Seasonal allowance for cycle " + seasonal->allowanceKwh.text() + " kWh\n";
+    const auto &ending = *accrual.ending;
+    const auto &monthlyDemand = ending.monthlyDemand;
+    CivilMonthCycle demandMonth;
+    if (monthlyDemand) {
+        const auto &reset = *declaration.plan.demandReset;
+        demandMonth = civilMonthCycleAt(reset.clock, reset.day, ending.throughUtcMs);
+        std::string posted, monthImport;
+        if (demandMonth.status != CivilStatus::Ok || !monthlyDemand->postedSubtotal.format(6, &posted) ||
+            !monthlyDemand->importedKwh.format(6, &monthImport)) return false;
+        report += "  Posted demand fees in this supply cycle " + posted + " " + currency + "\n";
+        report += "  Open demand month [" + std::to_string(demandMonth.beginUtcMs) + ", " +
+                  std::to_string(demandMonth.endUtcMs) + ") UTC ms\n";
+        report += "  Imported usage in open demand month " + monthImport + " kWh\n";
+    }
     ElectricityAmount singleDemandSubtotal,billablePeak,ratchetFloor;
     std::string namedDemandExact;
     const auto appendDemand = [&](const DemandChargeRule &demand, const ElectricityAmount &measured,
@@ -308,7 +322,8 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             !measured.format(6,&peak) || !demand.charge(billablePeak,&subtotal,&parts) ||
             !subtotal.format(6,&amount)) return false;
         const std::string unit = demand.unit();
-        report += "  Peak demand " + peak + " " + unit + " over " + std::to_string(demand.windowMinutes) + " minute windows\n";
+        report += (monthlyDemand ? "  Open-month peak demand " : "  Peak demand ") + peak + " " + unit +
+                  " over " + std::to_string(demand.windowMinutes) + " minute windows\n";
         if (!demand.eligiblePeriods.empty())
             report += "  Demand uses only windows in the declared eligibility periods\n";
         if (demand.ratchet) {
@@ -322,13 +337,14 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             if (!demand.contract->capacity.format(6,&capacity) || !parts.capacityFee.format(6,&contracted) ||
                 !parts.excessFee.format(6,&excess)) return false;
             report += "  Contracted capacity " + capacity + " " + unit + "\n";
-            report += "  Contracted capacity fee " + contracted + " " + currency + "\n";
-            report += "  Excess demand fee " + excess + " " + currency + "\n";
+            report += (monthlyDemand ? "  Projected contracted capacity fee " : "  Contracted capacity fee ") +
+                      contracted + " " + currency + "\n";
+            report += (monthlyDemand ? "  Projected excess demand fee " : "  Excess demand fee ") + excess + " " + currency + "\n";
         }
-        report += "  Demand charge before subtotal multiplier " + amount + " " + currency + "\n";
+        report += (monthlyDemand ? "  Projected open-month demand charge " : "  Demand charge before subtotal multiplier ") +
+                  amount + " " + currency + "\n";
         return true;
     };
-    const auto &ending = *accrual.ending;
     if (const auto &demand=declaration.plan.demandCharge) {
         if (!appendDemand(*demand,*ending.peakDemand,ending.demandHistory,singleDemandSubtotal)) return false;
     }
@@ -349,8 +365,10 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         namedDemandExact += ']';
         ElectricityAmount subtotal;
         std::string amount;
-        if (!demandSubtotal(declaration.plan,ending,subtotal) || !subtotal.format(6,&amount)) return false;
-        report += "  Combined demand charge before subtotal multiplier " + amount + " " + currency + "\n";
+        if (!monthlyDemand) {
+            if (!demandSubtotal(declaration.plan,ending,subtotal) || !subtotal.format(6,&amount)) return false;
+            report += "  Combined demand charge before subtotal multiplier " + amount + " " + currency + "\n";
+        }
     }
     if (accrual.billedKwh) {
         std::string billed;
@@ -461,6 +479,11 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         exact += "," + jsonQuote(ratchetFloor.numerator.text()) + "," + jsonQuote(billablePeak.numerator.text());
     if (ending.apparentDemand) exact += ",\"kVA\"";
     if (!namedDemandExact.empty()) exact += ",\"demand_charges\"," + namedDemandExact;
+    if (monthlyDemand)
+        exact += ",\"demand_billing\"," + std::to_string(demandMonth.beginUtcMs) + "," +
+                 std::to_string(demandMonth.endUtcMs) + "," + jsonQuote(monthlyDemand->timeDatabaseVersion) +
+                 "," + jsonQuote(monthlyDemand->importedKwh.numerator.text()) +
+                 "," + jsonQuote(monthlyDemand->postedSubtotal.numerator.text());
     if (!taxDigest.empty()) exact += ",\"ordered_tax_digest\"," + jsonQuote(taxDigest);
     if (const auto &exported=accrual.exportAccrual)
         exact += ",\"export_payment\"," + jsonQuote(exported->newKwh.numerator.text()) +
@@ -651,10 +674,11 @@ const char *decodeMeterTariff(const std::string &bytes, TariffDeclaration &decla
         return "saved tariff declaration unavailable or invalid";
     const auto *schema = root.find("schema_version");
     uint64_t schemaVersion = 0;
-    const auto *plan=root.find("plan"), *policy=root.find("reset_policy");
+    const auto *plan=root.find("plan"), *policy=root.find("reset_policy"), *demandReset=root.find("demand_reset_policy");
     namedTariff = schema && schema->asUint64(&schemaVersion) &&
         (schemaVersion == 4 || (schemaVersion >= 5 && schemaVersion <= tariffDeclarationLatestVersion &&
-         (usesNamedClock(plan ? plan->find("clock") : nullptr) || usesNamedClock(policy ? policy->find("clock") : nullptr))));
+         (usesNamedClock(plan ? plan->find("clock") : nullptr) || usesNamedClock(policy ? policy->find("clock") : nullptr) ||
+          usesNamedClock(demandReset ? demandReset->find("clock") : nullptr))));
     if (namedTariff && configureBundledCivilTimeData() != CivilStatus::Ok)
         return "reviewed tariff time database unavailable or invalid";
     if (!decodeTariffDeclaration(root, &declaration)) return "saved tariff declaration unavailable or invalid";
@@ -672,8 +696,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return "local clock precedes the review or is unavailable";
     const auto cutoff = original.cutoff;
     if (cutoff > now) return "review cutoff is in the future";
-    if (declaration.plan.hasDemandHistory() &&
-        declaration.opening.cycleBeginUtcMs > cutoff)
+    if (!tariffDemandHistoryAvailable(declaration, cutoff))
         return "completed demand history is after the review cutoff";
     if (stopped()) return "review cancelled";
     if (const auto *problem = decodeMeterReadings(original.intervals, declaration, cutoff, lateReadingError,

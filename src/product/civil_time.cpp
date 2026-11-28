@@ -221,6 +221,34 @@ CivilDay civilDay(const CivilClock &clock, CivilDate day) {
     result.status = CivilStatus::Ok; return result;
 }
 CivilDay civilDayAt(const CivilClock &clock, int64_t ms) { const auto local = civilAt(clock,ms); if (local.status != CivilStatus::Ok) { CivilDay d; d.status = local.status; return d; } return civilDay(clock,local.date); }
+
+CivilMonthCycle civilMonthCycleAt(const CivilClock &clock, unsigned day, int64_t utcMs) {
+    if (!day || day > 31) return {CivilStatus::Invalid};
+    const auto stamp = civilAt(clock, utcMs);
+    if (stamp.status != CivilStatus::Ok) return {stamp.status};
+    const auto dateInMonth = [&](int offset) {
+        const int index = stamp.date.year * 12 + static_cast<int>(stamp.date.month) - 1 + offset;
+        const int year = index / 12;
+        const unsigned month = static_cast<unsigned>(index % 12 + 1);
+        return CivilDate{year, month, (std::min)(day, monthDays(year, month))};
+    };
+    const auto boundary = [&](CivilDate date) -> std::optional<int64_t> {
+        if (clock.kind != CivilClockKind::NamedIana) return civilResolve(clock, date, 0).utcMs;
+        const auto window = civilDay(clock, date);
+        if (window.status != CivilStatus::Ok) return std::nullopt;
+        return window.beginUtcMs;
+    };
+    const int start = stamp.date.day < dateInMonth(0).day ? -1 : 0;
+    auto begin = boundary(dateInMonth(start));
+    auto end = boundary(dateInMonth(start + 1));
+    if (clock.kind == CivilClockKind::NamedIana && begin && end && utcMs >= *end) {
+        // The clock can revisit the previous local date after the first reset instant.
+        begin = end;
+        end = boundary(dateInMonth(start + 2));
+    }
+    if (!begin || !end || utcMs < *begin || utcMs >= *end) return {CivilStatus::Invalid};
+    return {CivilStatus::Ok, *begin, *end, stamp.databaseVersion};
+}
 bool civilDayIsContiguous(const CivilClock &clock,const CivilDay &day) {
     if(day.status!=CivilStatus::Ok||day.endUtcMs<=day.beginUtcMs)return false;
     if(clock.kind!=CivilClockKind::NamedIana)return true;

@@ -301,6 +301,27 @@ class ElectricityPreferencesSchemaTests(unittest.TestCase):
 
 
 class TariffDeclarationSchemaTests(unittest.TestCase):
+    def test_independent_demand_reset_requires_v20_and_opening(self):
+        schema = load('config/tariff-declaration.schema.json')
+        value = load('config/tariff-declaration.example.json')
+        value["schema_version"] = 20
+        value["demand_reset_policy"] = dict(monthly_day=15, clock=dict(kind="utc", fixed_offset_seconds=0))
+        value["demand_charge"] = dict(window_minutes=30, offset_minutes=0, published_utc_ms=0, rate_per_kw="5")
+        value["opening"].update(peak_demand_kw="0", demand_billing=dict(
+            imported_kwh="0", posted_subtotal="0", time_database_version="explicit-fixed-clock"))
+        self.assertEqual(validate(value, schema, schema), [])
+        for change in (
+                lambda item: item.update(schema_version=9),
+                lambda item: item.pop("demand_reset_policy"),
+                lambda item: item.pop("demand_charge"),
+                lambda item: item["opening"].pop("demand_billing"),
+                lambda item: item["opening"]["demand_billing"].update(posted_subtotal="-1"),
+                lambda item: item["opening"]["demand_billing"].update(time_database_version="2026e"),
+                lambda item: item["demand_reset_policy"].update(monthly_day=32)):
+            bad = json.loads(json.dumps(value))
+            change(bad)
+            self.assertTrue(validate(bad, schema, schema))
+
     def test_monthly_reset_pairs_only_with_v2(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -703,7 +724,7 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'dynamic': {'multiplier'},
                     'plan': {'export_payment', 'tax_periods', 'tax_allocation'},
                     'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'demand_peaks', 'exported_kwh',
-                                'accrued_export_payment', 'tax_bases', 'tax_segments'},
+                                'accrued_export_payment', 'tax_bases', 'tax_segments', 'demand_billing'},
                     'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places',
                                      'eligible_periods', 'contracted_capacity'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
