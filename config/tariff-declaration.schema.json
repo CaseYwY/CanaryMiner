@@ -5,7 +5,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -17,7 +17,7 @@
     "demand_charge": {"$ref": "#/$defs/demandCharge"},
     "restricted_credit": {"$ref": "#/$defs/restrictedCredit"}
   },
-  "if": {"properties": {"schema_version": {"enum": [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]}}},
+  "if": {"properties": {"schema_version": {"minimum": 4}}},
   "then": {
     "if": {"properties": {"schema_version": {"const": 4}}},
     "then": {
@@ -61,7 +61,12 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"schema_version": {"const": 15}}},
+      "if": {"anyOf": [
+        {"properties": {"schema_version": {"const": 15}}},
+        {"properties": {"schema_version": {"const": 17}, "plan": {
+          "required": ["tax_periods"], "not": {"required": ["tax_allocation"]}
+        }}}
+      ]},
       "then": {"properties": {
         "plan": {"required": ["tax_periods"], "properties": {"subtotal_multiplier": {"const": "1"}}},
         "opening": {"required": ["tax_bases"]}
@@ -71,7 +76,10 @@
       }}
     },
     {
-      "if": {"properties": {"schema_version": {"const": 16}}},
+      "if": {"anyOf": [
+        {"properties": {"schema_version": {"const": 16}}},
+        {"properties": {"schema_version": {"const": 17}, "plan": {"required": ["tax_allocation"]}}}
+      ]},
       "then": {"properties": {
         "plan": {"required": ["tax_periods", "tax_allocation"], "properties": {"subtotal_multiplier": {"const": "1"}}},
         "opening": {"required": ["tax_segments"]}
@@ -88,7 +96,21 @@
     {
       "if": {"properties": {"schema_version": {"const": 13}}},
       "then": {"required": ["restricted_credit"]},
-      "else": {"not": {"required": ["restricted_credit"]}}
+      "else": {
+        "if": {"properties": {"schema_version": {"const": 17}}},
+        "then": {
+          "if": {"required": ["restricted_credit"]},
+          "then": {"properties": {"plan": {"not": {"anyOf": [
+            {"required": ["export_payment"]}, {"required": ["tax_periods"]}
+          ]}}}}
+        },
+        "else": {"not": {"required": ["restricted_credit"]}}
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": 17}}},
+      "then": {"required": ["demand_charge"], "properties": {"demand_charge": {"required": ["eligible_periods"]}}},
+      "else": {"properties": {"demand_charge": {"not": {"required": ["eligible_periods"]}}}}
     },
     {
       "if": {"properties": {"schema_version": {"const": 7}}},
@@ -151,7 +173,7 @@
     },
     {
       "if": {"$ref": "#/$defs/apparentDemandVersion"},
-      "then": {"properties": {
+      "then": {"not": {"required": ["restricted_credit"]}, "properties": {
         "plan": {"not": {"required": ["export_payment"]}},
         "demand_charge": {
           "required": ["rate_per_kva", "power_factor_va_places"],
@@ -299,7 +321,20 @@
         "rate_per_kw": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "rate_per_kva": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "power_factor_va_places": {"type": ["integer", "null"], "minimum": 0, "maximum": 18},
-        "ratchet": {"$ref": "#/$defs/demandRatchet"}
+        "ratchet": {"$ref": "#/$defs/demandRatchet"},
+        "eligible_periods": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/demandPeriod"}}
+      }
+    },
+    "demandPeriod": {
+      "type": "object", "additionalProperties": false,
+      "required": ["begin_minute", "end_minute", "weekday_mask", "month_mask", "date", "eligible"],
+      "properties": {
+        "begin_minute": {"type": "integer", "minimum": 0, "maximum": 1439},
+        "end_minute": {"type": "integer", "minimum": 1, "maximum": 1440},
+        "weekday_mask": {"type": "integer", "minimum": 1, "maximum": 127},
+        "month_mask": {"type": "integer", "minimum": 1, "maximum": 4095},
+        "date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "eligible": {"type": "boolean"}
       }
     },
     "demandRatchet": {

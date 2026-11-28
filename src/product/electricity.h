@@ -91,6 +91,12 @@ struct DemandRatchet {
     unsigned lookbackMonths = 0;
     ExactDecimal fraction;
 };
+inline constexpr size_t maxDemandPeriods = 16;
+struct DemandPeriod {
+    unsigned beginMinute = 0, endMinute = 1440, weekdayMask = 127, monthMask = 4095;
+    std::optional<CivilDate> date{};
+    bool eligible = true;
+};
 struct DemandChargeRule {
     unsigned windowMinutes = 0;
     unsigned offsetMinutes = 0;  // UTC phase from the Unix epoch, less than one window
@@ -99,6 +105,7 @@ struct DemandChargeRule {
     std::optional<DemandRatchet> ratchet{};
     bool apparentPower = false;
     std::optional<unsigned> powerFactorVaPlaces{};
+    std::vector<DemandPeriod> eligiblePeriods{};  // empty uses all windows in the cycle
     bool apparent() const { return apparentPower; }
     const char *unit() const { return apparent() ? "kVA" : "kW"; }
     bool charge(const ElectricityAmount &peak, ElectricityAmount *out) const {
@@ -143,7 +150,7 @@ struct TariffPlan {
     std::optional<ExactDecimal> minimumCycleSubtotal;
     std::optional<ExactDecimal> subtotalMultiplier;  // explicit single multiplier on entire subtotal, no inferred tax order
     uint32_t unsupportedRules = 0;             // any unmodelled rule rejects evaluation
-    std::optional<DemandChargeRule> demandCharge;  // all-day maximum of aligned whole-meter demand windows
+    std::optional<DemandChargeRule> demandCharge;
     std::optional<ExportPaymentRule> exportPayment{};  // independent payout, outside the supply subtotal
     bool restrictedCreditAtClose = false;
     std::vector<TariffTaxPeriod> taxPeriods{};
@@ -202,6 +209,8 @@ struct BillOpening {
 // Apply the declared half-even input conversion to apparent VA. Active energy keeps its original watts.
 bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecimal &watts,
                                    const ExactDecimal &factor,ExactDecimal &voltAmps);
+ElectricityStatus validateHistoricalDemandPeak(const CivilClock &clock,const DemandChargeRule &rule,
+                                               int64_t begin,int64_t end,bool positivePeak);
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
                     ElectricityAmount &peak,ElectricityAmount &ratchetFloor);
 struct BillEstimate {

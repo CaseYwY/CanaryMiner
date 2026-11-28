@@ -394,6 +394,40 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     panel.key('d',{},T/1000);
     CHECK(panel.draft.find("schema_version")->text=="1"&&!panel.draft.find("demand_charge"));
     CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
+
+    panel.open(saved);
+    enter(panel,"demand_charge");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,26,ColorLevel::None).find("[H] Eligible periods")!=std::string::npos);
+    panel.key('h',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="17");
+    CHECK(panel.draft.find("opening")->find("peak_demand_kw")->text.empty());
+    CHECK(panel.draft.find("opening")->find("accrued_subtotal")->text=="1");
+    panel.key('\r',{},T/1000);
+    panel.key('\r',{},T/1000);
+    enter(panel,"eligible");  // An explicit false row excludes its time.
+    CHECK(!panel.draft.find("demand_charge")->find("eligible_periods")->items.front().find("eligible")->boolean);
+    panel.key(27,{},T/1000);
+    panel.key(27,{},T/1000);
+    panel.key(27,{},T/1000);
+    panel.key('h',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="9");
+    CHECK(!panel.draft.find("demand_charge")->find("eligible_periods"));
+
+    panel.key('h',{},T/1000);
+    panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"peak_demand_kw");type(panel,"10");
+    enter(panel,"key");type(panel,"scheduled-demand-opening");
+    panel.key(27,{},T/1000);
+    enter(panel,"plan");
+    enter(panel,"key");type(panel,"scheduled-demand-plan");
+    panel.key('v',{},T/1000);
+    CHECK(panel.page==TariffSettingsPage::Review);
+    CHECK(panel.render(120,27,ColorLevel::None).find("Demand uses only eligible periods in the plan clock")!=std::string::npos);
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    CHECK(!panel.dirty()&&store.load(&saved,&reason)&&saved.find("schema_version")->text=="17");
+    CHECK(decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharge->eligiblePeriods.size()==1);
 }
 
 void restrictedCredit(JsonValue draft,const std::filesystem::path &target) {
