@@ -341,9 +341,36 @@ load assumption.
 The `meter-bill` report names the use of declared eligibility and archives
 keep the schedule with the original meter input. The schedule changes the
 demand maximum. The meter's total import and its energy charges still cover
-all hours. This models one scheduled demand maximum per cycle. A supplier
-tariff can also use separate peaks, rounding and additional demand components,
-which require their own verified rules.
+all hours. A supplier can charge separate [concurrent demand maxima](#charge-for-concurrent-demand-maxima).
+
+### Charge for concurrent demand maxima
+
+Version 18 supports two to eight demand charges on the same whole-meter
+readings. In Settings, select `reset_policy` or the existing `demand_charge` and
+press **N**. Converting an existing single charge keeps its rule and opening
+peak in the first row. Enter each rule under `demand_charges` and one matching
+`key` and `peak` under `opening.demand_peaks`. Enter zero for every current
+peak at the cycle start. Mid-cycle peaks must come from readings already
+reviewed under their specific rules. Keep all demand fees out of the opening
+subtotal and enter their combined value in the demand tax base when the
+declaration uses a single tax period.
+
+Each rule has its own UTC window and rate. Within the rule, **H** edits eligible
+times, **K** switches kW or kVA, and **R** adds a floor based on completed
+monthly peaks. With a floor, enter the corresponding opening row's `history`
+using `cycle_end_utc_ms` and `peak_kw` or `peak_kva`. One meter's kVA rules
+must use the same apparent-power conversion. Add or remove rows in both tables.
+To return to a single rule, keep its matching opening row and press **N** on
+`demand_charges`. Use new plan and opening keys when saving changed rules.
+
+The cycle and review boundaries must align with every rule's demand grid.
+For cumulative readings, provide a register reading wherever an applicable
+boundary splits nonzero import. For example, at four consecutive 15-minute
+loads of 12, 4, 2 and 10 kW, the all-hours 30-minute maximum is 8 kW. A
+15-minute charge that applies only to the two middle intervals uses 4 kW.
+The bill lists both maxima in declaration order, adds their charges and
+counts the 7 kWh of imported energy once. The archive retains the exact rule
+and peak for each charge and reproduces the combined bill.
 
 ### Use a historical demand floor
 

@@ -224,7 +224,7 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     const auto &opening = declaration.opening;
     const bool annual = declaration.resetSchedule && declaration.resetSchedule->annualMonth;
     const bool exported = declaration.plan.exportPayment.has_value();
-    const bool extended = annual || declaration.plan.demandCharge.has_value() || exported;
+    const bool extended = annual || declaration.plan.hasDemand() || exported;
     const auto byteLimit = extended ? maxMeterFileBytes : maxOrdinaryMeterFileBytes;
     const auto intervalLimit = extended ? maxAnnualMeterIntervals : maxOrdinaryMeterIntervals;
     if (text.size() > byteLimit) return "interval file unavailable, oversized or not a regular file";
@@ -237,7 +237,7 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     if (!schema || !schema->asUint64(&version) || version < 1 || version > 7 || !scope || !scope->isString() ||
         root.members.size() != (version == 3 ? 5u : 3u))
         return "invalid interval document";
-    const bool apparent = declaration.plan.demandCharge && declaration.plan.demandCharge->apparent();
+    const auto *apparent = declaration.plan.apparentDemandRule();
     const bool apparentInput = version == 4 || version == 5;
     if (apparent && !apparentInput) return electricityStatusName(ElectricityStatus::DemandApparentEvidence);
     if (!apparent && apparentInput) return "apparent meter readings require a saved kVA tariff";
@@ -254,7 +254,7 @@ const char *decodeMeterReadings(const std::string &text, const TariffDeclaration
     readings.version = version;
     if (isPower)
         return decodeIntervals(*rows, opening, cutoff, lateReadingError,
-                               apparent ? &*declaration.plan.demandCharge : nullptr, exported,
+                               apparent, exported,
                                readings.series.emplace<std::vector<PowerInterval>>(), readings.apparentSources);
     auto &imports = readings.series.emplace<std::vector<MeterImportInterval>>();
     if (isRegister)
@@ -298,24 +298,50 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
         }
     }
     if (seasonal) report += "  Seasonal allowance for cycle " + seasonal->allowanceKwh.text() + " kWh\n";
-    ElectricityAmount demandSubtotal,billablePeak,ratchetFloor;
-    if (const auto &demand=declaration.plan.demandCharge) {
+    ElectricityAmount singleDemandSubtotal,billablePeak,ratchetFloor;
+    std::string namedDemandExact;
+    const auto appendDemand = [&](const DemandChargeRule &demand, const ElectricityAmount &measured,
+                                  const std::vector<ElectricityAmount> &history, ElectricityAmount &subtotal) {
         std::string peak, amount;
-        if (!billableDemand(*demand,*accrual.ending,billablePeak,ratchetFloor) ||
-            !accrual.ending->peakDemand->format(6,&peak) ||
-            !demand->charge(billablePeak,&demandSubtotal) ||
-            !demandSubtotal.format(6,&amount)) return false;
-        const std::string unit = demand->unit();
-        report += "  Peak demand " + peak + " " + unit + " over " + std::to_string(demand->windowMinutes) + " minute windows\n";
-        if (!demand->eligiblePeriods.empty())
+        if (!billableDemand(demand,measured,history,billablePeak,ratchetFloor) ||
+            !measured.format(6,&peak) || !demand.charge(billablePeak,&subtotal) ||
+            !subtotal.format(6,&amount)) return false;
+        const std::string unit = demand.unit();
+        report += "  Peak demand " + peak + " " + unit + " over " + std::to_string(demand.windowMinutes) + " minute windows\n";
+        if (!demand.eligiblePeriods.empty())
             report += "  Demand uses only windows in the declared eligibility periods\n";
-        if (demand->ratchet) {
+        if (demand.ratchet) {
             std::string floor,billable;
             if (!ratchetFloor.format(6,&floor) || !billablePeak.format(6,&billable)) return false;
             report += "  Demand ratchet floor " + floor + " " + unit + "\n";
             report += "  Billable demand " + billable + " " + unit + "\n";
         }
         report += "  Demand charge before subtotal multiplier " + amount + " " + currency + "\n";
+        return true;
+    };
+    const auto &ending = *accrual.ending;
+    if (const auto &demand=declaration.plan.demandCharge) {
+        if (!appendDemand(*demand,*ending.peakDemand,ending.demandHistory,singleDemandSubtotal)) return false;
+    }
+    const auto &named = declaration.plan.demandCharges;
+    if (!named.empty()) {
+        namedDemandExact = "[";
+        for (size_t i = 0; i < named.size(); ++i) {
+            const auto &item = named[i];
+            const auto &state = ending.demandOpenings[i];
+            ElectricityAmount amount;
+            report += "  Demand charge " + std::to_string(i + 1) + " (declaration order)\n";
+            if (!appendDemand(item.rule,state.peak,state.history,amount)) return false;
+            if (i) namedDemandExact += ',';
+            namedDemandExact += "[" + jsonQuote(item.key) + "," + jsonQuote(item.rule.unit()) +
+                "," + jsonQuote(state.peak.numerator.text()) + "," + jsonQuote(billablePeak.numerator.text()) +
+                "," + jsonQuote(ratchetFloor.numerator.text()) + "," + jsonQuote(amount.numerator.text()) + "]";
+        }
+        namedDemandExact += ']';
+        ElectricityAmount subtotal;
+        std::string amount;
+        if (!demandSubtotal(declaration.plan,ending,subtotal) || !subtotal.format(6,&amount)) return false;
+        report += "  Combined demand charge before subtotal multiplier " + amount + " " + currency + "\n";
     }
     if (accrual.billedKwh) {
         std::string billed;
@@ -411,7 +437,6 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             report += "  Cash due after restricted credit " + cash + " " + currency + "\n";
         } else report += "  Eligible charges are provisional. Restricted credit is applied only at closing.\n";
     }
-    const auto &ending = *accrual.ending;
     exact += "[" + std::to_string(opening.cycleBeginUtcMs) + "," + std::to_string(opening.cycleEndUtcMs) +
               "," + std::to_string(opening.throughUtcMs) + "," + std::to_string(ending.throughUtcMs) +
               "," + jsonQuote(ending.timeDatabaseVersion) + "," + jsonQuote(usage.numerator.text()) +
@@ -422,10 +447,11 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     if (accrual.billedKwh) exact += "," + jsonQuote(accrual.billedKwh->numerator.text());
     if (seasonal) exact += "," + jsonQuote(seasonal->allowanceKwh.text());
     if (ending.peakDemand)
-        exact += "," + jsonQuote(ending.peakDemand->numerator.text()) + "," + jsonQuote(demandSubtotal.numerator.text());
+        exact += "," + jsonQuote(ending.peakDemand->numerator.text()) + "," + jsonQuote(singleDemandSubtotal.numerator.text());
     if (declaration.plan.demandCharge && declaration.plan.demandCharge->ratchet)
         exact += "," + jsonQuote(ratchetFloor.numerator.text()) + "," + jsonQuote(billablePeak.numerator.text());
     if (ending.apparentDemand) exact += ",\"kVA\"";
+    if (!namedDemandExact.empty()) exact += ",\"demand_charges\"," + namedDemandExact;
     if (!taxDigest.empty()) exact += ",\"ordered_tax_digest\"," + jsonQuote(taxDigest);
     if (const auto &exported=accrual.exportAccrual)
         exact += ",\"export_payment\"," + jsonQuote(exported->newKwh.numerator.text()) +
@@ -637,7 +663,7 @@ const char *prepareMeterReview(const ReviewOriginal &original, int64_t now, bool
         return "local clock precedes the review or is unavailable";
     const auto cutoff = original.cutoff;
     if (cutoff > now) return "review cutoff is in the future";
-    if (declaration.plan.demandCharge && declaration.plan.demandCharge->ratchet &&
+    if (declaration.plan.hasDemandHistory() &&
         declaration.opening.cycleBeginUtcMs > cutoff)
         return "completed demand history is after the review cutoff";
     if (stopped()) return "review cancelled";

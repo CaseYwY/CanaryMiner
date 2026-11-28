@@ -428,6 +428,50 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
     CHECK(!panel.dirty()&&store.load(&saved,&reason)&&saved.find("schema_version")->text=="17");
     CHECK(decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharge->eligiblePeriods.size()==1);
+
+    panel.open(saved);
+    enter(panel,"demand_charge");
+    panel.key(27,{},T/1000);
+    CHECK(panel.render(120,26,ColorLevel::None).find("[N] Concurrent demand charges")!=std::string::npos);
+    panel.key('n',{},T/1000);
+    CHECK(panel.draft.find("schema_version")->text=="18"&&!panel.draft.find("demand_charge"));
+    CHECK(panel.draft.find("opening")->find("demand_peaks")->items.front().find("peak")->text=="10");
+    panel.key('\r',{},T/1000);
+    panel.key(kKeyDown,{},T/1000);
+    panel.key('\r',{},T/1000);
+    enter(panel,"rule");
+    enter(panel,"window_minutes");type(panel,"15");
+    enter(panel,"rate_per_kw");type(panel,"3");
+    panel.key('v',{},T/1000);
+    CHECK(panel.render(120,28,ColorLevel::None).find("The opening subtotal excludes all demand charges")!=std::string::npos);
+    CHECK(store.load(&saved,&reason)&&saved.find("schema_version")->text=="17");
+    panel.key(27,{},T/1000);
+    auto &namedOpening=member(panel.draft,"opening");
+    auto &secondPeak=member(namedOpening,"demand_peaks").items[1];
+    set(secondPeak,"peak",R"("10")");
+    set(namedOpening,"key",R"("concurrent-demand-opening")");
+    set(member(panel.draft,"plan"),"key",R"("concurrent-demand-plan")");
+    panel.key('v',{},T/1000);
+    panel.key('\r',[&](const JsonValue &value,std::string *error){return store.save(value,error);},T/1000);
+    const bool savedBoth=!panel.dirty()&&store.load(&saved,&reason)&&saved.find("schema_version")->text=="18"&&
+        decodeTariffDeclaration(saved,&decoded)&&decoded.plan.demandCharges.size()==2;
+    CHECK(savedBoth);
+    if(!savedBoth)return;
+    checkComparison(compareTariffCycles(decoded,{dec("8000"),dec("12000")},1,T),"0.000000","16.000000","16.000000");
+
+    // A caller passing corrupted ending state must not partially clear or rotate a settled opening.
+    constexpr int64_t feb2024=1706745600000;
+    decoded.resetSchedule=TariffResetSchedule{1,{}};
+    auto settled=decoded.opening;
+    settled.throughUtcMs=settled.cycleEndUtcMs=feb2024;
+    settled.demandOpenings.back().key="different-key";
+    const auto firstPeak=settled.demandOpenings.front().peak.numerator.text();
+    bool splits=false;
+    CHECK(advanceTariffOpening(decoded,settled,T,splits)==ElectricityStatus::Invalid);
+    CHECK(settled.throughUtcMs==feb2024&&settled.demandOpenings.front().peak.numerator.text()==firstPeak);
+    settled.demandOpenings.pop_back();
+    CHECK(advanceTariffOpening(decoded,settled,T,splits)==ElectricityStatus::Invalid);
+    CHECK(settled.throughUtcMs==feb2024&&settled.demandOpenings.front().peak.numerator.text()==firstPeak);
 }
 
 void restrictedCredit(JsonValue draft,const std::filesystem::path &target) {

@@ -169,27 +169,27 @@ SeasonalAllowance decodeSeasonalAllowance(const JsonValue &value,int64_t confirm
     return result;
 }
 
-DemandChargeRule decodeDemandCharge(const JsonValue &value,int64_t confirmedUtcMs,bool apparent,size_t &total) {
+DemandChargeRule decodeDemandCharge(const JsonValue &value,const std::string &path,int64_t confirmedUtcMs,bool apparent,size_t &total) {
     const auto *ratchet=value.find("ratchet");
     const auto *periods=value.find("eligible_periods");
     using Fields=std::initializer_list<const char *>;
     if(apparent)
-        keys(value,"demand_charge",{"window_minutes","offset_minutes","published_utc_ms","rate_per_kva","power_factor_va_places"},
+        keys(value,path,{"window_minutes","offset_minutes","published_utc_ms","rate_per_kva","power_factor_va_places"},
              ratchet?Fields{"ratchet"}:Fields{},periods?Fields{"eligible_periods"}:Fields{});
     else
-        keys(value,"demand_charge",{"window_minutes","offset_minutes","published_utc_ms","rate_per_kw"},
+        keys(value,path,{"window_minutes","offset_minutes","published_utc_ms","rate_per_kw"},
              ratchet?Fields{"ratchet"}:Fields{},periods?Fields{"eligible_periods"}:Fields{});
-    const auto window=static_cast<unsigned>(integer(*value.find("window_minutes"),"demand_charge.window_minutes",60));
-    const auto offset=static_cast<unsigned>(integer(*value.find("offset_minutes"),"demand_charge.offset_minutes",59));
+    const auto window=static_cast<unsigned>(integer(*value.find("window_minutes"),child(path,"window_minutes"),60));
+    const auto offset=static_cast<unsigned>(integer(*value.find("offset_minutes"),child(path,"offset_minutes"),59));
     if(window<5||60%window)
-        bad("demand_charge.window_minutes","Choose a window from 5 to 60 minutes that divides an hour.",TariffProblemKind::Unknown);
+        bad(child(path,"window_minutes"),"Choose a window from 5 to 60 minutes that divides an hour.",TariffProblemKind::Unknown);
     if(offset>=window)
-        bad("demand_charge.offset_minutes","Enter a nonnegative UTC offset smaller than the window.",TariffProblemKind::Unknown);
-    const auto published=static_cast<int64_t>(integer(*value.find("published_utc_ms"),"demand_charge.published_utc_ms"));
+        bad(child(path,"offset_minutes"),"Enter a nonnegative UTC offset smaller than the window.",TariffProblemKind::Unknown);
+    const auto published=static_cast<int64_t>(integer(*value.find("published_utc_ms"),child(path,"published_utc_ms")));
     if(published>confirmedUtcMs)
-        bad("demand_charge.published_utc_ms","Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);
+        bad(child(path,"published_utc_ms"),"Publication cannot be after local confirmation.",TariffProblemKind::FuturePublication);
     const auto *rateField=apparent?"rate_per_kva":"rate_per_kw";
-    const auto ratePath=child("demand_charge",rateField);
+    const auto ratePath=child(path,rateField);
     auto rate=decimal(*value.find(rateField),ratePath);
     if(rate.negative())bad(ratePath,"Use a nonnegative demand charge in the declared unit.",TariffProblemKind::Unknown);
     DemandChargeRule result{window,offset,published,std::move(rate)};
@@ -197,26 +197,26 @@ DemandChargeRule decodeDemandCharge(const JsonValue &value,int64_t confirmedUtcM
     if(apparent){
         const auto &places=*value.find("power_factor_va_places");
         if(places.type!=JsonValue::Type::Null)
-            result.powerFactorVaPlaces=static_cast<unsigned>(integer(places,"demand_charge.power_factor_va_places",18));
+            result.powerFactorVaPlaces=static_cast<unsigned>(integer(places,child(path,"power_factor_va_places"),18));
     }
     if(ratchet){
-        constexpr char path[]="demand_charge.ratchet";
-        keys(*ratchet,path,{"lookback_months","fraction"});
-        const auto months=static_cast<unsigned>(integer(*ratchet->find("lookback_months"),child(path,"lookback_months"),12));
-        auto fraction=decimal(*ratchet->find("fraction"),child(path,"fraction"));
+        const auto ratchetPath=child(path,"ratchet");
+        keys(*ratchet,ratchetPath,{"lookback_months","fraction"});
+        const auto months=static_cast<unsigned>(integer(*ratchet->find("lookback_months"),child(ratchetPath,"lookback_months"),12));
+        auto fraction=decimal(*ratchet->find("fraction"),child(ratchetPath,"fraction"));
         ExactDecimal one;
         ExactDecimal::parse("1",&one);
-        if(!months)bad(child(path,"lookback_months"),"Choose one to twelve completed monthly cycles.",TariffProblemKind::Unknown);
+        if(!months)bad(child(ratchetPath,"lookback_months"),"Choose one to twelve completed monthly cycles.",TariffProblemKind::Unknown);
         if(fraction.negative()||fraction.zero()||fraction.compare(one)>0)
-            bad(child(path,"fraction"),"Use a positive fraction no larger than one.",TariffProblemKind::Unknown);
+            bad(child(ratchetPath,"fraction"),"Use a positive fraction no larger than one.",TariffProblemKind::Unknown);
         result.ratchet=DemandRatchet{months,std::move(fraction)};
     }
     if (periods) {
-        constexpr char path[] = "demand_charge.eligible_periods";
-        boundedArray(*periods, path, maxDemandPeriods, total);
-        if (periods->items.empty()) bad(path,"Enter at least one demand period.",TariffProblemKind::Unknown);
+        const auto periodsPath = child(path,"eligible_periods");
+        boundedArray(*periods, periodsPath, maxDemandPeriods, total);
+        if (periods->items.empty()) bad(periodsPath,"Enter at least one demand period.",TariffProblemKind::Unknown);
         for (size_t i = 0; i < periods->items.size(); ++i) {
-            const auto at = std::string(path) + "[" + std::to_string(i) + "]";
+            const auto at = periodsPath + "[" + std::to_string(i) + "]";
             const auto &row = periods->items[i];
             keys(row,at,{"begin_minute","end_minute","weekday_mask","month_mask","date","eligible"});
             const auto field = [&](const char *name, unsigned max) {
@@ -234,6 +234,28 @@ DemandChargeRule decodeDemandCharge(const JsonValue &value,int64_t confirmedUtcM
         }
     }
     return result;
+}
+
+void decodeNamedDemandCharges(const JsonValue &rows, int64_t confirmed, TariffPlan &plan, size_t &total) {
+    const std::string field = "demand_charges";
+    boundedArray(rows, field, maxDemandCharges, total);
+    if (rows.items.size() < 2)
+        bad(field, "Enter at least two demand charges.", TariffProblemKind::Collection);
+    std::set<std::string> keysSeen;
+    for (const auto &row : rows.items) {
+        const auto path = field + "[" + std::to_string(plan.demandCharges.size()) + "]";
+        keys(row, path, {"key", "rule"});
+        auto key = label(*row.find("key"), child(path, "key"));
+        if (!keysSeen.insert(key).second)
+            bad(child(path, "key"), "Use a different key for each demand charge.", TariffProblemKind::DuplicateField);
+        const auto &source = *row.find("rule");
+        auto rule = decodeDemandCharge(source, child(path, "rule"), confirmed, source.find("rate_per_kva") != nullptr, total);
+        const auto *apparent = plan.apparentDemandRule();
+        if (rule.apparent() && apparent && rule.powerFactorVaPlaces != apparent->powerFactorVaPlaces)
+            bad(child(path, "rule.power_factor_va_places"),
+                "Use the same apparent power conversion for all charges on this meter.", TariffProblemKind::Unknown);
+        plan.demandCharges.push_back({std::move(key), std::move(rule)});
+    }
 }
 
 void validateSeasonalBands(const TariffPlan &plan) {
@@ -328,15 +350,14 @@ bool splitsChargedDay(const TariffPlan &plan,int64_t boundary,std::optional<int6
         });
 }
 
-void decodeDemandHistory(const JsonValue &rows,const DemandChargeRule &rule,const TariffResetSchedule &policy,
-                         const CivilClock &clock,
-                         const ExactDecimal &denominator,BillOpening &opening,size_t &total){
-    constexpr char field[]="opening.demand_history";
+void decodeDemandHistory(const JsonValue &rows,const std::string &field,const DemandChargeRule &rule,
+                         const TariffResetSchedule &policy,const CivilClock &clock,const ExactDecimal &denominator,
+                         int64_t cycleBegin,std::vector<ElectricityAmount> &history,size_t &total){
     boundedArray(rows,field,12,total);
     if(rows.items.size()!=rule.ratchet->lookbackMonths)
         bad(field,"Supply one actual peak for each complete month in the lookback.",TariffProblemKind::Unknown);
-    opening.demandHistory.resize(rows.items.size());
-    auto boundary=opening.cycleBeginUtcMs;
+    history.resize(rows.items.size());
+    auto boundary=cycleBegin;
     const int64_t span=rule.windowMinutes*60000LL,offset=rule.offsetMinutes*60000LL;
     const auto *peakField=rule.apparent()?"peak_kva":"peak_kw";
     for(size_t i=rows.items.size();i>0;--i){
@@ -355,9 +376,67 @@ void decodeDemandHistory(const JsonValue &rows,const DemandChargeRule &rule,cons
         if(eligibility!=ElectricityStatus::Ok)
             bad(peakPath,"Use zero when a completed month has no eligible windows. Its schedule must align with the demand grid.",
                 TariffProblemKind::ModelStatus,{},eligibility);
-        if(!peak.multiply(denominator,&opening.demandHistory[i-1].numerator))
+        if(!peak.multiply(denominator,&history[i-1].numerator))
             bad(peakPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         boundary=period.beginUtcMs;
+    }
+}
+
+ElectricityAmount decodeEstablishedDemand(const JsonValue &value,const std::string &path,const ExactDecimal &denominator) {
+    const auto peak=decimal(value,path);
+    if(peak.negative())bad(path,"Use a nonnegative established peak in the declared demand unit.",TariffProblemKind::Unknown);
+    ElectricityAmount result;
+    if(!peak.multiply(denominator,&result.numerator))
+        bad(path,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+    return result;
+}
+
+void decodeNamedDemandOpenings(const JsonValue &rows,const TariffDeclaration &declaration,BillOpening &opening,
+                               const ExactDecimal &denominator,size_t &total) {
+    const std::string field = "opening.demand_peaks";
+    boundedArray(rows, field, maxDemandCharges, total);
+    const auto &plan = declaration.plan;
+    const auto &charges = plan.demandCharges;
+    if (rows.items.size() != charges.size())
+        bad(field, "Supply exactly one opening peak per demand charge.", TariffProblemKind::Collection);
+    opening.demandOpenings.resize(charges.size());
+    for (size_t i = 0; i < rows.items.size(); ++i) {
+        const auto &row = rows.items[i];
+        const auto path = field + "[" + std::to_string(i) + "]";
+        using Fields = std::initializer_list<const char *>;
+        const auto *history = row.find("history");
+        keys(row, path, {"key", "peak"}, history ? Fields{"history"} : Fields{});
+        auto key = label(*row.find("key"), child(path, "key"));
+        const auto charge = std::find_if(charges.begin(), charges.end(), [&](const auto &item) { return item.key == key; });
+        if (charge == charges.end())
+            bad(child(path, "key"), "Use a declared demand charge key.", TariffProblemKind::Unknown);
+        auto &state = opening.demandOpenings[static_cast<size_t>(charge - charges.begin())];
+        if (!state.key.empty())
+            bad(child(path, "key"), "Supply each demand charge key once.", TariffProblemKind::DuplicateField);
+        state.key = std::move(key);
+        state.peak = decodeEstablishedDemand(*row.find("peak"), child(path, "peak"), denominator);
+        if (static_cast<bool>(history) != charge->rule.ratchet.has_value())
+            bad(child(path, "history"), "Supply history for a demand charge with a historical floor.", TariffProblemKind::MissingFields);
+        if (history)
+            decodeDemandHistory(*history, child(path, "history"), charge->rule, *declaration.resetSchedule,
+                                plan.clock, denominator, opening.cycleBeginUtcMs, state.history, total);
+    }
+    for (size_t i = 0; i < charges.size(); ++i) {
+        const auto &first = opening.demandOpenings[i].history;
+        if (first.empty()) continue;
+        for (size_t j = 0; j < i; ++j) {
+            const auto &second = opening.demandOpenings[j].history;
+            auto end = opening.cycleBeginUtcMs;
+            for (size_t ago = 1; ago <= (std::min)(first.size(), second.size()); ++ago) {
+                const auto period = recurringCycle(*declaration.resetSchedule, end - 1);
+                const auto status = validateRelatedDemandPeaks(plan.clock, charges[i].rule, first[first.size()-ago],
+                    charges[j].rule, second[second.size()-ago], period.beginUtcMs, end);
+                if (status != ElectricityStatus::Ok)
+                    bad(field, "Historical demand peaks conflict on the same meter or aligned windows.",
+                        TariffProblemKind::ModelStatus, {}, status);
+                end = period.beginUtcMs;
+            }
+        }
     }
 }
 
@@ -499,19 +578,35 @@ std::vector<BillTaxSegment> decodeTaxSegments(const JsonValue &value, const Exac
 }
 
 bool resetOpening(BillOpening &opening,const TariffCycleBounds &window,const TariffPlan &plan){
-    if(plan.demandCharge&&plan.demandCharge->ratchet){
-        auto &history=opening.demandHistory;
-        if(!opening.peakDemand||history.empty()||history.size()!=plan.demandCharge->ratchet->lookbackMonths)
-            return false;
-        auto peak=*opening.peakDemand;
-        std::rotate(history.begin(),history.begin()+1,history.end());
-        history.back()=std::move(peak);
+    const auto validHistory=[](const DemandChargeRule &rule,const std::vector<ElectricityAmount> &history){
+        return rule.ratchet ? !history.empty() && history.size()==rule.ratchet->lookbackMonths : history.empty();
+    };
+    if(plan.demandCharges.size()!=opening.demandOpenings.size())return false;
+    if(plan.demandCharge ? !plan.demandCharges.empty() :
+        opening.peakDemand.has_value()||opening.apparentDemand||!opening.demandHistory.empty())return false;
+    if(plan.demandCharge&&(!opening.peakDemand||opening.apparentDemand!=plan.demandCharge->apparent()||
+        !validHistory(*plan.demandCharge,opening.demandHistory)))return false;
+    for(size_t i=0;i<plan.demandCharges.size();++i){
+        const auto &state=opening.demandOpenings[i];
+        const auto &item=plan.demandCharges[i];
+        if(state.key!=item.key||!validHistory(item.rule,state.history))return false;
+    }
+    const auto resetPeak=[](const DemandChargeRule &rule, ElectricityAmount &peak, std::vector<ElectricityAmount> &history){
+        if(rule.ratchet){
+            std::rotate(history.begin(),history.begin()+1,history.end());
+            history.back()=std::move(peak);
+        }
+        peak={};
+    };
+    if(plan.demandCharge)resetPeak(*plan.demandCharge,*opening.peakDemand,opening.demandHistory);
+    for (size_t i = 0; i < plan.demandCharges.size(); ++i) {
+        auto &state = opening.demandOpenings[i];
+        resetPeak(plan.demandCharges[i].rule, state.peak, state.history);
     }
     opening.cycleBeginUtcMs=opening.throughUtcMs=window.beginUtcMs;
     opening.cycleEndUtcMs=window.endUtcMs;
     opening.importedKwh={};
     opening.accruedSubtotal={};
-    if(opening.peakDemand)opening.peakDemand=ElectricityAmount{};
     if(opening.exports)opening.exports=BillExportOpening{};
     if(opening.restrictedCredit)opening.restrictedCredit->accruedImportSubtotal={};
     if(opening.tax)opening.tax=BillTaxOpening{};
@@ -565,7 +660,9 @@ JsonValue tariffRowTemplate(const std::string &name,bool componentMultiplier,boo
     if(name=="lots")return literal(R"({"expires_utc_ms":0,"amount":""})");
     if(name=="bands")return literal(R"({"through_kwh":null,"rate_per_kwh":""})");
     if(name=="seasons")return literal(R"({"start_month":0,"start_day":0,"kwh_per_day":""})");
-    if(name=="demand_history")return literal(apparentDemand?R"({"cycle_end_utc_ms":0,"peak_kva":""})":
+    if(name=="demand_charges")return literal(R"({"key":"","rule":{"window_minutes":0,"offset_minutes":0,"published_utc_ms":0,"rate_per_kw":""}})");
+    if(name=="demand_peaks")return literal(R"({"key":"","peak":""})");
+    if(name=="demand_history"||name=="history")return literal(apparentDemand?R"({"cycle_end_utc_ms":0,"peak_kva":""})":
                                            R"({"cycle_end_utc_ms":0,"peak_kw":""})");
     if(name=="eligible_periods")return literal(R"({"begin_minute":0,"end_minute":1440,"weekday_mask":127,"month_mask":4095,"date":null,"eligible":true})");
     return {};
@@ -677,7 +774,7 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d,const std::
     const auto windows=comparisonCycles(d,cycles);
     if(windows.empty()||d.opening.evidence.basis!=PowerBasis::WholeMeterImport)
         return {ElectricityStatus::Invalid,0,false,{},{},{}};
-    if(d.plan.demandCharge&&d.plan.demandCharge->ratchet&&d.opening.cycleBeginUtcMs>decision)
+    if(d.plan.hasDemandHistory()&&d.opening.cycleBeginUtcMs>decision)
         return {ElectricityStatus::DemandHistoryNotYetKnown,0,false,{},{},{}};
     std::array<BillOpening,2> openings{d.opening,d.opening};
     TariffCycleComparison result;
@@ -733,30 +830,36 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(tariffJson(root).size()>tariffDeclarationMaxBytes)bad("","Declaration exceeds 64 KiB.",TariffProblemKind::Oversized);
         const auto *allowance=root.find("seasonal_allowance");
         const auto *demand=root.find("demand_charge");
+        const auto *demandCharges=root.find("demand_charges");
         const auto *restrictedCredit=root.find("restricted_credit");
         using Fields=std::initializer_list<const char *>;
+        const char *demandField=demandCharges?"demand_charges":demand?"demand_charge":nullptr;
         keys(root,"",{"schema_version","country","source_reference","acknowledged","confirmed_utc","reset_policy","plan","opening"},
-             allowance?(demand?Fields{"seasonal_allowance","demand_charge"}:Fields{"seasonal_allowance"}):
-                       (demand?Fields{"demand_charge"}:Fields{}),
+             allowance?(demandField?Fields{"seasonal_allowance",demandField}:Fields{"seasonal_allowance"}):
+                       (demandField?Fields{demandField}:Fields{}),
              restrictedCredit?Fields{"restricted_credit"}:Fields{});
         const auto version=integer(*root.find("schema_version"),"schema_version",tariffDeclarationLatestVersion);
         const bool scheduledDemand=version==17;
+        const bool concurrentDemand=version==18;
+        const bool flexibleDemand=scheduledDemand||concurrentDemand;
+        if(concurrentDemand!=static_cast<bool>(demandCharges)||(concurrentDemand&&demand))
+            bad("schema_version","Concurrent demand charges require version 18 and their own list.",TariffProblemKind::SchemaVersion);
         if(scheduledDemand!=static_cast<bool>(demand && demand->find("eligible_periods")))
             bad("schema_version","Demand eligibility periods require version 17.",TariffProblemKind::SchemaVersion);
-        if(!scheduledDemand&&(version==13)!=static_cast<bool>(restrictedCredit))
+        if(!flexibleDemand&&(version==13)!=static_cast<bool>(restrictedCredit))
             bad("schema_version","Restricted credits require version 13.",TariffProblemKind::SchemaVersion);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
         const auto &plan=*root.find("plan");
         const auto *exportRule=plan.find("export_payment");
         const auto *taxPeriods=plan.find("tax_periods");
-        if(scheduledDemand&&restrictedCredit&&(exportRule||taxPeriods))
+        if(flexibleDemand&&restrictedCredit&&(exportRule||taxPeriods))
             bad("restricted_credit","Restricted credit requires a plan without export payments or ordered taxes.",TariffProblemKind::Unknown);
-        const bool segmentedTaxes=version==16||(scheduledDemand&&plan.find("tax_allocation"));
-        const bool orderedTaxes=version==15||version==16||(scheduledDemand&&taxPeriods);
+        const bool segmentedTaxes=version==16||(flexibleDemand&&plan.find("tax_allocation"));
+        const bool orderedTaxes=version==15||version==16||(flexibleDemand&&taxPeriods);
         if(orderedTaxes!=static_cast<bool>(taxPeriods))
             bad("schema_version","Ordered taxes require version 15 or 16.",TariffProblemKind::SchemaVersion);
-        const bool scheduledExport=version==14||((orderedTaxes||scheduledDemand)&&exportRule&&exportRule->find("dynamic"));
-        if(!orderedTaxes&&!scheduledDemand&&((version==12||version==14)!=static_cast<bool>(exportRule)))
+        const bool scheduledExport=version==14||((orderedTaxes||flexibleDemand)&&exportRule&&exportRule->find("dynamic"));
+        if(!orderedTaxes&&!flexibleDemand&&((version==12||version==14)!=static_cast<bool>(exportRule)))
             bad("schema_version","Export payment requires version 12, 14, 15 or 16.",TariffProblemKind::SchemaVersion);
         if(version<12&&(version>=9)!=static_cast<bool>(demand))
             bad("schema_version","Demand charge requires version 9.",TariffProblemKind::SchemaVersion);
@@ -774,7 +877,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         const bool twoMonth=version==6||(allowsComponents&&policy.find("bimonthly_start_month"));
         if(twoMonth&&allowance)
             bad("reset_policy","Seasonal allowance cannot use the two-month average rule.",TariffProblemKind::Unknown);
-        if(twoMonth&&demand)
+        if(twoMonth&&demandField)
             bad("reset_policy","Demand charge requires a cycle without two-month averaging.",TariffProblemKind::Unknown);
         const bool explicitCycle=version==1||((version==4||version>=7)&&policy.isString());
         if(explicitCycle)choice(policy,"reset_policy",{"explicit_cycle_only"});
@@ -785,7 +888,10 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(allowance)d.seasonalAllowance=decodeSeasonalAllowance(*allowance,confirmedMs);
         auto &p=d.plan;
         size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0;
-        if(demand)p.demandCharge=decodeDemandCharge(*demand,confirmedMs,apparent,total);
+        if(demand)p.demandCharge=decodeDemandCharge(*demand,"demand_charge",confirmedMs,apparent,total);
+        if(demandCharges)decodeNamedDemandCharges(*demandCharges,confirmedMs,p,total);
+        if(concurrentDemand && p.apparentDemandRule() && (restrictedCredit||exportRule))
+            bad("demand_charges","kVA demand requires a meter declaration without separate export payments or restricted credit.",TariffProblemKind::Unknown);
         p.restrictedCreditAtClose=restrictedCredit!=nullptr;
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"},
              exportRule?Fields{"export_payment"}:Fields{},
@@ -893,9 +999,11 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         auto &s=d.opening;const auto &opening=*root.find("opening");
         keys(opening,"opening",{"key","scope","adapter","basis","origin","cycle_begin_utc_ms","cycle_end_utc_ms","through_utc_ms","imported_kwh","accrued_subtotal","time_database_version"},
              exportRule?(ratchet?Fields{openingPeak,"demand_history","exported_kwh","accrued_export_payment"}:
+                                   concurrentDemand?Fields{"demand_peaks","exported_kwh","accrued_export_payment"}:
                                    demand?Fields{openingPeak,"exported_kwh","accrued_export_payment"}:
                                           Fields{"exported_kwh","accrued_export_payment"}):
-                        (ratchet?Fields{openingPeak,"demand_history"}:demand?Fields{openingPeak}:Fields{}),
+                        (ratchet?Fields{openingPeak,"demand_history"}:concurrentDemand?Fields{"demand_peaks"}:
+                         demand?Fields{openingPeak}:Fields{}),
              segmentedTaxes?Fields{"tax_segments"}:orderedTaxes?Fields{"tax_bases"}:Fields{});
         choice(*opening.find("basis"),"opening.basis",{"whole_meter_import"});choice(*opening.find("origin"),"opening.origin",{"declared_forecast"});
         s.declared=true;s.planKey=p.key;s.evidence={PowerBasis::WholeMeterImport,PowerOrigin::DeclaredForecast,label(*opening.find("scope"),"opening.scope"),label(*opening.find("adapter"),"opening.adapter")};
@@ -915,8 +1023,11 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
             if(s.cycleBeginUtcMs!=bounds.beginUtcMs||s.cycleEndUtcMs!=bounds.endUtcMs)
                 bad("opening","Derive both cycle boundaries from the reset rule and through-time.",TariffProblemKind::Unknown);
         }
-        if(ratchet&&(!d.resetSchedule||d.resetSchedule->annualMonth||d.resetSchedule->bimonthlyStartMonth))
+        if(p.hasDemandHistory()&&(!d.resetSchedule||d.resetSchedule->annualMonth||d.resetSchedule->bimonthlyStartMonth))
             bad("reset_policy","Demand ratchet requires monthly resets.",TariffProblemKind::Unknown);
+        if(p.hasDemandHistory()&&s.cycleBeginUtcMs>confirmedMs)
+            bad(concurrentDemand?"opening.demand_peaks":"opening.demand_history",
+                "The latest historical month must be complete at local confirmation.",TariffProblemKind::Unknown);
         const bool namedReset=d.resetSchedule&&d.resetSchedule->clock.kind==CivilClockKind::NamedIana;
         if(version==4&&!namedRate&&!namedReset)
             bad("schema_version","Version 4 requires an explicitly named tariff or reset clock.",TariffProblemKind::SchemaVersion);
@@ -947,23 +1058,18 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(restrictedCredit)s.restrictedCredit=decodeRestrictedCredit(*restrictedCredit,s,denominator,total);
         if(p.demandCharge){
             s.apparentDemand=apparent;
-            const auto path=child("opening",openingPeak);
-            const auto peak=decimal(*opening.find(openingPeak),path);
-            if(peak.negative())bad(path,"Use a nonnegative established peak in the declared demand unit.",TariffProblemKind::Unknown);
-            if(!peak.multiply(denominator,&s.peakDemand.emplace().numerator))
-                bad(path,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
-            if(ratchet){
-                if(s.cycleBeginUtcMs>confirmedMs)
-                    bad("opening.demand_history","The latest historical month must be complete at local confirmation.",TariffProblemKind::Unknown);
-                decodeDemandHistory(*opening.find("demand_history"),*p.demandCharge,*d.resetSchedule,p.clock,denominator,s,total);
-            }
-            if(s.throughUtcMs!=s.cycleBeginUtcMs){
-                ElectricityAmount billable,floor,peakCharge;
-                if(!billableDemand(*p.demandCharge,s,billable,floor)||
-                   !p.demandCharge->charge(billable,&peakCharge)||
-                   !s.accruedSubtotal.numerator.add(peakCharge.numerator,&s.accruedSubtotal.numerator))
-                    bad(path,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
-            }
+            s.peakDemand=decodeEstablishedDemand(*opening.find(openingPeak),child("opening",openingPeak),denominator);
+            if(ratchet)
+                decodeDemandHistory(*opening.find("demand_history"),"opening.demand_history",*p.demandCharge,
+                                    *d.resetSchedule,p.clock,denominator,s.cycleBeginUtcMs,s.demandHistory,total);
+        }
+        if(concurrentDemand)decodeNamedDemandOpenings(*opening.find("demand_peaks"),d,s,denominator,total);
+        if(p.hasDemand()&&s.throughUtcMs!=s.cycleBeginUtcMs){
+            ElectricityAmount peakCharge;
+            if(!demandSubtotal(p,s,peakCharge)||
+               !s.accruedSubtotal.numerator.add(peakCharge.numerator,&s.accruedSubtotal.numerator))
+                bad(concurrentDemand?"opening.demand_peaks":child("opening",openingPeak),
+                    "Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         }
         if(twoMonth)normalizeBimonthlyTariff(p);
         std::optional<SeasonalCycleTariff> adjusted;
