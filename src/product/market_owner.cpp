@@ -258,14 +258,13 @@ bool MarketPollingPlan::complete(const MarketFetchTicket &ticket, const PublicJs
         h.attempts = 0; h.nextDueMs = later(ms, refresh); return true;
     }
     const bool rateLimited = r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::RateLimited;
-    const bool kraken = policy_.publicHourKrakenFallback && provider(feed) == provider(krakenHourFeed);
+    const bool kraken = provider(feed) == provider(krakenHourFeed);
     const bool serviceThrottle = kraken && r.status == PublicHttpsStatus::Ok && data == MarketDataStatus::ProviderThrottled;
-    const bool shareDelay = kraken && (serviceThrottle || rateLimited || r.httpStatus == 429 ||
-                                      (r.retryAfterSeconds && transient(r)));
+    const bool shareDelay = serviceThrottle || rateLimited || r.httpStatus == 429 || (r.retryAfterSeconds && transient(r));
     const auto seconds = utcSeconds(policy_, utc);
     const auto waitSeconds = providerNotBeforeUtc > seconds ? providerNotBeforeUtc - seconds : 0;
-    const bool unboundedServiceDelay = serviceThrottle && (!providerNotBeforeUtc || waitSeconds >= 3600);
-    const bool cappedRetry = (shareDelay || r.httpStatus == 429) && r.retryAfterSeconds >= 3600;
+    const bool unboundedServiceDelay = serviceThrottle && (!providerNotBeforeUtc || waitSeconds >= maxPublicRetryAfterSeconds);
+    const bool cappedRetry = shareDelay && r.retryAfterSeconds >= maxPublicRetryAfterSeconds;
 
     ++h.attempts;
     if (!(transient(r) || rateLimited || serviceThrottle) || cappedRetry || unboundedServiceDelay) {
@@ -408,8 +407,7 @@ struct MarketDataOwner::Impl {
                         quote = parseMarketQuote(response, context);
                         status = quote.status;
                     }
-                    const auto notBefore = policy.publicHourKrakenFallback && status == MarketDataStatus::ProviderThrottled
-                        ? krakenThrottleUtc(response) : 0;
+                    const auto notBefore = status == MarketDataStatus::ProviderThrottled ? krakenThrottleUtc(response) : 0;
                     now = clock();
                     {
                         // Serialize cancellation with cache commit, not with network/parse work. No late fact commits after stop.

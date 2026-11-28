@@ -77,6 +77,35 @@ int main() {
     failure.retryAfterSeconds = 3600;
     ticket = plan.next(0, E + 10); plan.complete(*ticket, failure, MarketDataStatus::Transport, 0, E + 10);
     CHECK(plan.health()[0].latched);
+    for (const unsigned delay : {30u, maxPublicRetryAfterSeconds}) {
+        MarketPollingPlan throttle;
+        CHECK(throttle.start(1, 0, E + 10, fast, true));
+        ticket = throttle.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlTicker);
+        auto retry = failure;
+        retry.httpStatus = 503;
+        retry.retryAfterSeconds = delay;
+        CHECK(ticket && throttle.complete(*ticket, retry, MarketDataStatus::Transport, 0, E + 10));
+        ticket = throttle.next(0, E + 10);
+        CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtTicker);
+        CHECK(ticket && throttle.complete(*ticket, okay(), MarketDataStatus::Ok, 0, E + 10));
+        ticket = throttle.next(1000, E + 11);
+        CHECK(ticket && ticket->request.feed == PublicFeed::KrakenUsdtCandles);
+        CHECK(ticket && throttle.complete(*ticket, okay(), MarketDataStatus::Ok, 1000, E + 11));
+        const auto expectKraken = [&](uint64_t ms) {
+            auto next = throttle.next(ms, E + 10 + ms / 1000);
+            CHECK(next && next->request.feed == PublicFeed::KrakenUsdtTicker);
+            CHECK(next && throttle.complete(*next, okay(), MarketDataStatus::Ok, ms, E + 10 + ms / 1000));
+        };
+        expectKraken(29000); // only the Gate sibling stays delayed
+        if (delay == maxPublicRetryAfterSeconds) {
+            CHECK(throttle.health()[0].latched);
+            expectKraken(3600000); // capped instructions outlast the normal retry window
+        } else {
+            ticket = throttle.next(30000, E + 40);
+            CHECK(ticket && ticket->request.feed == PublicFeed::GatePearlCandles);
+        }
+    }
     for (const auto &error : {PublicHttpsStatus::TlsVerification, PublicHttpsStatus::TlsProtocol, PublicHttpsStatus::DestinationBlocked, PublicHttpsStatus::InvalidJson}) {
         plan.stop(); static uint64_t generation = 6; CHECK(plan.start(++generation, 0, E + 10, policy, false));
         failure.status = error; failure.httpStatus = 0; failure.retryAfterSeconds = 0;
@@ -374,6 +403,28 @@ int main() {
     CHECK(waitUntil([&] { return owner.snapshot()->clockFault; }));
     owner.stop(); CHECK(!owner.snapshot()->running);
     CHECK(!owner.start(1)); CHECK(owner.start(2)); owner.stop(); CHECK(owner.snapshot()->generation == 2);
+
+    ms = 0;
+    std::atomic<unsigned> krakenRequests{0};
+    MarketDataOwner throttledOwner([&](const PublicJsonRequest &request, const std::atomic<bool> &, PublicHttpsLimits) {
+        auto response = okay();
+        response.observedUtc = clock().second;
+        if (request.feed == PublicFeed::GatePearlTicker)
+            response.body = "[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]";
+        else if (++krakenRequests == 1)
+            response.body = "{\"error\":[\"EService: Throttled: " + std::to_string(E + 20) + "\"]}";
+        else
+            response.body = "{\"error\":[],\"result\":{\"USDTZUSD\":{\"c\":[\"0.98\",\"1\"]}}}";
+        return response;
+    }, policy, MarketOrigin::SyntheticFixture, false, clock);
+    CHECK(throttledOwner.start(1));
+    CHECK(waitUntil([&] { return throttledOwner.snapshot()->health[2].data == MarketDataStatus::ProviderThrottled; }));
+    const auto krakenWait = throttledOwner.snapshot()->health[2];
+    CHECK(krakenRequests == 1 && !krakenWait.latched && krakenWait.nextDueMs == 11000);
+    ms = 11000;
+    CHECK(waitUntil([&] { return throttledOwner.snapshot()->fxQuote.has_value(); }));
+    CHECK(krakenRequests == 2);
+    throttledOwner.stop();
 
     std::atomic<bool> entered{false};
     std::atomic<unsigned> stoppedCalls{0};

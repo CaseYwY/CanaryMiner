@@ -119,6 +119,35 @@ class Handler(socketserver.BaseRequestHandler):
                 code = b"503 Service Unavailable"
             if path == b"/rate-limit":
                 code, extras = b"429 Too Many Requests", b"Retry-After: 999999\r\n"
+            if path.startswith(b"/retry-"):
+                response_date = b"Date: Wed, 21 Oct 2015 07:28:00 GMT\r\n"
+                retry_headers = (
+                    b"Wed, 21 Oct 2015 07:28:19 GMT",
+                    b"Wednesday, 21-Oct-15 07:28:19 GMT",
+                    b"Wed Oct 21 07:28:19 2015",
+                    b"Wed, 21 Oct 2015 07:27:59 GMT",
+                    b"18446744073709551616000000000",
+                    b"20\r\nRetry-After: 3",
+                    b"tomorrow",
+                    b"Mon, 31 Feb 2015 07:28:19 GMT",
+                    b"000000000000000000000000000030",
+                    b"19",
+                    b"",
+                    b"19",
+                )
+                scenario = int(path.removeprefix(b"/retry-"))
+                code = b"503 Service Unavailable"
+                extras = b"Retry-After: " + retry_headers[scenario - 1] + b"\r\n" + response_date
+                if scenario == 10:
+                    connection.sendall(b"HTTP/1.1 103 Early Hints\r\nRetry-After: 3600\r\n\r\n")
+                if scenario == 11:
+                    # Exercise a rolling future year, without an older response Date masking a fixed year pivot.
+                    future = datetime(datetime.now(timezone.utc).year + 45, 1, 1, tzinfo=timezone.utc)
+                    weekday = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+                    value = f"{weekday[future.weekday()]}, 01-Jan-{future.year % 100:02d} 00:00:00 GMT"
+                    extras = b"Retry-After: " + value.encode("ascii") + b"\r\n"
+                if scenario == 12:
+                    body = b"x" * 9000  # error bodies must not erase a retry instruction
             if path == b"/bad-json":
                 body = b'{"duplicate":1,"duplicate":2}'
             if path == b"/invalid-utf8":
@@ -253,6 +282,8 @@ def main():
                                  ("/deep-json", "invalid-json"), ("/truncated", "network"), ("/slow-header", "timeout"), ("/slow-body", "timeout")):
                 case(server, path, status)
             case(server, "/rate-limit", "http-status", retry=3600)
+            for scenario, delay in enumerate((19, 19, 19, 0, 3600, 3600, 3600, 3600, 30, 19, 3600, 19), 1):
+                case(server, f"/retry-{scenario}", "http-status", retry=delay)
             case(server, "/slow-header", "cancelled", mode="cancel")
             case(server, "/slow-body", "cancelled", mode="cancel")
             case(server, "/ok", "destination-blocked", mode="blocked")

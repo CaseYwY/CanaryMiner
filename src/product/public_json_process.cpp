@@ -53,7 +53,7 @@ bool integer(const std::string &s, uint64_t *result) {
 }
 bool validResponse(const PublicJsonResponse &r, size_t limit) {
     if (!wireStatus(static_cast<unsigned>(r.status)) || r.httpStatus < 0 || r.httpStatus > 599 ||
-        r.retryAfterSeconds > 3600 || r.body.size() > limit) return false;
+        r.retryAfterSeconds > maxPublicRetryAfterSeconds || r.body.size() > limit) return false;
     if (r.status == PublicHttpsStatus::Ok || (r.status == PublicHttpsStatus::AssetObservation && r.httpStatus == 200))
         return r.httpStatus == 200 && r.observedUtc > 0 && r.observedUtc <= 253402300799ULL && boundedPublicJson(r.body);
     if (r.status == PublicHttpsStatus::AssetObservation && (r.httpStatus || r.retryAfterSeconds)) return false;
@@ -78,7 +78,8 @@ bool decodePublicJsonResponse(const std::string &wire, size_t limit, PublicJsonR
     if (!(header >> magic >> fields[0] >> fields[1] >> fields[2] >> fields[3] >> fields[4]) || magic != "CMJSON1" || header >> extra) return false;
     uint64_t n[5] = {};
     for (unsigned i = 0; i < 5; ++i) if (!integer(fields[i], &n[i])) return false;
-    if (!wireStatus(n[0]) || n[1] > 599 || n[3] > 3600 || n[4] > limit || n[4] != wire.size() - end - 1) return false;
+    if (!wireStatus(n[0]) || n[1] > 599 || n[3] > maxPublicRetryAfterSeconds || n[4] > limit || n[4] != wire.size() - end - 1)
+        return false;
     PublicJsonResponse r;
     r.status = static_cast<PublicHttpsStatus>(n[0]); r.httpStatus = static_cast<long>(n[1]); r.observedUtc = n[2];
     r.retryAfterSeconds = static_cast<unsigned>(n[3]); r.body = wire.substr(end + 1);

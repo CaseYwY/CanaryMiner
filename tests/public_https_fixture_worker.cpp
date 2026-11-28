@@ -20,7 +20,8 @@ int main(int argc, char **argv) {
     if (dnsOverHttps != (argc == 9) || (dnsOverHttps && argv[8] != om::publicCloudflareDoh)) return 2;
     const char *paths[] = {"/ok", "/chunked", "/redirect", "/http-error", "/html", "/compressed", "/conflict-header", "/large-header",
         "/large-body", "/chunked-large", "/bad-json", "/invalid-utf8", "/deep-json", "/truncated", "/slow-header", "/slow-body", "/rate-limit"};
-    const std::string path = scenario >= 1 && scenario <= 17 ? paths[scenario - 1] : "/ok";
+    std::string path = scenario >= 1 && scenario <= 17 ? paths[scenario - 1] : "/ok";
+    if (scenario >= 27 && scenario <= 38) path = "/retry-" + std::to_string(scenario - 26);
     const char *dohPaths[] = {"/doh-ok", "/doh-refused", "/doh-redirect", "/doh-reserved", "/doh-ok", "/doh-slow"};
     const auto ca = std::filesystem::absolute(argv[0]).parent_path() /
         ((scenario == 20 || scenario == 25) ? "untrusted.pem" : "root.pem");
