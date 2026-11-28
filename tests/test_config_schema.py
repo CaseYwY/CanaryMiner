@@ -514,6 +514,35 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
         apparent['power_factor_va_places'] = None
         self.assertEqual(validate(example, schema, schema), [])
 
+    def test_contracted_capacity_requires_v19_and_a_positive_capacity(self):
+        schema = load('config/tariff-declaration.schema.json')
+        example = load('config/tariff-declaration.example.json')
+        example['schema_version'] = 19
+        contract = dict(capacity='0.5', rate_per_unit='2')
+        rule = dict(window_minutes=15, offset_minutes=0, published_utc_ms=0, rate_per_kw='4',
+                    contracted_capacity=contract)
+        example['demand_charge'] = rule
+        example['opening']['peak_demand_kw'] = '0'
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 9}, schema, schema))
+        contract['capacity'] = '0'
+        self.assertTrue(validate(example, schema, schema))
+        contract['capacity'] = '10'
+        contract['rate_per_unit'] = '-2'
+        self.assertTrue(validate(example, schema, schema))
+        contract['rate_per_unit'] = '0'
+        self.assertEqual(validate(example, schema, schema), [])
+        example.pop('demand_charge')
+        example['opening'].pop('peak_demand_kw')
+        example['demand_charges'] = [dict(key='facility', rule=rule),
+                                     dict(key='plain', rule=dict(window_minutes=15, offset_minutes=0,
+                                                                 published_utc_ms=0, rate_per_kw='1'))]
+        example['opening']['demand_peaks'] = [dict(key='facility', peak='0'), dict(key='plain', peak='0')]
+        self.assertEqual(validate(example, schema, schema), [])
+        self.assertTrue(validate({**example, 'schema_version': 18}, schema, schema))
+        rule.pop('contracted_capacity')
+        self.assertTrue(validate(example, schema, schema))
+
     def test_apparent_demand_uses_v11_and_unit_specific_fields(self):
         schema = load('config/tariff-declaration.schema.json')
         example = load('config/tariff-declaration.example.json')
@@ -675,7 +704,8 @@ class TariffDeclarationSchemaTests(unittest.TestCase):
                     'plan': {'export_payment', 'tax_periods', 'tax_allocation'},
                     'opening': {'peak_demand_kw', 'peak_demand_kva', 'demand_history', 'demand_peaks', 'exported_kwh',
                                 'accrued_export_payment', 'tax_bases', 'tax_segments'},
-                    'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places', 'eligible_periods'},
+                    'demandCharge': {'ratchet', 'rate_per_kw', 'rate_per_kva', 'power_factor_va_places',
+                                     'eligible_periods', 'contracted_capacity'},
                     'demandHistoryRow': {'peak_kw', 'peak_kva'},
                     'namedDemandOpening': {'history'},
                 }.get(name, set())

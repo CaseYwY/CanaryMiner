@@ -5,7 +5,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["schema_version", "country", "source_reference", "acknowledged", "confirmed_utc", "reset_policy", "plan", "opening"],
   "properties": {
-    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18], "type": "integer"},
+    "schema_version": {"enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], "type": "integer"},
     "country": {"$ref": "#/$defs/label"},
     "source_reference": {"$ref": "#/$defs/label"},
     "acknowledged": {"type": "boolean", "const": true},
@@ -64,7 +64,7 @@
     {
       "if": {"anyOf": [
         {"properties": {"schema_version": {"const": 15}}},
-        {"properties": {"schema_version": {"enum": [17, 18]}, "plan": {
+        {"properties": {"schema_version": {"enum": [17, 18, 19]}, "plan": {
           "required": ["tax_periods"], "not": {"required": ["tax_allocation"]}
         }}}
       ]},
@@ -79,7 +79,7 @@
     {
       "if": {"anyOf": [
         {"properties": {"schema_version": {"const": 16}}},
-        {"properties": {"schema_version": {"enum": [17, 18]}, "plan": {"required": ["tax_allocation"]}}}
+        {"properties": {"schema_version": {"enum": [17, 18, 19]}, "plan": {"required": ["tax_allocation"]}}}
       ]},
       "then": {"properties": {
         "plan": {"required": ["tax_periods", "tax_allocation"], "properties": {"subtotal_multiplier": {"const": "1"}}},
@@ -98,7 +98,7 @@
       "if": {"properties": {"schema_version": {"const": 13}}},
       "then": {"required": ["restricted_credit"]},
       "else": {
-        "if": {"properties": {"schema_version": {"enum": [17, 18]}}},
+        "if": {"properties": {"schema_version": {"enum": [17, 18, 19]}}},
         "then": {
           "if": {"required": ["restricted_credit"]},
           "then": {"properties": {"plan": {"not": {"anyOf": [
@@ -111,10 +111,16 @@
     {
       "if": {"properties": {"schema_version": {"const": 17}}},
       "then": {"required": ["demand_charge"], "properties": {"demand_charge": {"required": ["eligible_periods"]}}},
-      "else": {"properties": {"demand_charge": {"not": {"required": ["eligible_periods"]}}}}
+      "else": {
+        "if": {"properties": {"schema_version": {"maximum": 18}}},
+        "then": {"properties": {"demand_charge": {"not": {"required": ["eligible_periods"]}}}}
+      }
     },
     {
-      "if": {"properties": {"schema_version": {"const": 18}}},
+      "if": {"anyOf": [
+        {"properties": {"schema_version": {"const": 18}}},
+        {"required": ["demand_charges"], "properties": {"schema_version": {"const": 19}}}
+      ]},
       "then": {
         "required": ["demand_charges"],
         "not": {"required": ["demand_charge"]},
@@ -140,6 +146,19 @@
         "not": {"required": ["demand_charges"]},
         "properties": {"opening": {"not": {"required": ["demand_peaks"]}}}
       }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": 19}}},
+      "then": {"oneOf": [
+        {"required": ["demand_charge"], "properties": {"demand_charge": {"required": ["contracted_capacity"]}}},
+        {"required": ["demand_charges"], "properties": {"demand_charges": {"contains": {
+          "properties": {"rule": {"required": ["contracted_capacity"]}}
+        }}}}
+      ]},
+      "else": {"properties": {
+        "demand_charge": {"not": {"required": ["contracted_capacity"]}},
+        "demand_charges": {"items": {"properties": {"rule": {"not": {"required": ["contracted_capacity"]}}}}}
+      }}
     },
     {
       "if": {"properties": {"schema_version": {"const": 7}}},
@@ -351,7 +370,15 @@
         "rate_per_kva": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]},
         "power_factor_va_places": {"type": ["integer", "null"], "minimum": 0, "maximum": 18},
         "ratchet": {"$ref": "#/$defs/demandRatchet"},
+        "contracted_capacity": {"$ref": "#/$defs/contractedDemand"},
         "eligible_periods": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/demandPeriod"}}
+      }
+    },
+    "contractedDemand": {
+      "type": "object", "additionalProperties": false, "required": ["capacity", "rate_per_unit"],
+      "properties": {
+        "capacity": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^(?:[1-9]|0\\.)"}]},
+        "rate_per_unit": {"allOf": [{"$ref": "#/$defs/decimal"}, {"pattern": "^[0-9]"}]}
       }
     },
     "demandPeriod": {

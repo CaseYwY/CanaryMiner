@@ -303,8 +303,9 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
     const auto appendDemand = [&](const DemandChargeRule &demand, const ElectricityAmount &measured,
                                   const std::vector<ElectricityAmount> &history, ElectricityAmount &subtotal) {
         std::string peak, amount;
+        DemandChargeParts parts;
         if (!billableDemand(demand,measured,history,billablePeak,ratchetFloor) ||
-            !measured.format(6,&peak) || !demand.charge(billablePeak,&subtotal) ||
+            !measured.format(6,&peak) || !demand.charge(billablePeak,&subtotal,&parts) ||
             !subtotal.format(6,&amount)) return false;
         const std::string unit = demand.unit();
         report += "  Peak demand " + peak + " " + unit + " over " + std::to_string(demand.windowMinutes) + " minute windows\n";
@@ -315,6 +316,14 @@ bool appendPeriod(std::string &report, unsigned period, const TariffDeclaration 
             if (!ratchetFloor.format(6,&floor) || !billablePeak.format(6,&billable)) return false;
             report += "  Demand ratchet floor " + floor + " " + unit + "\n";
             report += "  Billable demand " + billable + " " + unit + "\n";
+        }
+        if (demand.contract) {
+            std::string capacity, contracted, excess;
+            if (!demand.contract->capacity.format(6,&capacity) || !parts.capacityFee.format(6,&contracted) ||
+                !parts.excessFee.format(6,&excess)) return false;
+            report += "  Contracted capacity " + capacity + " " + unit + "\n";
+            report += "  Contracted capacity fee " + contracted + " " + currency + "\n";
+            report += "  Excess demand fee " + excess + " " + currency + "\n";
         }
         report += "  Demand charge before subtotal multiplier " + amount + " " + currency + "\n";
         return true;

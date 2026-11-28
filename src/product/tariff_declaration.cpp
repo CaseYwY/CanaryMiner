@@ -10,9 +10,10 @@ constexpr uint64_t lastMs=253402300799999ULL;
 struct Invalid {TariffProblem problem;};
 [[noreturn]] void bad(const std::string &path,const std::string &message,TariffProblemKind kind,std::vector<std::string> choices={},std::optional<ElectricityStatus> status={}){throw Invalid{{path,message,kind,std::move(choices),status}};}
 void keys(const JsonValue &v,const std::string &path,std::initializer_list<const char *> names,
-          std::initializer_list<const char *> additional={},std::initializer_list<const char *> extra={}){
-    if(!v.isObject()||v.members.size()!=names.size()+additional.size()+extra.size())bad(path,"Missing/unknown fields; unsupported rules are never discarded.",TariffProblemKind::MissingFields);
-    for(const auto fields:{names,additional,extra})for(const auto *name:fields)
+          std::initializer_list<const char *> additional={},std::initializer_list<const char *> extra={},
+          std::initializer_list<const char *> last={}){
+    if(!v.isObject()||v.members.size()!=names.size()+additional.size()+extra.size()+last.size())bad(path,"Missing/unknown fields; unsupported rules are never discarded.",TariffProblemKind::MissingFields);
+    for(const auto fields:{names,additional,extra,last})for(const auto *name:fields)
         if(!v.find(name))bad(path,"Missing/unknown fields; reopen the documented schema.",TariffProblemKind::SchemaFields);
     std::set<std::string> seen;for(const auto &m:v.members)if(!seen.insert(m.first).second)bad(path,"Duplicate field.",TariffProblemKind::DuplicateField);
 }
@@ -172,13 +173,16 @@ SeasonalAllowance decodeSeasonalAllowance(const JsonValue &value,int64_t confirm
 DemandChargeRule decodeDemandCharge(const JsonValue &value,const std::string &path,int64_t confirmedUtcMs,bool apparent,size_t &total) {
     const auto *ratchet=value.find("ratchet");
     const auto *periods=value.find("eligible_periods");
+    const auto *contract=value.find("contracted_capacity");
     using Fields=std::initializer_list<const char *>;
     if(apparent)
         keys(value,path,{"window_minutes","offset_minutes","published_utc_ms","rate_per_kva","power_factor_va_places"},
-             ratchet?Fields{"ratchet"}:Fields{},periods?Fields{"eligible_periods"}:Fields{});
+             ratchet?Fields{"ratchet"}:Fields{},periods?Fields{"eligible_periods"}:Fields{},
+             contract?Fields{"contracted_capacity"}:Fields{});
     else
         keys(value,path,{"window_minutes","offset_minutes","published_utc_ms","rate_per_kw"},
-             ratchet?Fields{"ratchet"}:Fields{},periods?Fields{"eligible_periods"}:Fields{});
+             ratchet?Fields{"ratchet"}:Fields{},periods?Fields{"eligible_periods"}:Fields{},
+             contract?Fields{"contracted_capacity"}:Fields{});
     const auto window=static_cast<unsigned>(integer(*value.find("window_minutes"),child(path,"window_minutes"),60));
     const auto offset=static_cast<unsigned>(integer(*value.find("offset_minutes"),child(path,"offset_minutes"),59));
     if(window<5||60%window)
@@ -194,6 +198,20 @@ DemandChargeRule decodeDemandCharge(const JsonValue &value,const std::string &pa
     if(rate.negative())bad(ratePath,"Use a nonnegative demand charge in the declared unit.",TariffProblemKind::Unknown);
     DemandChargeRule result{window,offset,published,std::move(rate)};
     result.apparentPower=apparent;
+    if(contract){
+        const auto contractPath=child(path,"contracted_capacity");
+        keys(*contract,contractPath,{"capacity","rate_per_unit"});
+        const auto capacityPath=child(contractPath,"capacity");
+        const auto capacity=decimal(*contract->find("capacity"),capacityPath);
+        if(capacity.negative()||capacity.zero())
+            bad(capacityPath,"Use a positive contractual capacity in the declared demand unit.",TariffProblemKind::OpeningQuantity);
+        const auto scaled=electricityKwh(capacity);
+        if(!scaled)bad(capacityPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
+        const auto fixedPath=child(contractPath,"rate_per_unit");
+        auto fixed=decimal(*contract->find("rate_per_unit"),fixedPath);
+        if(fixed.negative())bad(fixedPath,"Use a nonnegative capacity rate for the declared cycle.",TariffProblemKind::Unknown);
+        result.contract=ContractedDemand{*scaled,std::move(fixed)};
+    }
     if(apparent){
         const auto &places=*value.find("power_factor_va_places");
         if(places.type!=JsonValue::Type::Null)
@@ -836,13 +854,20 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
                        (demandField?Fields{demandField}:Fields{}),
              restrictedCredit?Fields{"restricted_credit"}:Fields{});
         const auto version=integer(*root.find("schema_version"),"schema_version",tariffDeclarationLatestVersion);
-        const bool scheduledDemand=version==17;
-        const bool concurrentDemand=version==18;
-        const bool flexibleDemand=scheduledDemand||concurrentDemand;
+        const bool contractVersion=version==19;
+        const bool hasContract=(demand && demand->find("contracted_capacity")) ||
+            (demandCharges && std::any_of(demandCharges->items.begin(),demandCharges->items.end(),[](const auto &item){
+                const auto *rule=item.find("rule");
+                return rule && rule->find("contracted_capacity");
+            }));
+        if(contractVersion!=hasContract)
+            bad("schema_version","Contracted demand capacity requires version 19 and at least one capacity rule.",TariffProblemKind::SchemaVersion);
+        const bool concurrentDemand=version==18||(contractVersion&&demandCharges);
+        const bool flexibleDemand=version==17||concurrentDemand||contractVersion;
         if(concurrentDemand!=static_cast<bool>(demandCharges)||(concurrentDemand&&demand))
-            bad("schema_version","Concurrent demand charges require version 18 and their own list.",TariffProblemKind::SchemaVersion);
-        if(scheduledDemand!=static_cast<bool>(demand && demand->find("eligible_periods")))
-            bad("schema_version","Demand eligibility periods require version 17.",TariffProblemKind::SchemaVersion);
+            bad("schema_version","Concurrent demand charges require version 18 or 19 and their own list.",TariffProblemKind::SchemaVersion);
+        if(!contractVersion&&(version==17)!=static_cast<bool>(demand && demand->find("eligible_periods")))
+            bad("schema_version","Demand eligibility periods require version 17 or 19.",TariffProblemKind::SchemaVersion);
         if(!flexibleDemand&&(version==13)!=static_cast<bool>(restrictedCredit))
             bad("schema_version","Restricted credits require version 13.",TariffProblemKind::SchemaVersion);
         if(!version)bad("schema_version","Unsupported schema.",TariffProblemKind::SchemaVersion);
@@ -861,7 +886,7 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         if(version<12&&(version>=9)!=static_cast<bool>(demand))
             bad("schema_version","Demand charge requires version 9.",TariffProblemKind::SchemaVersion);
         const auto *ratchet=demand?demand->find("ratchet"):nullptr;
-        const bool apparent=version==11||((orderedTaxes||scheduledDemand)&&demand&&demand->find("power_factor_va_places"));
+        const bool apparent=version==11||((orderedTaxes||version==17||contractVersion)&&demand&&demand->find("power_factor_va_places"));
         if(apparent&&restrictedCredit)
             bad("restricted_credit","Restricted credit requires a plan without kVA demand.",TariffProblemKind::Unknown);
         if(version<11&&(version==10)!=static_cast<bool>(ratchet))
@@ -887,8 +912,8 @@ bool decodeTariffDeclaration(const JsonValue &root,TariffDeclaration *out,Tariff
         size_t total=d.seasonalAllowance?d.seasonalAllowance->seasons.size():0;
         if(demand)p.demandCharge=decodeDemandCharge(*demand,"demand_charge",confirmedMs,apparent,total);
         if(demandCharges)decodeNamedDemandCharges(*demandCharges,confirmedMs,p,total);
-        if(concurrentDemand && p.apparentDemandRule() && (restrictedCredit||exportRule))
-            bad("demand_charges","kVA demand requires a meter declaration without separate export payments or restricted credit.",TariffProblemKind::Unknown);
+        if((concurrentDemand||contractVersion) && p.apparentDemandRule() && (restrictedCredit||exportRule))
+            bad(demandField,"kVA demand requires a meter declaration without separate export payments or restricted credit.",TariffProblemKind::Unknown);
         p.restrictedCreditAtClose=restrictedCredit!=nullptr;
         keys(plan,"plan",{"key","territory","supplier","product","currency","clock","tiers","rounding","cycle_charge","minimum_cycle_subtotal","subtotal_multiplier","revisions"},
              exportRule?Fields{"export_payment"}:Fields{},
