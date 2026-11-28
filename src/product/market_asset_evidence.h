@@ -29,9 +29,10 @@ inline bool readMarketAssetEvidence(const std::string &archive, size_t &offset, 
 inline bool appendMarketAssetEvidence(std::string &report, const char *provider, PublicFeed metadataFeed,
                                       const PublicJsonResponse &response, uint64_t sentUtc, uint64_t receivedUtc) {
     const bool refused = response.status == PublicHttpsStatus::AssetIdentity;
+    const bool invalidTime = response.status == PublicHttpsStatus::AssetObservation;
     const auto &asset = response.assetEvidence;
     if (!asset) {
-        if (refused || response.status == PublicHttpsStatus::Ok) return false;
+        if (refused || response.status == PublicHttpsStatus::Ok || (invalidTime && response.httpStatus)) return false;
         report += std::string(provider) + " metadata: unavailable\n";
         return true;
     }
@@ -39,7 +40,9 @@ inline bool appendMarketAssetEvidence(std::string &report, const char *provider,
         response.observedUtc >= sentUtc && response.observedUtc <= receivedUtc;
     if (!asset->observedUtc || asset->observedUtc < sentUtc || asset->observedUtc > receivedUtc ||
         (marketObservedWithinRequest && asset->observedUtc > response.observedUtc) ||
-        (refused && response.httpStatus != 200) || !boundedPublicJson(asset->body, maxMarketAssetBodyBytes))
+        (refused && response.httpStatus != 200) ||
+        (invalidTime && (response.httpStatus != 200 || response.observedUtc >= asset->observedUtc)) ||
+        !boundedPublicJson(asset->body, maxMarketAssetBodyBytes))
         return false;
     if (marketIdentityMatches(metadataFeed, asset->body) == refused) return false;
     report += std::string(provider) + (refused ? " metadata: identity refused" : " metadata: identity checked") +

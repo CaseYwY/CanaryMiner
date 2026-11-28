@@ -308,7 +308,7 @@ PublicJsonResponse PublicJsonClient::get(const PublicJsonRequest &request, const
         else if (std::chrono::steady_clock::now() >= deadline) t.response.status = PublicHttpsStatus::Timeout;
         t.response.observedUtc = utcNow();
         if (t.response.status == PublicHttpsStatus::Ok && (!startedUtc || t.response.observedUtc < startedUtc || t.response.observedUtc > 253402300799ULL))
-            t.response.status = PublicHttpsStatus::InvalidJson;
+            t.response.status = PublicHttpsStatus::InvalidObservationTime;
         if (t.response.status != PublicHttpsStatus::Ok) { t.response.body.clear(); t.response.observedUtc = 0; }
 #ifdef CANARY_HTTPS_TESTING
         if (diagnostic[0]) std::fprintf(stderr, "fixture TLS diagnostic: %s\n", diagnostic);

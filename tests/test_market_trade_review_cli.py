@@ -184,6 +184,14 @@ def main(cli_path, fixture, capable):
         requests.unlink()
         assert identity_requests.read_text(encoding="ascii").splitlines() == ["12"]
         identity_requests.unlink()
+        identity_scenario.write_text("stale-clock", encoding="ascii")
+        denied = call(3, ALLOW)
+        assert "public market asset observation time could not be verified" in denied.stdout
+        assert "PRL/USD trade reference at capture: N/A" in denied.stdout
+        assert requests.read_text(encoding="ascii").splitlines() == ["8"]
+        requests.unlink()
+        assert identity_requests.read_text(encoding="ascii").splitlines() == ["12"]
+        identity_requests.unlink()
         identity_scenario.unlink()
 
         save = (ALLOW, "--save-review", archive.name)

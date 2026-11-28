@@ -233,6 +233,8 @@ const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::str
     if (!readArchiveNumber(bytes,offset,clockLimit,started) || !readArchiveNumber(bytes,offset,clockLimit,cutoff) ||
         !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
         !readReceipt(bytes,offset,capture.gate,trades) || !readReceipt(bytes,offset,capture.kraken,trades) ||
+        (!evidence && capture.gate.response.status == PublicHttpsStatus::AssetObservation) ||
+        capture.kraken.response.status == PublicHttpsStatus::AssetObservation ||
         (evidence && !market_detail::readMarketAssetEvidence(bytes, offset, maxUtc, capture.gate.response)) ||
         !local_review_archive::readArchivePart(bytes,offset,tickerReportBytes,savedReport) ||
         bytes.size()-offset!=65 || bytes.back()!='\n' ||

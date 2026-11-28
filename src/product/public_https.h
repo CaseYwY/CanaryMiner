@@ -50,7 +50,9 @@ enum class PublicHttpsStatus {
     Ok, Unavailable, InvalidRequest, Busy, Cancelled, Timeout, DestinationBlocked,
     TlsVerification, TlsProtocol, Network, HttpStatus, InvalidHeaders, BodyTooLarge, InvalidJson,
     Unreaped,  // parent-only ownership uncertainty; never accepted from CMJSON1 helper input
-    AssetIdentity  // market metadata contradicted the configured asset or pair
+    AssetIdentity,  // parent-only market metadata contradiction
+    AssetObservation,  // parent-only market receipt chronology failure
+    InvalidObservationTime  // helper UTC changed during a successful request
 };
 const char *publicHttpsStatusName(PublicHttpsStatus status);
 struct PublicAssetEvidence {
