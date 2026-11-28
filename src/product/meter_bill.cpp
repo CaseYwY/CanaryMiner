@@ -1328,6 +1328,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         return "recurring review seed archive unavailable or invalid";
     auto previousDigest = sha256Hex(bytes);
     const bool history = mode == RecurringInspection::History;
+    const bool inspecting = mode != RecurringInspection::None;
     const bool refreshInspection = history || mode == RecurringInspection::ScheduledReadings;
     const auto seedDigest = mode == RecurringInspection::ScheduledReadings ? previousDigest : std::string{};
     if (watch) {
@@ -1410,13 +1411,20 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         }
         const auto stem = "cycle-" + std::to_string(progress.closing);
         const auto target = stem + ".cmr";
+        using FileType = std::filesystem::file_type;
+        const auto temporaryType = [&] {
+            const auto temporary = localReviewPath(target + ".tmp");
+            std::error_code error;
+            return temporary ? std::filesystem::symlink_status(*temporary, error).type() : FileType::none;
+        };
         auto archive = readCycleSlot(target, maxArchiveBytes, bytes);
-        if (archive == LocalFileRead::Missing && refreshInspection) {
+        auto observedTemporary = FileType::none;
+        if (archive == LocalFileRead::Missing && inspecting) {
             lastExistingClosing = latestCycleArchiveEnd(workspace, stopped);
             if (!lastExistingClosing) return "could not inspect recurring review archive names";
-            // The watcher may have committed the missing archive during the directory scan.
-            if (*lastExistingClosing >= progress.closing)
-                archive = readCycleSlot(target, maxArchiveBytes, bytes);
+            // The watcher may have moved the temporary archive after the directory scan.
+            observedTemporary = temporaryType();
+            archive = readCycleSlot(target, maxArchiveBytes, bytes);
         }
         if (watch && target == watch->latestName) {
             if (archive != LocalFileRead::Ok || sha256Hex(bytes) != watch->latestDigest)
@@ -1449,13 +1457,10 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (!lastExistingClosing) return "could not inspect recurring review archive names";
             if (*lastExistingClosing >= progress.closing)
                 return "recurring review archive gap; restore the existing archive chain before continuing";
-            const auto temporary = localReviewPath(target + ".tmp");
-            std::error_code error;
-            if (!temporary) return "recurring review successor has uncertain temporary output";
-            const auto tempType = std::filesystem::symlink_status(*temporary, error).type();
-            if (mode == RecurringInspection::ScheduledReadings && tempType == std::filesystem::file_type::regular)
+            const auto tempType = inspecting ? observedTemporary : temporaryType();
+            if (mode == RecurringInspection::ScheduledReadings && tempType == FileType::regular)
                 return describeOctopusReadingsPlan(priorReview, draft, previousDigest, seedDigest, mode, false, report);
-            if (tempType != std::filesystem::file_type::not_found)
+            if (tempType != FileType::not_found)
                 return "recurring review successor has uncertain temporary output";
             if (history) {
                 waiting = "End of verified archive chain";

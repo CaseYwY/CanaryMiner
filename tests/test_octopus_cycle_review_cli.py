@@ -316,6 +316,20 @@ def main(cli, bundle, clock_fixture=None):
             advancing = dict(past, CANARY_TEST_SUCCESSOR_CLOCK_ADVANCE='1')
             assert json.loads(run(*scheduled, cwd=planner, env=advancing)) == dict(
                 expected_plan, seed_sha256=seed_digest, ready=False)
+            expected_history = run('--cycle-history', planner_seed, cwd=planner)
+            publishing = dict(os.environ, LD_PRELOAD=str(clock_fixture), CANARY_TEST_PUBLISH_SUCCESSOR=str(successor))
+            publishing_path = successor.with_suffix('.cmr.tmp')
+            successor.rename(publishing_path)
+            published_history = run('--cycle-history', planner_seed, cwd=planner, env=publishing)
+            assert successor.exists() and not publishing_path.exists()
+            assert published_history == expected_history, published_history
+            successor.rename(publishing_path)
+            assert json.loads(run(*scheduled, cwd=planner, env=publishing)) == dict(
+                expected_plan, seed_sha256=seed_digest, ready=True)
+            assert successor.exists() and not publishing_path.exists()
+            successor.rename(publishing_path)
+            assert json.loads(run(*query, cwd=planner, env=publishing)) == expected_plan
+            assert successor.exists() and not publishing_path.exists()
         damaged = successor.read_bytes()
         successor.write_bytes(damaged[:-1])
         run(*query, cwd=planner, code=3, reason='successor archive is invalid')

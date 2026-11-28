@@ -743,8 +743,10 @@ with an archived invoice comparison have an invoice inside the cycle archive.
 
 The command reads the closed archives without starting the watcher or reading staged meter, rate
 or invoice inputs. A missing archive before a later one, an invalid link, a changed saved amount,
-or a temporary file at the next slot prevents a summary. The report covers up to 120 successors
-plus the selected seed. If it reaches that limit, use the last verified archive as the next seed
+or an unfinished temporary file at the next slot prevents a summary. If the watcher publishes
+that successor during inspection, the history and readings plans reopen and verify it.
+The report covers up to 120 successors plus the selected seed. If it reaches that limit, use the last
+verified archive as the next seed
 and count the shared cycle only once when combining totals.
 
 Add `--with-invoices` to see the saved invoice comparisons and the number of verified cycles

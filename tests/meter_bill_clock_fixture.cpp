@@ -8,6 +8,8 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 
 extern "C" int clock_gettime(clockid_t clock, struct timespec *value) noexcept {
     static const auto realClock = reinterpret_cast<decltype(&clock_gettime)>(dlsym(RTLD_NEXT, "clock_gettime"));
@@ -48,4 +50,19 @@ extern "C" int open(const char *path, int flags, ...) {
         }
     }
     return fd;
+}
+
+extern "C" int lstat(const char *path, struct stat *info) noexcept {
+    static const auto realStat = reinterpret_cast<decltype(&lstat)>(dlsym(RTLD_NEXT, "lstat"));
+    if (!realStat) {
+        errno = ENOSYS;
+        return -1;
+    }
+    const auto *target = std::getenv("CANARY_TEST_PUBLISH_SUCCESSOR");
+    if (target) {
+        const auto temporary = std::string(target) + ".tmp";
+        if (path == temporary && (::link(temporary.c_str(), target) != 0 || ::unlink(temporary.c_str()) != 0))
+            std::abort();
+    }
+    return realStat(path, info);
 }
