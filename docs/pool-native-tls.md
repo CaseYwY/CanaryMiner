@@ -35,8 +35,12 @@ is absent. [RFC 6960](https://www.rfc-editor.org/rfc/rfc6960) ·
 [OpenSSL OCSP API](https://docs.openssl.org/3.5/man3/OCSP_resp_find_status/)
 
 If the leaf requires the `status_request` feature, the worker also refuses an
-absent staple. The worker refuses other required TLS features, including
-`status_request_v2`. If the leaf leaves stapling optional, a missing response gives
+absent staple. The worker checks the TLS Feature declaration on the verified
+chain, including the trust anchor. Each certificate must retain the features
+declared by its signer. An omitted inherited feature, malformed declaration or
+unsupported feature such as `status_request_v2` is a certificate verification
+failure and cannot allow plaintext fallback. If the verified chain leaves
+stapling optional, a missing response gives
 the ordinary certificate check without a revocation result. The worker uses
 the pool's response in the handshake. Live responder lookup, intermediate
 revocation and Linux release qualification remain separate work.
