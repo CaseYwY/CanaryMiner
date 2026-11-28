@@ -11,10 +11,26 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+namespace {
+bool watchClockLifted = false;
+bool watchClockLiftUsed = false;
+}
+
 extern "C" int clock_gettime(clockid_t clock, struct timespec *value) noexcept {
     static const auto realClock = reinterpret_cast<decltype(&clock_gettime)>(dlsym(RTLD_NEXT, "clock_gettime"));
     const char *boundary = std::getenv("CANARY_TEST_SUCCESSOR_CUTOFF_MS");
-    if (clock != CLOCK_REALTIME || !boundary) return realClock ? realClock(clock, value) : -1;
+    if (clock != CLOCK_REALTIME || !boundary) {
+        const auto result = realClock ? realClock(clock, value) : -1;
+        if (result == 0 && clock == CLOCK_REALTIME && watchClockLifted) {
+            value->tv_sec += 2;
+            value->tv_nsec += 500000000L;
+            if (value->tv_nsec >= 1000000000L) {
+                ++value->tv_sec;
+                value->tv_nsec -= 1000000000L;
+            }
+        }
+        return result;
+    }
     const auto cutoff = std::atoll(boundary);
     if (cutoff <= 0) return -1;
     static unsigned realtimeSamples = 0;
@@ -25,6 +41,12 @@ extern "C" int clock_gettime(clockid_t clock, struct timespec *value) noexcept {
     value->tv_sec = static_cast<time_t>(ms / 1000);
     value->tv_nsec = static_cast<long>(ms % 1000) * 1000000;
     return 0;
+}
+
+extern "C" int nanosleep(const struct timespec *duration, struct timespec *remaining) {
+    static const auto realSleep = reinterpret_cast<decltype(&nanosleep)>(dlsym(RTLD_NEXT, "nanosleep"));
+    watchClockLifted = false;
+    return realSleep ? realSleep(duration, remaining) : -1;
 }
 
 extern "C" int open(const char *path, int flags, ...) {
@@ -41,6 +63,18 @@ extern "C" int open(const char *path, int flags, ...) {
         return realOpen(path, flags, mode);
     }
     const auto fd = realOpen(path, flags);
+    const auto *lift = std::getenv("CANARY_TEST_LIFT_WATCH_CLOCK_ON_INVOICE");
+    if (fd >= 0 && lift && !watchClockLiftUsed && std::strcmp(path, lift) == 0) {
+        watchClockLifted = true;
+        watchClockLiftUsed = true;
+    }
+    const auto *readings = std::getenv("CANARY_TEST_REMOVE_COMPARISON_ON_READINGS");
+    if (fd >= 0 && readings && std::strcmp(path, readings) == 0) {
+        const auto *comparison = std::getenv("CANARY_TEST_COMPARISON_TO_REMOVE");
+        if (!comparison) std::abort();
+        const auto held = std::string(comparison) + ".held";
+        if (std::rename(comparison, held.c_str()) != 0) std::abort();
+    }
     const auto *invoice = std::getenv("CANARY_TEST_PUBLISH_ON_INVOICE_INPUT");
     if (fd >= 0 && invoice && std::strcmp(path, invoice) == 0) {
         const auto *target = std::getenv("CANARY_TEST_PUBLISH_SUCCESSOR_ON_INVOICE");

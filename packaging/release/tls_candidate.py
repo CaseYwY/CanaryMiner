@@ -27,6 +27,7 @@ BILLING_WATCH_SCHEMA = 'canaryminer-tls-billing-watch-candidate-v5'
 OCTOPUS_ACCOUNT_SCHEMA = 'canaryminer-tls-octopus-account-candidate-v6'
 BILLING_WATCH_FILES = {'linux': 'billing-watch.sh', 'windows': 'Register-BillingWatch.ps1'}
 BILLING_WATCH_QUIET = b'--watch-quiet\0'
+BILLING_WATCH_INVOICES = b'--watch-invoices'
 OCTOPUS_ACCOUNT_FILES = ('tools/capture_octopus_consumption.py', 'tools/prepare_octopus_consumption.py',
                          'tools/capture_octopus_rates.py')
 ENERGY_WORKERS = ('canary_energy_authorization_worker', 'canary_energy_collector_worker')
@@ -299,6 +300,9 @@ def validate(platform, files):
     miner, preferences, stream_worker = images(platform)
     if billing_watch and BILLING_WATCH_QUIET not in files[f'bin/{miner}']:
         raise ValueError('billing watcher requires a miner with quiet watch support')
+    if (billing_watch and BILLING_WATCH_INVOICES in files[billing_watch_path(platform)] and
+            BILLING_WATCH_INVOICES + b'\0' not in files[f'bin/{miner}']):
+        raise ValueError('billing watcher requires a miner with invoice watch support')
     if octopus_account:
         runner = b'--run-scheduled'
         scheduled = runner in files['tools/capture_octopus_consumption.py']

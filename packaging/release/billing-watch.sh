@@ -3,7 +3,7 @@
 set -euo pipefail
 
 usage() {
-    printf '%s\n' 'Usage: billing-watch.sh SEED.cmr SECONDS [--confirm-electricity-import] [--allow-public-rates]' >&2
+    printf '%s\n' 'Usage: billing-watch.sh SEED.cmr SECONDS [--confirm-electricity-import] [--allow-public-rates] [--watch-invoices]' >&2
     printf '%s\n' '       billing-watch.sh SEED.cmr SECONDS --account-capture /absolute/path/to/python3' >&2
     exit 2
 }
@@ -28,7 +28,7 @@ while (( $# )); do
     option=$1
     shift
     case $option in
-        --confirm-electricity-import|--allow-public-rates) ;;
+        --confirm-electricity-import|--allow-public-rates|--watch-invoices) ;;
         --account-capture)
             [[ -z $python && $# -eq 1 && ${#options[@]} -eq 0 && $1 = /* && -x $1 ]] || usage
             IFS= read -r -d '' python < <(realpath -ze -- "$1") || usage

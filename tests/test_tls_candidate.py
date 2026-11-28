@@ -511,6 +511,12 @@ class CandidateTests(unittest.TestCase):
                         self.assertFalse((prefix / other_helper).exists())
                         if platform == 'linux':
                             self.assertEqual(stat.S_IMODE((prefix / helper).stat().st_mode), 0o755)
+                    supporting = {**files, helper: b'watch script --watch-invoices'}
+                    with self.assertRaisesRegex(ValueError, 'miner with invoice watch support'):
+                        CANDIDATE.load(platform, archive, publish(supporting, True))
+                    supporting[miner] += CANDIDATE.BILLING_WATCH_INVOICES + b'\0'
+                    self.assertEqual(CANDIDATE.load(platform, archive, publish(supporting, True))[1]['schema'],
+                                     CANDIDATE.BILLING_WATCH_SCHEMA)
 
     def test_account_capture_requires_each_companion_and_preserves_v5(self):
         for platform in ('windows', 'linux'):
@@ -543,6 +549,7 @@ class CandidateTests(unittest.TestCase):
                     self.assertEqual(CANDIDATE.load(platform, archive, ship(legacy, account=True))[1]['schema'],
                                      CANDIDATE.OCTOPUS_ACCOUNT_SCHEMA)
                     combined = {**files, **companions, helper: launcher}
+                    combined[miner] += CANDIDATE.BILLING_WATCH_INVOICES + b'\0'
                     with self.assertRaises(ValueError):
                         CANDIDATE.load(platform, archive, ship(combined))
                     for name in (*companions, helper):
