@@ -134,11 +134,12 @@ ElectricityStatus demandRanges(const CivilClock &clock, const DemandChargeRule &
             !period.weekdayMask || period.weekdayMask > 127 || !period.monthMask || period.monthMask > 4095 ||
             (period.date && !validCivilDate(*period.date))) return ElectricityStatus::Invalid;
     const int64_t span = rule.windowMinutes * minuteMs, offset = rule.offsetMinutes * minuteMs;
-    std::optional<int64_t> opened;
+    int64_t opened = 0;
+    bool rangeOpen = false;
     const auto close = [&](int64_t boundary) {
-        if ((*opened - offset) % span || (boundary - offset) % span) return false;
-        ranges.push_back({*opened, boundary});
-        opened.reset();
+        if ((opened - offset) % span || (boundary - offset) % span) return false;
+        ranges.push_back({opened, boundary});
+        rangeOpen = false;
         return true;
     };
     size_t cuts = 0;
@@ -165,11 +166,14 @@ ElectricityStatus demandRanges(const CivilClock &clock, const DemandChargeRule &
             else (period.eligible ? recurring : recurringExclude) = true;
         }
         const bool eligible = dated || datedExclude ? !datedExclude : recurring && !recurringExclude;
-        if (eligible && !opened) opened = cursor;
-        if (!eligible && opened && !close(cursor)) return ElectricityStatus::DemandWindowBoundary;
+        if (eligible && !rangeOpen) {
+            opened = cursor;
+            rangeOpen = true;
+        }
+        if (!eligible && rangeOpen && !close(cursor)) return ElectricityStatus::DemandWindowBoundary;
         cursor = next;
     }
-    if (opened && !close(end)) return ElectricityStatus::DemandWindowBoundary;
+    if (rangeOpen && !close(end)) return ElectricityStatus::DemandWindowBoundary;
     return ElectricityStatus::Ok;
 }
 
