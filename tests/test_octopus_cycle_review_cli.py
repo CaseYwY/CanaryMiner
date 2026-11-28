@@ -429,6 +429,7 @@ def main(cli, bundle, clock_fixture=None):
         assert 'Invoice reviews available for 1 of 1 verified cycles' in annual_history
         assert 'Supply invoice totals cover 0 of 1 verified cycles' in annual_history
         assert 'Stated supply charges total' not in annual_history
+        assert 'Supply invoice matches' not in annual_history
         assert f'Estimated annual adjustment {annual[3] - 1:.2f} GBP' in annual_history
         assert 'Stated annual adjustment' not in annual_history
         if clock_fixture:
@@ -447,6 +448,8 @@ def main(cli, bundle, clock_fixture=None):
         assert 'Stated supply charges total 0.75 GBP' in annual_history
         assert f'Calculated at each invoice precision {annual[3]:.2f} GBP' in annual_history
         assert f'Total difference (calculated minus invoice) {annual[3] - Decimal("0.75"):.2f} GBP' in annual_history
+        assert 'Supply invoice matches: 0 of 1 compared cycles' in annual_history
+        assert f'Calculated above invoice: 1 cycle, {annual[3] - Decimal("0.75"):.2f} GBP total' in annual_history
 
         leap = cycle(annual_end, annual_next, GO_PRODUCT, None, 14, 6, 366, bundle=True)
         leap[0].update(schema_version=5, reset_policy=dict(annual_month=1, annual_day=1, clock=LONDON))
@@ -508,9 +511,10 @@ def main(cli, bundle, clock_fixture=None):
         assert 'waiting for the cycle to close' in run('--roll-forward', old, '--as-of-utc-ms', may - 1)
 
         write(first_stem.with_suffix('.rates.json'), current[2])
+        first_charge = current[3] + Decimal('0.125')
         write(first_stem.with_suffix('.invoice.json'), dict(schema_version=1, scope=SCOPE, currency='GBP',
-            decimal_places=2, rounding='half_even',
-            cycles=[dict(begin_utc_ms=april, end_utc_ms=may, supply_charge=str(current[3]))]))
+            decimal_places=3, rounding='half_even',
+            cycles=[dict(begin_utc_ms=april, end_utc_ms=may, supply_charge=str(first_charge))]))
         bad_readings = copy.deepcopy(following[1])
         bad_readings['register_readings'][0]['imported_kwh'] = '0'
         write(second_stem.with_suffix('.readings.json'), bad_readings)
@@ -521,7 +525,7 @@ def main(cli, bundle, clock_fixture=None):
         first_bytes = first_archive.read_bytes()
         first_report = run('--open-review', first_archive, '--previous-cycle', old)
         close(current[3], first_report)
-        assert '(match)' in first_report
+        assert 'Difference (calculated minus invoice) -0.125 GBP (mismatch)' in first_report
 
         write(second_stem.with_suffix('.readings.json'), following[1])
         resumed = run(*roll)
@@ -542,14 +546,26 @@ def main(cli, bundle, clock_fixture=None):
         assert f'Estimated total {(current[3] + following[3]):.6f} GBP' in rotated
 
         with_invoices = (*history, '--with-invoices')
+        empty = root / 'empty-invoice-review.cmr'
+        invoice.write_bytes(b'')
+        run('--open-review', second_archive, '--invoice', invoice, '--save-review', empty.name,
+            code=3, reason='invoice file unavailable, empty, oversized or not a regular file')
+        run('--open-review', second_archive, '--invoice', invoice,
+            code=3, reason='invoice file unavailable, empty, oversized or not a regular file')
+        assert not empty.exists() and not empty.with_suffix('.cmr.tmp').exists()
+        assert second_archive.read_bytes() == second_bytes
+
         rounded_invoices = Decimal('3.23') + current[3]
         embedded = run(*with_invoices)
         assert 'Invoice reviews available for 2 of 3 verified cycles' in embedded
         assert 'Supply invoice totals cover 2 of 3 verified cycles' in embedded
-        assert f'Stated supply charges total {rounded_invoices:.2f} GBP' in embedded
-        assert f'Calculated at each invoice precision {rounded_invoices:.2f} GBP' in embedded
-        assert 'Total difference (calculated minus invoice) 0.00 GBP' in embedded
-        assert embedded.count('(match)') == 2 and embedded.count('(no invoice review)') == 1
+        assert f'Stated supply charges total {rounded_invoices + Decimal("0.125"):.3f} GBP' in embedded
+        assert f'Calculated at each invoice precision {rounded_invoices:.3f} GBP' in embedded
+        assert 'Total difference (calculated minus invoice) -0.125 GBP' in embedded
+        assert 'Supply invoice matches: 1 of 2 compared cycles' in embedded
+        assert 'Calculated above invoice: 0 cycles, 0.000 GBP total' in embedded
+        assert 'Calculated below invoice: 1 cycle, 0.125 GBP total' in embedded
+        assert embedded.count('(match)') == 1 and embedded.count('(no invoice review)') == 1
         late = root / f'cycle-{june}.compared.cmr'
         temporary = late.with_suffix('.cmr.tmp')
         temporary.write_bytes(b'in progress')
@@ -566,9 +582,12 @@ def main(cli, bundle, clock_fixture=None):
         comparison = run(*with_invoices)
         assert 'Invoice reviews available for 3 of 3 verified cycles' in comparison
         assert 'Supply invoice totals cover 3 of 3 verified cycles' in comparison
-        assert f'Stated supply charges total {rounded_invoices - Decimal("0.125"):.3f} GBP' in comparison
+        assert f'Stated supply charges total {rounded_invoices:.3f} GBP' in comparison
         assert f'Calculated at each invoice precision {rounded_invoices:.3f} GBP' in comparison
-        assert 'Total difference (calculated minus invoice) 0.125 GBP' in comparison
+        assert 'Total difference (calculated minus invoice) 0.000 GBP' in comparison
+        assert 'Supply invoice matches: 1 of 3 compared cycles' in comparison
+        assert 'Calculated above invoice: 1 cycle, 0.125 GBP total' in comparison
+        assert 'Calculated below invoice: 1 cycle, 0.125 GBP total' in comparison
         assert '0.000000 GBP (late invoice comparison)' in comparison
         assert 'Invoice comparison uses 3 decimal places with ties rounded away from zero.' in comparison
         assert 'Difference (calculated minus invoice) 0.125 GBP (mismatch)' in comparison
@@ -576,7 +595,8 @@ def main(cli, bundle, clock_fixture=None):
         rotated_comparison = run('--with-invoices', '--cycle-history', first_archive)
         assert 'Invoice reviews available for 2 of 2 verified cycles' in rotated_comparison
         assert 'Supply invoice totals cover 2 of 2 verified cycles' in rotated_comparison
-        assert f'Stated supply charges total {current[3] - Decimal("0.125"):.3f} GBP' in rotated_comparison
+        assert f'Stated supply charges total {current[3]:.3f} GBP' in rotated_comparison
+        assert 'Supply invoice matches: 0 of 2 compared cycles' in rotated_comparison
         assert rotated_comparison.endswith('End of verified archive chain\n')
         assert run(*history) == rollup and late.read_bytes() == late_bytes
         if clock_fixture:
@@ -612,7 +632,8 @@ def main(cli, bundle, clock_fixture=None):
         assert 'Independent supply and export statements' in independent_history
         assert 'Difference for supply charge (calculated minus invoice) 0.00 GBP (match)' in independent_history
         assert 'Supply invoice totals cover 3 of 3 verified cycles' in independent_history
-        assert f'Stated supply charges total {rounded_invoices:.2f} GBP' in independent_history
+        assert f'Stated supply charges total {rounded_invoices + Decimal("0.125"):.3f} GBP' in independent_history
+        assert 'Supply invoice matches: 2 of 3 compared cycles' in independent_history
         late.unlink()
 
         assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes

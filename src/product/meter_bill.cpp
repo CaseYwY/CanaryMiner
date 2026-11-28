@@ -1243,7 +1243,9 @@ const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing
 
 struct CycleInvoiceHistory {
     size_t reviews = 0, comparableCycles = 0;
+    size_t aboveCycles = 0, belowCycles = 0;
     InvoiceTotals totals;
+    ExactDecimal aboveTotal, belowTotal;
     unsigned places = 0;
 };
 
@@ -1265,9 +1267,20 @@ const char *appendCycleHistory(const ReviewOriginal &original, const MeterReview
         rows += details->report;
         if (details->supply) {
             const auto &supply = *details->supply;
+            ExactDecimal difference;
             if (!invoices.totals.calculated.add(supply.totals.calculated, &invoices.totals.calculated) ||
-                !invoices.totals.stated.add(supply.totals.stated, &invoices.totals.stated))
+                !invoices.totals.stated.add(supply.totals.stated, &invoices.totals.stated) ||
+                !supply.totals.calculated.subtract(supply.totals.stated, &difference))
                 return "cycle invoice totals exceed arithmetic capacity";
+            if (difference.negative()) {
+                if (!invoices.belowTotal.subtract(difference, &invoices.belowTotal))
+                    return "cycle invoice totals exceed arithmetic capacity";
+                ++invoices.belowCycles;
+            } else if (!difference.zero()) {
+                if (!invoices.aboveTotal.add(difference, &invoices.aboveTotal))
+                    return "cycle invoice totals exceed arithmetic capacity";
+                ++invoices.aboveCycles;
+            }
             ++invoices.comparableCycles;
             invoices.places = (std::max)(invoices.places, supply.places);
         }
@@ -1568,19 +1581,30 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             report += "Supply invoice totals cover " + std::to_string(invoiceHistory.comparableCycles) + " of " +
                 std::to_string(existing + 1) + " verified cycles\n";
             if (invoiceHistory.comparableCycles) {
-                std::string calculated, stated, change;
+                std::string calculated, stated, change, above, below;
                 ExactDecimal difference;
                 const auto &totals = invoiceHistory.totals;
                 const auto places = invoiceHistory.places;
                 if (!totals.calculated.formatRatio(1, places, &calculated) ||
                     !totals.stated.formatRatio(1, places, &stated) ||
                     !totals.calculated.subtract(totals.stated, &difference) ||
-                    !difference.formatRatio(1, places, &change))
+                    !difference.formatRatio(1, places, &change) ||
+                    !invoiceHistory.aboveTotal.formatRatio(1, places, &above) ||
+                    !invoiceHistory.belowTotal.formatRatio(1, places, &below))
                     return "cycle invoice totals exceed the display range";
                 const auto &currency = priorReview.declaration.plan.currency;
                 report += "  Stated supply charges total " + stated + " " + currency + "\n";
                 report += "  Calculated at each invoice precision " + calculated + " " + currency + "\n";
                 report += "  Total difference (calculated minus invoice) " + change + " " + currency + "\n";
+                const auto matches = invoiceHistory.comparableCycles - invoiceHistory.aboveCycles - invoiceHistory.belowCycles;
+                report += "  Supply invoice matches: " + std::to_string(matches) + " of " +
+                    std::to_string(invoiceHistory.comparableCycles) + " compared cycles\n";
+                const auto appendDiscrepancy = [&](const char *label, size_t cycles, const std::string &amount) {
+                    report += label + std::to_string(cycles) + (cycles == 1 ? " cycle, " : " cycles, ") +
+                        amount + " " + currency + " total\n";
+                };
+                appendDiscrepancy("  Calculated above invoice: ", invoiceHistory.aboveCycles, above);
+                appendDiscrepancy("  Calculated below invoice: ", invoiceHistory.belowCycles, below);
             }
         }
         report += std::string(waiting) + "\n";

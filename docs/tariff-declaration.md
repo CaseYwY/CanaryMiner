@@ -755,6 +755,9 @@ estimated total covers all verified cycles. The separate supply invoice totals c
 with a complete stated supply charge. They sum the stated charges and the estimate for each
 of those cycles rounded at its own invoice precision. The difference is the calculated sum
 minus the stated sum. The total displays the greatest precision used by the included invoices.
+The summary counts matching cycles and shows how many estimates were above or below the invoice
+and by how much in total. These amounts are positive magnitudes, so offsetting discrepancies
+remain visible when the signed total is zero.
 
 Supply amounts can come from a direct invoice, an independent supply-only statement or an
 annual reconciliation with a stated adjustment. The annual amount is the sum of interim
