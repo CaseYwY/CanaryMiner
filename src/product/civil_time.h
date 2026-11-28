@@ -43,6 +43,11 @@ struct CivilDay {
     int64_t beginUtcMs = 0, endUtcMs = 0;  // [begin,end), first valid local midnight boundary
     std::string databaseVersion;
 };
+struct CivilMonthCycle {
+    CivilStatus status = CivilStatus::Unavailable;
+    int64_t beginUtcMs = 0, endUtcMs = 0;
+    std::string databaseVersion{};
+};
 // Explicit process-lifetime configuration of reviewed app-private text TZDB. No hot reload or fallback to OS data.
 CivilStatus configureCivilTimeData(const std::filesystem::path &absoluteDirectory, const std::string &exactVersion);
 bool civilNamedTimeAvailable();
@@ -53,6 +58,8 @@ CivilStamp civilAt(const CivilClock &clock, int64_t utcMs);
 CivilResolved civilResolve(const CivilClock &clock, CivilDate date, uint32_t millisecondOfDay, CivilChoose choose = CivilChoose::Reject);
 CivilDay civilDay(const CivilClock &clock, CivilDate date);
 CivilDay civilDayAt(const CivilClock &clock, int64_t utcMs);
+// Uses the last day of a short month and the first valid instant of the selected date.
+CivilMonthCycle civilMonthCycleAt(const CivilClock &clock, unsigned day, int64_t utcMs);
 // Reject a local date that leaves or returns outside its first continuous UTC range.
 bool civilDayIsContiguous(const CivilClock &clock, const CivilDay &day);
 std::optional<int64_t> civilNextTransition(const CivilClock &clock, int64_t utcMs);

@@ -88,8 +88,9 @@ class TariffComparisonSettings {
                  : tariffComparisonEnglish(Key::EndUnavailable));
         const bool net=declaration_->plan.exportPayment.has_value();
         auto cycleLabel=declaration_->resetSchedule
-            ? tariffComparisonEnglish(net?Key::NetCycles:Key::Cycles, {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
-            : tariffComparisonEnglish(net?Key::NetInstruction:Key::Instruction);
+            ? tariffComparisonEnglish(declaration_->plan.demandReset?Key::IndependentDemandCycles:net?Key::NetCycles:Key::Cycles,
+                                      {{"count", std::to_string(cycles_)}, {"max", std::to_string(maxTariffComparisonCycles)}})
+            : tariffComparisonEnglish(declaration_->plan.demandReset?Key::IndependentDemand:net?Key::NetInstruction:Key::Instruction);
         if(declaration_->dailyFeeAllocation()==DailyFeeAllocation::ProrateByCycleMinutes)
             cycleLabel+=" | "+i18n::tariffMonthlyEnglish(i18n::TariffMonthlyMessageKey::FeeLabel);
         add(cycleLabel);
@@ -98,8 +99,11 @@ class TariffComparisonSettings {
             add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(Key::WithApparent, {{"power", input_[1]}}));
             if (!job_ && notice_.empty()) add(tariffComparisonEnglish(rule->powerFactorVaPlaces ? Key::ApparentFactorInput : Key::ApparentInput));
         } else {
-            add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(net?Key::WithoutNetWatts:Key::WithoutWatts, {{"watts", input_[0]}}));
-            add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(net?Key::WithNetWatts:Key::WithWatts, {{"watts", input_[1]}}));
+            const bool signedDemand = net && declaration_->plan.demandReset;
+            const auto without = signedDemand ? Key::WithoutSignedWatts : net ? Key::WithoutNetWatts : Key::WithoutWatts;
+            const auto with = signedDemand ? Key::WithSignedWatts : net ? Key::WithNetWatts : Key::WithWatts;
+            add(std::string(focus_ == 0 ? "> " : "  ") + tariffComparisonEnglish(without, {{"watts", input_[0]}}));
+            add(std::string(focus_ == 1 ? "> " : "  ") + tariffComparisonEnglish(with, {{"watts", input_[1]}}));
         }
         if (pending()) add(tariffComparisonEnglish(Key::Pending));
         else if (job_ && !job_->cancel.load(std::memory_order_relaxed)) {

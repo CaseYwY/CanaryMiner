@@ -395,6 +395,53 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(panel.draft.find("schema_version")->text=="1"&&!panel.draft.find("demand_charge"));
     CHECK(!panel.draft.find("opening")->find("peak_demand_kw"));
 
+    {
+        TariffSettingsPanel monthlyPanel;
+        monthlyPanel.open(saved);
+        enter(monthlyPanel,"demand_charge");
+        monthlyPanel.key(27,{},T/1000);
+        monthlyPanel.key('w',{},T/1000);
+        CHECK(monthlyPanel.draft.find("schema_version")->text=="20");
+        enter(monthlyPanel,"demand_reset_policy");
+        enter(monthlyPanel,"monthly_day");type(monthlyPanel,"1");
+        monthlyPanel.key(27,{},T/1000);
+        CHECK(monthlyPanel.draft.find("demand_charge")->find("rate_per_kw")->text.empty());
+        enter(monthlyPanel,"demand_charge");
+        enter(monthlyPanel,"rate_per_kw");type(monthlyPanel,"5");
+        monthlyPanel.key(27,{},T/1000);
+        enter(monthlyPanel,"opening");
+        enter(monthlyPanel,"peak_demand_kw");type(monthlyPanel,"10");
+        enter(monthlyPanel,"demand_billing");
+        enter(monthlyPanel,"imported_kwh");type(monthlyPanel,"2.5");
+        enter(monthlyPanel,"posted_subtotal");type(monthlyPanel,"0");
+        TariffDeclarationStore monthlyStore(target.parent_path()/"independent-demand-tariff.json");
+        JsonValue v20;
+        CHECK(monthlyStore.load(&v20,&reason)&&monthlyStore.save(saved,&reason));
+        CHECK(!monthlyStore.save(monthlyPanel.draft,&reason)&&reason.find("NEW plan.key")!=std::string::npos);
+        set(member(monthlyPanel.draft,"plan"),"key",R"("independent-demand-plan")");
+        set(member(monthlyPanel.draft,"opening"),"key",R"("independent-demand-opening")");
+        monthlyPanel.key('v',{},T/1000);
+        CHECK(monthlyPanel.render(120,28,ColorLevel::None).find("Demand charges post at each demand month close")!=std::string::npos);
+        monthlyPanel.key('\r',[&](const JsonValue &value,std::string *error){return monthlyStore.save(value,error);},T/1000);
+        const bool monthlySaved=!monthlyPanel.dirty()&&monthlyStore.load(&v20,&reason)&&decodeTariffDeclaration(v20,&decoded)&&
+            decoded.plan.demandReset&&decoded.opening.monthlyDemand;
+        CHECK(monthlySaved);
+        if(monthlySaved){
+            checkComparison(compareTariffCycles(decoded,{dec("8000"),dec("12000")},1,T),"0.000000","0.000000","0.000000");
+            monthlyPanel.open(v20);
+            monthlyPanel.key('p',{},T/1000);
+            CHECK(monthlyPanel.render(60,12,ColorLevel::None).find("Demand fees at month close")!=std::string::npos);
+            frame(monthlyPanel,60,12);
+            monthlyPanel.key(27,{},T/1000);
+            enter(monthlyPanel,"demand_reset_policy");
+            monthlyPanel.key('w',{},T/1000);
+            CHECK(monthlyPanel.draft.find("schema_version")->text=="9");
+            CHECK(!monthlyPanel.draft.find("opening")->find("demand_billing"));
+            CHECK(monthlyPanel.draft.find("opening")->find("peak_demand_kw")->text.empty());
+            CHECK(monthlyPanel.draft.find("demand_charge")->find("rate_per_kw")->text.empty());
+        }
+    }
+
     panel.open(saved);
     enter(panel,"demand_charge");
     panel.key(27,{},T/1000);
@@ -486,6 +533,14 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
             contract.plan.demandCharges[0].rule.contract.has_value();
         CHECK(contractedSaved);
         if(contractedSaved){
+            contractedPanel.open(persistedContract);
+            enter(contractedPanel,"demand_charges");
+            contractedPanel.key(27,{},T/1000);
+            contractedPanel.key('w',{},T/1000);
+            const auto *rule=contractedPanel.draft.find("demand_charges")->items.front().find("rule");
+            CHECK(rule->find("rate_per_kw")->text.empty());
+            CHECK(rule->find("contracted_capacity")->find("rate_per_unit")->text.empty());
+            CHECK(rule->find("contracted_capacity")->find("capacity")->text=="9");
             contractedPanel.open(persistedContract);
             enter(contractedPanel,"demand_charges");
             contractedPanel.key('\r',{},T/1000);

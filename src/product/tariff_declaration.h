@@ -7,7 +7,7 @@
 #include <optional>
 namespace om {
 constexpr size_t tariffDeclarationMaxBytes=65536;
-constexpr uint64_t tariffDeclarationLatestVersion=19;
+constexpr uint64_t tariffDeclarationLatestVersion=20;
 inline constexpr char finalDisplayRounding[] = "final_display_only";
 inline constexpr char meterHalfHourRounding[] = "meter_import_half_hour_kwh_half_even_2";
 enum class TariffResetCadence { Monthly, Annual, Bimonthly };
@@ -71,6 +71,7 @@ TariffCycleComparison compareTariffCycles(const TariffDeclaration &d, const std:
 // Start the adjacent declared cycle from an opening whose prior cycle is complete.
 ElectricityStatus advanceTariffOpening(const TariffDeclaration &d, BillOpening &settled, int64_t publishedThroughUtcMs,
                                        bool &chargedDaySplit);
+bool tariffDemandHistoryAvailable(const TariffDeclaration &declaration, int64_t cutoff);
 // Display-neutral private source records. Row counts are not JSON strings; value tokens retain exact source serialization.
 struct TariffDeclarationChange {
     enum class Kind { Value, RowCount };

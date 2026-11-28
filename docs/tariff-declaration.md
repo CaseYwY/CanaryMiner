@@ -400,6 +400,45 @@ The declaration covers a single contract and two rates per demand rule for
 the whole cycle. Supplier-specific proration and other overage formulas
 require separate tariff rules and qualification.
 
+### Use a separate monthly demand reset
+
+Version 20 lets the supply bill and demand charges close on different
+calendars. In Settings select a demand charge or the concurrent demand
+list and press **W**. Enter the day of the month and clock under
+`demand_reset_policy`. Short months use their last day when necessary.
+The clock can use UTC, a fixed offset, or the reviewed IANA time data
+through the same named-clock control. The reset and meter readings must
+support the declared demand-window grid. A nonzero register delta
+crossing a demand reset needs a reading at that reset.
+
+Re-enter each demand rate when enabling or removing the separate schedule.
+A contracted capacity fee applies once per demand month and any excess
+uses that month's billable peak. To reopen a declaration at an intermediate
+instant, enter the open demand month's measured peaks and its imported kWh
+under `opening.demand_billing.imported_kwh`. In
+`opening.demand_billing.posted_subtotal` enter only the fees from demand
+months that already closed within the current supply period. Use zero at
+the start of that supply period. The ordinary opening subtotal excludes
+these fees. When required, the ordinary demand tax base includes them.
+The demand opening records the data version of its own clock.
+
+For example, a supply period from January 15 through February 15
+includes the demand charge from the demand month ending February 1.
+Its February peak and demand-month imports carry into the next supply
+period. A demand fee closing at the same instant as a supply period is
+included in the closing supply bill. Any historical floor keeps its
+consecutive demand months and advances only at the demand reset.
+Ordered taxes use their existing supply allocation rules.
+
+`meter-bill` reports posted demand fees separately from the open month's
+peak and projected fee. The whole-meter comparison includes demand fees
+posted through the selected supply horizon. Changes to a peak in a
+still-open month affect the supply bill that contains its closing instant.
+Private review archives replay the same period boundaries and exact
+amounts. This is a declared review model with the existing meter-file
+bounds. Supplier-specific monthly rate revisions and settlement
+qualification require separate evidence.
+
 ### Use a historical demand floor
 
 Set a monthly reset and add a demand charge. In Settings, select `demand_charge` and press **R**.
@@ -427,7 +466,8 @@ reconstructs the same history and verifies the exact floor and billable demand f
 each reviewed cycle.
 
 This covers T21 for one all-day maximum with consecutive monthly resets. A version 19
-contract can use the same historical floor. Independent reset schedules remain open.
+contract can use the same historical floor. With a [separate demand reset](#use-a-separate-monthly-demand-reset),
+the historical rows follow the demand clock even when the supply period is longer.
 
 ### Charge for apparent demand in kVA
 

@@ -91,6 +91,37 @@ int main(int argc, char **argv) {
         CHECK(evaluateBill(demandPlan,incomplete,load("8000",T,T+hour/3),T+hour/3,T).status==
               ElectricityStatus::DemandWindowBoundary);
     }
+    // A demand month can include imports before this supply cycle and close during it.
+    {
+        const auto jan15 = dateUtc({2024,1,15}), feb1 = dateUtc({2024,2,1});
+        const auto feb15 = dateUtc({2024,2,15}), mar1 = dateUtc({2024,3,1});
+        auto monthly = plan(jan15, mar1);
+        monthly.revisions[0].baseRatePerKwh = d("0");
+        monthly.demandCharge = DemandChargeRule{15,0,jan15,d("4")};
+        monthly.demandCharge->contract = ContractedDemand{kwh("10"),d("2")};
+        monthly.demandReset = DemandResetSchedule{1,{}};
+        auto prior = opening(jan15, mar1);
+        prior.peakDemand = kwh("12");
+        prior.monthlyDemand = MonthlyDemandOpening{"explicit-fixed-clock",kwh("3"),{}};
+        auto noPosting = evaluateBill(monthly,prior,load("1000",jan15,feb1-hour),feb1-hour,feb15);
+        charge(noPosting,"0.000000");
+        CHECK(noPosting.ending && display(*noPosting.ending->peakDemand) == "12.000000");
+        if (noPosting.ending) {
+            const auto closed = evaluateBill(monthly,*noPosting.ending,load("0",feb1-hour,feb1),feb1,feb15);
+            charge(closed,"28.000000");
+            CHECK(closed.ending && closed.ending->peakDemand->numerator.zero());
+            CHECK(closed.ending && display(closed.ending->monthlyDemand->postedSubtotal) == "28.000000");
+            if (closed.ending) {
+                const auto next = evaluateBill(monthly,*closed.ending,load("0",feb1,mar1),mar1,feb15);
+                charge(next,"20.000000");
+            }
+        }
+        const auto full = evaluateBill(monthly,prior,load("0",jan15,mar1),mar1,feb15);
+        charge(full,"48.000000");
+        CHECK(full.ending && display(full.ending->monthlyDemand->postedSubtotal) == "48.000000");
+        prior.monthlyDemand->postedSubtotal = kwh("1");
+        CHECK(evaluateBill(monthly,prior,load("0",jan15,mar1),mar1,feb15).status == ElectricityStatus::Invalid);
+    }
     // Immutable chronological price revisions do not replenish tier allowances. T17, T33/T34.
     p = plan(T,T+2*hour); s = opening(T,T+2*hour); p.revisions[0].baseRatePerKwh = d("1");
     auto r = p.revisions[0]; r.key = "fixture.revision.2"; r.beginUtcMs = T+hour; r.baseRatePerKwh = d("3");

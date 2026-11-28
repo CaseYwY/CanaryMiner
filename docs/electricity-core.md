@@ -4,7 +4,7 @@ P-05a / P-08a implements **pure local host-side foundations**, not production fi
 
 The later [P-05b/P-08b native session slice](session-energy.md) separately adds reviewed **flat energy-only** declarations and a default-off streaming GPU-board model from existing telemetry. It does not activate this full-bill/counterfactual API, combined-rule settings, persistent billing state, actual-income/net forecasts or hardware qualification. Its explicit mapped-UTC guard is an adapter/model contract, not a change to this pure function's exact input-clock rules.
 
-[P-05c](tariff-declaration.md) adds native composition and persisted declared-opening settings for this model. They remain offline; no measured accumulator, independent reset ledger or runtime financial activation is supplied.
+[P-05c](tariff-declaration.md) adds native composition and persisted declared-opening settings for this model. [P-05by](tariff-declaration.md#use-a-separate-monthly-demand-reset) tracks a declared monthly demand opening independently of the supply period during a local review. Automatic observed billing and runtime financial activation remain open.
 
 [P-05g](billing-ledger.md) adds `accrueBill` for exact provisional prefixes and a separate fixture monetary ledger. The full-settlement restrictions below continue to apply to `evaluateBill`/`counterfactualBill`; prefix amounts are not shortened utility bills. The ledger is unused by the ordinary runtime pending source/checkpoint adaptation and isolated recovery ownership.
 

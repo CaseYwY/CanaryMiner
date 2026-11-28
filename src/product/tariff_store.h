@@ -22,9 +22,11 @@ class TariffDeclarationStore {
                 const auto *allowance=v.find("seasonal_allowance");
                 const auto *demand=v.find("demand_charge");
                 if(!demand)demand=v.find("demand_charges");
+                const auto *demandReset=v.find("demand_reset_policy");
                 return tariffJson(*v.find("plan"))+tariffJson(*v.find("country"))+
                     tariffJson(*v.find("source_reference"))+tariffJson(*v.find("reset_policy"))+
                     (allowance?tariffJson(*allowance):std::string{})+(demand?tariffJson(*demand):std::string{})+
+                    (demandReset?tariffJson(*demandReset):std::string{})+
                     (v.find("restricted_credit")?"restricted-credit-at-close":"");
             };
             const auto opening=[](const JsonValue &v){

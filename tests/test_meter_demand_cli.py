@@ -119,6 +119,20 @@ def main(cli, bundle=None):
                    "0.000000", "30.000000")
             policy["demand_charge"]["eligible_periods"] = [eligible(120, 210)]
             review(policy, modeled((spring, spring_end, "4000")), spring_end, error="saved tariff declaration")
+
+            start = utc("2024-11-01T03:00:00")
+            month_close, finish = start + HOUR, start + 2 * HOUR
+            independent = declaration(start, finish, minutes=60)
+            independent.update(schema_version=20, demand_reset_policy=dict(monthly_day=1, clock=named("America/New_York")))
+            independent["opening"].update(peak_demand_kw="3", demand_billing=dict(
+                imported_kwh="3", posted_subtotal="0", time_database_version="2026e"))
+            readings = register([(start, "0"), (month_close, "0"), (finish, "2")])
+            report = review(independent, readings, finish, archive="independent-named.cmr")
+            assert "Reviewed IANA time database 2026e" in report
+            assert f"Open demand month [{month_close}, " in report
+            assert "Open-month peak demand 2.000000 kW" in report
+            assert "Cycle estimate at closing 17.000000 USD" in report
+            assert run("--open-review", "independent-named.cmr") == report
         else:
             begin = utc("2024-01-01")
             cut, end = begin + 5 * MINUTE, begin + 15 * MINUTE
@@ -223,6 +237,82 @@ def main(cli, bundle=None):
             report = review(history_capacity, register([(feb, "0"), (mar, "0")]), mar)
             totals(report, "0.000000", "40.000000")
             assert "Billable demand 15.000000 kW" in report and "Excess demand fee 20.000000 USD" in report
+
+            jan15, feb15, mar15 = (utc(f"2024-{month}-15T00:00:00") for month in ("01", "02", "03"))
+            jan_close, feb_close = (utc(day) for day in ("2024-01-31T23:00:00", "2024-02-29T23:00:00"))
+            independent = declaration(jan15, feb15, reset=dict(monthly_day=15, clock=UTC), rates_end=mar15, minutes=30)
+            independent.update(schema_version=20, demand_reset_policy=dict(
+                monthly_day=1, clock=dict(kind="fixed_standard", fixed_offset_seconds=3600)))
+            independent["demand_charge"].update(rate_per_kw="4",
+                contracted_capacity=dict(capacity="10", rate_per_unit="2"))
+            independent["opening"].update(peak_demand_kw="12", demand_billing=dict(
+                imported_kwh="6", posted_subtotal="0", time_database_version="explicit-fixed-clock"))
+            before_close = jan_close - HOUR
+            monthly_steps = [(jan15, "0"), (before_close, "0"), (jan_close, "0"), (feb15 - HOUR // 2, "0"),
+                             (feb15, "8"), (feb_close, "8"), (mar15, "8")]
+            report = review(independent, register(monthly_steps[:2]), before_close)
+            assert "Posted demand fees in this supply cycle 0.000000 USD" in report
+            assert "Open-month peak demand 12.000000 kW" in report
+            partial = review(independent, register(monthly_steps[:3]), jan_close, archive="independent-prefix.cmr")
+            assert "Provisional cycle estimate 28.000000 USD" in partial
+            assert "Open-month peak demand 0.000000 kW" in partial
+            assert run("--open-review", "independent-prefix.cmr") == partial
+            original = (root / "independent-prefix.cmr").read_bytes()
+            report = review(independent, register(monthly_steps), mar15)
+            assert "Posted demand fees in this supply cycle 28.000000 USD" in report
+            assert "Cycle estimate at closing 36.000000 USD" in report
+            assert "Open-month peak demand 16.000000 kW" in report
+            assert "Posted demand fees in this supply cycle 44.000000 USD" in report
+            assert "Cycle estimate at closing 44.000000 USD" in report
+            extended = run("--extend-review", "independent-prefix.cmr", "--intervals", meter,
+                           "--as-of-utc-ms", mar15, "--save-review", "independent-extended.cmr")
+            predecessor = f"Extends verified meter coverage through {jan_close} UTC ms "
+            assert sum(line.startswith(predecessor) for line in extended.splitlines()) == 1
+            assert [line for line in extended.splitlines() if not line.startswith(predecessor)] == report.splitlines()
+            assert run("--open-review", "independent-extended.cmr") == extended
+            assert (root / "independent-prefix.cmr").read_bytes() == original
+            review(independent, register([(jan15, "0"), (feb15, "8")]), feb15, error=boundary)
+            invalid = copy.deepcopy(independent)
+            invalid["opening"]["demand_billing"]["posted_subtotal"] = "1"
+            review(invalid, register(monthly_steps), mar15, error="saved tariff declaration")
+            invalid["opening"]["demand_billing"]["posted_subtotal"] = "0"
+            invalid["demand_reset_policy"]["clock"]["fixed_offset_seconds"] = 900
+            review(invalid, register(monthly_steps), mar15, error="saved tariff declaration")
+
+            resumed = copy.deepcopy(independent)
+            resumed["opening"].update(through_utc_ms=jan_close, peak_demand_kw="0",
+                                      demand_billing=dict(imported_kwh="0", posted_subtotal="28",
+                                                          time_database_version="explicit-fixed-clock"),
+                                      tax_bases=dict(energy="0", daily_fee="0", cycle_fee="0", demand="28", billed_kwh="0"))
+            resumed["plan"]["tax_periods"] = [dict(begin_utc_ms=jan15, end_utc_ms=feb15,
+                published_utc_ms=jan15, rules=[dict(key="demand-tax", kind="fraction", rate="0.1",
+                components=["demand"], included_in=[], prior_taxes=[])])]
+            report = review(resumed, register(monthly_steps[2:5]), feb15)
+            assert "Cycle estimate at closing 38.800000 USD" in report
+            resumed["opening"]["tax_bases"]["demand"] = "0"
+            review(resumed, register(monthly_steps[2:5]), feb15, error="saved tariff declaration")
+
+            demand_history = copy.deepcopy(independent)
+            annual_end = utc("2025-01-15")
+            demand_history["reset_policy"] = dict(annual_month=1, annual_day=15, clock=UTC)
+            demand_history["opening"]["cycle_end_utc_ms"] = annual_end
+            demand_history["plan"]["revisions"][0]["end_utc_ms"] = annual_end
+            demand_history["demand_charge"]["ratchet"] = dict(lookback_months=1, fraction="0.75")
+            dec_close = utc("2023-12-31T23:00:00")
+            demand_history["opening"]["demand_history"] = [dict(cycle_end_utc_ms=dec_close, peak_kw="20")]
+            report = review(demand_history, register(monthly_steps[:3]), jan_close)
+            assert "Posted demand fees in this supply cycle 40.000000 USD" in report
+            assert "Demand ratchet floor 9.000000 kW" in report
+
+            paired_independent = concurrent(independent, dict(window_minutes=30, offset_minutes=0,
+                published_utc_ms=jan15, rate_per_kva="3", power_factor_va_places=None))
+            paired_independent["schema_version"] = 20
+            paired_independent["opening"]["demand_peaks"][1]["peak"] = "16"
+            apparent_month = modeled((jan15, jan_close, "0"))
+            apparent_month["schema_version"] = 4
+            apparent_month["intervals"][0]["average_va"] = "0"
+            report = review(paired_independent, apparent_month, jan_close)
+            assert "Posted demand fees in this supply cycle 76.000000 USD" in report
 
             # A v9 source can resolve demand and energy on different grids.
             quarter_hour = declaration(begin, rounded_end)
