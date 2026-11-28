@@ -1,6 +1,7 @@
 """Exercise the ordinary offline command with the actual miner's host CLI."""
 from concurrent.futures import ThreadPoolExecutor
 import copy
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -75,6 +76,74 @@ def fallback_sample():
     return doc
 
 
+def signed_hour(body):
+    return body + hashlib.sha256(body).hexdigest().encode("ascii") + b"\n"
+
+
+def part(data):
+    return str(len(data)).encode("ascii") + b"\n" + data
+
+
+def public_hour_bytes(end, pearl_at, fx_at, *, missing_fx=(), kraken_at=None):
+    """Build a v5 capture with an independently calculated single-hour report."""
+    start, initial = end - 3600, end + 5
+    minutes = range(start, end, 60)
+    missing = set(missing_fx)
+    pearl = {minute: pearl_at(minute) for minute in minutes}
+    primary = {minute: fx_at(minute) for minute in minutes if minute not in missing}
+    fallback = {minute: kraken_at(minute) for minute in minutes} if kraken_at else {}
+    cutoff = initial + (2 if fallback else 1)
+    mexc = [[t * 1000, p, p, p, p, "1", t * 1000 + 60000, "1"] for t, p in pearl.items()]
+    coinbase = {"candles": [dict(start=str(t), open=p, high=p, low=p, close=p, volume="1")
+                           for t, p in primary.items()]}
+    asset = (b'{"symbols":[{"symbol":"PEARLUSDT","baseAsset":"PEARL","quoteAsset":"USDT",'
+             b'"status":"1","isSpotTradingAllowed":true}]}')
+
+    def receipt(payload, observed):
+        data = json.dumps(payload, separators=(",", ":")).encode("ascii")
+        wire = f"CMJSON1 0 200 {observed} 0 {len(data)}\n".encode("ascii") + data
+        return f"{observed}\n{observed}\n".encode("ascii") + part(wire)
+
+    lines = [
+        "One public candle sample; candle finality is unverified.",
+        f"UTC seconds [{start}, {end}); window ended {cutoff-end} s ago",
+        f"MEXC Pearl mainnet PRL/USDT: 60/60 elapsed minute buckets; observed UTC {initial} (receipt age {cutoff-initial} s)",
+        f"Coinbase USDT/USD: {len(primary)}/60 elapsed minute buckets; observed UTC {initial+1} (receipt age {cutoff-initial-1} s)",
+    ]
+    body = f"CANARY-MARKET-HOUR-REVIEW-5\n{initial}\n{end}\n2\n{3 if fallback else 2}\n{2 if fallback else 1}\n".encode("ascii")
+    body += receipt(mexc, initial) + receipt(coinbase, initial + 1)
+    if fallback:
+        rows = [[t, p, p, p, p, p, "1", 1] for t, p in (*fallback.items(), (end, "1"))]
+        body += receipt({"error": [], "result": {"USDTZUSD": rows, "last": end - 60}}, cutoff)
+        lines += [
+            f"Kraken USDT/USD fallback: 60/60 elapsed minute buckets; observed UTC {cutoff} (receipt age 0 s)",
+            "FX source for USD mean: Kraken USDT/USD (candidate, minute starts inferred at receipt)",
+        ]
+    body += f"2\n{initial}\n".encode("ascii") + part(asset)
+    selected = fallback or primary
+    complete = len(selected) == 60
+    lines.append(f"Mean USDT per PRL (exact sum / minutes): {sum(map(Decimal, pearl.values())).normalize():f} / 60")
+    if complete:
+        total = sum(Decimal(pearl[t]) * Decimal(selected[t]) for t in minutes)
+        lines.append(f"Mean USD per PRL (exact sum / minutes): {total.normalize():f} / 60")
+    else:
+        lines.append("Mean USD per PRL (exact sum / minutes): N/A (requires complete aligned PRL and FX coverage)")
+    lines.append(f"Sample result: {'complete' if complete else 'incomplete'}")
+    ranges = []
+    for minute in sorted(missing):
+        if ranges and ranges[-1][1] == minute:
+            ranges[-1][1] = minute + 60
+        else:
+            ranges.append([minute, minute + 60])
+    if ranges:
+        lines.append("Coinbase USDT/USD missing elapsed-minute ranges (UTC seconds)" +
+                     "".join(f" [{a}, {b})" for a, b in ranges))
+    lines += [f"Capture UTC {cutoff} (ages at capture)",
+              f"MEXC Pearl spot pair metadata: identity checked | observed UTC {initial}"]
+    report = ("\n".join(lines) + "\n").encode("ascii")
+    return signed_hour(body + part(report))
+
+
 @unittest.skipUnless(MINER is not None, "run directly with the built miner CLI")
 class MarketHourCli(unittest.TestCase):
     def setUp(self):
@@ -145,6 +214,105 @@ class MarketHourCli(unittest.TestCase):
         self.assert_refusal(reopen(receipt(limited, received=cutoff - 1)), "archive unavailable or invalid")
         self.assert_refusal(reopen(receipt(b"CMJSON1 4 0 0 0 0\n")), "archive unavailable or invalid")
         self.assert_refusal(reopen(receipt(b"CMJSON1 14 0 0 0 0\n")), "archive unavailable or invalid")
+
+    def combine(self, end, minutes, *paths, cutoff=None, output=None):
+        args = ["--combine-public-hours", "--end-utc", str(end), "--minutes", str(minutes),
+                "--as-of-utc", str(end + 60 if cutoff is None else cutoff)]
+        for path in paths:
+            args.extend(("--archive", str(path)))
+        if output:
+            args.extend(("--save-review", output))
+        return self.run_miner("market-hour", *args)
+
+    def test_combine_eight_hours_and_replay_self_contained_archive(self):
+        def price(t):
+            return "1" if t // 60 % 2 else "3"
+
+        originals = []
+        for index, end in enumerate([END - n * 3600 for n in range(8)] + [END - 1800]):
+            path = self.stage / f"private-\u884c\u60c5-{index}.cmh"
+            data = public_hour_bytes(end, price, price)
+            path.write_bytes(data)
+            originals.append((path, data))
+        names = [path.name for path, _ in originals]
+        result = self.combine(END, 480, *names, output="composite.cmh")
+        self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+        self.assertIn("Original public hours 9", result.stdout)
+        self.assertIn("480/480 usable minutes", result.stdout)
+        self.assertIn("960 / 480", result.stdout)
+        self.assertIn("2400 / 480", result.stdout)
+        self.assertEqual(self.combine(END, 480, *reversed(names)).stdout, result.stdout)
+        self.assert_refusal(self.combine(END, 480, *names, output="composite.cmh"), "existing archive was preserved")
+        self.assert_refusal(self.combine(END, 480, *names, names[0]), "duplicate original public hour archive")
+        self.assert_refusal(self.combine(END, 480, *names, cutoff=END + 5), "saved review cutoff is in the future")
+        archive = self.stage / "composite.cmh"
+        packed = archive.read_bytes()
+        self.assertTrue(packed.startswith(b"CANARY-MARKET-HOUR-REVIEW-6\n"))
+        for path, data in originals:
+            self.assertEqual(path.read_bytes(), data)
+            self.assertIn(data, packed)
+            path.unlink()
+        restored = self.run_miner("market-hour", "--open-review", archive.name)
+        self.assertEqual((restored.returncode, restored.stderr, restored.stdout), (0, "", result.stdout))
+        archive.write_bytes(signed_hour(packed[:-65].replace(b"2400 / 480", b"2401 / 480", 1)))
+        self.assert_refusal(self.run_miner("market-hour", "--open-review", archive.name), "recalculated report")
+        archive.write_bytes(packed)
+        self.assert_refusal(self.combine(END, 480, archive.name), "original public hour archives")
+        self.assertEqual((self.stage / "config.json").read_text(), "CONFIG_SENTINEL")
+
+    def test_conflicts_gaps_and_separate_fx_sources_in_combined_window(self):
+        def token(_):
+            return "2"
+
+        def fx(_):
+            return "1"
+
+        def alternate(t):
+            return "3" if t == END - 3600 else "2"
+
+        first, second = self.stage / "private-first.cmh", self.stage / "private-second.cmh"
+        first.write_bytes(public_hour_bytes(END - 1800, token, fx))
+        second.write_bytes(public_hour_bytes(END, alternate, fx))
+        conflict = self.combine(END, 90, first.name, second.name)
+        self.assertEqual((conflict.returncode, conflict.stderr), (3, ""), conflict)
+        self.assertIn("89/90 usable minutes. Conflicting closes in 1 minute", conflict.stdout)
+        self.assertIn("Mean USDT per PRL unavailable", conflict.stdout)
+        self.assert_refusal(self.combine(END, 90, first.name, second.name, output="partial.cmh"), "complete aligned coverage")
+        self.assertFalse((self.stage / "partial.cmh").exists())
+        first.write_bytes(public_hour_bytes(END - 3600, token, fx))
+        second.write_bytes(public_hour_bytes(END, token, fx, missing_fx=(END - 60,), kraken_at=fx))
+        split = self.combine(END, 120, first.name, second.name)
+        self.assertEqual((split.returncode, split.stderr), (3, ""), split)
+        self.assertIn("240 / 120", split.stdout)
+        self.assertIn("Coinbase USDT/USD: 119/120 usable minutes", split.stdout)
+        self.assertIn("Kraken USDT/USD fallback: 60/120 usable minutes", split.stdout)
+        self.assertNotIn("FX source for USD mean", split.stdout)
+        first.write_bytes(public_hour_bytes(END - 3600, token, fx, missing_fx=(END - 7200,), kraken_at=fx))
+        fallback = self.combine(END, 120, first.name, second.name)
+        self.assertEqual((fallback.returncode, fallback.stderr), (0, ""), fallback)
+        self.assertIn("FX source for USD mean: Kraken", fallback.stdout)
+        self.assertIn("Mean USD per PRL (exact sum / minutes): 240 / 120", fallback.stdout)
+        hole = self.combine(END, 120, second.name)
+        self.assertIn("60/120 usable minutes", hole.stdout)
+        self.assertEqual(hole.returncode, 3, hole)
+        self.assert_refusal(self.combine(END, 60, first.name), "does not overlap")
+        self.assert_refusal(self.combine(END, 720, second.name), code=2)
+        self.assert_refusal(self.combine(END + 1, 60, second.name), "invalid completed UTC")
+        self.assert_refusal(self.combine(END, 60, second.name, cutoff=int(time.time()) + 3600),
+                            "invalid completed UTC")
+        self.assert_refusal(self.combine(END, 60, *([second.name] * 17)), code=2)
+
+    def test_combine_at_maximum_minute_bound(self):
+        names = []
+        for index in range(12):
+            path = self.stage / f"private-hour-{index}.cmh"
+            path.write_bytes(public_hour_bytes(END - index * 3600, lambda _: "1.25", lambda _: "0.8"))
+            names.append(path.name)
+        result = self.combine(END, 719, *names)
+        self.assertEqual((result.returncode, result.stderr), (0, ""), result)
+        self.assertIn(f"UTC seconds [{END - 719 * 60}, {END})", result.stdout)
+        self.assertIn("Mean USDT per PRL (exact sum / minutes): 898.75 / 719", result.stdout)
+        self.assertIn("Mean USD per PRL (exact sum / minutes): 719 / 719", result.stdout)
 
     def test_local_file_and_exact_same_minute_conversion(self):
         result = self.run_review(sample())
