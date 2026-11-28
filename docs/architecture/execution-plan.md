@@ -125,6 +125,10 @@ The [opt-in Schannel verifier](../pool-schannel.md#separate-normal-and-explicit-
 
 The [OpenSSL pool worker](../pool-native-tls.md#linux-certificate-status-in-the-handshake) validates TLS Feature declarations on its verified chain. Each issued certificate retains its signer's declared features, including a root's declaration when present. Missing inheritance, malformed declarations and an absent required leaf staple fail verification before the worker admits Stratum traffic. Leaf stapling and intermediate revocation remain separate checks.
 
+## P-12z Check supplied intermediate status on Linux
+
+The [OpenSSL pool worker](../pool-native-tls.md#linux-certificate-status-in-the-handshake) validates intermediate OCSP responses supplied in TLS 1.3 handshakes when built with OpenSSL 3.6 or later. It matches signed identities against its verified chain and rejects invalid status before Stratum. The leaf-only path remains available on OpenSSL 3.5 and TLS 1.2. Missing optional status, live responder lookup, donation TLS and public pool/GPU release acceptance remain open.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

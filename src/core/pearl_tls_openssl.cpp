@@ -21,6 +21,9 @@ constexpr long ocspWithNextUpdateMaxAgeSeconds = 10 * 86400;
 constexpr long ocspWithoutNextUpdateMaxAgeSeconds = 86400;
 constexpr int maximumOcspEntries = 64;
 constexpr int maximumTlsFeatures = 64;
+constexpr int maximumIssuerDepth = 10;
+constexpr int maximumOcspTargets = 1 + maximumIssuerDepth;
+using OcspCoverage = std::array<bool, maximumOcspTargets>;
 bool dnsName(const std::string &name){
     if(name.empty()||name.size()>253||name.back()=='.')return false;
     std::size_t begin=0;
@@ -81,23 +84,8 @@ bool exactOcspEncoding(OCSP_BASICRESP *basic, const unsigned char *encoded, long
         std::equal(canonical.begin(), canonical.end(), encoded);
 }
 
-bool verifyOcspStaple(SSL *ssl, X509_STORE *trust) {
-    auto *chain = SSL_get0_verified_chain(ssl);
-    const int chainLength = sk_X509_num(chain);
-    auto *leaf = sk_X509_value(chain, 0);
-    bool required = false;
-    if (!leaf || !readStaplingFeature(leaf, required)) return false;
-    // RFC 7633 requires each issued certificate to retain its signer's declared features.
-    bool childRequiresStaple = required;
-    for (int i = 1; i < chainLength; ++i) {
-        bool issuerRequiresStaple = false;
-        if (!readStaplingFeature(sk_X509_value(chain, i), issuerRequiresStaple) ||
-            (issuerRequiresStaple && !childRequiresStaple)) return false;
-        childRequiresStaple = issuerRequiresStaple;
-    }
-    unsigned char *encoded = nullptr;
-    const long size = SSL_get_tlsext_status_ocsp_resp(ssl, &encoded);
-    if (size == -1 && !encoded) return !required;
+bool verifyOcspResponse(const unsigned char *encoded, long size, STACK_OF(X509) *chain,
+                        int targets, X509_STORE *trust, OcspCoverage &coverage) {
     if (!encoded || size <= 0 || size > static_cast<long>(bufferLimit)) return false;
 
     const unsigned char *cursor = encoded;
@@ -112,10 +100,8 @@ bool verifyOcspStaple(SSL *ssl, X509_STORE *trust) {
     if (responses < 1 || responses > maximumOcspEntries ||
         OCSP_BASICRESP_get_ext_by_critical(basic.get(), 1, -1) >= 0 ||
         !exactOcspEncoding(basic.get(), encoded, size)) return false;
-    auto *issuer = sk_X509_value(chain, 1);
-    if (!issuer) return false;
-
     OCSP_SINGLERESP *match = nullptr;
+    int matchedTarget = -1;
     for (int i = 0; i < responses; ++i) {
         auto *entry = OCSP_resp_get0(basic.get(), i);
         if (!entry) return false;
@@ -123,12 +109,16 @@ bool verifyOcspStaple(SSL *ssl, X509_STORE *trust) {
         auto *identity = const_cast<OCSP_CERTID *>(OCSP_SINGLERESP_get0_id(entry));
         const auto *digest = identity ? ocspIdentityDigest(identity) : nullptr;
         if (!digest) return false;
-        const std::unique_ptr<OCSP_CERTID, decltype(&OCSP_CERTID_free)> expected(
-            OCSP_cert_to_id(digest, leaf, issuer), OCSP_CERTID_free);
-        if (!expected) return false;
-        if (OCSP_id_cmp(identity, expected.get()) != 0) continue;
-        if (match) return false;
-        match = entry;
+        for (int target = 0; target < targets; ++target) {
+            const std::unique_ptr<OCSP_CERTID, decltype(&OCSP_CERTID_free)> expected(
+                OCSP_cert_to_id(digest, sk_X509_value(chain, target), sk_X509_value(chain, target + 1)),
+                OCSP_CERTID_free);
+            if (!expected) return false;
+            if (OCSP_id_cmp(identity, expected.get()) != 0) continue;
+            if (match || coverage[target]) return false;
+            match = entry;
+            matchedTarget = target;
+        }
     }
     if (!match || OCSP_SINGLERESP_get_ext_by_critical(match, 1, -1) >= 0 ||
         OCSP_basic_verify(basic.get(), chain, trust, OCSP_NOEXPLICIT) != 1) return false;
@@ -136,13 +126,75 @@ bool verifyOcspStaple(SSL *ssl, X509_STORE *trust) {
     const auto *produced = OCSP_resp_get0_produced_at(basic.get());
     auto latest = std::time(nullptr);
     if (latest == static_cast<std::time_t>(-1) || !produced) return false;
+#if OPENSSL_VERSION_PREREQ(4, 1)
+    const auto producedLength = ASN1_STRING_get_length(produced);
+#else
+    const auto producedLength = ASN1_STRING_length(produced);
+#endif
+    // Keep the UTC, whole-second GeneralizedTime form required by the old X.509 comparison.
+    if (producedLength != 15 || ASN1_STRING_get0_data(produced)[14] != 'Z') return false;
     latest += ocspClockSkewSeconds;
-    if (X509_cmp_time(produced, &latest) >= 0) return false;
+    const int producedOrder = ASN1_TIME_cmp_time_t(produced, latest);
+    if (producedOrder != -1 && producedOrder != 0) return false;
     ASN1_GENERALIZEDTIME *thisUpdate = nullptr, *nextUpdate = nullptr;
     const int status = OCSP_single_get0_status(match, nullptr, nullptr, &thisUpdate, &nextUpdate);
-    return status == V_OCSP_CERTSTATUS_GOOD && thisUpdate &&
+    if (status != V_OCSP_CERTSTATUS_GOOD || !thisUpdate ||
         OCSP_check_validity(thisUpdate, nextUpdate, ocspClockSkewSeconds,
-                            nextUpdate ? ocspWithNextUpdateMaxAgeSeconds : ocspWithoutNextUpdateMaxAgeSeconds) == 1;
+                            nextUpdate ? ocspWithNextUpdateMaxAgeSeconds : ocspWithoutNextUpdateMaxAgeSeconds) != 1)
+        return false;
+    coverage[matchedTarget] = true;
+    return true;
+}
+
+#ifdef SSL_get0_tlsext_status_ocsp_resp_ex
+bool verifyStapleStack(SSL *ssl, STACK_OF(X509) *chain, int targets, X509_STORE *trust, bool leafRequired) {
+    STACK_OF(OCSP_RESPONSE) *staples = nullptr;
+    const long count = SSL_get0_tlsext_status_ocsp_resp_ex(ssl, &staples);
+    if (count == -1 && !staples) return !leafRequired;
+    // TLS permits extra certificates or a different wire order than the verified path.
+    const bool multiple = SSL_version(ssl) == TLS1_3_VERSION;
+    const int peerCount = multiple ? sk_X509_num(SSL_get_peer_cert_chain(ssl)) : 1;
+    if (!staples || count <= 0 || count > peerCount) return false;
+    const int possibleTargets = multiple ? targets : std::min(targets, 1);
+    OcspCoverage coverage{};
+    for (int i = 0; i < count; ++i) {
+        auto *response = sk_OCSP_RESPONSE_value(staples, i);
+        if (!response) continue;
+        // Bind every response by signed CertID. Some OpenSSL versions compact absent entries.
+        const int size = i2d_OCSP_RESPONSE(response, nullptr);
+        if (size <= 0 || size > static_cast<int>(bufferLimit)) return false;
+        std::vector<unsigned char> encoded(static_cast<std::size_t>(size));
+        auto *cursor = encoded.data();
+        if (i2d_OCSP_RESPONSE(response, &cursor) != size ||
+            !verifyOcspResponse(encoded.data(), size, chain, possibleTargets, trust, coverage)) return false;
+    }
+    return !leafRequired || coverage.front();
+}
+#endif
+
+bool verifyOcspStaples(SSL *ssl, X509_STORE *trust) {
+    auto *chain = SSL_get0_verified_chain(ssl);
+    const int chainLength = sk_X509_num(chain);
+    if (chainLength < 1 || chainLength > maximumOcspTargets + 1) return false;
+    bool leafRequired = false;
+    if (!readStaplingFeature(sk_X509_value(chain, 0), leafRequired)) return false;
+    // RFC 7633 requires each issued certificate to retain its signer's declared features.
+    bool childRequiresStaple = leafRequired;
+    for (int i = 1; i < chainLength; ++i) {
+        bool issuerRequiresStaple = false;
+        if (!readStaplingFeature(sk_X509_value(chain, i), issuerRequiresStaple) ||
+            (issuerRequiresStaple && !childRequiresStaple)) return false;
+        childRequiresStaple = issuerRequiresStaple;
+    }
+#ifdef SSL_get0_tlsext_status_ocsp_resp_ex
+    return verifyStapleStack(ssl, chain, chainLength - 1, trust, leafRequired);
+#else
+    unsigned char *encoded = nullptr;
+    const long size = SSL_get_tlsext_status_ocsp_resp(ssl, &encoded);
+    if (size == -1 && !encoded) return !leafRequired;
+    OcspCoverage coverage{};
+    return chainLength > 1 && verifyOcspResponse(encoded, size, chain, 1, trust, coverage);
+#endif
 }
 
 struct OpenSslEngine final:PearlTlsEngine {
@@ -170,7 +222,7 @@ struct OpenSslEngine final:PearlTlsEngine {
     }
     bool configure(const PearlTlsPolicy &p){
         ctx=SSL_CTX_new(TLS_client_method());if(!ctx)return false;
-        SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,nullptr);SSL_CTX_set_verify_depth(ctx,10);
+        SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,nullptr);SSL_CTX_set_verify_depth(ctx,maximumIssuerDepth);
         SSL_CTX_set_session_cache_mode(ctx,SSL_SESS_CACHE_OFF);
         SSL_CTX_set_options(ctx,SSL_OP_NO_COMPRESSION|SSL_OP_NO_RENEGOTIATION);
         SSL_CTX_clear_mode(ctx,SSL_MODE_AUTO_RETRY|SSL_MODE_ENABLE_PARTIAL_WRITE|SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
@@ -181,7 +233,8 @@ struct OpenSslEngine final:PearlTlsEngine {
         if(ip){if(X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl),p.serverName.c_str())!=1)return false;}
         else{if(!dnsName(p.serverName))return false;
             SSL_set_hostflags(ssl,X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS|X509_CHECK_FLAG_NEVER_CHECK_SUBJECT);
-            if(SSL_set1_host(ssl,p.serverName.c_str())!=1||SSL_set_tlsext_host_name(ssl,p.serverName.c_str())!=1)return false;}
+            if(X509_VERIFY_PARAM_set1_host(SSL_get0_param(ssl),p.serverName.c_str(),p.serverName.size())!=1||
+                SSL_set_tlsext_host_name(ssl,p.serverName.c_str())!=1)return false;}
         BIO *internal=nullptr;if(BIO_new_bio_pair(&internal,bufferLimit,&network,bufferLimit)!=1)return false;
         SSL_set_bio(ssl,internal,internal);SSL_set_connect_state(ssl);return true;
     }
@@ -195,7 +248,7 @@ struct OpenSslEngine final:PearlTlsEngine {
         ERR_clear_error();const int ret=SSL_do_handshake(ssl);const int err=SSL_get_error(ssl,ret);
         if(ret!=1)return mapped(err);
         if(SSL_get_verify_result(ssl)!=X509_V_OK){failure=E::Verification;return {K::Error,0};}
-        if(!verifyOcspStaple(ssl,SSL_CTX_get_cert_store(ctx))){failure=E::Verification;return {K::Error,0};}
+        if(!verifyOcspStaples(ssl,SSL_CTX_get_cert_store(ctx))){failure=E::Verification;return {K::Error,0};}
         return {K::Complete,0};
     }
     PearlTlsEngineStep send(const char *p,std::size_t size)override{

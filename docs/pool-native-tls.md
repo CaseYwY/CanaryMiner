@@ -22,17 +22,24 @@ Empty CA bytes select native OpenSSL default trust paths. Explicit bounded PEM b
 
 ## Linux certificate status in the handshake
 
-The OpenSSL pool worker requests one stapled OCSP response for the leaf. It
-matches the response to the leaf and issuer in the verified chain. It accepts
-a signature from that issuer or its directly authorized OCSP responder. The worker
-refuses duplicate matches, revoked or unknown status, unsupported critical
-extensions and invalid or stale responses before making the connection
-available to Stratum. It allows up to
+The OpenSSL pool worker requests stapled OCSP status. With TLS 1.2 or
+OpenSSL 3.5, it checks the response for the leaf. With TLS 1.3 and OpenSSL
+3.6 or later, it also checks the supplied intermediate responses. Each
+response must contain exactly one signed certificate ID matching a
+certificate and issuer on the verified path. Matching by ID handles absent
+entries and avoids relying on the peer's certificate order. Duplicate or unmatched responses fail
+verification, including responses for certificates outside the verified path.
+The worker accepts a signature from the certificate's issuer or its directly
+authorized OCSP responder. It rejects revoked or unknown status, unsupported
+critical extensions and invalid or stale responses before admitting Stratum.
+It allows up to
 five minutes of clock skew for the validity window. The status observation is
 at most ten days old when a next-update time is present, or 24 hours when it
 is absent. [RFC 6960](https://www.rfc-editor.org/rfc/rfc6960) ·
 [CA/Browser Forum TLS baseline requirements](https://cabforum.org/working-groups/server/baseline-requirements/requirements/) ·
-[OpenSSL OCSP API](https://docs.openssl.org/3.5/man3/OCSP_resp_find_status/)
+[OpenSSL OCSP API](https://docs.openssl.org/3.5/man3/OCSP_resp_find_status/) ·
+[OpenSSL TLS 1.3 multi-stapling API](https://docs.openssl.org/3.6/man3/SSL_CTX_set_tlsext_status_cb/) ·
+[TLS 1.3 certificate status](https://www.rfc-editor.org/rfc/rfc9846.html#section-4.5.1.1)
 
 If the leaf requires the `status_request` feature, the worker also refuses an
 absent staple. The worker checks the TLS Feature declaration on the verified
@@ -40,11 +47,19 @@ chain, including the trust anchor. Each certificate must retain the features
 declared by its signer. An omitted inherited feature, malformed declaration or
 unsupported feature such as `status_request_v2` is a certificate verification
 failure and cannot allow plaintext fallback. If the verified chain leaves
-stapling optional, a missing response gives
-the ordinary certificate check without a revocation result. The worker uses
-the pool's response in the handshake. Live responder lookup, intermediate
-revocation and Linux release qualification remain separate work.
+stapling optional, a missing response gives the ordinary certificate check
+without a revocation result for that certificate. Intermediate status
+coverage depends on the peer supplying a response. The worker consumes
+responses from the handshake and does not contact responders. OpenSSL 3.6
+exposes parsed OCSP objects. The worker checks their signed contents and
+embedded response encoding after OpenSSL handles the outer wire format. Online
+revocation and qualification of the public pools and Linux release remain open.
 [RFC 7633](https://www.rfc-editor.org/rfc/rfc7633)
+
+The opt-in `pool_tls_ocsp_loopback` CTest checks both TLS versions. A build
+using OpenSSL 3.6 or newer also exercises multi-stapling and needs an
+`openssl` test executable from the same series. Set
+`CANARY_OCSP_TEST_OPENSSL` to its path if CMake would find a different one.
 
 ## Finite progress and exact bytes
 
