@@ -129,6 +129,10 @@ The [OpenSSL pool worker](../pool-native-tls.md#linux-certificate-status-in-the-
 
 The [OpenSSL pool worker](../pool-native-tls.md#linux-certificate-status-in-the-handshake) validates intermediate OCSP responses supplied in TLS 1.3 handshakes when built with OpenSSL 3.6 or later. It matches signed identities against its verified chain and rejects invalid status before Stratum. The leaf-only path remains available on OpenSSL 3.5 and TLS 1.2. Missing optional status, live responder lookup, donation TLS and public pool/GPU release acceptance remain open.
 
+## P-12aa Package the Linux OpenSSL 4.1 candidate
+
+The [TLS candidate packer](../pool-tls-candidate.md#build-inputs-and-archive-creation) accepts an inventoried Linux OpenSSL 4.1.0 build. The pool and optional public HTTPS workers must link the same version recorded in the manifest, with its pinned licence. The installer also verifies existing 3.5.9 archives. OpenSSL 4.1 delivers supplied intermediate status checking in the Linux candidate. The release still requires real GPU, pool share and donation acceptance.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

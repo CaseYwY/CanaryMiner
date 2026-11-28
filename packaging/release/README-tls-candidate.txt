@@ -26,9 +26,11 @@ Strict TLS uses the system CA store, requires a matching DNS name and
 disables plaintext fallback.
 
 Windows uses Schannel and requires the x64 Visual C++ 2015–2022 runtime
-at least as recent as the build toolset. Linux uses static OpenSSL 3.5.9
-and the system CA store. Linux needs the glibc floor in manifest.json,
-compatible C++ runtime libraries, and kernel pidfd support.
+at least as recent as the build toolset. Linux uses the static OpenSSL
+version recorded in manifest.json and the system CA store. The 4.1.0
+build verifies intermediate OCSP responses supplied during TLS 1.3.
+Linux needs the glibc floor in manifest.json, compatible C++ runtime
+libraries, and kernel pidfd support.
 
 When the candidate includes named tariff clocks, keep bin/canary-tzdb-2026e
 with the programs. It contains the verified data used by named tariff clocks.
