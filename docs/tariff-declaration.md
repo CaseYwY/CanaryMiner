@@ -779,8 +779,38 @@ canary-miner meter-bill --cycle-history march.cmr --with-invoices
 The history checks the original tariff, readings, captured rates, review cutoff, and predecessor
 link in a late comparison against the corresponding cycle. It recalculates the saved estimates
 and invoice comparison. An invalid, conflicting or unfinished comparison prevents the report in
-this mode. The command only reads comparison files for cycles in the selected history. Raw staged
-invoice files are used by the recurring review when a cycle is first saved.
+this mode. History reads only comparison archives for cycles in the selected history. The recurring
+review uses staged invoices when it first saves a cycle.
+
+#### Reconcile late staged invoices
+
+To compare invoices that arrived after their cycles were archived, place each reviewed invoice in
+`cycle-END.invoice.json` and run this one-time command in the seed archive's workspace.
+
+~~~text
+canary-miner meter-bill --reconcile-invoices march.cmr
+canary-miner meter-bill --cycle-history march.cmr --with-invoices
+~~~
+
+The command replays the seed and its consecutive successors. It applies each staged invoice to the
+corresponding verified cycle at the original meter review cutoff. It saves each new comparison as
+`cycle-END.compared.cmr` and keeps the original cycle and staged input. An existing embedded or late
+comparison is verified and counted once. A staged file for an existing comparison must match the saved
+invoice byte for byte. Move any conflicting input out of the staging filename and review it separately.
+The selected seed must agree with any canonical archive for the same closing time and with the next
+archived cycle's predecessor link.
+
+Cycles without a saved or staged invoice remain pending. Invoices for cycles beyond the verified
+chain stay staged until their meter reviews exist. If a cycle or invoice fails verification, comparisons
+already saved by this run stay available and the error reports the saved count. Correct the reported
+problem and rerun to resume. The same replay limit as cycle history applies.
+
+This command shares the workspace lease with the watcher and with single-cycle commands that save
+to the recurring archive names. Run it when the watcher is stopped. It works offline with locally
+reviewed invoices. New cycle archives must agree with any comparisons already saved for them or
+their predecessor.
+The reserved recurring filenames use lowercase and the cycle's verified closing time. To save a
+single comparison under a reserved name, attach the invoice to a saved cycle in the same workspace.
 
 #### Watch for new billing inputs
 

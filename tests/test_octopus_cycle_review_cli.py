@@ -489,10 +489,16 @@ def main(cli, bundle, clock_fixture=None):
         first_archive = first_stem.with_suffix('.cmr')
         second_archive = second_stem.with_suffix('.cmr')
         history = ('--cycle-history', old)
+        reconcile = ('--reconcile-invoices', old)
         private_files = {path: path.read_bytes() for path in root.iterdir() if path.is_file()}
         single = run(*history)
         assert '1 verified cycle' in single and f'[{march}, {april})' in single
         assert {path: path.read_bytes() for path in root.iterdir() if path.is_file()} == private_files
+        for extras in (('--with-invoices',), ('--allow-public-rates',), ('--invoice', invoice),
+                       ('--cycle-history', old), ('--as-of-utc-ms', june + HOUR), ('--watch-every-seconds', '1')):
+            run(*reconcile, *extras, code=2, reason='invalid options')
+        run(*reconcile, cwd=installed, code=3, reason="seed archive's workspace")
+        assert '0 saved, 1 already compared, 0 without a staged invoice' in run(*reconcile)
         for extras in (('--watch-every-seconds', '1'), ('--save-review', 'extra.cmr'), ('--allow-public-rates',),
                        ('--with-invoices', '--with-invoices'), ('--with-invoices', '--invoice', invoice),
                        ('--scheduled-readings-plan', old), ('--as-of-utc-ms', june + HOUR)):
@@ -579,6 +585,30 @@ def main(cli, bundle, clock_fixture=None):
                           '--invoice', invoice, '--save-review', late.name)
         assert 'Difference (calculated minus invoice) 0.125 GBP (mismatch)' in late_report
         late_bytes = late.read_bytes()
+        late.unlink()
+        staged_late = second_stem.with_suffix('.invoice.json')
+        staged_bytes = invoice.read_bytes()
+        staged_late.write_bytes(staged_bytes)
+        assert run(*with_invoices) == embedded
+        if clock_fixture:
+            regression = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                              CANARY_TEST_SUCCESSOR_CUTOFF_MS=str(june + 2 * HOUR),
+                              CANARY_TEST_COMPARISON_CLOCK_REGRESSION='1')
+            run('--reconcile-invoices', second_archive, env=regression, code=3,
+                reason='local clock changed during the billing review')
+            assert not late.exists() and not temporary.exists()
+        temporary.write_bytes(b'unfinished comparison')
+        run(*reconcile, code=3, reason='late invoice review has uncertain temporary output')
+        assert temporary.read_bytes() == b'unfinished comparison' and not late.exists()
+        temporary.unlink()
+        assert '1 saved, 2 already compared, 0 without a staged invoice' in run(*reconcile)
+        assert late.read_bytes() == late_bytes
+        assert '0 saved, 3 already compared, 0 without a staged invoice' in run(*reconcile)
+        staged_late.write_bytes(staged_bytes + b'\n')
+        run(*reconcile, code=3, reason='staged invoice differs from the saved comparison')
+        assert late.read_bytes() == late_bytes and staged_late.read_bytes() == staged_bytes + b'\n'
+        staged_late.unlink()
+        assert '0 saved, 3 already compared, 0 without a staged invoice' in run(*reconcile)
         comparison = run(*with_invoices)
         assert 'Invoice reviews available for 3 of 3 verified cycles' in comparison
         assert 'Supply invoice totals cover 3 of 3 verified cycles' in comparison
@@ -635,6 +665,111 @@ def main(cli, bundle, clock_fixture=None):
         assert f'Stated supply charges total {rounded_invoices + Decimal("0.125"):.3f} GBP' in independent_history
         assert 'Supply invoice matches: 2 of 3 compared cycles' in independent_history
         late.unlink()
+
+        alternate_workspace = root / 'alternate invoice seed'
+        alternate_workspace.mkdir()
+        original_seed = alternate_workspace / 'selected-seed.cmr'
+        alternate_seed = alternate_workspace / 'other-seed.cmr'
+        canonical_seed = alternate_workspace / f'cycle-{april}.cmr'
+        seed_temporary = canonical_seed.with_suffix('.cmr.TMP')
+        seed_invoice = canonical_seed.with_suffix('.invoice.json')
+        seed_comparison = canonical_seed.with_suffix('.compared.cmr')
+        inputs(previous)
+        for entry, cutoff in ((original_seed, april + HOUR), (alternate_seed, april + 2 * HOUR)):
+            run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--save-review', entry.name,
+                '--as-of-utc-ms', cutoff, cwd=alternate_workspace)
+        originals = original_seed.read_bytes(), alternate_seed.read_bytes()
+        write(seed_invoice, dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2,
+                                 rounding='half_even', cycles=[dict(begin_utc_ms=march, end_utc_ms=april,
+                                                                   supply_charge='3.23')]))
+        original_seed.rename(canonical_seed)
+        run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, code=3,
+            reason='canonical cycle archive does not match the selected seed')
+        run('--open-review', alternate_seed, '--invoice', seed_invoice, '--save-review', seed_comparison.name,
+            cwd=alternate_workspace, code=3, reason='canonical cycle archive does not match the selected seed')
+        run('--open-review', canonical_seed, '--invoice', seed_invoice, '--save-review', seed_comparison.name,
+            code=3, reason="original archive's workspace")
+        run('--open-review', canonical_seed, '--invoice', seed_invoice, '--save-review', f'cycle-{may}.compared.cmr',
+            cwd=alternate_workspace, code=3, reason='recurring comparison filename must match')
+        run('--open-review', canonical_seed, '--invoice', seed_invoice, '--save-review',
+            f'CYCLE-{april}.compared.cmr', cwd=alternate_workspace, code=3, reason='lowercase recurring archive name')
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--invoice', seed_invoice,
+            '--save-review', seed_comparison.name, cwd=alternate_workspace, code=3,
+            reason='a recurring comparison requires an invoice attached to a saved cycle')
+        inputs(current)
+        run('--next-cycle-review', alternate_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', first_archive.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='canonical cycle archive does not match the selected seed')
+        assert not (alternate_workspace / first_archive.name).exists()
+        assert not seed_comparison.exists()
+        assert (canonical_seed.read_bytes(), alternate_seed.read_bytes()) == originals
+        canonical_seed.rename(original_seed)
+        if os.name != 'nt':
+            alias = canonical_seed.with_name(canonical_seed.name.upper())
+            alias.write_bytes(originals[0])
+            run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, code=3,
+                reason='canonical cycle archive does not match the selected seed')
+            assert not seed_comparison.exists()
+            alias.unlink()
+        seed_temporary.write_bytes(b'publication uncertain')
+        run('--reconcile-invoices', original_seed, cwd=alternate_workspace, code=3,
+            reason='canonical seed archive has uncertain temporary output')
+        assert seed_temporary.read_bytes() == b'publication uncertain' and not seed_comparison.exists()
+        seed_temporary.unlink()
+        mislabeled = alternate_workspace / first_archive.name
+        mislabeled.write_bytes(originals[0])
+        run('--reconcile-invoices', mislabeled, cwd=alternate_workspace, code=3,
+            reason='seed filename differs from its verified closing time')
+        mislabeled.unlink()
+        inputs(current)
+        run('--next-cycle-review', original_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', second_archive.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='recurring archive filename must match')
+        run('--next-cycle-review', original_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', f'CYCLE-{may}.cmr', '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='lowercase recurring archive name')
+        run('--next-cycle-review', original_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', first_archive.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace)
+        selected_successor = alternate_workspace / first_archive.name
+        held_successor = selected_successor.with_suffix('.cmr.held')
+        run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, code=3,
+            reason='successor does not match the previous closing record')
+        run('--open-review', alternate_seed, '--invoice', seed_invoice, '--save-review', seed_comparison.name,
+            cwd=alternate_workspace, code=3, reason='successor does not match the previous closing record')
+        inputs(previous)
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--save-review', canonical_seed.name,
+            '--as-of-utc-ms', april + 2 * HOUR, cwd=alternate_workspace, code=3,
+            reason='successor does not match the previous closing record')
+        assert not canonical_seed.exists()
+        inputs(current)
+        assert not seed_comparison.exists()
+        if clock_fixture:
+            selected_successor.rename(held_successor)
+            publishing = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                              CANARY_TEST_PUBLISH_ON_INVOICE_INPUT=str(seed_invoice),
+                              CANARY_TEST_PUBLISH_SUCCESSOR_ON_INVOICE=str(selected_successor))
+            run('--reconcile-invoices', alternate_seed, cwd=alternate_workspace, env=publishing, code=3,
+                reason='a successor archive appeared before invoice publication')
+            assert selected_successor.exists() and not held_successor.exists() and not seed_comparison.exists()
+        assert '1 saved, 0 already compared, 1 without a staged invoice' in run(
+            '--reconcile-invoices', original_seed, cwd=alternate_workspace)
+        assert seed_comparison.is_file() and (original_seed.read_bytes(), alternate_seed.read_bytes()) == originals
+        selected_successor.rename(held_successor)
+        run('--next-cycle-review', alternate_seed, '--tariff', tariff, '--intervals', readings,
+            '--octopus-rates', rates, '--save-review', selected_successor.name, '--as-of-utc-ms', may + HOUR,
+            cwd=alternate_workspace, code=3, reason='late invoice review does not match the original cycle inputs')
+        assert not selected_successor.exists() and not selected_successor.with_suffix('.cmr.tmp').exists()
+        selected_successor.with_suffix('.readings.json').write_bytes(readings.read_bytes())
+        selected_successor.with_suffix('.rates.json').write_bytes(rates.read_bytes())
+        run('--roll-forward', alternate_seed, '--as-of-utc-ms', may + HOUR, cwd=alternate_workspace, code=3,
+            reason='late invoice review does not match the original cycle inputs')
+        assert not selected_successor.exists() and not selected_successor.with_suffix('.cmr.tmp').exists()
+        held_successor.rename(selected_successor)
+        inputs(previous)
+        run('--tariff', tariff, '--intervals', readings, '--octopus-rates', rates, '--save-review', canonical_seed.name,
+            '--as-of-utc-ms', april + HOUR, cwd=alternate_workspace)
+        assert canonical_seed.read_bytes() == originals[0]
 
         assert first_archive.read_bytes() == first_bytes and second_archive.read_bytes() == second_bytes
         run('--roll-forward', old, '--as-of-utc-ms', may + HOUR, code=3, reason='newer than the requested cutoff')
@@ -711,6 +846,9 @@ def main(cli, bundle, clock_fixture=None):
                 time.sleep(1.25)
                 assert output.read_text(encoding='ascii').count('waiting for complete meter readings') == 1
                 run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
+                run('--reconcile-invoices', watched_seed, cwd=watched, code=3, reason='workspace is busy')
+                run('--next-cycle-review', watched_seed, '--intervals', readings, '--octopus-rates', rates,
+                    '--save-review', first_target.name, cwd=watched, code=3, reason='workspace is busy')
                 if os.name != 'nt':
                     (watched / 'meter-billing.lock').unlink()
                     run('--roll-forward', watched_seed, cwd=watched, code=3, reason='workspace is busy')
@@ -764,6 +902,38 @@ def main(cli, bundle, clock_fixture=None):
                     if moved.exists():
                         moved.rename(watched)
         assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
+        watched_reconcile = ('--reconcile-invoices', watched_seed)
+        first_input = first_target.with_suffix('.invoice.json')
+        second_input = second_target.with_suffix('.invoice.json')
+        first_comparison = first_target.with_suffix('.compared.cmr')
+        second_comparison = second_target.with_suffix('.compared.cmr')
+        write(first_input, dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2,
+                                rounding='half_even', cycles=[dict(begin_utc_ms=april, end_utc_ms=may,
+                                                                  supply_charge=decimal_text(current[3]))]))
+        second_input.write_bytes(b'')
+        first_original, second_original = first_target.read_bytes(), second_target.read_bytes()
+        run(*watched_reconcile, cwd=watched, code=3, reason='this run saved 1 invoice comparison\n'
+            'meter-bill: staged invoice is unavailable, empty, oversized or not a regular file')
+        saved_first_comparison = first_comparison.read_bytes()
+        assert not second_comparison.exists() and second_input.read_bytes() == b''
+        wrong_period = dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2,
+                              rounding='half_even', cycles=[dict(begin_utc_ms=may + 1, end_utc_ms=june,
+                                                                supply_charge='0')])
+        write(second_input, wrong_period)
+        run(*watched_reconcile, cwd=watched, code=3, reason='invoice cycle bounds differ')
+        assert not second_comparison.exists()
+        wrong_period['cycles'][0]['begin_utc_ms'] = may
+        write(second_input, wrong_period)
+        future_stem = watched / f"cycle-{utc('2023-06-30T23:00:00')}"
+        future_input = future_stem.with_suffix('.invoice.json')
+        future_input.write_bytes(b'only an invoice, no archived meter review')
+        assert '1 saved, 2 already compared, 0 without a staged invoice' in run(*watched_reconcile, cwd=watched)
+        assert '0 saved, 3 already compared, 0 without a staged invoice' in run(*watched_reconcile, cwd=watched)
+        assert first_comparison.read_bytes() == saved_first_comparison
+        assert (first_target.read_bytes(), second_target.read_bytes()) == (first_original, second_original)
+        assert not future_stem.with_suffix('.compared.cmr').exists()
+        assert 'Supply invoice matches: 3 of 3 compared cycles' in run('--cycle-history', watched_seed,
+                                                                     '--with-invoices', cwd=watched)
         # A supervisor can launch the quiet watch without a reader on stdout.
         lease = watched / 'meter-billing.lock'
         lease.unlink()

@@ -41,6 +41,13 @@ extern "C" int open(const char *path, int flags, ...) {
         return realOpen(path, flags, mode);
     }
     const auto fd = realOpen(path, flags);
+    const auto *invoice = std::getenv("CANARY_TEST_PUBLISH_ON_INVOICE_INPUT");
+    if (fd >= 0 && invoice && std::strcmp(path, invoice) == 0) {
+        const auto *target = std::getenv("CANARY_TEST_PUBLISH_SUCCESSOR_ON_INVOICE");
+        if (!target) std::abort();
+        const auto held = std::string(target) + ".held";
+        if (::link(held.c_str(), target) != 0 || ::unlink(held.c_str()) != 0) std::abort();
+    }
     if (fd < 0 && errno == ENOENT) {
         const auto *target = std::getenv("CANARY_TEST_PUBLISH_COMPARISON");
         if (target && std::strcmp(path, target) == 0) {

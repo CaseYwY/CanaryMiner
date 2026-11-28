@@ -16,14 +16,14 @@ namespace om {
 inline constexpr int64_t meterBillMaxUtcMs = 253402300799999LL;
 inline constexpr std::size_t maxInvoiceBytes = 16 * 1024;
 
-enum class RecurringInspection { None, NextReadings, ScheduledReadings, History };
+enum class RecurringMode { None, NextReadings, ScheduledReadings, History, ReconcileInvoices };
 
 struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
     int nextCycleArg = 0, previousCycleArg = 0, rollForwardArg = 0, watchArg = 0, quietWatchArg = 0;
-    int inspectionArg = 0, historyInvoicesArg = 0;
-    RecurringInspection inspection = RecurringInspection::None;
+    int recurringModeArg = 0, historyInvoicesArg = 0;
+    RecurringMode recurringMode = RecurringMode::None;
     unsigned watchSeconds = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
     int allowPublicRatesArg = 0, dnsServerArg = 0;
@@ -74,11 +74,12 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             else if (name == "--prepare-next-cycle" && !options.prepareCycleArg) options.prepareCycleArg = i+1;
             else if (name == "--next-cycle-review" && !options.nextCycleArg) options.nextCycleArg = i+1;
             else if ((name == "--next-readings-plan" || name == "--scheduled-readings-plan" ||
-                      name == "--cycle-history") && !options.inspectionArg) {
-                options.inspectionArg = i+1;
-                options.inspection = name == "--cycle-history" ? RecurringInspection::History :
-                    name == "--scheduled-readings-plan" ? RecurringInspection::ScheduledReadings :
-                                                          RecurringInspection::NextReadings;
+                      name == "--cycle-history" || name == "--reconcile-invoices") && !options.recurringModeArg) {
+                options.recurringModeArg = i+1;
+                options.recurringMode = name == "--reconcile-invoices" ? RecurringMode::ReconcileInvoices :
+                    name == "--cycle-history" ? RecurringMode::History :
+                    name == "--scheduled-readings-plan" ? RecurringMode::ScheduledReadings :
+                                                        RecurringMode::NextReadings;
             }
             else if (name == "--roll-forward" && !options.rollForwardArg) options.rollForwardArg = i+1;
             else if (name == "--watch-every-seconds" && !options.watchArg) {
@@ -117,12 +118,12 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
         if (options.saveReadingsArg || (options.confirmImportArg && !options.rollForwardArg) ||
             (options.watchArg && (!options.rollForwardArg || options.reviewCutoffArg)) ||
             (options.quietWatchArg && !options.watchArg) ||
-            (options.historyInvoicesArg && options.inspection != RecurringInspection::History)) return false;
+            (options.historyInvoicesArg && options.recurringMode != RecurringMode::History)) return false;
         if (options.allowPublicRatesArg && ((!options.nextCycleArg && !options.rollForwardArg) ||
                                           options.archiveArg || options.prepareCycleArg ||
                                           options.tariffArg || options.ratesArg || options.reviewCutoffArg)) return false;
         if (options.dnsServerArg && !options.allowPublicRatesArg) return false;
-        if (options.inspectionArg) {
+        if (options.recurringModeArg) {
             if (operands != 2 + (options.historyInvoicesArg ? 1 : 0)) return false;
         } else if (options.rollForwardArg) {
             if (operands != 2 + (options.reviewCutoffArg ? 2 : 0) + (options.allowPublicRatesArg ? 1 : 0) +
