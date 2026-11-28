@@ -458,6 +458,23 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(savedBoth);
     if(!savedBoth)return;
     checkComparison(compareTariffCycles(decoded,{dec("8000"),dec("12000")},1,T),"0.000000","16.000000","16.000000");
+    panel.open(saved);
+    enter(panel,"demand_charges");
+    panel.key('\r',{},T/1000);
+    enter(panel,"key");type(panel,"renamed-demand");
+    CHECK(panel.draft.find("opening")->find("demand_peaks")->items.front().find("peak")->text.empty());
+    enter(panel,"rule");
+    enter(panel,"window_minutes");type(panel,"5");
+    for(unsigned i=0;i<3;++i)panel.key(27,{},T/1000);
+    enter(panel,"opening");
+    enter(panel,"demand_peaks");
+    panel.key('\r',{},T/1000);
+    enter(panel,"key");type(panel,"renamed-demand");
+    CHECK(panel.draft.find("opening")->find("demand_peaks")->items.front().find("peak")->text.empty());
+    unsigned unexpectedSave=0;
+    panel.key('v',{},T/1000);
+    panel.key('\r',[&](const JsonValue &,std::string *){++unexpectedSave;return false;},T/1000);
+    CHECK(!unexpectedSave&&store.load(&saved,&reason)&&saved.find("demand_charges")->items.front().find("key")->text=="demand-1");
 
     // A caller passing corrupted ending state must not partially clear or rotate a settled opening.
     constexpr int64_t feb2024=1706745600000;

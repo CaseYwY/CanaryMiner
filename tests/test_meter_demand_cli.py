@@ -333,6 +333,16 @@ def main(cli, bundle=None):
             contradicts["demand_charges"][0]["rule"]["window_minutes"] = 15
             contradicts["opening"]["demand_peaks"][0]["peak"] = "9"
             review(contradicts, register(register_points[2:]), close, error="saved tariff declaration")
+            disjoint = copy.deepcopy(existing)
+            disjoint["demand_charges"][0]["rule"].update(window_minutes=15, eligible_periods=[eligible(0, 15)])
+            disjoint["demand_charges"][1]["rule"]["eligible_periods"] = [eligible(15, 30)]
+            disjoint["opening"].update(imported_kwh="3", accrued_subtotal="3")
+            for state in disjoint["opening"]["demand_peaks"]:
+                state["peak"] = "8"
+            review(disjoint, register(register_points[2:]), close, error="saved tariff declaration")
+            disjoint["opening"].update(imported_kwh="4", accrued_subtotal="4")
+            report = review(disjoint, register(register_points[2:]), close)
+            totals(report, "8.000000", "71.000000")
             taxed = copy.deepcopy(existing)
             taxed["plan"]["tax_periods"] = [dict(
                 begin_utc_ms=begin, end_utc_ms=close, published_utc_ms=begin,

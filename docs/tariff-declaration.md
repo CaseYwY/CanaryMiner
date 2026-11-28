@@ -351,7 +351,8 @@ press **N**. Converting an existing single charge keeps its rule and opening
 peak in the first row. Enter each rule under `demand_charges` and one matching
 `key` and `peak` under `opening.demand_peaks`. Enter zero for every current
 peak at the cycle start. Mid-cycle peaks must come from readings already
-reviewed under their specific rules. Keep all demand fees out of the opening
+reviewed under their specific rules. Peaks from disjoint eligible periods
+must fit within the declared imported energy. Keep all demand fees out of the opening
 subtotal and enter their combined value in the demand tax base when the
 declaration uses a single tax period.
 

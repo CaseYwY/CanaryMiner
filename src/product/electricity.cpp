@@ -269,6 +269,59 @@ ElectricityStatus compareRelatedDemandPeaks(const TariffPlan &plan, const Relate
     return ElectricityStatus::Ok;
 }
 
+bool demandWindowsOverlap(const std::vector<DemandRange> &a, const std::vector<DemandRange> &b,
+                          int64_t begin, int64_t end) {
+    auto left = a.begin(), right = b.begin();
+    while (left != a.end() && right != b.end()) {
+        if (left->begin >= end || right->begin >= end) return false;
+        const auto start = (std::max)({begin, left->begin, right->begin});
+        const auto finish = (std::min)({end, left->end, right->end});
+        if (start < finish) return true;
+        if (left->end < right->end) ++left;
+        else ++right;
+    }
+    return false;
+}
+
+ElectricityStatus validateDisjointDemandImport(const TariffPlan &plan, const BillOpening &opening,
+                                                const DemandRanges &eligible) {
+    std::array<ExactDecimal, maxDemandCharges> minimum{};
+    std::array<unsigned, maxDemandCharges> overlaps{};
+    size_t active = 0;
+    for (size_t i = 0; i < plan.demandCharges.size(); ++i) {
+        const auto &rule = plan.demandCharges[i].rule;
+        const auto &measured = opening.demandOpenings[i].peak.numerator;
+        if (rule.apparent() || measured.zero()) continue;
+        // Compare peak times window-minutes with total import times sixty, without rounding.
+        if (!measured.multiply(number(rule.windowMinutes), &minimum[i])) return ElectricityStatus::Capacity;
+        ++active;
+        for (size_t j = 0; j < i; ++j) {
+            if (minimum[j].zero()) continue;
+            if (rule.eligiblePeriods.empty() || plan.demandCharges[j].rule.eligiblePeriods.empty() ||
+                demandWindowsOverlap(eligible[i], eligible[j], opening.cycleBeginUtcMs, opening.throughUtcMs)) {
+                overlaps[i] |= 1u << j;
+                overlaps[j] |= 1u << i;
+            }
+        }
+    }
+    if (active < 2) return ElectricityStatus::Ok;
+    ExactDecimal available;
+    if (!opening.importedKwh.numerator.multiply(number(60), &available)) return ElectricityStatus::Capacity;
+    const auto check = [&](const auto &walk, size_t first, unsigned blocked, const ExactDecimal &used) -> ElectricityStatus {
+        // At most eight items, hence at most 256 subsets of mutually disjoint windows.
+        for (size_t i = first; i < plan.demandCharges.size(); ++i) {
+            if (minimum[i].zero() || (blocked & (1u << i))) continue;
+            ExactDecimal sum;
+            if (!used.add(minimum[i], &sum)) return ElectricityStatus::Capacity;
+            if (sum.compare(available) > 0) return ElectricityStatus::Invalid;
+            const auto status = walk(walk, i + 1, blocked | overlaps[i], sum);
+            if (status != ElectricityStatus::Ok) return status;
+        }
+        return ElectricityStatus::Ok;
+    };
+    return check(check, 0, 0, {});
+}
+
 ElectricityStatus validateDemand(const TariffPlan &plan, const BillOpening &opening, int64_t end, int64_t decision,
                                  DemandRanges &eligible) {
     if (plan.demandCharge) {
@@ -297,7 +350,8 @@ ElectricityStatus validateDemand(const TariffPlan &plan, const BillOpening &open
         if (status != ElectricityStatus::Ok) return status;
         peaks[i] = &start.peak;
     }
-    return compareRelatedDemandPeaks(plan, peaks, eligible, opening.cycleBeginUtcMs, opening.throughUtcMs);
+    const auto relation = compareRelatedDemandPeaks(plan, peaks, eligible, opening.cycleBeginUtcMs, opening.throughUtcMs);
+    return relation == ElectricityStatus::Ok ? validateDisjointDemandImport(plan, opening, eligible) : relation;
 }
 
 template<class Trace>

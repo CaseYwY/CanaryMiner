@@ -47,6 +47,10 @@ class TariffSettingsPanel {
                 const auto name=selectedName();
                 const auto location=path();
                 const bool changed=v->text!=input;
+                const bool changedChargeKey=changed&&name=="key"&&!v->text.empty()&&route.size()==2&&
+                    location.rfind("demand_charges[",0)==0;
+                const bool changedPeakKey=changed&&name=="key"&&route.size()==3&&location.rfind("opening.demand_peaks[",0)==0;
+                auto *keyOpening=changedChargeKey?uniqueChargeOpening(v->text):changedPeakKey?node():nullptr;
                 const bool openingChanged=changed&&location=="opening";
                 const bool components=requiresPricedOpeningReview();
                 const bool changedOpeningPoint=openingChanged&&(seasonal()||components)&&
@@ -89,6 +93,10 @@ class TariffSettingsPanel {
                 else if(changedComponents)reviewChangedComponents();
                 if (changed && (demandPeriodRow() || (changedRateClock && (scheduledDemand() || concurrentDemand()))))
                     reviewChangedDemandPeriods();
+                if(changedChargeKey||changedPeakKey){
+                    reviewChangedDemandPeriods(keyOpening);
+                    message="Demand key changed. Review the opening peak, tax base and historical values.";
+                }
                 if(changed&&inConcurrentRule()){
                     if(name=="window_minutes"||name=="offset_minutes"||name=="power_factor_va_places")
                         reviewChangedDemandPeriods();
@@ -407,14 +415,23 @@ class TariffSettingsPanel {
     JsonValue *namedDemandOpening(const std::string &key){
         auto *peaks=member(*member(draft,"opening"),"demand_peaks");
         if(!peaks||key.empty())return nullptr;
-        const auto row=std::find_if(peaks->items.begin(),peaks->items.end(),
-            [&](const auto &item){return item.find("key")->text==key;});
-        return row==peaks->items.end()?nullptr:&*row;
+        JsonValue *match=nullptr;
+        for(auto &item:peaks->items){
+            if(item.find("key")->text!=key)continue;
+            if(match)return nullptr;
+            match=&item;
+        }
+        return match;
+    }
+    JsonValue *uniqueChargeOpening(const std::string &key){
+        const auto &items=draft.find("demand_charges")->items;
+        const auto count=std::count_if(items.begin(),items.end(),[&](const auto &item){return item.find("key")->text==key;});
+        return count==1?namedDemandOpening(key):nullptr;
     }
     JsonValue *selectedDemandOpening(){
         if(!inConcurrentRule())return nullptr;
         const auto &item=draft.find("demand_charges")->items[route[1]];
-        return namedDemandOpening(item.find("key")->text);
+        return uniqueChargeOpening(item.find("key")->text);
     }
     bool namedHistoryUsesKva()const{
         if(route.size()!=4||!draft.find("demand_charges"))return false;
@@ -662,7 +679,7 @@ class TariffSettingsPanel {
         refreshClockContract();
         reviewChangedDemandPeriods();
     }
-    void reviewChangedDemandPeriods(){
+    void reviewChangedDemandPeriods(JsonValue *editedOpening=nullptr){
         message="Draft demand periods changed. Review the local times and masks.";
         auto &opening=*member(draft,"opening");
         const bool midcycle=opening.find("through_utc_ms")->text!=opening.find("cycle_begin_utc_ms")->text;
@@ -676,9 +693,9 @@ class TariffSettingsPanel {
                     historyCleared=true;
                 }
             };
-            if(inConcurrentRule()){
-                if(auto *state=selectedDemandOpening())clear(*state);
-            }else{
+            if(!editedOpening&&inConcurrentRule())editedOpening=selectedDemandOpening();
+            if(editedOpening)clear(*editedOpening);
+            else{
                 for(auto &state:member(opening,"demand_peaks")->items)clear(state);
             }
         }else{
