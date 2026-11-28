@@ -136,7 +136,8 @@ def main(cli_path, fixture, capable):
         assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
         identity_requests.unlink()
 
-        for case in ('perle', 'wrapped', 'old-helper', 'limited'):
+        for case in ('perle', 'wrapped', 'old-helper', 'limited', 'stale-clock', 'future-clock',
+                     'price-before-identity', 'helper-clock'):
             identity_scenario.write_text(case, encoding='ascii')
             denied = run(allow)
             assert denied.returncode == 3 and not denied.stderr, denied
@@ -144,7 +145,11 @@ def main(cli_path, fixture, capable):
             assert 'Latest USDT/USD [Kraken USDTZUSD]: 0.98' in denied.stdout
             if case in ('perle', 'wrapped'):
                 assert 'public market asset identity could not be verified' in denied.stdout
-            assert_requests(['2'])
+            if case in ('stale-clock', 'future-clock', 'price-before-identity'):
+                assert 'public market asset observation time could not be verified' in denied.stdout
+            if case == 'helper-clock':
+                assert 'invalid public response observation time' in denied.stdout
+            assert_requests(['0', '2'] if case == 'price-before-identity' else ['2'])
             assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
             identity_requests.unlink()
         identity_scenario.write_text('perle', encoding='ascii')
@@ -167,6 +172,35 @@ def main(cli_path, fixture, capable):
         assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
         archive.unlink()
         identity_requests.unlink()
+        for case, evidence, feeds in (
+            ('future-clock', 'metadata: unavailable', ['2']),
+            ('helper-clock', 'metadata: unavailable', ['2']),
+            ('price-before-identity', 'metadata: identity checked', ['0', '2']),
+        ):
+            identity_scenario.write_text(case, encoding='ascii')
+            saved_clock_failure = run(*sample)
+            assert saved_clock_failure.returncode == 3 and not saved_clock_failure.stderr
+            diagnostic = ('invalid public response observation time' if case == 'helper-clock' else
+                          'public market asset observation time could not be verified')
+            assert diagnostic in saved_clock_failure.stdout
+            assert 'Gate Pearl asset ' + evidence in saved_clock_failure.stdout
+            original = archive.read_bytes()
+            assert (b'"currency_pair":"PEARL_USDT"' in original) == (case == 'price-before-identity')
+            replay = run('--open-review', archive)
+            assert replay.returncode == 0 and replay.stdout == saved_clock_failure.stdout and not replay.stderr
+            if case == 'price-before-identity':
+                reply = re.search(rb"\nCMJSON1 16 200 ([0-9]+) 0 ", original)
+                assert reply
+                corrected_time = str(int(reply[1]) + 1).encode('ascii')
+                assert len(corrected_time) == len(reply[1])
+                changed = original[:reply.start(1)] + corrected_time + original[reply.end(1):-65]
+                archive.write_bytes(changed + sha256(changed).hexdigest().encode('ascii') + b'\n')
+                denied = run('--open-review', archive)
+                assert denied.returncode == 3 and not denied.stdout and 'invalid' in denied.stderr
+            assert_requests(feeds)
+            assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+            identity_requests.unlink()
+            archive.unlink()
         identity_scenario.unlink()
 
         identity_scenario.write_text('budget', encoding='ascii')

@@ -211,6 +211,18 @@ def main(cli_path, fixture, enabled, sample_only=False):
         launched(["5"])
         sample_archive.unlink()
         identity_requests.unlink()
+        identity_scenario.write_text("future-clock", encoding="ascii")
+        captured_clock_failure = run(*capture, fallback)
+        assert captured_clock_failure.returncode == 3 and not captured_clock_failure.stderr
+        assert "public market asset observation time could not be verified" in captured_clock_failure.stdout
+        assert "MEXC Pearl spot pair metadata: unavailable" in captured_clock_failure.stdout
+        assert "210 / 60" not in captured_clock_failure.stdout
+        launched(["5"])
+        assert identity_requests.read_text(encoding="ascii").splitlines() == ["13"]
+        replay = run("--open-review", sample_archive.name)
+        assert replay.returncode == 0 and replay.stdout == captured_clock_failure.stdout and not replay.stderr
+        sample_archive.unlink()
+        identity_requests.unlink()
         identity_scenario.unlink()
 
         assert not resolver_requests.exists()

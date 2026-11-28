@@ -36,6 +36,14 @@ int main(int argc, char **argv) {
     input.httpStatus = 200;
     CHECK(encodePublicJsonResponse(input, &wire));
     CHECK(decodePublicJsonResponse(wire, 1024, &output) && output.status == input.status && output.body.empty());
+    input={};input.status=PublicHttpsStatus::AssetObservation;
+    CHECK(encodePublicJsonResponse(input,&wire));
+    CHECK(decodePublicJsonResponse(wire,1024,&output) && output.status==input.status && output.body.empty());
+    CHECK(!decodePublicJsonResponse("CMJSON1 16 429 0 5 0\n",1024,&output));
+    CHECK(!decodePublicJsonResponse("CMJSON1 16 200 0 0 2\n{}",1024,&output));
+    CHECK(decodePublicJsonResponse("CMJSON1 17 200 0 0 0\n",1024,&output));
+    CHECK(output.status==PublicHttpsStatus::InvalidObservationTime && output.body.empty());
+    CHECK(!decodePublicJsonResponse("CMJSON1 17 500 0 0 0\n",1024,&output));
     CHECK(std::string(publicHttpsStatusName(PublicHttpsStatus::Unreaped)).find("unconfirmed")!=std::string::npos);
     std::atomic<bool> cancel{true};
     PublicJsonProcessClient missing(std::filesystem::path(argv[1]).parent_path() / "canary-missing-synthetic-helper");
@@ -78,7 +86,7 @@ int main(int argc, char **argv) {
     start = std::chrono::steady_clock::now();
     CHECK(client.get(request(2), cancel, limits).status == PublicHttpsStatus::Timeout);
     CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(2));
-    for (unsigned scenario : {3u, 4u, 5u, 6u}) {
+    for (unsigned scenario : {3u, 4u, 5u, 6u, 7u, 8u}) {
         const auto result = client.get(request(scenario), cancel, limits);
         CHECK(result.status == PublicHttpsStatus::Unavailable);
         CHECK(result.body.empty() && !result.observedUtc);

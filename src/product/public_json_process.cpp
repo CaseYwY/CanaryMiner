@@ -34,9 +34,13 @@
 namespace om {
 namespace {
 constexpr size_t kWireHeader = 128;
-bool wireStatus(uint64_t status) {
+bool helperWireStatus(uint64_t status) {
     return status <= static_cast<unsigned>(PublicHttpsStatus::InvalidJson) ||
-        status == static_cast<unsigned>(PublicHttpsStatus::AssetIdentity);
+        status == static_cast<unsigned>(PublicHttpsStatus::InvalidObservationTime);
+}
+bool wireStatus(uint64_t status) {
+    return helperWireStatus(status) || status == static_cast<unsigned>(PublicHttpsStatus::AssetIdentity) ||
+        status == static_cast<unsigned>(PublicHttpsStatus::AssetObservation);
 }
 bool integer(const std::string &s, uint64_t *result) {
     if (s.empty() || s.size() > 20 || (s.size() > 1 && s[0] == '0')) return false;
@@ -50,8 +54,10 @@ bool integer(const std::string &s, uint64_t *result) {
 bool validResponse(const PublicJsonResponse &r, size_t limit) {
     if (!wireStatus(static_cast<unsigned>(r.status)) || r.httpStatus < 0 || r.httpStatus > 599 ||
         r.retryAfterSeconds > 3600 || r.body.size() > limit) return false;
-    if (r.status == PublicHttpsStatus::Ok)
+    if (r.status == PublicHttpsStatus::Ok || (r.status == PublicHttpsStatus::AssetObservation && r.httpStatus == 200))
         return r.httpStatus == 200 && r.observedUtc > 0 && r.observedUtc <= 253402300799ULL && boundedPublicJson(r.body);
+    if (r.status == PublicHttpsStatus::AssetObservation && (r.httpStatus || r.retryAfterSeconds)) return false;
+    if (r.status == PublicHttpsStatus::InvalidObservationTime && r.httpStatus != 200) return false;
     return r.body.empty() && r.observedUtc == 0;
 }
 }  // namespace
@@ -371,7 +377,8 @@ PublicJsonResponse PublicJsonProcessClient::get(const PublicJsonRequest &request
                     if (!impl_->read(&wire, limit)) return response;
                     if (before == wire.size()) break;
                 }
-                if (!ok || !decodePublicJsonResponse(wire, limits.bodyBytes, &response)) return PublicJsonResponse{};
+                if (!ok || !decodePublicJsonResponse(wire, limits.bodyBytes, &response) ||
+                    !helperWireStatus(static_cast<unsigned>(response.status))) return PublicJsonResponse{};
                 if (cancel.load()) { response = {}; response.status = PublicHttpsStatus::Cancelled; }
                 else if (std::chrono::steady_clock::now() >= deadline) { response = {}; response.status = PublicHttpsStatus::Timeout; }
                 return response;

@@ -31,6 +31,8 @@ const char *publicHttpsStatusName(PublicHttpsStatus status) {
         case PublicHttpsStatus::BodyTooLarge: return "public response body limit exceeded";
         case PublicHttpsStatus::InvalidJson: return "invalid/over-budget public JSON";
         case PublicHttpsStatus::AssetIdentity: return "public market asset identity could not be verified";
+        case PublicHttpsStatus::AssetObservation: return "public market asset observation time could not be verified";
+        case PublicHttpsStatus::InvalidObservationTime: return "invalid public response observation time";
         case PublicHttpsStatus::Unreaped: return "public helper exit/ownership unconfirmed; admission blocked";
     }
     return "unsupported public response";

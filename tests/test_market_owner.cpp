@@ -467,15 +467,16 @@ int main() {
     CHECK(beforeLoss->running&&beforeLoss->pearlQuote->last.text()=="2.5");
     CHECK(!lostHelper.start(2)&&lifecycleCalls==3&&lostHelper.snapshot()==lostView);
 
-    for (const bool conflictingMetadata : {true, false}) {
+    for (const auto rejection : {PublicHttpsStatus::AssetIdentity, PublicHttpsStatus::AssetObservation,
+                                 PublicHttpsStatus::InvalidObservationTime, PublicHttpsStatus::Ok}) {
         ms = 0;
         std::atomic<unsigned> gateAttempts{0};
         MarketDataOwner changedAsset([&](const PublicJsonRequest &request, const std::atomic<bool> &, PublicHttpsLimits) {
             const bool gate = request.feed == PublicFeed::GatePearlTicker;
             const bool changed = gate && ++gateAttempts > 1;
-            if (changed && conflictingMetadata) {
+            if (changed && rejection != PublicHttpsStatus::Ok) {
                 PublicJsonResponse invalid;
-                invalid.status = PublicHttpsStatus::AssetIdentity;
+                invalid.status = rejection;
                 return invalid;
             }
             auto response = okay();
@@ -493,7 +494,7 @@ int main() {
         CHECK(waitUntil([&] { return changedAsset.snapshot()->health[0].latched; }));
         const auto afterMismatch = changedAsset.snapshot();
         CHECK(afterMismatch->running && !afterMismatch->pearlQuote && afterMismatch->fxQuote);
-        CHECK(conflictingMetadata ? afterMismatch->health[0].transport == PublicHttpsStatus::AssetIdentity :
+        CHECK(rejection != PublicHttpsStatus::Ok ? afterMismatch->health[0].transport == rejection :
             afterMismatch->health[0].data == MarketDataStatus::Identity);
         CHECK(beforeMismatch->pearlQuote.has_value());
         changedAsset.stop();

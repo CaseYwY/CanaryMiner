@@ -27,6 +27,8 @@ int main(int argc, char **argv) {
     if (scenario == 3) { const std::string text(16384, 'x'); std::fwrite(text.data(), 1, text.size(), stdout); return 0; }
     if (scenario == 4) { std::fputs("CMJSON1 0 200 1 0 2\n{}extra", stdout); return 0; }
     if (scenario == 5) { std::fputs("CMJSON1 0 200 1 0 2\n{", stdout); return 0; }
+    if (scenario == 7) { std::fputs("CMJSON1 15 200 0 0 0\n", stdout); return 0; }
+    if (scenario == 8) { std::fputs("CMJSON1 16 0 0 0 0\n", stdout); return 0; }
     om::PublicJsonResponse response;
     response.status = om::PublicHttpsStatus::Ok; response.httpStatus = 200; response.observedUtc = 1; response.body = "{\"fixture\":true}";
     if (std::strcmp(argv[2], "0") == 0 && std::strcmp(argv[3], "0") == 0) {

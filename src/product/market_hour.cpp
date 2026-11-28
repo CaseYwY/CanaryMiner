@@ -388,6 +388,9 @@ bool decodePublicHourReview(const std::string &bytes, market_detail::PublicHourO
     const auto readReceipt = sample ? readSampleReceipt : readPublicHourReceipt;
     if (!readReceipt(bytes, offset, original.pearl) || !readReceipt(bytes, offset, original.coinbase) ||
         (fallback && !readReceipt(bytes, offset, original.kraken.emplace())) ||
+        (!original.withIdentityEvidence && original.pearl.response.status == PublicHttpsStatus::AssetObservation) ||
+        original.coinbase.response.status == PublicHttpsStatus::AssetObservation ||
+        (original.kraken && original.kraken->response.status == PublicHttpsStatus::AssetObservation) ||
         (original.withIdentityEvidence && !market_detail::readMarketAssetEvidence(bytes, offset, marketUtcLimit,
                                                                                   original.pearl.response)) ||
         !local_review_archive::readArchivePart(bytes, offset, maxReportBytes, savedReport) ||

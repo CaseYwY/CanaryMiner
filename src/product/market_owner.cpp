@@ -37,7 +37,8 @@ struct MarketProcessFetchState {
     explicit MarketProcessFetchState(std::filesystem::path helper) : client(std::move(helper)) {}
 
     PublicJsonResponse sample(const PublicJsonRequest &request, const std::atomic<bool> &cancel,
-                              const PublicHttpsLimits &limits, uint64_t epoch, size_t provider) {
+                              const PublicHttpsLimits &limits, uint64_t epoch, size_t provider,
+                              uint64_t *sentUtc = nullptr) {
         using Clock = std::chrono::steady_clock;
         auto &next = nextProviderRequest[provider];
         for (;;) {
@@ -49,6 +50,7 @@ struct MarketProcessFetchState {
             const auto remaining = (std::min)(next, limits.parentDeadline) - now;
             std::this_thread::sleep_for((std::min)(remaining, Clock::duration(std::chrono::milliseconds(25))));
         }
+        if (sentUtc) *sentUtc = marketSystemClock().second;
         auto reply = client.get(request, cancel, limits);
         next = Clock::now() + std::chrono::milliseconds(providerSpacingMs);
         return reply;
@@ -130,13 +132,19 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
             auto metadataLimits = limits;
             metadataLimits.bodyBytes = (std::min)(limits.bodyBytes, maxMarketAssetBodyBytes);
             const size_t provider = *identity == PublicFeed::GatePearlAsset ? 0 : 1;
-            auto metadata = state->sample({*identity}, cancel, metadataLimits, epoch, provider);
+            uint64_t sentUtc = 0;
+            auto metadata = state->sample({*identity}, cancel, metadataLimits, epoch, provider, &sentUtc);
+            const auto receivedUtc = marketSystemClock().second;
             if (metadata.status != PublicHttpsStatus::Ok) return metadata;
-            const bool verified = marketIdentityMatches(*identity, metadata.body);
+            const bool validClock = sentUtc && metadata.observedUtc >= sentUtc && metadata.observedUtc <= receivedUtc;
+            const bool verified = validClock && marketIdentityMatches(*identity, metadata.body);
             if (!nativeProcessEpochCurrent(epoch)) return marketSampleFailure(PublicHttpsStatus::Unreaped);
             if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
-            auto result = verified ? state->sample(request, cancel, limits, epoch, provider) :
-                marketSampleFailure(PublicHttpsStatus::AssetIdentity);
+            if (!validClock) return marketSampleFailure(PublicHttpsStatus::AssetObservation);
+            auto result = verified ? state->sample(request, cancel, limits, epoch, provider)
+                                   : marketSampleFailure(PublicHttpsStatus::AssetIdentity);
+            if (result.status == PublicHttpsStatus::Ok && result.observedUtc < metadata.observedUtc)
+                result.status = PublicHttpsStatus::AssetObservation;
             if (!verified) result.httpStatus = metadata.httpStatus;
             result.assetEvidence.emplace(PublicAssetEvidence{metadata.observedUtc, std::move(metadata.body)});
             return result;
@@ -408,9 +416,11 @@ struct MarketDataOwner::Impl {
                         std::lock_guard<std::mutex> commit(commitMutex);
                         if (!nativeCurrent()||cancel.load()) break;
                         if (plan.complete(*ticket, response, status, now.first, now.second, notBefore)) {
-                            const bool metadataMismatch = response.status == PublicHttpsStatus::AssetIdentity;
-                            if (metadataMismatch && feed == pearlHourFeed) current.pearlHour.reset();
-                            if ((metadataMismatch || status == MarketDataStatus::Identity) &&
+                            const bool invalidAsset = response.status == PublicHttpsStatus::AssetIdentity ||
+                                response.status == PublicHttpsStatus::AssetObservation ||
+                                response.status == PublicHttpsStatus::InvalidObservationTime;
+                            if (invalidAsset && feed == pearlHourFeed) current.pearlHour.reset();
+                            if ((invalidAsset || status == MarketDataStatus::Identity) &&
                                 marketIdentityFeed(ticket->request.feed) == PublicFeed::GatePearlAsset) {
                                 current.pearlTrade.reset();
                                 current.pearlQuote.reset();

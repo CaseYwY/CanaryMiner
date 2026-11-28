@@ -77,7 +77,7 @@ extern "C" int __wrap_pidfd_spawn(int *fd,const char *path,const posix_spawn_fil
 }
 int main(int argc,char **argv){
     if(argc>=2&&std::string(argv[1])=="--local-task-v1")return helper(argc,argv);
-    if(argc==8){PublicJsonResponse reply;reply.status=PublicHttpsStatus::Ok;reply.httpStatus=200;reply.observedUtc=T/1000;
+    if(argc==8){PublicJsonResponse reply;reply.status=PublicHttpsStatus::Ok;reply.httpStatus=200;reply.observedUtc=marketSystemClock().second;
         reply.body=std::string_view(argv[1])=="12" ?
             R"({"currency":"PEARL","name":"Pearl","chain":"PEARL","delisted":false,"trade_disabled":false,"chains":[{"name":"PEARL","addr":""}]})" :
             "[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]";
@@ -132,7 +132,9 @@ int main(int argc,char **argv){
         auto native=marketProcessFetch(exe);MarketDataOwner owner([&](const PublicJsonRequest &request,const std::atomic<bool> &cancel,PublicHttpsLimits limits){++fetches;
                 if(callback){PublicJsonResponse reply;reply.status=PublicHttpsStatus::Ok;reply.httpStatus=200;reply.observedUtc=T/1000;reply.body="[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]";
                     NativeProcessAdmission other;hookAdmitted=other.begin();if(hookAdmitted){other.markUnresolved();other.settled();}return reply;}return native(request,cancel,limits);},
-            {},MarketOrigin::SyntheticFixture,false,[]{return std::pair<uint64_t,uint64_t>{10000,static_cast<uint64_t>(T/1000)};});CHECK(owner.start(7));if(!cached)release();
+            {},MarketOrigin::SyntheticFixture,false,[&]{
+                if(callback)return std::pair<uint64_t,uint64_t>{10000,static_cast<uint64_t>(T/1000)};
+                return marketSystemClock();});CHECK(owner.start(7));if(!cached)release();
         CHECK(until([&]{const auto s=owner.snapshot();return s->helperFault||s->pearlQuote.has_value();}));const auto old=owner.snapshot();
         if(cached){CHECK(old->running&&old->pearlQuote&&spawns>0);
             if(foreign){{NativeProcessScope scope(oldEpoch);CHECK(!owner.snapshot()->running);}CHECK(owner.snapshot()->running);}

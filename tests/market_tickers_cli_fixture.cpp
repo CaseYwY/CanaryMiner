@@ -114,6 +114,8 @@ int main(int argc, char **argv) {
         if (!log) return 4;
         if (mode == "old-helper") return 2;
         if (mode == "slow") std::this_thread::sleep_for(std::chrono::seconds(10));
+        if (mode == "price-before-identity")
+            std::this_thread::sleep_for(std::chrono::milliseconds(1600));
         if (mode == "budget") {
             std::ofstream(dir / "identity-budget") << total << '\n';
             std::this_thread::sleep_for(std::chrono::milliseconds(180));
@@ -123,10 +125,17 @@ int main(int argc, char **argv) {
             response.status = om::PublicHttpsStatus::HttpStatus;
             response.httpStatus = 429;
             response.retryAfterSeconds = 5;
+        } else if (mode == "helper-clock") {
+            response.status = om::PublicHttpsStatus::InvalidObservationTime;
+            response.httpStatus = 200;
         } else {
             response.status = om::PublicHttpsStatus::Ok;
             response.httpStatus = 200;
             response.observedUtc = static_cast<uint64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+            if (mode == "stale-clock") response.observedUtc -= 60;
+            if (mode == "future-clock") response.observedUtc += 60;
+            if (mode == "price-before-identity")
+                std::ofstream(dir / "identity-clock") << response.observedUtc << '\n';
             if (gateIdentity)
                 response.body = mode == "perle" ? R"({"currency":"PRL","name":"Perle","chain":"SOL","delisted":false,"trade_disabled":false,"chains":[{"name":"SOL","addr":"synthetic"}]})" :
                     mode == "wrapped" ? R"({"currency":"PEARL","name":"Pearl","chain":"SOL","delisted":false,"trade_disabled":false,"chains":[{"name":"SOL","addr":"synthetic"}]})" :
@@ -246,6 +255,11 @@ int main(int argc, char **argv) {
         std::ifstream(dir / "identity-scenario") >> identityMode;
         if (identityMode == "pacing") recordMarketStart(dir, feed);
         if (identityMode == "budget") std::ofstream(dir / "ticker-budget") << argv[5] << '\n';
+        if (identityMode == "price-before-identity") {
+            uint64_t identityUtc = 0;
+            if (!(std::ifstream(dir / "identity-clock") >> identityUtc) || identityUtc < 2) return 4;
+            response.observedUtc = identityUtc - 1;
+        }
         response.body = R"([{"currency_pair":"PEARL_USDT","last":"2.50"}])";
         if (mode == "future") response.observedUtc += 3600;
         if (mode == "limited") {
