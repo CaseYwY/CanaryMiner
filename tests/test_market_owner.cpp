@@ -357,14 +357,17 @@ int main() {
     CHECK(text.find("N/A (time convention unqualified/unavailable)") != std::string::npos);
     ms = 60000;
     CHECK(waitUntil([&] { return owner.snapshot()->health[0].transport == PublicHttpsStatus::Network; }));
-    CHECK(owner.snapshot()->pearlQuote->last.text() == "2.5");
+    const auto afterNetworkFailure = owner.snapshot();
+    CHECK(afterNetworkFailure->pearlQuote &&
+        afterNetworkFailure->pearlQuote->last.text() == "2.5" &&
+        afterNetworkFailure->pearlQuote->observation.observedUtc == E + 10);
     ms = 120001;
     CHECK(waitUntil([&] { return owner.snapshot()->health[0].latched; }));
     const auto later = owner.snapshot();
-    CHECK(later->pearlQuote->observation.observedUtc == E + 10);  // failures never freshen the old quote
+    CHECK(!later->pearlQuote);  // conflicting identity withdraws the formerly accepted quote
     CHECK(first->revision < later->revision && first->pearlQuote->last.text() == "2.5");
     text = joined(marketSnapshotLines(*later, policy, E + 130, 120001));
-    CHECK(text.find("stale/invalid cached reference 2.5") != std::string::npos);
+    CHECK(text.find("stale/invalid cached reference 2.5") == std::string::npos);
     CHECK(text.find("Latest PRL/USD reference: N/A") != std::string::npos);
     CHECK(later->economicRequests == 1);  // refresh clock has not advanced the independent hourly request clock
     ms = 0;
@@ -463,6 +466,38 @@ int main() {
     CHECK(text.find("helper ownership fault")!=text.npos);
     CHECK(beforeLoss->running&&beforeLoss->pearlQuote->last.text()=="2.5");
     CHECK(!lostHelper.start(2)&&lifecycleCalls==3&&lostHelper.snapshot()==lostView);
+
+    for (const bool conflictingMetadata : {true, false}) {
+        ms = 0;
+        std::atomic<unsigned> gateAttempts{0};
+        MarketDataOwner changedAsset([&](const PublicJsonRequest &request, const std::atomic<bool> &, PublicHttpsLimits) {
+            const bool gate = request.feed == PublicFeed::GatePearlTicker;
+            const bool changed = gate && ++gateAttempts > 1;
+            if (changed && conflictingMetadata) {
+                PublicJsonResponse invalid;
+                invalid.status = PublicHttpsStatus::AssetIdentity;
+                return invalid;
+            }
+            auto response = okay();
+            response.observedUtc = clock().second;
+            if (gate)
+                response.body = changed ? R"([{"currency_pair":"PRL_USDT","last":"2.50"}])" :
+                    R"([{"currency_pair":"PEARL_USDT","last":"2.50"}])";
+            else response.body = R"({"error":[],"result":{"USDTZUSD":{"c":["0.98","1"]}}})";
+            return response;
+        }, policy, MarketOrigin::SyntheticFixture, false, clock);
+        CHECK(changedAsset.start(1));
+        CHECK(waitUntil([&] { return changedAsset.snapshot()->pearlQuote && changedAsset.snapshot()->fxQuote; }));
+        const auto beforeMismatch = changedAsset.snapshot();
+        ms = 60000;
+        CHECK(waitUntil([&] { return changedAsset.snapshot()->health[0].latched; }));
+        const auto afterMismatch = changedAsset.snapshot();
+        CHECK(afterMismatch->running && !afterMismatch->pearlQuote && afterMismatch->fxQuote);
+        CHECK(conflictingMetadata ? afterMismatch->health[0].transport == PublicHttpsStatus::AssetIdentity :
+            afterMismatch->health[0].data == MarketDataStatus::Identity);
+        CHECK(beforeMismatch->pearlQuote.has_value());
+        changedAsset.stop();
+    }
 
     std::atomic<bool> lossEntered{false};
     MarketDataOwner lateLoss([&](const PublicJsonRequest &,const std::atomic<bool> &cancelled,PublicHttpsLimits){

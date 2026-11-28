@@ -23,8 +23,10 @@ class PublicJsonOwnershipArtifacts(unittest.TestCase):
     def test_parent_only_outcome_is_not_a_helper_claim(self):
         root = Path(__file__).resolve().parents[1]
         source = (root / 'src/product/public_json_process.cpp').read_text(encoding='utf-8')
-        # Both encode and decode retain the original CMJSON1 helper-status ceiling.
-        self.assertEqual(source.count('static_cast<unsigned>(PublicHttpsStatus::InvalidJson)'), 2)
+        # Both encode and decode use the same allowlist. The original parent-only value remains excluded.
+        self.assertIn('status <= static_cast<unsigned>(PublicHttpsStatus::InvalidJson)', source)
+        self.assertIn('status == static_cast<unsigned>(PublicHttpsStatus::AssetIdentity)', source)
+        self.assertEqual(source.count('!wireStatus('), 2)
         self.assertIn('// Cleanup is part of the result', source)
         header = (root / 'src/product/public_json_process.h').read_text(encoding='utf-8')
         self.assertNotIn('TestPeer', header)

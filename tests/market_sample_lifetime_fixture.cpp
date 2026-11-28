@@ -1,5 +1,6 @@
 #include "product/executable_path.h"
 #include "product/market_hour.h"
+#include "product/market_owner.h"
 #include "product/market_reward.h"
 #include "product/market_sample_options.h"
 #include "product/market_ticker_runtime.h"
@@ -15,6 +16,7 @@
 #if defined(__linux__)
 #include <dlfcn.h>
 #include <pthread.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -32,6 +34,8 @@ std::atomic<bool> sampleExpired{false};
 thread_local bool tickerClockRollback = false;
 thread_local size_t tickerClockRead = 0;
 thread_local volatile sig_atomic_t *stopAfterSync = nullptr;
+thread_local const std::string *identityWorker = nullptr;
+thread_local unsigned identityFileChecks = 0;
 #endif
 }
 
@@ -71,6 +75,14 @@ extern "C" int fsync(int fd) {
     if (!result && stopAfterSync) *stopAfterSync = 1;
     return result;
 }
+
+extern "C" int stat(const char *path, struct stat *value) noexcept {
+    static const auto inspect = reinterpret_cast<decltype(&stat)>(dlsym(RTLD_NEXT, "stat"));
+    // Each native get checks the same installed helper before reserving its admission.
+    if (identityWorker && *identityWorker == path && ++identityFileChecks == 2) advanceEpoch();
+    if (!inspect) { errno = ENOSYS; return -1; }
+    return inspect(path, value);
+}
 #endif
 
 int main(int argc, char **argv) {
@@ -86,9 +98,31 @@ int main(int argc, char **argv) {
     if (module.empty()) return 2;
     std::string mode;
     std::ifstream(module.parent_path() / "sample-lifetime-mode") >> mode;
+    if (mode == "identity-pacing" || mode == "identity-pacing-deadline") {
+        const auto fetch = om::marketProcessFetch(om::installedPublicTickerHelper(module));
+        const std::atomic<bool> cancel{false};
+        if (mode == "identity-pacing-deadline") {
+            const auto reply = fetch({om::PublicFeed::GatePearlTicker}, cancel, {500, 500});
+            return reply.status == om::PublicHttpsStatus::Timeout ? 0 : 5;
+        }
+        for (int i = 0; i < 2; ++i) {
+            const auto reply = fetch({om::PublicFeed::GatePearlTicker}, cancel, {});
+            if (reply.status != om::PublicHttpsStatus::Ok) return 6;
+        }
+        return 0;
+    }
     const auto epoch = om::nativeProcessEpoch();
     if (mode == "stale") advanceEpoch();
 #if defined(__linux__)
+    if (mode == "identity-between") {
+        const auto path = (module.parent_path() / "canary_public_json_worker").native();
+        const auto fetch = om::marketProcessFetch(path);
+        identityWorker = &path;
+        const std::atomic<bool> cancel{false};
+        const auto result = fetch({om::PublicFeed::GatePearlTicker}, cancel, {});
+        identityWorker = nullptr;
+        return identityFileChecks == 2 && result.status == om::PublicHttpsStatus::Unreaped ? 0 : 5;
+    }
     if (mode == "first") faultOnThread = 1;
     if (mode == "second") faultOnThread = 2;
     if (mode == "third") faultOnThread = 3;

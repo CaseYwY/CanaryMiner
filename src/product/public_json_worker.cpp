@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
             n[i] = n[i] * 10 + static_cast<unsigned>(c - '0');
         }
     }
-    if (n[0] > static_cast<unsigned>(om::PublicFeed::OctopusStandingCharges) || n[1] > INT64_MAX ||
+    if (n[0] > static_cast<unsigned>(om::PublicFeed::MexcPearlPair) || n[1] > INT64_MAX ||
         n[2] > INT64_MAX || n[3] > 60000 || n[4] > 60000 || n[5] > 1024 * 1024 || n[6] > 32768) return 2;
     const auto feed = static_cast<om::PublicFeed>(n[0]);
     const bool octopus = feed == om::PublicFeed::OctopusUnitRates || feed == om::PublicFeed::OctopusStandingCharges;

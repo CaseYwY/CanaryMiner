@@ -11,7 +11,7 @@ enum class MarketReadinessMessageKey {
 inline LocalizedMessage marketReadinessMessage(std::string_view locale, MarketReadinessMessageKey key) {
     static constexpr std::string_view messages[] = {
         "Public feed readiness [Enter]", "Public feed readiness", "Resize to 60 x 12", "[Esc] Back [Q] Stop",
-        "Gate Spot REST | PRL/USDT", "Kraken Spot REST | USDT/USD",
+        "Gate Spot REST | PEARL_USDT", "Kraken Spot REST | USDT/USD",
         "Latest: documented last-trade price. Trade timestamp unavailable from the ticker.",
         "1 hour: candle response shape and timestamp anchor unresolved.",
         "1 hour: candle timestamp anchor unresolved. The final REST candle is provisional.",

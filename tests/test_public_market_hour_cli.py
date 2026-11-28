@@ -176,6 +176,18 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert result.stdout.count("60/60 elapsed minute buckets") == 2
         assert "180 / 60" in result.stdout and "210 / 60" in result.stdout
         assert len(re.findall(r"observed UTC [0-9]+ \(receipt age [0-9]+ s\)", result.stdout)) == 2
+        identity_requests = installed / "identity-requests"
+        identity_scenario = installed / "identity-scenario"
+        assert identity_requests.read_text(encoding="ascii").splitlines() == ["13"]
+        identity_requests.unlink()
+        identity_scenario.write_text("wrong-pair", encoding="ascii")
+        denied = run(allow, fallback)
+        assert denied.returncode == 3 and "public market asset identity could not be verified" in denied.stdout, denied
+        assert "210 / 60" not in denied.stdout
+        launched(["5"])
+        assert identity_requests.read_text(encoding="ascii").splitlines() == ["13"]
+        identity_requests.unlink()
+        identity_scenario.unlink()
 
         assert not resolver_requests.exists()
         for args in ((allow, *dns), (*save, *dns), (allow, *dns, *save[1:])):

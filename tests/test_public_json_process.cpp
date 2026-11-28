@@ -32,6 +32,10 @@ int main(int argc, char **argv) {
     input={};input.status=PublicHttpsStatus::Unreaped;
     wire="preserved";CHECK(!encodePublicJsonResponse(input,&wire)&&wire=="preserved");
     CHECK(!decodePublicJsonResponse("CMJSON1 14 0 0 0 0\n",1024,&output));
+    input.status = PublicHttpsStatus::AssetIdentity;
+    input.httpStatus = 200;
+    CHECK(encodePublicJsonResponse(input, &wire));
+    CHECK(decodePublicJsonResponse(wire, 1024, &output) && output.status == input.status && output.body.empty());
     CHECK(std::string(publicHttpsStatusName(PublicHttpsStatus::Unreaped)).find("unconfirmed")!=std::string::npos);
     std::atomic<bool> cancel{true};
     PublicJsonProcessClient missing(std::filesystem::path(argv[1]).parent_path() / "canary-missing-synthetic-helper");

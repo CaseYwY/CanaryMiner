@@ -30,6 +30,7 @@ const char *publicHttpsStatusName(PublicHttpsStatus status) {
         case PublicHttpsStatus::InvalidHeaders: return "invalid/unsupported public response headers";
         case PublicHttpsStatus::BodyTooLarge: return "public response body limit exceeded";
         case PublicHttpsStatus::InvalidJson: return "invalid/over-budget public JSON";
+        case PublicHttpsStatus::AssetIdentity: return "public market asset identity could not be verified";
         case PublicHttpsStatus::Unreaped: return "public helper exit/ownership unconfirmed; admission blocked";
     }
     return "unsupported public response";
@@ -73,6 +74,12 @@ bool publicFeedUrl(const PublicJsonRequest &r, std::string *url) {
         return false;
     std::string result;
     switch (r.feed) {
+        case PublicFeed::GatePearlAsset:
+            if (r.fromUtc || r.toUtc) return false;
+            result = "https://api.gateio.ws/api/v4/spot/currencies/PEARL"; break;
+        case PublicFeed::MexcPearlPair:
+            if (r.fromUtc || r.toUtc) return false;
+            result = "https://api.mexc.com/api/v3/exchangeInfo?symbol=PEARLUSDT"; break;
         case PublicFeed::GatePearlTicker:
             if (r.fromUtc || r.toUtc) return false;
             result = "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=PEARL_USDT"; break;

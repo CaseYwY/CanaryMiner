@@ -13,7 +13,7 @@ namespace om {
 enum class PublicFeed {
     GatePearlTicker, GatePearlCandles, KrakenUsdtTicker, KrakenUsdtCandles,
     MexcPearlHour, CoinbaseUsdtHour, PearlMainnetTip, GatePearlTrades, KrakenUsdtTrades, PearlIndexedBlockHash,
-    OctopusUnitRates, OctopusStandingCharges
+    OctopusUnitRates, OctopusStandingCharges, GatePearlAsset, MexcPearlPair
 };
 inline constexpr uint32_t maxPearlRewardTipHeight = INT32_MAX - 1;
 inline constexpr size_t maxPublicTradeRows=20;
@@ -49,7 +49,8 @@ struct PublicHttpsLimits {
 enum class PublicHttpsStatus {
     Ok, Unavailable, InvalidRequest, Busy, Cancelled, Timeout, DestinationBlocked,
     TlsVerification, TlsProtocol, Network, HttpStatus, InvalidHeaders, BodyTooLarge, InvalidJson,
-    Unreaped  // parent-only ownership uncertainty; never accepted from CMJSON1 helper input
+    Unreaped,  // parent-only ownership uncertainty; never accepted from CMJSON1 helper input
+    AssetIdentity  // market metadata contradicted the configured asset or pair
 };
 const char *publicHttpsStatusName(PublicHttpsStatus status);
 struct PublicJsonResponse {

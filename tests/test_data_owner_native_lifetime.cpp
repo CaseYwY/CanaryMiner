@@ -78,7 +78,10 @@ extern "C" int __wrap_pidfd_spawn(int *fd,const char *path,const posix_spawn_fil
 int main(int argc,char **argv){
     if(argc>=2&&std::string(argv[1])=="--local-task-v1")return helper(argc,argv);
     if(argc==8){PublicJsonResponse reply;reply.status=PublicHttpsStatus::Ok;reply.httpStatus=200;reply.observedUtc=T/1000;
-        reply.body="[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]";std::string wire;if(!encodePublicJsonResponse(reply,&wire))return 2;
+        reply.body=std::string_view(argv[1])=="12" ?
+            R"({"currency":"PEARL","name":"Pearl","chain":"PEARL","delisted":false,"trade_disabled":false,"chains":[{"name":"PEARL","addr":""}]})" :
+            "[{\"currency_pair\":\"PEARL_USDT\",\"last\":\"2.50\"}]";
+        std::string wire;if(!encodePublicJsonResponse(reply,&wire))return 2;
         return std::fwrite(wire.data(),1,wire.size(),stdout)==wire.size()?0:3;}
     if(argc!=3)return 4;
     const std::string kind=argv[1],action=argv[2];

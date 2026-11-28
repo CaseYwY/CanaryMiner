@@ -9,6 +9,12 @@ int main() {
     std::string url = "unchanged";
     CHECK(publicFeedUrl({}, &url));
     CHECK(url == "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=PEARL_USDT");
+    CHECK(publicFeedUrl({PublicFeed::GatePearlAsset}, &url));
+    CHECK(url == "https://api.gateio.ws/api/v4/spot/currencies/PEARL");
+    CHECK(publicFeedUrl({PublicFeed::MexcPearlPair}, &url));
+    CHECK(url == "https://api.mexc.com/api/v3/exchangeInfo?symbol=PEARLUSDT");
+    CHECK(!publicFeedUrl({PublicFeed::GatePearlAsset, 60, 120}, &url));
+    CHECK(!publicFeedUrl({PublicFeed::MexcPearlPair, 0, 60}, &url));
     CHECK(publicFeedUrl({PublicFeed::KrakenUsdtTicker}, &url));
     CHECK(url == "https://api.kraken.com/0/public/Ticker?pair=USDTUSD");
     CHECK(publicFeedUrl({PublicFeed::GatePearlCandles, 600, 600 + 900 * 60}, &url));

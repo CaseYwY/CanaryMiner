@@ -132,7 +132,7 @@ static void panelTests() {
     p.key(kKeyDown, ok);
     CHECK(p.key('\r', ok) == SettingsResult::None && p.marketReadiness.visible);
     const auto gate = p.render(60,12,ColorLevel::None);
-    CHECK(gate.find("Gate Spot REST | PRL/USDT") != std::string::npos &&
+    CHECK(gate.find("Gate Spot REST | PEARL_USDT") != std::string::npos &&
           gate.find("candle response shape") != std::string::npos);
     CHECK(gate.find("Kraken Spot REST") == std::string::npos);
     CHECK(p.render(20,8,ColorLevel::None).find("[Esc] Back [Q] Stop") != std::string::npos);
