@@ -6,6 +6,7 @@ param(
     [ValidateRange(1, 86400)][int]$Seconds = 300,
     [switch]$ConfirmElectricityImport,
     [switch]$AllowPublicRates,
+    [switch]$WatchInvoices,
     [string]$AccountCapturePython
 )
 
@@ -14,7 +15,7 @@ $archive = Get-Item -LiteralPath $Seed -Force
 $miner = Get-Item -LiteralPath (Join-Path $PSScriptRoot '..\bin\canary-miner.exe') -Force
 $inputs = @($archive, $miner)
 if ($AccountCapturePython) {
-    if ($ConfirmElectricityImport -or $AllowPublicRates -or $Seconds -lt 60) {
+    if ($ConfirmElectricityImport -or $AllowPublicRates -or $WatchInvoices -or $Seconds -lt 60) {
         throw 'Account capture requires a 60 to 86400 second interval and its own task.'
     }
     $python = Get-Item -LiteralPath $AccountCapturePython -Force
@@ -78,6 +79,7 @@ if ($AccountCapturePython) {
     $action.Arguments = 'meter-bill --roll-forward "{0}" --watch-every-seconds {1} --watch-quiet' -f $archive.FullName, $interval
     if ($ConfirmElectricityImport) { $action.Arguments += ' --confirm-electricity-import' }
     if ($AllowPublicRates) { $action.Arguments += ' --allow-public-rates' }
+    if ($WatchInvoices) { $action.Arguments += ' --watch-invoices' }
 }
 
 # TASK_CREATE refuses a collision even if another process registers it first.

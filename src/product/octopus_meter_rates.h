@@ -1,5 +1,6 @@
 #pragma once
 
+#include "market_public_sample.h"
 #include "tariff_declaration.h"
 
 #include <cstddef>
@@ -30,7 +31,7 @@ struct OctopusRateCapture {
 const char *capturePublicOctopusRates(TariffDeclaration declaration, const std::string &payment,
                                       const std::string &dns, const std::filesystem::path &module,
                                       const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
-                                      OctopusRateCapture &out);
+                                      OctopusRateCapture &out, market_detail::MarketSampleClock *parentSample = nullptr);
 
 struct OctopusRateCaptureSource {
     std::filesystem::path module;

@@ -1,4 +1,5 @@
 """Close adjacent Octopus billing cycles using separate captures and private originals."""
+from contextlib import contextmanager
 import copy
 import ctypes
 from decimal import Decimal
@@ -811,6 +812,12 @@ def main(cli, bundle, clock_fixture=None):
             run('--roll-forward', old, '--watch-every-seconds', *extra, code=2, reason='invalid options')
         run('--open-review', old, '--watch-every-seconds', '1', code=2, reason='invalid options')
         run('--roll-forward', old, '--watch-quiet', code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-invoices', code=2, reason='invalid options')
+        run('--reconcile-invoices', old, '--watch-invoices', code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-every-seconds', '1', '--watch-invoices', '--watch-invoices',
+            code=2, reason='invalid options')
+        run('--roll-forward', old, '--watch-every-seconds', '1', '--watch-invoices', cwd=installed,
+            code=3, reason="seed archive's workspace")
         run('--roll-forward', old, '--watch-every-seconds', '1', '--watch-quiet', '--watch-quiet',
             code=2, reason='invalid options')
 
@@ -820,6 +827,9 @@ def main(cli, bundle, clock_fixture=None):
         watched_seed.write_bytes(old_bytes)
         watch = (binary, 'meter-bill', '--roll-forward', watched_seed, '--watch-every-seconds', '1')
         first_target, second_target = (watched / f'cycle-{at}.cmr' for at in (may, june))
+        first_invoice = dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2,
+                             rounding='half_even', cycles=[dict(begin_utc_ms=april, end_utc_ms=may,
+                                                               supply_charge=decimal_text(current[3]))])
         can_signal = os.name != 'nt' or ctypes.windll.kernel32.GetConsoleCP() != 0
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' and can_signal else 0
 
@@ -859,9 +869,11 @@ def main(cli, bundle, clock_fixture=None):
                 publish_for_watch(may, 'rates', fresh)
                 await_watch(child, output, '0 verified, 1 saved')
                 close(current[3], run('--open-review', first_target, '--previous-cycle', watched_seed, cwd=watched))
+                publish_for_watch(may, 'invoice', first_invoice)
                 publish_for_watch(june, 'readings', following[1])
                 publish_for_watch(june, 'rates', following[2])
                 await_watch(child, output, '1 verified, 1 saved')
+                assert not first_target.with_suffix('.compared.cmr').exists()
                 close(following[3], run('--open-review', second_target, '--previous-cycle', first_target, cwd=watched))
                 held = watched / 'held-latest.cmr'
                 second_target.rename(held)
@@ -907,9 +919,7 @@ def main(cli, bundle, clock_fixture=None):
         second_input = second_target.with_suffix('.invoice.json')
         first_comparison = first_target.with_suffix('.compared.cmr')
         second_comparison = second_target.with_suffix('.compared.cmr')
-        write(first_input, dict(schema_version=1, scope=SCOPE, currency='GBP', decimal_places=2,
-                                rounding='half_even', cycles=[dict(begin_utc_ms=april, end_utc_ms=may,
-                                                                  supply_charge=decimal_text(current[3]))]))
+        assert json.loads(first_input.read_bytes()) == first_invoice
         second_input.write_bytes(b'')
         first_original, second_original = first_target.read_bytes(), second_target.read_bytes()
         run(*watched_reconcile, cwd=watched, code=3, reason='this run saved 1 invoice comparison\n'
@@ -956,6 +966,79 @@ def main(cli, bundle, clock_fixture=None):
                     child.wait(timeout=5)
                 watched_seed.write_bytes(old_bytes)
         assert '2 verified, 0 saved' in run('--roll-forward', watched_seed, cwd=watched)
+
+        first_comparison.unlink()
+        second_comparison.unlink()
+        first_input.unlink()
+        second_input.unlink()
+
+        @contextmanager
+        def invoice_watcher(env=None):
+            with output.open('wb') as log, errors.open('wb') as err, subprocess.Popen(
+                    (*watch, '--watch-invoices'), cwd=watched, env=env,
+                    stdout=log, stderr=err, creationflags=flags) as child:
+                try:
+                    yield child
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=5)
+
+        with invoice_watcher() as child:
+            await_watch(child, output, '0 saved, 1 already compared, 2 without a staged invoice')
+            publish_for_watch(may, 'invoice', first_invoice)
+            await_watch(child, output, '1 saved, 1 already compared, 1 without a staged invoice')
+            revised_first = first_comparison.read_bytes()
+            await_watch(child, output, '0 saved, 2 already compared, 1 without a staged invoice')
+            assert first_comparison.read_bytes() == revised_first
+            invalid = dict(wrong_period, scope='wrong-invoice-scope')
+            publish_for_watch(june, 'invoice', invalid)
+            assert child.wait(timeout=12) == 3
+            assert f'cycle closing {june} UTC ms' in errors.read_text(encoding='ascii')
+            assert first_comparison.read_bytes() == revised_first and not second_comparison.exists()
+
+        publish_for_watch(june, 'invoice', wrong_period)
+        with invoice_watcher() as child:
+            await_watch(child, output, '1 saved, 2 already compared, 0 without a staged invoice')
+            revised_second = second_comparison.read_bytes()
+            held = first_comparison.with_suffix('.cmr.held')
+            first_comparison.rename(held)
+            assert child.wait(timeout=12) == 3
+            assert 'previously verified invoice comparison changed or disappeared' in errors.read_text(encoding='ascii')
+            assert not first_comparison.exists() and held.read_bytes() == revised_first
+            held.rename(first_comparison)
+        assert second_comparison.read_bytes() == revised_second
+        assert (first_target.read_bytes(), second_target.read_bytes()) == (first_original, second_original)
+        assert 'Supply invoice matches: 3 of 3 compared cycles' in run('--cycle-history', watched_seed,
+                                                                     '--with-invoices', cwd=watched)
+        assert not future_stem.with_suffix('.compared.cmr').exists()
+        if clock_fixture:
+            july = utc('2023-06-30T23:00:00')
+            july_first = Decimal(following[1]['register_readings'][-1]['imported_kwh'])
+            next_cycle = cycle(june, july, PRODUCT, july_first, 5, 1, 30)
+            future_input.unlink()
+            publish_for_watch(july, 'rates', next_cycle[2])
+            removing = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                            CANARY_TEST_REMOVE_COMPARISON_ON_READINGS=str(future_stem.with_suffix('.readings.json')),
+                            CANARY_TEST_COMPARISON_TO_REMOVE=str(second_comparison))
+            with invoice_watcher(removing) as child:
+                await_watch(child, output, '0 saved, 3 already compared, 0 without a staged invoice')
+                publish_for_watch(july, 'readings', next_cycle[1])
+                assert child.wait(timeout=12) == 3
+                assert 'previously verified invoice comparison changed or disappeared' in errors.read_text(encoding='ascii')
+                assert not future_stem.with_suffix('.cmr').exists()
+                held = second_comparison.with_suffix('.cmr.held')
+                assert held.read_bytes() == revised_second
+                held.rename(second_comparison)
+            future_stem.with_suffix('.readings.json').unlink()
+            first_comparison.unlink()
+            rollback = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                            CANARY_TEST_LIFT_WATCH_CLOCK_ON_INVOICE=str(first_input))
+            with invoice_watcher(rollback) as child:
+                await_watch(child, output, '1 saved, 2 already compared, 0 without a staged invoice')
+                assert child.wait(timeout=12) == 3
+                assert 'local clock changed while waiting for the next billing check' in errors.read_text(encoding='ascii')
+                assert first_comparison.read_bytes() == revised_first and second_comparison.read_bytes() == revised_second
 
         feb = utc('2023-02-01T00:00:00')
         drift = cycle(feb, march, GO_PRODUCT, Decimal(100), 14, 6, 28)

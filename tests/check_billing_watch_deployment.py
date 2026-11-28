@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 
-from test_meter_bill_named_cli import HOUR, utc
+from test_meter_bill_named_cli import HOUR, SCOPE, utc
 from test_octopus_cycle_review_cli import cycle
 from test_octopus_meter_rates_cli import GO_PRODUCT
 
@@ -36,12 +36,14 @@ def stage(path, value):
 
 
 class ScheduledTask:
-    def __init__(self, installed, seed, label, *, capture_python=None):
+    def __init__(self, installed, seed, label, *, capture_python=None, watch_invoices=False):
         self.powershell = ('powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned')
         command = (*self.powershell, '-File', str(installed / 'deploy' / 'Register-BillingWatch.ps1'),
                    '-Name', label, '-Seed', str(seed), '-Seconds', '60' if capture_python else '1')
         if capture_python:
             command += ('-AccountCapturePython', str(capture_python))
+        if watch_invoices:
+            command += ('-WatchInvoices',)
         name = execute(*command).decode('ascii').strip()
         kind = 'OctopusCapture' if capture_python else 'Billing'
         assert re.fullmatch(rf'CanaryMiner-{kind}-{label}-S-1-[0-9-]+', name), name
@@ -54,6 +56,7 @@ class ScheduledTask:
                 assert property_value in xml, property_value
             assert '--allow-public-rates' not in xml
             assert ('--confirm-electricity-import' in xml) == bool(capture_python)
+            assert ('--watch-invoices' in xml) == watch_invoices
             assert self.manage('(Get-ScheduledTask', ').Principal.LogonType').strip() == b'Interactive'
             assert self.manage('(Get-ScheduledTask', ').Principal.RunLevel').strip() == b'Limited'
             assert self.manage('(Get-ScheduledTask', ').Settings.MultipleInstances').strip() == b'IgnoreNew'
@@ -91,7 +94,7 @@ class ScheduledTask:
 
 
 class UserUnit:
-    def __init__(self, installed, seed, label, *, capture_python=None):
+    def __init__(self, installed, seed, label, *, capture_python=None, watch_invoices=False):
         self.name = f'canaryminer-billing-{label}.service'
         config = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
         self.unit = config / 'systemd' / 'user' / self.name
@@ -102,9 +105,11 @@ class UserUnit:
             assert b'--run-scheduled' in data and b'--confirm-electricity-import' in data
             execute(renderer, seed, '1', '--account-capture', capture_python, expected=2)
         else:
-            data = execute(renderer, seed, '1')
+            options = ('--watch-invoices',) if watch_invoices else ()
+            data = execute(renderer, seed, '1', *options)
             assert b'--allow-public-rates' not in data and b'--confirm-electricity-import' not in data
-            for option in ('--allow-public-rates', '--confirm-electricity-import'):
+            assert (b'--watch-invoices' in data) == watch_invoices
+            for option in ('--allow-public-rates', '--confirm-electricity-import', '--watch-invoices'):
                 assert option.encode('ascii') in execute(renderer, seed, '1', option)
                 execute(renderer, seed, '1', option, option, expected=2)
         with self.unit.open('xb') as output:
@@ -204,7 +209,40 @@ def main(installed, *, activate_default_target=False):
                 deployed.stop()
             finally:
                 deployed.remove()
-    print(f'Billing watch deployment passed with {manager.__name__}: start, archive, stop, refusal, removal.')
+
+        comparison = target.with_suffix('.compared.cmr')
+        deployed = manager(installed, seed, label + '-invoices', watch_invoices=True)
+        try:
+            deployed.start()
+            wait_until(lambda: bill('--cycle-history', seed, '--with-invoices').count(b'no invoice review') == 2)
+            assert not comparison.exists()
+            stage(target.with_suffix('.invoice.json'), dict(schema_version=1, scope=SCOPE, currency='GBP',
+                  decimal_places=2, rounding='half_even', cycles=[dict(begin_utc_ms=april, end_utc_ms=may,
+                                                                       supply_charge=f'{following[3]:.2f}')]))
+            wait_until(comparison.exists)
+            assert b'Supply invoice matches: 1 of 1 compared cycles' in bill('--cycle-history', seed, '--with-invoices')
+            assert seed.read_bytes() == saved and target.read_bytes() == archived
+
+            def hold_comparison():
+                try:
+                    comparison.rename(comparison.with_suffix('.cmr.held'))
+                except PermissionError as error:
+                    if getattr(error, 'winerror', None) == 32:
+                        return False
+                    raise
+                return True
+
+            wait_until(hold_comparison)
+            wait_until(deployed.refused)
+            assert not comparison.exists()
+        except AssertionError as error:
+            raise AssertionError(deployed.status()) from error
+        finally:
+            try:
+                deployed.stop()
+            finally:
+                deployed.remove()
+    print(f'Billing watch deployment passed with {manager.__name__}: default and opted-in invoice watch.')
 
 
 if __name__ == '__main__':

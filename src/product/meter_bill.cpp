@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -52,7 +53,7 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
                       options.saveReadingsArg, options.watchArg})
         if (index && (index < 3 || index >= argc)) return std::nullopt;
     for (int index : {options.allowPublicRatesArg, options.confirmImportArg, options.quietWatchArg,
-                      options.historyInvoicesArg})
+                      options.historyInvoicesArg, options.watchInvoicesArg})
         if (index && (index < 2 || index >= argc)) return std::nullopt;
 #if defined(_WIN32)
     (void)argv;
@@ -95,6 +96,8 @@ std::optional<MeterBillPaths> meterBillPaths(const MeterBillOptions &options, in
         return std::nullopt;
     if (options.historyInvoicesArg &&
         std::wstring_view(args.values[options.historyInvoicesArg]) != L"--with-invoices")
+        return std::nullopt;
+    if (options.watchInvoicesArg && std::wstring_view(args.values[options.watchInvoicesArg]) != L"--watch-invoices")
         return std::nullopt;
     if (options.dnsServerArg && (!matches(options.dnsServerArg, L"--dns-server") ||
         std::wstring_view(args.values[options.dnsServerArg]) != std::wstring(options.dnsServer.begin(), options.dnsServer.end())))
@@ -1051,24 +1054,29 @@ const char *checkLiveCycleInputs(const ReviewOriginal &original, const MeterRevi
 const char *captureMeterReviewRates(ReviewOriginal &original, int64_t &now, const char *lateReadingError,
                                     const std::string &payment, const std::string &dns, const std::string &output,
                                     const OctopusRateCaptureSource &source, NativeProcessLifetime &lifetime,
-                                    const market_detail::MarketSampleClock &started, const volatile sig_atomic_t *stop,
+                                    const market_detail::MarketSampleClock &started,
+                                    market_detail::MarketSampleClock &lastSample, const volatile sig_atomic_t *stop,
                                     const std::function<bool()> &stopped) {
     using namespace market_detail;
     MeterReview preview;
     if (const auto *problem = prepareMeterReview(original, now, false, lateReadingError, stopped, preview))
         return problem;
     if (const auto *problem = checkLiveCycleInputs(original, preview, payment, output)) return problem;
-    if (!marketTradeClockContinuous(started, started, marketTradeClock()))
+    const auto before = marketTradeClock();
+    if (!marketTradeClockContinuous(started, lastSample, before))
         return "local clock changed during the billing review";
+    lastSample = before;
     if (stopped() || !lifetime.begin()) return "helper ownership uncertain";
 
     OctopusRateCapture captured;
     if (const auto *problem = source.fetch(std::move(preview.declaration), payment, dns, source.module,
-                                           lifetime, stop, captured)) return problem;
+                                           lifetime, stop, captured, &lastSample)) return problem;
     const auto finished = marketTradeClock();
-    if (!marketTradeClockContinuous(started, started, finished) ||
-        captured.summary.observedUtcMs < now || captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
+    if (!marketTradeClockContinuous(started, lastSample, finished) ||
+        captured.summary.observedUtcMs < static_cast<int64_t>(before.second) ||
+        captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
         return "local clock changed during the billing review";
+    lastSample = finished;
     now = static_cast<int64_t>(finished.second);
     original.cutoff = captured.summary.observedUtcMs;
     original.supplierRates = std::move(captured.bytes);
@@ -1290,7 +1298,15 @@ struct RecurringCycleProgress {
 
 struct RecurringCycleWatch {
     std::string seedDigest, latestName, latestDigest;
+    std::map<int64_t, std::string> comparedDigests;
+    market_detail::MarketSampleClock lastSample;
 };
+
+std::string cycleComparisonName(int64_t closing) {
+    return "cycle-" + std::to_string(closing) + ".compared.cmr";
+}
+
+constexpr auto watchedComparisonChanged = "a previously verified invoice comparison changed or disappeared while watching";
 
 bool sameCycleReviewInputs(const ReviewOriginal &a, const ReviewOriginal &b) {
     if (a.cutoff != b.cutoff || a.tariff != b.tariff || a.intervals != b.intervals ||
@@ -1305,8 +1321,9 @@ bool sameCycleReviewInputs(const ReviewOriginal &a, const ReviewOriginal &b) {
 
 const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing, int64_t now,
                                 const char *lateReadingError, const std::function<bool()> &stopped,
-                                InvoiceReviewDetails *details, std::string *retainedInvoice = nullptr) {
-    const auto name = "cycle-" + std::to_string(closing) + ".compared.cmr";
+                                InvoiceReviewDetails *details, std::string *retainedInvoice = nullptr,
+                                std::string *archiveDigest = nullptr) {
+    const auto name = cycleComparisonName(closing);
     std::string bytes;
     auto state = readCycleSlot(name, maxArchiveBytes, bytes);
     if (state == LocalFileRead::Missing) {
@@ -1330,15 +1347,16 @@ const char *readLateCycleInvoice(const ReviewOriginal &original, int64_t closing
                                                   &meterOnlyExact, nullptr, details)) return problem;
     if (meterOnlyExact != original.results) return "late invoice review changed the original cycle amounts";
     if (retainedInvoice) *retainedInvoice = std::move(comparison.invoice);
+    if (archiveDigest) *archiveDigest = sha256Hex(bytes);
     return nullptr;
 }
 
 const char *prepareStagedCycleInvoice(const ReviewOriginal &original, int64_t closing, int64_t now,
                                       const char *lateReadingError, const std::function<bool()> &stopped,
-                                      bool &retained, std::string &output) {
+                                      bool &retained, std::string &output, std::string *archiveDigest) {
     std::string retainedInvoice;
     if (const auto *problem = readLateCycleInvoice(original, closing, now, lateReadingError, stopped,
-                                                   nullptr, &retainedInvoice)) return problem;
+                                                   nullptr, &retainedInvoice, archiveDigest)) return problem;
     const auto &savedInvoice = original.invoice.empty() ? retainedInvoice : original.invoice;
     retained = !savedInvoice.empty();
 
@@ -1448,7 +1466,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                              const OctopusRateCaptureSource *source, const std::string &dns,
                              NativeProcessLifetime &lifetime, const market_detail::MarketSampleClock &started,
                              const volatile sig_atomic_t *stop, const std::function<bool()> &stopped,
-                             RecurringCycleWatch *watch, RecurringMode mode, bool withInvoices,
+                             RecurringCycleWatch *watch, RecurringMode mode, bool withInvoices, bool watchInvoices,
                              RecurringCycleProgress &progress, std::string &report) {
     constexpr size_t maxHistory = 120;
     constexpr size_t maxNew = 24;
@@ -1462,6 +1480,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
     auto previousDigest = sha256Hex(bytes);
     const bool history = mode == RecurringMode::History;
     const bool reconciling = mode == RecurringMode::ReconcileInvoices;
+    const bool compareInvoices = reconciling || watchInvoices;
     const bool closedOnly = history || reconciling;
     const bool existingOnly = mode != RecurringMode::None;
     const bool refreshInspection = closedOnly || mode == RecurringMode::ScheduledReadings;
@@ -1470,6 +1489,21 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         if (!watch->seedDigest.empty() && watch->seedDigest != previousDigest)
             return "recurring review seed changed while watching";
         watch->seedDigest = previousDigest;
+    }
+    if (watchInvoices) {
+        std::string saved;
+        if (!watch->latestName.empty() &&
+            (readCycleSlot(watch->latestName, maxArchiveBytes, saved) != LocalFileRead::Ok ||
+             sha256Hex(saved) != watch->latestDigest))
+            return "latest verified recurring archive changed or disappeared while watching";
+        for (const auto &[closing, digest] : watch->comparedDigests) {
+            if (stopped()) return "review cancelled";
+            if (readCycleSlot(cycleComparisonName(closing), maxArchiveBytes, saved) != LocalFileRead::Ok ||
+                sha256Hex(saved) != digest) {
+                progress.closing = closing;
+                return watchedComparisonChanged;
+            }
+        }
     }
     bool sawWatchedHead = !watch || watch->latestName.empty();
     if (requestedCutoff && requestedCutoff < previous.cutoff) return "new review cutoff precedes the saved cutoff";
@@ -1484,11 +1518,14 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                                                  withInvoices ? &invoiceDetails : nullptr))
         return problem;
 
+    auto phaseSample = started;
+    auto &lastSample = watch ? watch->lastSample : phaseSample;
     const auto refreshClock = [&] {
         if (!source && !watch && !refreshInspection) return true;
         const auto current = market_detail::marketTradeClock();
-        if (!market_detail::marketTradeClockContinuous(started, started, current) ||
+        if (!market_detail::marketTradeClockContinuous(started, lastSample, current) ||
             current.second < static_cast<uint64_t>(now)) return false;
+        lastSample = current;
         now = static_cast<int64_t>(current.second);
         return true;
     };
@@ -1498,12 +1535,19 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
     auto previousPath = seed;
     std::string_view waiting;
     std::optional<int64_t> lastExistingClosing;
+    const auto comparisonMatchesWatch = [&](int64_t closing, const std::string &digest) {
+        if (!watchInvoices) return true;
+        const auto prior = watch->comparedDigests.find(closing);
+        return prior == watch->comparedDigests.end() || prior->second == digest;
+    };
     const auto reconcilePrevious = [&](int64_t closing, bool endOfChain) -> const char * {
         progress.closing = closing;
         bool retained = false;
-        std::string comparison;
+        std::string comparison, digest;
         if (const auto *problem = prepareStagedCycleInvoice(previous, closing, now, lateReadingError,
-                                                           stopped, retained, comparison)) return problem;
+                                                           stopped, retained, comparison,
+                                                           watchInvoices ? &digest : nullptr)) return problem;
+        if (!comparisonMatchesWatch(closing, digest)) return watchedComparisonChanged;
         if (!comparison.empty()) {
             if (std::filesystem::current_path() != workspace)
                 return "recurring review workspace moved during invoice reconciliation";
@@ -1521,7 +1565,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                 if (*latest > closing) return "a successor archive appeared before invoice publication; rerun reconciliation";
             }
             if (!refreshClock()) return "local clock changed during the billing review";
-            const auto target = "cycle-" + std::to_string(closing) + ".compared.cmr";
+            const auto target = cycleComparisonName(closing);
             const auto saved = local_review_archive::saveWhileActive(target, ".cmr", comparison,
                                                                      maxArchiveBytes, stopped);
             if (saved == local_review_archive::ReviewSave::Stopped) return "review cancelled";
@@ -1530,10 +1574,17 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (saved != local_review_archive::ReviewSave::Written)
                 return "could not create an invoice comparison; existing archives were preserved";
             ++progress.invoicesSaved;
+            if (watchInvoices) digest = sha256Hex(comparison);
         } else if (retained) ++retainedInvoices;
         else ++missingInvoices;
+        if (watchInvoices && !digest.empty()) watch->comparedDigests.try_emplace(closing, std::move(digest));
         progress.closing = 0;
         return nullptr;
+    };
+    const auto invoiceSummary = [&] {
+        return "Octopus invoice reconciliation: " + std::to_string(progress.invoicesSaved) + " saved, " +
+            std::to_string(retainedInvoices) + " already compared, " + std::to_string(missingInvoices) +
+            " without a staged invoice\n";
     };
     for (;;) {
         progress.closing = 0;
@@ -1553,7 +1604,7 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (const auto *problem = appendCycleHistory(previous, priorReview, periods, historyTotal,
                                                          withInvoices ? &invoiceDetails : nullptr, invoiceHistory, historyRows))
                 return problem;
-        } else if (reconciling && existing == 0) {
+        } else if (compareInvoices && existing == 0 && progress.saved == 0) {
             progress.closing = link->closedAt;
             if (const auto *problem = verifyInvoiceSeedSlot(seed, workspace, *link, stopped)) return problem;
             progress.closing = 0;
@@ -1707,7 +1758,8 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
                 if (watch && std::filesystem::current_path() != workspace)
                     return "recurring review workspace moved while watching";
                 if (const auto *problem = captureMeterReviewRates(next, now, lateReadingError,
-                        priorReview.supplier->paymentMethod, dns, target, *source, lifetime, started, stop, stopped))
+                        priorReview.supplier->paymentMethod, dns, target, *source, lifetime, started, lastSample,
+                        stop, stopped))
                     return problem;
                 ++captures;
             }
@@ -1717,8 +1769,14 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
             if (const auto *problem = calculateMeterReview(next, true, stopped, nextReview)) return problem;
             if (nextReview.exact.size() > maxExactResultsBytes) return "exact results exceed the archive bound";
             next.results = std::move(nextReview.exact);
+            std::string priorInvoiceDigest;
             if (const auto *problem = readLateCycleInvoice(previous, link->closedAt, now, lateReadingError, stopped,
-                                                           nullptr)) return problem;
+                                                           nullptr, nullptr,
+                                                           watchInvoices ? &priorInvoiceDigest : nullptr)) return problem;
+            if (!comparisonMatchesWatch(link->closedAt, priorInvoiceDigest)) {
+                progress.closing = link->closedAt;
+                return watchedComparisonChanged;
+            }
             if (const auto *problem = readLateCycleInvoice(next, progress.closing, now, lateReadingError, stopped,
                                                            nullptr)) return problem;
             if (stopped()) return "review cancelled";
@@ -1736,20 +1794,18 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         }
         // A named seed may share its closing slot with another valid archive. Verify the
         // successor's link before publishing this cycle's comparison under that shared name.
-        if (reconciling)
+        if (compareInvoices)
             if (const auto *problem = reconcilePrevious(link->closedAt, false)) return problem;
         previousDigest = sha256Hex(bytes);
         if (watch) latestName = target;
-        if (reconciling) previousPath = workspace / target;
+        if (compareInvoices) previousPath = workspace / target;
         previous = std::move(next);
         priorReview = std::move(nextReview);
     }
     if (reconciling) {
         if (const auto *problem = reconcilePrevious(priorReview.declaration.opening.cycleEndUtcMs, true)) return problem;
         if (!refreshClock()) return "local clock changed during the billing review";
-        report = "Octopus invoice reconciliation: " + std::to_string(progress.invoicesSaved) + " saved, " +
-            std::to_string(retainedInvoices) + " already compared, " + std::to_string(missingInvoices) +
-            " without a staged invoice\n" + std::string(waiting) + "\n";
+        report = invoiceSummary() + std::string(waiting) + "\n";
         return nullptr;
     }
     if (history) {
@@ -1796,6 +1852,11 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
     }
 
     if (!sawWatchedHead) return "could not recheck the latest verified recurring archive while watching";
+    const auto nextClosing = progress.closing;
+    if (watchInvoices) {
+        if (const auto *problem = reconcilePrevious(priorReview.declaration.opening.cycleEndUtcMs, true)) return problem;
+        if (!refreshClock()) return "local clock changed during the billing review";
+    }
     if (watch && !latestName.empty()) {
         watch->latestName = std::move(latestName);
         watch->latestDigest = std::move(previousDigest);
@@ -1804,9 +1865,10 @@ const char *rollOctopusCycles(const std::filesystem::path &seed, const std::file
         std::to_string(progress.saved) + " saved\nLast verified closing " +
         std::to_string(priorReview.declaration.opening.cycleEndUtcMs) + " UTC ms\n";
     report += waiting;
-    if (progress.closing && existing + progress.saved < maxHistory)
-        report += "\nNext closing " + std::to_string(progress.closing) + " UTC ms";
+    if (nextClosing && existing + progress.saved < maxHistory)
+        report += "\nNext closing " + std::to_string(nextClosing) + " UTC ms";
     report += '\n';
+    if (watchInvoices) report += invoiceSummary();
     return nullptr;
 }
 
@@ -1829,7 +1891,8 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "canary-miner meter-bill --next-cycle-review ARCHIVE --intervals FILE --save-review NAME.cmr\n"
                   "    --allow-public-rates [--dns-server IP|cloudflare-doh] [--invoice FILE]\n"
                   "canary-miner meter-bill --roll-forward SEED.cmr [--confirm-electricity-import]\n"
-                  "    [--watch-every-seconds SECONDS [--watch-quiet]] [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP|cloudflare-doh]]\n"
+                  "    [--watch-every-seconds SECONDS [--watch-quiet] [--watch-invoices]]\n"
+                  "    [--as-of-utc-ms MS | --allow-public-rates [--dns-server IP|cloudflare-doh]]\n"
                   "canary-miner meter-bill --next-readings-plan SEED.cmr\n"
                   "canary-miner meter-bill --scheduled-readings-plan SEED.cmr\n"
                   "canary-miner meter-bill --cycle-history SEED.cmr [--with-invoices]\n"
@@ -1856,6 +1919,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
                   "Use --next-readings-plan in the seed's workspace to identify the next closed cycle that needs readings.\n"
                   "Watch checks again after 1 to 86400 seconds. It requires the current clock and holds the workspace lease.\n"
                   "Use --watch-quiet for a supervised watch without a standard output stream.\n"
+                  "Use --watch-invoices to compare late staged invoices while watching in the seed's workspace.\n"
                   "With electricity import confirmed, use cycle-END.pages if the readings file is absent.\n"
                   "Page directories contain observation.json and page-1.json, page-2.json, and so on.\n"
                   "Use --as-of-utc-ms to require readings and published rates available by that UTC instant.\n"
@@ -1869,6 +1933,7 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
     }
     const bool live = options.allowPublicRatesArg != 0;
     const bool reconciling = options.recurringMode == RecurringMode::ReconcileInvoices;
+    const bool watchInvoices = options.watchInvoicesArg != 0;
     NativeProcessLifetime captureLifetime;
     const std::function<bool()> stopped = [&] {
         return market_detail::marketSampleStopped(stop) || (captureLifetime.bound() && !captureLifetime.permitted());
@@ -1938,11 +2003,11 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             constexpr auto unavailable = "recurring review workspace is busy or unavailable";
             if (!leasePath) return fail(unavailable);
             const auto workspace = leasePath->parent_path();
-            if (options.recurringModeArg) {
+            if (options.recurringModeArg || watchInvoices) {
                 std::error_code error;
                 const auto parent = std::filesystem::absolute(paths->archive, error).parent_path();
                 if (error || !std::filesystem::equivalent(parent, workspace, error))
-                    return fail(reconciling ? "run invoice reconciliation in the seed archive's workspace" :
+                    return fail(reconciling || watchInvoices ? "run invoice reconciliation in the seed archive's workspace" :
                                 options.recurringMode == RecurringMode::History ?
                                 "run cycle history in the seed archive's workspace" :
                                 "run the readings plan in the seed archive's workspace");
@@ -1950,34 +2015,37 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             RecurringWorkspaceLease lease;
             if (!readOnly && !lease.acquire(*leasePath)) return fail(unavailable);
             RecurringCycleWatch watch;
-            auto previousSample = started;
+            watch.lastSample = started;
+            auto previousCheck = started;
             std::string lastReport;
             for (;;) {
                 if (stopped()) return fail("review cancelled");
                 if (watching && std::filesystem::current_path() != workspace)
                     return fail("recurring review workspace moved while watching");
                 const auto sample = watching ? market_detail::marketTradeClock() : started;
-                if (watching && !market_detail::marketTradeClockContinuous(previousSample, previousSample, sample))
+                if (watching && !market_detail::marketTradeClockContinuous(previousCheck, watch.lastSample, sample))
                     return fail("local clock changed while waiting for the next billing check");
-                previousSample = sample;
+                previousCheck = sample;
+                watch.lastSample = sample;
                 std::string report;
                 RecurringCycleProgress progress;
                 if (const auto *problem = rollOctopusCycles(paths->archive, workspace,
                         options.reviewCutoffUtcMs, watching ? static_cast<int64_t>(sample.second) : now,
                         options.confirmImportArg != 0, live ? publicRates : nullptr, options.dnsServer,
                         captureLifetime, sample, stop, stopped, watching ? &watch : nullptr, options.recurringMode,
-                        options.historyInvoicesArg != 0, progress, report)) {
+                        options.historyInvoicesArg != 0, watchInvoices, progress, report)) {
                     if (progress.closing)
                         std::fprintf(stderr, "meter-bill: cycle closing %lld UTC ms\n", static_cast<long long>(progress.closing));
                     if (progress.saved)
                         std::fprintf(stderr, "meter-bill: this %s committed %zu new cycle%s\n",
                                      watching ? "check" : "run", progress.saved, progress.saved == 1 ? "" : "s");
                     if (progress.invoicesSaved)
-                        std::fprintf(stderr, "meter-bill: this run saved %zu invoice comparison%s\n",
-                                     progress.invoicesSaved, progress.invoicesSaved == 1 ? "" : "s");
+                        std::fprintf(stderr, "meter-bill: this %s saved %zu invoice comparison%s\n",
+                                     watching ? "check" : "run", progress.invoicesSaved,
+                                     progress.invoicesSaved == 1 ? "" : "s");
                     return fail(problem);
                 }
-                if (options.recurringModeArg && stopped()) return stopResult();
+                if ((options.recurringModeArg || watchInvoices) && stopped()) return stopResult();
                 if (!options.quietWatchArg && report != lastReport) {
                     if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
                         return 1;
@@ -2123,8 +2191,10 @@ int commandMeterBill(const MeterBillOptions &options, int argc, const char *cons
             if (options.invoiceArg &&
                 (!readLocalReviewInput(paths->invoice, maxInvoiceBytes, original.invoice) || original.invoice.empty()))
                 return fail("invoice file unavailable, empty, oversized or not a regular file");
+            auto lastSample = started;
             if (const auto *problem = captureMeterReviewRates(original, now, lateReadingError, inheritedPayment,
-                    options.dnsServer, options.outputName, *publicRates, captureLifetime, started, stop, stopped))
+                    options.dnsServer, options.outputName, *publicRates, captureLifetime, started, lastSample,
+                    stop, stopped))
                 return fail(problem);
         }
 

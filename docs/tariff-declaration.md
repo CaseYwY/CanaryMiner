@@ -840,6 +840,18 @@ Watch uses the current clock and cannot be combined with `--as-of-utc-ms`. The
 process when provided. Public capture can issue up to three successful captures per check.
 A capture failure terminates the watch. Use Ctrl+C or Ctrl+Break to stop a foreground run.
 
+Add `--watch-invoices` to reconcile late staged invoices during each check while the watcher holds
+the workspace lease. Start it in the seed archive's directory. It uses the existing staging and
+comparison filenames and reports how many comparisons were saved, already verified, or still
+waiting for invoices. Completed comparisons are replayed, and the watcher stops if one it has
+verified changes or disappears. A conflicting or invalid staged invoice also stops the watch.
+Correct the issue and restart. Late staged invoices require this option or the one-time
+reconciliation command.
+
+~~~text
+canary-miner meter-bill --roll-forward march.cmr --watch-every-seconds 300 --watch-invoices
+~~~
+
 #### Run the watcher at login
 
 A TLS candidate packed with `--with-billing-watch --with-named-tzdb` includes a user-level
@@ -852,6 +864,8 @@ The following examples use saved prices. To accept local supplier import pages, 
 `-ConfirmElectricityImport` on Windows or `--confirm-electricity-import` on Linux. To
 request public rates for missing captures, add `-AllowPublicRates` on Windows or
 `--allow-public-rates` on Linux with a public HTTPS candidate. The choices are independent.
+Use `-WatchInvoices` on Windows or `--watch-invoices` on Linux to enable late invoice review.
+These options apply to the billing watcher. Scheduled account readings use a separate task or unit.
 Registering the watcher does not grant supplier account access, start mining or change
 the economy setting.
 

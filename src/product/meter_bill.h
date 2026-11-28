@@ -22,7 +22,7 @@ struct MeterBillOptions {
     int tariffArg = 0, intervalsArg = 0, reviewCutoffArg = 0;
     int archiveArg = 0, extendArg = 0, saveArg = 0, ratesArg = 0, invoiceArg = 0, prepaidArg = 0;
     int nextCycleArg = 0, previousCycleArg = 0, rollForwardArg = 0, watchArg = 0, quietWatchArg = 0;
-    int recurringModeArg = 0, historyInvoicesArg = 0;
+    int recurringModeArg = 0, historyInvoicesArg = 0, watchInvoicesArg = 0;
     RecurringMode recurringMode = RecurringMode::None;
     unsigned watchSeconds = 0;
     int prepareCycleArg = 0, saveTariffArg = 0, saveRegisterArg = 0;
@@ -57,6 +57,10 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
             }
             if (name == "--with-invoices" && !options.historyInvoicesArg) {
                 options.historyInvoicesArg = i++;
+                continue;
+            }
+            if (name == "--watch-invoices" && !options.watchInvoicesArg) {
+                options.watchInvoicesArg = i++;
                 continue;
             }
             if (i + 1 >= argc) return false;
@@ -117,7 +121,7 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
         }
         if (options.saveReadingsArg || (options.confirmImportArg && !options.rollForwardArg) ||
             (options.watchArg && (!options.rollForwardArg || options.reviewCutoffArg)) ||
-            (options.quietWatchArg && !options.watchArg) ||
+            ((options.quietWatchArg || options.watchInvoicesArg) && !options.watchArg) ||
             (options.historyInvoicesArg && options.recurringMode != RecurringMode::History)) return false;
         if (options.allowPublicRatesArg && ((!options.nextCycleArg && !options.rollForwardArg) ||
                                           options.archiveArg || options.prepareCycleArg ||
@@ -128,7 +132,8 @@ inline bool parseMeterBillCli(int argc, const char *const *argv, int begin, Mete
         } else if (options.rollForwardArg) {
             if (operands != 2 + (options.reviewCutoffArg ? 2 : 0) + (options.allowPublicRatesArg ? 1 : 0) +
                                 (options.dnsServerArg ? 2 : 0) + (options.confirmImportArg ? 1 : 0) +
-                                (options.watchArg ? 2 : 0) + (options.quietWatchArg ? 1 : 0)) return false;
+                                (options.watchArg ? 2 : 0) + (options.quietWatchArg ? 1 : 0) +
+                                (options.watchInvoicesArg ? 1 : 0)) return false;
         } else if (options.prepareCycleArg) {
             if (operands != 4 || (!options.saveTariffArg && !options.saveRegisterArg)) return false;
         } else if (options.saveTariffArg || options.saveRegisterArg) return false;
