@@ -16,7 +16,7 @@ from test_meter_bill_named_cli import SCOPE, utc
 from test_octopus_meter_rates_cli import BEGIN, BUNDLE, END, GO_PRODUCT, HOUR, PAYMENT, PRODUCT, SLOTS, inputs, pages as paginate, row
 
 
-def main(cli, fixture, bundle, real_worker):
+def main(cli, fixture, bundle, real_worker, clock_fixture=None):
     declaration, pages, readings, _, billed, total = inputs()
     with tempfile.TemporaryDirectory(prefix="canary-capture-rates-") as folder:
         root = Path(folder)
@@ -46,8 +46,9 @@ def main(cli, fixture, bundle, real_worker):
         write(tariff, declaration)
         write(root / "meter.json", readings)
 
-        def run(command, *args, cwd=root):
-            result = subprocess.run([binary, command, *args], cwd=cwd, text=True, capture_output=True, timeout=16)
+        def run(command, *args, cwd=root, env=None):
+            result = subprocess.run([binary, command, *args], cwd=cwd, env=env, text=True,
+                                    capture_output=True, timeout=16)
             assert tariff.name not in result.stdout + result.stderr
             assert "FORBIDDEN_DEVICE_SETUP" not in result.stdout + result.stderr
             return result
@@ -223,6 +224,12 @@ def main(cli, fixture, bundle, real_worker):
         write(fee, live_standing)
         invoice["cycles"][0]["begin_utc_ms"] = END
         write(root / "april-invoice.json", invoice)
+        if clock_fixture:
+            clock = dict(os.environ, LD_PRELOAD=str(clock_fixture),
+                         CANARY_TEST_LIFT_RATE_PARENT_SAMPLES=Path(binary).name)
+            refused = run(*live_root, "--invoice", "april-invoice.json", env=clock)
+            assert refused.returncode == 3 and not refused.stdout and "local clock changed" in refused.stderr, refused
+            assert not requests.exists() and not live_output.exists() and not live_temp.exists()
         live = run(*live_root, "--invoice", "april-invoice.json")
         assert live.returncode == 0 and not live.stderr, live
         assert f"Cycle estimate at closing {new_total:.6f} GBP" in live.stdout and "(match)" in live.stdout, live

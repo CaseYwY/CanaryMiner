@@ -64,7 +64,7 @@ int rateError(const char *what, int code = 3) {
 const char *capturePublicOctopusRates(TariffDeclaration declaration, const std::string &payment,
                                       const std::string &dns, const std::filesystem::path &module,
                                       const NativeProcessLifetime &lifetime, const volatile sig_atomic_t *stop,
-                                      OctopusRateCapture &out) {
+                                      OctopusRateCapture &out, market_detail::MarketSampleClock *parentSample) {
     using namespace market_detail;
     const auto stopped = [&] { return marketSampleStopped(stop) || !lifetime.permitted(); };
     if (stopped()) return "rate capture cancelled";
@@ -79,6 +79,8 @@ const char *capturePublicOctopusRates(TariffDeclaration declaration, const std::
     if (revision.beginUtcMs % octopus_detail::halfHourMs || revision.endUtcMs % octopus_detail::halfHourMs)
         return "rate window must use exact UTC half-hour boundaries";
     const auto started = marketTradeClock();
+    if (parentSample && !marketTradeClockContinuous(*parentSample, *parentSample, started))
+        return "local clock changed during the capture";
     if (!started.second || started.second > maxMarketUtcMs || revision.endUtcMs > static_cast<int64_t>(started.second) ||
         declaration.confirmedUtc > started.second / 1000) return "rate window and declaration must be wholly elapsed";
 
@@ -136,6 +138,7 @@ const char *capturePublicOctopusRates(TariffDeclaration declaration, const std::
         return "captured rates conflict with the tariff opening";
     if (stopped()) return "rate capture cancelled";
     out = {std::move(bundle), std::move(summary)};
+    if (parentSample) *parentSample = previous;
     return nullptr;
 }
 

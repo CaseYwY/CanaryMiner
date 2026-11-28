@@ -21,9 +21,26 @@ extern "C" int clock_gettime(clockid_t clock, struct timespec *value) noexcept {
     const char *boundary = std::getenv("CANARY_TEST_SUCCESSOR_CUTOFF_MS");
     if (clock != CLOCK_REALTIME || !boundary) {
         const auto result = realClock ? realClock(clock, value) : -1;
-        if (result == 0 && clock == CLOCK_REALTIME && watchClockLifted) {
-            value->tv_sec += 2;
-            value->tv_nsec += 500000000L;
+        if (result == 0 && clock == CLOCK_REALTIME) {
+            int liftMs = watchClockLifted ? 2500 : 0;
+            if (const auto *parent = std::getenv("CANARY_TEST_LIFT_RATE_PARENT_SAMPLES")) {
+                static const bool isParent = [parent] {
+                    char executable[4096];
+                    const auto count = ::readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+                    if (count < 0) return false;
+                    executable[count] = '\0';
+                    const auto *basename = std::strrchr(executable, '/');
+                    return basename && std::strcmp(basename + 1, parent) == 0;
+                }();
+                if (isParent) {
+                    static unsigned parentSamples = 0;
+                    ++parentSamples;
+                    // Intake, outer entry, five nested samples for a Go capture, outer completion.
+                    if (parentSamples == 2 || parentSamples == 8) liftMs = 2000;
+                }
+            }
+            value->tv_sec += liftMs / 1000;
+            value->tv_nsec += (liftMs % 1000) * 1000000L;
             if (value->tv_nsec >= 1000000000L) {
                 ++value->tv_sec;
                 value->tv_nsec -= 1000000000L;

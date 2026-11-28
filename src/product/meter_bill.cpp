@@ -1070,10 +1070,11 @@ const char *captureMeterReviewRates(ReviewOriginal &original, int64_t &now, cons
 
     OctopusRateCapture captured;
     if (const auto *problem = source.fetch(std::move(preview.declaration), payment, dns, source.module,
-                                           lifetime, stop, captured)) return problem;
+                                           lifetime, stop, captured, &lastSample)) return problem;
     const auto finished = marketTradeClock();
     if (!marketTradeClockContinuous(started, lastSample, finished) ||
-        captured.summary.observedUtcMs < now || captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
+        captured.summary.observedUtcMs < static_cast<int64_t>(before.second) ||
+        captured.summary.observedUtcMs > static_cast<int64_t>(finished.second))
         return "local clock changed during the billing review";
     lastSample = finished;
     now = static_cast<int64_t>(finished.second);
