@@ -352,7 +352,7 @@ bool splitsChargedDay(const TariffPlan &plan,int64_t boundary,std::optional<int6
 
 void decodeDemandHistory(const JsonValue &rows,const std::string &field,const DemandChargeRule &rule,
                          const TariffResetSchedule &policy,const CivilClock &clock,const ExactDecimal &denominator,
-                         int64_t cycleBegin,std::vector<ElectricityAmount> &history,size_t &total){
+                         int64_t cycleBegin,std::vector<ElectricityAmount> &history,size_t &total,bool checkEligibility=true){
     boundedArray(rows,field,12,total);
     if(rows.items.size()!=rule.ratchet->lookbackMonths)
         bad(field,"Supply one actual peak for each complete month in the lookback.",TariffProblemKind::Unknown);
@@ -372,10 +372,12 @@ void decodeDemandHistory(const JsonValue &rows,const std::string &field,const De
         const auto peakPath=child(path,peakField);
         const auto peak=decimal(*row.find(peakField),peakPath);
         if(peak.negative())bad(peakPath,"Use a nonnegative measured peak in the declared demand unit.",TariffProblemKind::Unknown);
-        const auto eligibility=validateHistoricalDemandPeak(clock,rule,period.beginUtcMs,boundary,!peak.zero());
-        if(eligibility!=ElectricityStatus::Ok)
-            bad(peakPath,"Use zero when a completed month has no eligible windows. Its schedule must align with the demand grid.",
-                TariffProblemKind::ModelStatus,{},eligibility);
+        if(checkEligibility){
+            const auto eligibility=validateHistoricalDemandPeak(clock,rule,period.beginUtcMs,boundary,!peak.zero());
+            if(eligibility!=ElectricityStatus::Ok)
+                bad(peakPath,"Use zero when a completed month has no eligible windows. Its schedule must align with the demand grid.",
+                    TariffProblemKind::ModelStatus,{},eligibility);
+        }
         if(!peak.multiply(denominator,&history[i-1].numerator))
             bad(peakPath,"Arithmetic capacity exceeded.",TariffProblemKind::ArithmeticCapacity);
         boundary=period.beginUtcMs;
@@ -419,24 +421,19 @@ void decodeNamedDemandOpenings(const JsonValue &rows,const TariffDeclaration &de
             bad(child(path, "history"), "Supply history for a demand charge with a historical floor.", TariffProblemKind::MissingFields);
         if (history)
             decodeDemandHistory(*history, child(path, "history"), charge->rule, *declaration.resetSchedule,
-                                plan.clock, denominator, opening.cycleBeginUtcMs, state.history, total);
+                                plan.clock, denominator, opening.cycleBeginUtcMs, state.history, total, false);
     }
-    for (size_t i = 0; i < charges.size(); ++i) {
-        const auto &first = opening.demandOpenings[i].history;
-        if (first.empty()) continue;
-        for (size_t j = 0; j < i; ++j) {
-            const auto &second = opening.demandOpenings[j].history;
-            auto end = opening.cycleBeginUtcMs;
-            for (size_t ago = 1; ago <= (std::min)(first.size(), second.size()); ++ago) {
-                const auto period = recurringCycle(*declaration.resetSchedule, end - 1);
-                const auto status = validateRelatedDemandPeaks(plan.clock, charges[i].rule, first[first.size()-ago],
-                    charges[j].rule, second[second.size()-ago], period.beginUtcMs, end);
-                if (status != ElectricityStatus::Ok)
-                    bad(field, "Historical demand peaks conflict on the same meter or aligned windows.",
-                        TariffProblemKind::ModelStatus, {}, status);
-                end = period.beginUtcMs;
-            }
-        }
+    size_t longest = 0;
+    for (const auto &item : opening.demandOpenings)
+        longest = (std::max)(longest, item.history.size());
+    auto end = opening.cycleBeginUtcMs;
+    for (size_t ago = 1; ago <= longest; ++ago) {
+        const auto period = recurringCycle(*declaration.resetSchedule, end - 1);
+        const auto status = validateDemandHistoryMonth(plan, opening, ago, period.beginUtcMs, end);
+        if (status != ElectricityStatus::Ok)
+            bad(field, "Historical demand peaks must agree on aligned windows. Use zero without eligible windows.",
+                TariffProblemKind::ModelStatus, {}, status);
+        end = period.beginUtcMs;
     }
 }
 

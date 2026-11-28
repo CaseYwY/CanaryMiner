@@ -225,9 +225,8 @@ bool apparentDemandFromPowerFactor(const DemandChargeRule &rule,const ExactDecim
                                    const ExactDecimal &factor,ExactDecimal &voltAmps);
 ElectricityStatus validateHistoricalDemandPeak(const CivilClock &clock,const DemandChargeRule &rule,
                                                int64_t begin,int64_t end,bool positivePeak);
-ElectricityStatus validateRelatedDemandPeaks(const CivilClock &clock,const DemandChargeRule &first,
-                                             const ElectricityAmount &firstPeak,const DemandChargeRule &second,
-                                             const ElectricityAmount &secondPeak,int64_t begin,int64_t end);
+ElectricityStatus validateDemandHistoryMonth(const TariffPlan &plan,const BillOpening &opening,
+                                             size_t monthsBack,int64_t begin,int64_t end);
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
                     ElectricityAmount &peak,ElectricityAmount &ratchetFloor);
 bool billableDemand(const DemandChargeRule &rule, const ElectricityAmount &measured,

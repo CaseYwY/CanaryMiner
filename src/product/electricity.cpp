@@ -143,14 +143,19 @@ ElectricityStatus demandRanges(const CivilClock &clock, const DemandChargeRule &
         return true;
     };
     size_t cuts = 0;
+    CivilStamp stamp;
+    int64_t localMidnight = 0, civilSegmentEnd = begin;
     for (auto cursor = begin; cursor < end;) {
         if (++cuts > maxCuts) return ElectricityStatus::Capacity;
-        const auto stamp = civilAt(clock, cursor);
-        if (stamp.status != CivilStatus::Ok) return ElectricityStatus::Unavailable;
-        const auto localMidnight = cursor - stamp.millisecondOfDay;
-        auto next = (std::min)(end, localMidnight + dayMs);
-        if (const auto transition = civilNextTransition(clock, cursor); transition && *transition > cursor)
-            next = (std::min)(next, *transition);
+        if (cursor >= civilSegmentEnd) {
+            stamp = civilAt(clock, cursor);
+            if (stamp.status != CivilStatus::Ok) return ElectricityStatus::Unavailable;
+            localMidnight = cursor - stamp.millisecondOfDay;
+            civilSegmentEnd = (std::min)(end, localMidnight + dayMs);
+            if (const auto transition = civilNextTransition(clock, cursor); transition && *transition > cursor)
+                civilSegmentEnd = (std::min)(civilSegmentEnd, *transition);
+        }
+        auto next = civilSegmentEnd;
         bool recurring = false, recurringExclude = false, dated = false, datedExclude = false;
         for (const auto &period : rule.eligiblePeriods) {
             if (!(period.weekdayMask & (1u << (stamp.isoWeekday - 1))) ||
@@ -243,6 +248,27 @@ bool demandWindowsCovered(const DemandChargeRule &subset, const std::vector<Dema
     return true;
 }
 
+using RelatedDemandPeaks = std::array<const ElectricityAmount *, maxDemandCharges>;
+
+ElectricityStatus compareRelatedDemandPeaks(const TariffPlan &plan, const RelatedDemandPeaks &peaks,
+                                            const DemandRanges &eligible, int64_t begin, int64_t end) {
+    for (size_t i = 0; i < plan.demandCharges.size(); ++i) {
+        if (!peaks[i]) continue;
+        for (size_t j = 0; j < i; ++j) {
+            if (!peaks[j]) continue;
+            const auto order = peaks[i]->numerator.compare(peaks[j]->numerator);
+            if (!order) continue;
+            const auto high = order > 0 ? i : j, low = order > 0 ? j : i;
+            const auto &higher = plan.demandCharges[high].rule;
+            const auto &lower = plan.demandCharges[low].rule;
+            if (demandAverageBoundedBy(higher, lower) &&
+                demandWindowsCovered(higher, eligible[high], lower, eligible[low], begin, end))
+                return ElectricityStatus::Invalid;
+        }
+    }
+    return ElectricityStatus::Ok;
+}
+
 ElectricityStatus validateDemand(const TariffPlan &plan, const BillOpening &opening, int64_t end, int64_t decision,
                                  DemandRanges &eligible) {
     if (plan.demandCharge) {
@@ -259,6 +285,7 @@ ElectricityStatus validateDemand(const TariffPlan &plan, const BillOpening &open
     eligible.resize(plan.demandCharges.size());
     const auto *apparent = plan.apparentDemandRule();
     std::set<std::string> keys;
+    RelatedDemandPeaks peaks{};
     for (size_t i = 0; i < plan.demandCharges.size(); ++i) {
         const auto &charge = plan.demandCharges[i];
         const auto &start = opening.demandOpenings[i];
@@ -268,18 +295,9 @@ ElectricityStatus validateDemand(const TariffPlan &plan, const BillOpening &open
         const auto status = validateDemandRule(plan.clock, charge.rule, opening, start.peak, start.history,
                                                end, decision, eligible[i]);
         if (status != ElectricityStatus::Ok) return status;
-        for (size_t j = 0; j < i; ++j) {
-            const auto &other = plan.demandCharges[j].rule;
-            const auto relation = start.peak.numerator.compare(opening.demandOpenings[j].peak.numerator);
-            const auto begin = opening.cycleBeginUtcMs, through = opening.throughUtcMs;
-            if ((relation > 0 && demandAverageBoundedBy(charge.rule, other) &&
-                 demandWindowsCovered(charge.rule, eligible[i], other, eligible[j], begin, through)) ||
-                (relation < 0 && demandAverageBoundedBy(other, charge.rule) &&
-                 demandWindowsCovered(other, eligible[j], charge.rule, eligible[i], begin, through)))
-                return ElectricityStatus::Invalid;
-        }
+        peaks[i] = &start.peak;
     }
-    return ElectricityStatus::Ok;
+    return compareRelatedDemandPeaks(plan, peaks, eligible, opening.cycleBeginUtcMs, opening.throughUtcMs);
 }
 
 template<class Trace>
@@ -1019,24 +1037,27 @@ ElectricityStatus validateHistoricalDemandPeak(const CivilClock &clock,const Dem
     return positivePeak&&ranges.empty() ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
 }
 
-ElectricityStatus validateRelatedDemandPeaks(const CivilClock &clock,const DemandChargeRule &first,
-                                             const ElectricityAmount &firstPeak,const DemandChargeRule &second,
-                                             const ElectricityAmount &secondPeak,int64_t begin,int64_t end) {
-    const auto order = firstPeak.numerator.compare(secondPeak.numerator);
-    if (!order) return ElectricityStatus::Ok;
-    const auto &higher = order > 0 ? first : second;
-    const auto &lower = order > 0 ? second : first;
-    if (!demandAverageBoundedBy(higher, lower)) return ElectricityStatus::Ok;
-    if (lower.eligiblePeriods.empty()) return ElectricityStatus::Invalid;
-    std::vector<DemandRange> inside, outside;
-    if (!higher.eligiblePeriods.empty()) {
-        const auto status = demandRanges(clock, higher, begin, end, inside);
+ElectricityStatus validateDemandHistoryMonth(const TariffPlan &plan,const BillOpening &opening,
+                                             size_t monthsBack,int64_t begin,int64_t end) {
+    if (!monthsBack || !instant(begin) || !instant(end) || begin>=end || end-begin>370*dayMs ||
+        plan.demandCharges.size()>maxDemandCharges || plan.demandCharges.size()!=opening.demandOpenings.size())
+        return ElectricityStatus::Invalid;
+    RelatedDemandPeaks peaks{};
+    DemandRanges eligible(plan.demandCharges.size());
+    for (size_t i = 0; i < plan.demandCharges.size(); ++i) {
+        const auto &state = opening.demandOpenings[i];
+        const auto &item = plan.demandCharges[i];
+        if (state.key != item.key) return ElectricityStatus::Invalid;
+        if (monthsBack > state.history.size()) continue;
+        peaks[i] = &state.history[state.history.size()-monthsBack];
+        if (item.rule.eligiblePeriods.empty()) continue;
+        if (!item.rule.windowMinutes) return ElectricityStatus::Invalid;
+        // Reuse this rule's schedule for every comparison in the month.
+        const auto status = demandRanges(plan.clock, item.rule, begin, end, eligible[i]);
         if (status != ElectricityStatus::Ok) return status;
+        if (eligible[i].empty() && !peaks[i]->numerator.zero()) return ElectricityStatus::Invalid;
     }
-    const auto status = demandRanges(clock, lower, begin, end, outside);
-    if (status != ElectricityStatus::Ok) return status;
-    return demandWindowsCovered(higher, inside, lower, outside, begin, end)
-        ? ElectricityStatus::Invalid : ElectricityStatus::Ok;
+    return compareRelatedDemandPeaks(plan, peaks, eligible, begin, end);
 }
 
 bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
