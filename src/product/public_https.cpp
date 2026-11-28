@@ -6,15 +6,18 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #ifdef CANARY_HTTPS_TESTING
 #include <cstdio>
 #endif
 #include <limits>
+#include <tuple>
 #include <utility>
 
 #if defined(CANARY_PUBLIC_HTTPS)
 #include "../core/platform.h"
 #include <curl/curl.h>
+#include <regex>
 #if !defined(_WIN32)
 #include <fcntl.h>
 #endif
@@ -84,11 +87,84 @@ static bool decimalUnsigned(const std::string &s, uint64_t *out) {
     }
     *out = result; return true;
 }
+
+static bool utcParts(std::time_t time, std::tm &result) {
+#if defined(_WIN32)
+    return gmtime_s(&result, &time) == 0;
+#else
+    return gmtime_r(&time, &result) != nullptr;
+#endif
+}
+
+static std::time_t httpDate(const std::string &value) {
+    if (value.size() < 24 || value.size() > 40) return -1;
+    // Accept the three HTTP-date layouts, excluding curl_getdate's other date and timezone patterns.
+    static const std::regex layout(
+        R"([a-z]{3}, [0-9]{2} [a-z]{3} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} gmt|)"
+        R"([a-z]{6,9}, [0-9]{2}-[a-z]{3}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} gmt|)"
+        R"([a-z]{3} [a-z]{3} (?: [0-9]|[0-9]{2}) [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4})");
+    if (!std::regex_match(value, layout)) return -1;
+    const auto comma = value.find(',');
+    const auto dayStart = comma == std::string::npos ? 8u : comma + 2;
+    const auto day = (value[dayStart] == ' ' ? 0 : 10 * (value[dayStart] - '0')) + value[dayStart + 1] - '0';
+    const auto parse = [day](const std::string &text) -> std::time_t {
+        const auto parsed = curl_getdate(text.c_str(), nullptr);
+        std::tm calendar{};
+        // The date parser can normalize days beyond the end of a month.
+        return parsed >= 0 && utcParts(parsed, calendar) && calendar.tm_mday == day ? parsed : -1;
+    };
+    const auto yearStart = value.rfind('-');
+    std::string expanded = value;
+    if (comma != std::string::npos) expanded.replace(expanded.size() - 3, 3, "GMT");
+    if (yearStart == std::string::npos) return parse(expanded);
+
+    // RFC 850 uses a rolling 50-year rule. libcurl's general date parser uses a fixed pivot.
+    std::tm now{};
+    if (!utcParts(std::time(nullptr), now)) return -1;
+    const int lastFutureYear = now.tm_year + 1950;
+    const int digits = 10 * (value[yearStart + 1] - '0') + value[yearStart + 2] - '0';
+    int year = lastFutureYear / 100 * 100 + digits;
+    if (year > lastFutureYear) year -= 100;
+    expanded.replace(yearStart + 1, 2, std::to_string(year));
+    auto parsed = parse(expanded);
+    if (year == lastFutureYear) {
+        std::tm later{};
+        if (!utcParts(parsed, later) || parsed < 0) return -1;
+        if (std::tie(later.tm_mon, later.tm_mday, later.tm_hour, later.tm_min, later.tm_sec) >
+            std::tie(now.tm_mon, now.tm_mday, now.tm_hour, now.tm_min, now.tm_sec)) {
+            expanded.replace(yearStart + 1, 4, std::to_string(year - 100));
+            parsed = parse(expanded);
+        }
+    }
+    return parsed;
+}
+
+static unsigned retryDelay(const std::string &value, std::time_t serverTime) {
+    constexpr unsigned cap = maxPublicRetryAfterSeconds;
+    if (!value.empty() && std::all_of(value.begin(), value.end(), [](char ch) { return ch >= '0' && ch <= '9'; })) {
+        unsigned seconds = 0;
+        for (char ch : value) {
+            seconds = seconds * 10 + static_cast<unsigned>(ch - '0');
+            if (seconds >= cap) return cap;
+        }
+        return seconds;
+    }
+    const auto until = httpDate(value);
+    auto baseline = std::time(nullptr);
+    // Clock skew or response transit must not shorten the provider's advertised wait.
+    if (serverTime >= 0 && (baseline < 0 || serverTime < baseline)) baseline = serverTime;
+    if (until < 0 || baseline < 0) return cap;
+    return until <= baseline ? 0u : static_cast<unsigned>((std::min)(until - baseline, std::time_t{cap}));
+}
+
 struct Transfer {
     PublicJsonResponse response;
     PublicHttpsLimits limits;
     size_t headerBytes = 0;
     std::string media, encoding, contentLength;
+    std::optional<std::string> retryAfter;
+    std::time_t serverTime = -1;
+    bool conflictingRetryAfter = false;
     bool permitLoopback = false;
     unsigned port = 443;
     bool failed() const { return response.status != PublicHttpsStatus::Ok; }
@@ -129,8 +205,14 @@ static size_t receiveHeader(char *data, size_t size, size_t count, void *opaque)
             }
             t.response.httpStatus = static_cast<long>(code);
             t.media.clear(); t.encoding.clear(); t.contentLength.clear();
+            t.retryAfter.reset();
+            t.serverTime = -1;
+            t.conflictingRetryAfter = false;
         } else if (line == "\r\n" || line == "\n") {
             if (t.response.httpStatus >= 200) {
+                if (t.retryAfter)
+                    t.response.retryAfterSeconds = t.conflictingRetryAfter ?
+                        maxPublicRetryAfterSeconds : retryDelay(*t.retryAfter, t.serverTime);
                 if (t.response.httpStatus != 200) { t.fail(PublicHttpsStatus::HttpStatus); return 0; }
                 if (trimLower(t.media.substr(0, t.media.find(';'))) != "application/json" || (!t.encoding.empty() && t.encoding != "identity")) {
                     t.fail(PublicHttpsStatus::InvalidHeaders); return 0;
@@ -140,15 +222,26 @@ static size_t receiveHeader(char *data, size_t size, size_t count, void *opaque)
             const auto colon = line.find(':');
             if (colon == std::string::npos || !colon || line[0] == ' ' || line[0] == '\t') { t.fail(PublicHttpsStatus::InvalidHeaders); return 0; }
             const auto name = trimLower(line.substr(0, colon)), value = trimLower(line.substr(colon + 1));
-            auto unique = [&](std::string *field) { if (!field->empty() && *field != value) return false; *field = value; return true; };
-            if ((name == "content-type" && !unique(&t.media)) || (name == "content-encoding" && !unique(&t.encoding)) ||
-                (name == "content-length" && !unique(&t.contentLength))) { t.fail(PublicHttpsStatus::InvalidHeaders); return 0; }
-            if (name == "content-length") {
-                uint64_t length = 0;
-                if (!decimalUnsigned(value, &length)) { t.fail(PublicHttpsStatus::InvalidHeaders); return 0; }
-                if (length > t.limits.bodyBytes) { t.fail(PublicHttpsStatus::BodyTooLarge); return 0; }
+            // Only successful bodies are eligible for delivery. Read error headers through
+            // the blank line so their representation metadata cannot discard a retry hint.
+            if (t.response.httpStatus == 200) {
+                auto unique = [&](std::string *field) { if (!field->empty() && *field != value) return false; *field = value; return true; };
+                if ((name == "content-type" && !unique(&t.media)) || (name == "content-encoding" && !unique(&t.encoding)) ||
+                    (name == "content-length" && !unique(&t.contentLength))) { t.fail(PublicHttpsStatus::InvalidHeaders); return 0; }
+                if (name == "content-length") {
+                    uint64_t length = 0;
+                    if (!decimalUnsigned(value, &length)) { t.fail(PublicHttpsStatus::InvalidHeaders); return 0; }
+                    if (length > t.limits.bodyBytes) { t.fail(PublicHttpsStatus::BodyTooLarge); return 0; }
+                }
             }
-            if (name == "retry-after") { uint64_t seconds = 0; if (decimalUnsigned(value, &seconds)) t.response.retryAfterSeconds = static_cast<unsigned>(std::min<uint64_t>(seconds, 3600)); }
+            if (name == "retry-after") {
+                if (!t.retryAfter) t.retryAfter = value;
+                else if (*t.retryAfter != value) t.conflictingRetryAfter = true;
+            }
+            if (name == "date") {
+                const auto date = httpDate(value);
+                if (date >= 0 && (t.serverTime < 0 || date < t.serverTime)) t.serverTime = date;
+            }
         }
         return bytes;
     } catch (...) { t.fail(PublicHttpsStatus::Unavailable); return 0; }

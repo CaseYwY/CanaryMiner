@@ -29,6 +29,7 @@ int main(int argc, char **argv) {
             "/large-body", "/chunked-large", "/bad-json", "/invalid-utf8", "/deep-json", "/truncated", "/slow-header", "/slow-body", "/rate-limit"};
         unsigned scenario = 0;
         for (unsigned i = 0; i < 17; ++i) if (std::string(argv[2]) == paths[i]) scenario = i + 1;
+        for (unsigned i = 1; i <= 12; ++i) if (path == "/retry-" + std::to_string(i)) scenario = i + 26;
         if (mode == "wrong-name") scenario = 18;
         if (mode == "blocked") scenario = 19;
         if (std::filesystem::path(argv[3]).filename() == "untrusted.pem") scenario = 20;
@@ -47,7 +48,8 @@ int main(int argc, char **argv) {
     if (stop.joinable()) stop.join();
     const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     const auto expected = static_cast<om::PublicHttpsStatus>(std::stoi(argv[5]));
-    std::cout << om::publicHttpsStatusName(result.status) << " http=" << result.httpStatus << " body=" << result.body.size() << " elapsed_ms=" << ms << '\n';
+    std::cout << om::publicHttpsStatusName(result.status) << " http=" << result.httpStatus
+              << " body=" << result.body.size() << " retry=" << result.retryAfterSeconds << " elapsed_ms=" << ms << '\n';
     if (result.status != expected || ms > 2000) return 1;
     if (expected == om::PublicHttpsStatus::Ok) {
         if (result.body != "{\"fixture\":true}" || !result.observedUtc) return 1;

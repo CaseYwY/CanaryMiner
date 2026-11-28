@@ -18,6 +18,7 @@ enum class PublicFeed {
 inline constexpr uint32_t maxPearlRewardTipHeight = INT32_MAX - 1;
 inline constexpr size_t maxPublicTradeRows=20;
 inline constexpr size_t maxPublicTradeBodyBytes=64*1024;
+inline constexpr unsigned maxPublicRetryAfterSeconds = 3600;
 inline constexpr std::string_view octopusRateRegions = "ABCDEFGHJKLMNP";
 inline constexpr unsigned octopusRatePageSize = 100, octopusMaxUnitRows = 8192, octopusMaxStandingRows = 256;
 inline constexpr unsigned octopusMaxPages(unsigned rows) { return (rows + octopusRatePageSize - 1) / octopusRatePageSize; }
