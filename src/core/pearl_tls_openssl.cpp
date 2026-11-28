@@ -126,8 +126,16 @@ bool verifyOcspResponse(const unsigned char *encoded, long size, STACK_OF(X509) 
     const auto *produced = OCSP_resp_get0_produced_at(basic.get());
     auto latest = std::time(nullptr);
     if (latest == static_cast<std::time_t>(-1) || !produced) return false;
+#if OPENSSL_VERSION_PREREQ(4, 1)
+    const auto producedLength = ASN1_STRING_get_length(produced);
+#else
+    const auto producedLength = ASN1_STRING_length(produced);
+#endif
+    // Keep the UTC, whole-second GeneralizedTime form required by the old X.509 comparison.
+    if (producedLength != 15 || ASN1_STRING_get0_data(produced)[14] != 'Z') return false;
     latest += ocspClockSkewSeconds;
-    if (X509_cmp_time(produced, &latest) >= 0) return false;
+    const int producedOrder = ASN1_TIME_cmp_time_t(produced, latest);
+    if (producedOrder != -1 && producedOrder != 0) return false;
     ASN1_GENERALIZEDTIME *thisUpdate = nullptr, *nextUpdate = nullptr;
     const int status = OCSP_single_get0_status(match, nullptr, nullptr, &thisUpdate, &nextUpdate);
     if (status != V_OCSP_CERTSTATUS_GOOD || !thisUpdate ||
@@ -225,7 +233,8 @@ struct OpenSslEngine final:PearlTlsEngine {
         if(ip){if(X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl),p.serverName.c_str())!=1)return false;}
         else{if(!dnsName(p.serverName))return false;
             SSL_set_hostflags(ssl,X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS|X509_CHECK_FLAG_NEVER_CHECK_SUBJECT);
-            if(SSL_set1_host(ssl,p.serverName.c_str())!=1||SSL_set_tlsext_host_name(ssl,p.serverName.c_str())!=1)return false;}
+            if(X509_VERIFY_PARAM_set1_host(SSL_get0_param(ssl),p.serverName.c_str(),p.serverName.size())!=1||
+                SSL_set_tlsext_host_name(ssl,p.serverName.c_str())!=1)return false;}
         BIO *internal=nullptr;if(BIO_new_bio_pair(&internal,bufferLimit,&network,bufferLimit)!=1)return false;
         SSL_set_bio(ssl,internal,internal);SSL_set_connect_state(ssl);return true;
     }

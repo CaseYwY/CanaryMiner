@@ -63,10 +63,13 @@ Cert certificate(EVP_PKEY *pub,X509 *issuer,EVP_PKEY *sign,bool root=false,unsig
     require(ASN1_INTEGER_set(X509_get_serialNumber(c.get()),root?1:static_cast<long>(variant+2))==1);
     const long begin=variant==3?3600:-86400,end=variant==2?-3600:86400;
     require(X509_gmtime_adj(X509_getm_notBefore(c.get()),begin)&&X509_gmtime_adj(X509_getm_notAfter(c.get()),end));
-    require(X509_set_pubkey(c.get(),pub)==1);auto *subject=X509_get_subject_name(c.get());
+    require(X509_set_pubkey(c.get(),pub)==1);
+    const std::unique_ptr<X509_NAME,decltype(&X509_NAME_free)> subject(X509_NAME_new(),X509_NAME_free);
+    require(bool(subject));
     const auto *name=root?"fixture-root":"tls-fixture.test";
-    require(X509_NAME_add_entry_by_txt(subject,"CN",MBSTRING_ASC,reinterpret_cast<const unsigned char *>(name),-1,-1,0)==1);
-    require(X509_set_issuer_name(c.get(),issuer?X509_get_subject_name(issuer):subject)==1);
+    require(X509_NAME_add_entry_by_txt(subject.get(),"CN",MBSTRING_ASC,reinterpret_cast<const unsigned char *>(name),-1,-1,0)==1);
+    require(X509_set_subject_name(c.get(),subject.get())==1);
+    require(X509_set_issuer_name(c.get(),issuer?X509_get_subject_name(issuer):subject.get())==1);
     extension(c.get(),issuer?issuer:c.get(),NID_basic_constraints,root?"critical,CA:TRUE,pathlen:1":"critical,CA:FALSE");
     extension(c.get(),issuer?issuer:c.get(),NID_key_usage,root?"critical,keyCertSign,cRLSign":"critical,digitalSignature");
     if(!root){extension(c.get(),issuer,NID_ext_key_usage,variant==4?"clientAuth":"serverAuth");
