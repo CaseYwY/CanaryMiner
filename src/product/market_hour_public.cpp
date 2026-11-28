@@ -1,5 +1,6 @@
 #include "market_hour.h"
 #include "market_hour_capture.h"
+#include "market_asset_evidence.h"
 #include "market_public_sample.h"
 #include "market_ticker_runtime.h"
 
@@ -94,6 +95,11 @@ int commandPublicMarketHour(const MarketHourOptions &options, const std::filesys
                 return 3;
             }
             report += publicHourCaptureTime(previous.second);
+            const bool validEvidence = appendMarketAssetEvidence(report, "MEXC Pearl spot pair", PublicFeed::MexcPearlPair,
+                original.pearl.response, original.pearl.sentUtc, original.pearl.receivedUtc);
+            if (!lifetime.permitted()) return ownershipUncertain();
+            if (marketSampleStopped(stop)) return hourError("sample cancelled", 130);
+            if (!validEvidence) return hourError("could not save public hour: invalid MEXC pair metadata evidence");
             const auto state = savePublicHourReview(options.archiveName, original, report, [&] {
                 return marketSampleStopped(stop) || !lifetime.permitted();
             });

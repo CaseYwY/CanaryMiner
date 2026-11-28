@@ -193,11 +193,16 @@ def main(cli_path, fixture, capable):
         dns.unlink()
         stored = archive.read_bytes()
         fields = BytesIO(stored)
-        assert fields.readline() == HEADER and all(int(fields.readline()) > 0 for _ in range(3))
+        assert fields.readline() == HEADER.replace(b"REVIEW-1", b"REVIEW-2") and all(int(fields.readline()) > 0 for _ in range(3))
         for body in (gate, fx):
             assert all(int(fields.readline()) > 0 for _ in range(4))
             assert fields.read(int(fields.readline())) == body
+        assert fields.readline() == b"2\n"
+        observed = int(fields.readline())
+        metadata = fields.read(int(fields.readline()))
+        assert json.loads(metadata)["chain"] == "PEARL"
         assert fields.read(int(fields.readline())) == captured.stdout.encode("ascii")
+        assert f"Gate Pearl asset metadata: identity checked | observed UTC {observed}" in captured.stdout
         assert RESOLVER.encode() not in stored
         assert "existing archive was preserved" in call(3, *save).stderr
         assert_requests()
@@ -239,7 +244,7 @@ def main(cli_path, fixture, capable):
         assert not saved.stderr and "HTTP 429 | Retry-After 1 s" in saved.stdout
         assert "Gate Pearl mainnet PRL/USDT: 2.5" in saved.stdout and "reference at capture: N/A" in saved.stdout
         saved_bytes = partial_path.read_bytes()
-        assert saved_bytes.startswith(b"CANARY-MARKET-TRADE-SAMPLE-1\n") and RESOLVER.encode() not in saved_bytes
+        assert saved_bytes.startswith(b"CANARY-MARKET-TRADE-SAMPLE-2\n") and RESOLVER.encode() not in saved_bytes
         assert dns.read_text(encoding="ascii").splitlines() == [RESOLVER, RESOLVER]
         dns.unlink()
         assert_requests()

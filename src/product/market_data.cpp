@@ -7,6 +7,33 @@
 #include <string_view>
 
 namespace om {
+bool marketIdentityMatches(PublicFeed feed, const std::string &body) {
+    JsonValue root;
+    if (!parseJsonStrict(body, &root, nullptr, {maxMarketAssetBodyBytes, 64}) || !root.isObject()) return false;
+    const auto textIs = [](const JsonValue &obj, const char *field, std::string_view expected) {
+        const auto *value = obj.find(field);
+        return value && value->isString() && value->text == expected;
+    };
+    const auto boolIs = [](const JsonValue &obj, const char *field, bool expected) {
+        const auto *value = obj.find(field);
+        return value && value->isBool() && value->boolean == expected;
+    };
+    if (feed == PublicFeed::GatePearlAsset) {
+        const auto *chains = root.find("chains");
+        return textIs(root, "currency", "PEARL") && textIs(root, "name", "Pearl") &&
+            textIs(root, "chain", "PEARL") && boolIs(root, "delisted", false) &&
+            boolIs(root, "trade_disabled", false) && chains && chains->isArray() && chains->items.size() == 1 &&
+            textIs(chains->items.front(), "name", "PEARL") && textIs(chains->items.front(), "addr", "");
+    }
+    if (feed != PublicFeed::MexcPearlPair) return false;
+    const auto *symbols = root.find("symbols");
+    if (!symbols || !symbols->isArray() || symbols->items.size() != 1) return false;
+    const auto &symbol = symbols->items.front();
+    return textIs(symbol, "symbol", "PEARLUSDT") && textIs(symbol, "baseAsset", "PEARL") &&
+        textIs(symbol, "quoteAsset", "USDT") && textIs(symbol, "status", "1") &&
+        boolIs(symbol, "isSpotTradingAllowed", true);
+}
+
 const char *marketDataStatusName(MarketDataStatus status) {
     switch (status) {
         case MarketDataStatus::Ok: return "ok";

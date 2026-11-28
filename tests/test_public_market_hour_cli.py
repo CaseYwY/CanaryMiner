@@ -12,6 +12,23 @@ import tempfile
 import time
 
 
+def signed(contents):
+    return contents + hashlib.sha256(contents).hexdigest().encode("ascii") + b"\n"
+
+
+def asset_receipt(rest):
+    present, observed, size, data = rest.split(b"\n", 3)
+    assert present == b"2"
+    payload_size = int(size)
+    return int(observed), data[:payload_size], data[payload_size:]
+
+
+def legacy_public_hour(version, initial, end, receipts, report, options=b""):
+    old_report = b"".join(report.splitlines(keepends=True)[:-1])
+    prefix = f"CANARY-MARKET-HOUR-REVIEW-{version}\n".encode() + initial + b"\n" + end + b"\n" + options
+    return signed(prefix + receipts + str(len(old_report)).encode() + b"\n" + old_report), old_report.decode()
+
+
 def main(cli_path, fixture, enabled, sample_only=False):
     worker_name = "canary_public_json_worker" + (".exe" if os.name == "nt" else "")
     libc = os.confstr("CS_GNU_LIBC_VERSION") if sys.platform == "linux" else None
@@ -187,6 +204,13 @@ def main(cli_path, fixture, enabled, sample_only=False):
         launched(["5"])
         assert identity_requests.read_text(encoding="ascii").splitlines() == ["13"]
         identity_requests.unlink()
+        captured_denial = run(*capture, fallback)
+        assert captured_denial.returncode == 3 and "MEXC Pearl spot pair metadata: identity refused" in captured_denial.stdout
+        assert b'"symbol":"PRLUSDT"' in sample_archive.read_bytes()
+        assert run("--open-review", sample_archive.name).stdout == captured_denial.stdout
+        launched(["5"])
+        sample_archive.unlink()
+        identity_requests.unlink()
         identity_scenario.unlink()
 
         assert not resolver_requests.exists()
@@ -234,12 +258,11 @@ def main(cli_path, fixture, enabled, sample_only=False):
         data = archive.read_bytes()
         body = data[:-65]
 
-        def signed(contents):
-            return contents + hashlib.sha256(contents).hexdigest().encode("ascii") + b"\n"
-
         assert len(data) > 65536 and data == signed(body)
-        header, initial, saved_end, rest = body.split(b"\n", 3)
-        assert header == b"CANARY-MARKET-HOUR-REVIEW-2" and int(saved_end) == end
+        header, initial, saved_end, mode, receipt_count, rest = body.split(b"\n", 5)
+        assert header == b"CANARY-MARKET-HOUR-REVIEW-5" and int(saved_end) == end
+        assert mode == b"1" and receipt_count == b"2"
+        price_receipts = rest
         assert (int(initial) - 5) // 60 * 60 == end
         clock = int(initial)
         timings = {}
@@ -252,8 +275,19 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert rest[:n] == (installed / ("body-" + side)).read_bytes()
             (installed / ("body-" + side)).unlink()
             rest = rest[n:]
+        price_receipts = price_receipts[:-len(rest)]
+        evidence_start = len(body) - len(rest)
+        asset_observed, metadata, rest = asset_receipt(rest)
+        evidence_end = len(body) - len(rest)
+        assert json.loads(metadata)["symbols"][0]["symbol"] == "PEARLUSDT"
+        assert f"MEXC Pearl spot pair metadata: identity checked | observed UTC {asset_observed}" in saved.stdout
         length, report = rest.split(b"\n", 1)
         assert len(report) == int(length) and report.decode() == saved.stdout
+        legacy_bytes, legacy_report = legacy_public_hour(2, initial, saved_end, price_receipts, report)
+        archive.write_bytes(legacy_bytes)
+        old = run("--open-review", archive.name)
+        assert old.returncode == 0 and old.stdout == legacy_report and not old.stderr
+        archive.write_bytes(data)
         assert f"Capture UTC {clock} (ages at capture)" in saved.stdout
         assert "180 / 60" in saved.stdout and "210 / 60" in saved.stdout
         if os.name != "nt":
@@ -283,6 +317,9 @@ def main(cli_path, fixture, enabled, sample_only=False):
             (change_receipt("pearl", 2, int(timings["fx"][0]) + 1), "review archive unavailable or invalid"),
             (change_receipt("fx", 1, clock + 1), "saved public hour response unavailable or invalid"),
             (change_receipt("fx", 2, clock + 3600), "saved review cutoff is in the future"),
+            (signed(body[:evidence_start] + b"1\n" + body[evidence_end:]), "saved MEXC pair metadata evidence is invalid"),
+            (signed(body[:evidence_start] + f"2\n{clock + 1}\n{len(metadata)}\n".encode() + metadata + body[evidence_end:]),
+             "saved MEXC pair metadata evidence is invalid"),
         ):
             archive.write_bytes(altered)
             invalid = run("--open-review", archive.name)
@@ -319,10 +356,12 @@ def main(cli_path, fixture, enabled, sample_only=False):
         assert resolver_requests.read_text(encoding="ascii").splitlines() == [resolver] * 3
         resolver_requests.unlink()
         fallback_data = fallback_archive.read_bytes()
-        assert fallback_data.startswith(b"CANARY-MARKET-HOUR-REVIEW-3\n")
+        assert fallback_data.startswith(b"CANARY-MARKET-HOUR-REVIEW-5\n")
         assert resolver.encode("ascii") not in fallback_data
         fallback_body = fallback_data[:-65]
-        details = fallback_body.split(b"\n", 3)[-1]
+        _, initial, closing, mode, count, details = fallback_body.split(b"\n", 5)
+        assert mode == b"1" and count == b"3"
+        all_receipts = details
         receipts = []
         for side in ("pearl", "fx", "kraken"):
             sent, observed, received, size, details = details.split(b"\n", 4)
@@ -333,7 +372,15 @@ def main(cli_path, fixture, enabled, sample_only=False):
             receipts.append((sent, observed, received, payload))
             side_path.unlink()
         assert int(receipts[1][2]) <= int(receipts[2][0])
-        assert details.split(b"\n", 1)[1].decode() == captured.stdout
+        all_receipts = all_receipts[:-len(details)]
+        _, _, details = asset_receipt(details)
+        report = details.split(b"\n", 1)[1]
+        assert report.decode() == captured.stdout
+        legacy_bytes, legacy_report = legacy_public_hour(3, initial, closing, all_receipts, report)
+        fallback_archive.write_bytes(legacy_bytes)
+        old = run("--open-review", fallback_archive.name)
+        assert old.returncode == 0 and old.stdout == legacy_report and not old.stderr
+        fallback_archive.write_bytes(fallback_data)
         kraken_payload = receipts[2][-1]
         coinbase_payload = receipts[1][-1]
         coinbase_full = json.loads(coinbase_payload)
@@ -382,7 +429,7 @@ def main(cli_path, fixture, enabled, sample_only=False):
             captured_bytes = sample_archive.read_bytes()
             captured_body = captured_bytes[:-65]
             assert captured_bytes == signed(captured_body)
-            assert captured_body.startswith(b"CANARY-MARKET-HOUR-REVIEW-4\n")
+            assert captured_body.startswith(b"CANARY-MARKET-HOUR-REVIEW-5\n")
             assert resolver.encode("ascii") not in captured_body
             if mode == "limited":
                 assert b"CMJSON1 10 429 0 1 0\n" in captured_body
@@ -399,15 +446,27 @@ def main(cli_path, fixture, enabled, sample_only=False):
             assert not requests.exists() and captured_bytes == sample_archive.read_bytes()
 
             if mode == "kraken-gap":
-                header, initial, closing, permission, count, receipts = captured_body.split(b"\n", 5)
-                assert permission == b"2" and count == b"3"
-                changed = b"\n".join((header, initial, closing, b"1", count, receipts))
+                header, initial, closing, mode, count, permission, receipts = captured_body.split(b"\n", 6)
+                assert mode == b"2" and permission == b"2" and count == b"3"
+                changed = b"\n".join((header, initial, closing, mode, count, b"1", receipts))
                 sample_archive.write_bytes(signed(changed))
                 refused_sample = run("--open-review", sample_archive.name)
                 assert refused_sample.returncode == 3 and not refused_sample.stdout
                 assert "captured request permission" in refused_sample.stderr
 
             if mode == "limited":
+                _, initial, closing, _, count, permission, details = captured_body.split(b"\n", 6)
+                all_receipts = details
+                for _ in range(int(count)):
+                    _, _, size, details = details.split(b"\n", 3)
+                    details = details[int(size):]
+                all_receipts = all_receipts[:-len(details)]
+                _, _, details = asset_receipt(details)
+                legacy_bytes, legacy_report = legacy_public_hour(4, initial, closing, all_receipts,
+                                                                 details.split(b"\n", 1)[1], permission + b"\n" + count + b"\n")
+                sample_archive.write_bytes(legacy_bytes)
+                old = run("--open-review", sample_archive.name)
+                assert old.returncode == 0 and old.stdout == legacy_report and not old.stderr
                 sample_archive.write_bytes(signed(captured_body.replace(b"rate limited", b"rate altered", 1)))
                 refused_sample = run("--open-review", sample_archive.name)
                 assert refused_sample.returncode == 3 and not refused_sample.stdout

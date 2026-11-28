@@ -51,7 +51,7 @@ Gate lists Pearl mainnet under `PEARL_USDT` and Perle under `PRL_USDT`. Before f
 
 Each metadata check and its data request share the original time limit, resolver choice and cancellation. The market client waits at least one second after each Gate or MEXC request ends before requesting that provider again. If a provider reports a different identity, the client withholds the new Pearl price. The Dashboard discards current Pearl values from that provider. A separate FX source can still report its own observation, while Pearl/USD requires an eligible Pearl price. Builds with older public HTTPS helpers cannot fetch the new metadata requests.
 
-New sample captures retain an identity refusal as a source outcome. Existing review archives still open with their original data and format. An older build needs an update to open a capture containing the new refusal code. Replay is historical and does not recheck the exchange's current asset metadata.
+New ticker and trade archives (version 2) and public-hour archives (version 5) keep the original Gate or MEXC metadata response when the metadata request succeeds, including when its contents cause an identity refusal. Offline replay checks the original identity rule and the recorded request and receipt times. A price observation within those bounds must follow the metadata observation or share its second. Incomplete captures preserve invalid price replies and record any metadata request failure. Older archives remain readable with their original reports. The archived response records what the helper received at capture time. It carries no provider signature or current identity claim.
 
 ### Save a public ticker request
 
@@ -328,16 +328,16 @@ returns an error and publishes no review. If a sample finishes with incomplete c
 the UTC window and both provider outcomes from that attempt. Stdout is reserved for a saved report.
 A source marked `non-public destination refused` reached the address check before HTTPS.
 Check the DNS response for that provider. Benchmark, private and other non-public
-ranges remain refused. The version 2 archive holds both original response bodies byte for byte,
-the selected window, command start and per-request times, the calculated report, and a SHA-256 checksum.
-When the USD calculation uses Kraken, version 3 adds the original Kraken body and receipt times
-alongside the MEXC and incomplete Coinbase receipts. Coinbase success still produces version 2.
+ranges remain refused. The archive holds both original response bodies byte for byte, the selected
+window, command start and per-request times, the calculated report, and a SHA-256 checksum. When the
+USD calculation uses Kraken, the archive also keeps the original Kraken body and receipt times alongside
+the MEXC and incomplete Coinbase receipts. Version 5 retains the MEXC pair metadata and observation time.
 The save preserves any existing archive or temporary sibling. If the command reports uncertain publication or cleanup,
 check the archive and its temporary sibling. Reopen any published archive to verify it.
 
 Opening the archived hour works in builds with public HTTPS disabled. It reads only the supplied archive,
 checks the checksum, revalidates the source formats and request-time bounds, and recalculates both means.
-For version 3 it also checks the original Coinbase gap and the full Kraken coverage.
+For a saved fallback it also checks the original Coinbase gap and the full Kraken coverage.
 The ages in the report are measured at its recorded capture time. The archive and checksum provide a way to
 check the stored calculation and detect corruption. They carry no provider signature or current freshness claim.
 Existing [user-declared reviews](manual-market.md#save-and-reopen-a-local-hour-review) remain readable.
@@ -351,8 +351,9 @@ canary-miner market-hour --allow-public-candles --kraken-fallback --save-sample 
 canary-miner market-hour --open-review sample.cmh
 ```
 
-The version 4 archive records the frozen window, request and receipt times, fallback permission,
-and the bounded response for each attempted source. It keeps admitted JSON bodies byte for byte.
+The version 5 archive records the frozen window, request and receipt times, fallback permission,
+the pair metadata when available, and the bounded response for each attempted source. It keeps
+admitted JSON bodies byte for byte.
 An HTTP request failure carries its recorded status and no body. The report shows any recorded HTTP status
 and bounded retry delay for failed or invalid responses. For each usable minute series,
 the report lists contiguous missing UTC ranges. A series with an invalid or unavailable response

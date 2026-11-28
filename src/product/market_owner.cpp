@@ -3,7 +3,6 @@
 #include "market_public_sample.h"
 #include "public_json_process.h"
 #include "native_process_admission.h"
-#include "json_dom.h"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -32,32 +31,6 @@ std::optional<PublicFeed> marketIdentityFeed(PublicFeed feed) {
         case PublicFeed::MexcPearlHour: return PublicFeed::MexcPearlPair;
         default: return std::nullopt;
     }
-}
-
-bool marketIdentityMatches(PublicFeed feed, const std::string &body) {
-    JsonValue root;
-    if (!parseJsonStrict(body, &root, nullptr, {16384, 64}) || !root.isObject()) return false;
-    const auto textIs = [](const JsonValue &obj, const char *field, std::string_view expected) {
-        const auto *value = obj.find(field);
-        return value && value->isString() && value->text == expected;
-    };
-    const auto boolIs = [](const JsonValue &obj, const char *field, bool expected) {
-        const auto *value = obj.find(field);
-        return value && value->isBool() && value->boolean == expected;
-    };
-    if (feed == PublicFeed::GatePearlAsset) {
-        const auto *chains = root.find("chains");
-        return textIs(root, "currency", "PEARL") && textIs(root, "name", "Pearl") &&
-            textIs(root, "chain", "PEARL") && boolIs(root, "delisted", false) &&
-            boolIs(root, "trade_disabled", false) && chains && chains->isArray() && chains->items.size() == 1 &&
-            textIs(chains->items.front(), "name", "PEARL") && textIs(chains->items.front(), "addr", "");
-    }
-    const auto *symbols = root.find("symbols");
-    if (!symbols || !symbols->isArray() || symbols->items.size() != 1) return false;
-    const auto &symbol = symbols->items.front();
-    return textIs(symbol, "symbol", "PEARLUSDT") && textIs(symbol, "baseAsset", "PEARL") &&
-        textIs(symbol, "quoteAsset", "USDT") && textIs(symbol, "status", "1") &&
-        boolIs(symbol, "isSpotTradingAllowed", true);
 }
 
 struct MarketProcessFetchState {
@@ -155,21 +128,18 @@ MarketFetch marketProcessFetch(std::filesystem::path helper) {
             limits.parentDeadline = (std::min)(limits.parentDeadline,
                 std::chrono::steady_clock::now() + std::chrono::milliseconds(limits.totalMs));
             auto metadataLimits = limits;
-            metadataLimits.bodyBytes = (std::min)(limits.bodyBytes, size_t{16384});
+            metadataLimits.bodyBytes = (std::min)(limits.bodyBytes, maxMarketAssetBodyBytes);
             const size_t provider = *identity == PublicFeed::GatePearlAsset ? 0 : 1;
             auto metadata = state->sample({*identity}, cancel, metadataLimits, epoch, provider);
             if (metadata.status != PublicHttpsStatus::Ok) return metadata;
             const bool verified = marketIdentityMatches(*identity, metadata.body);
             if (!nativeProcessEpochCurrent(epoch)) return marketSampleFailure(PublicHttpsStatus::Unreaped);
             if (cancel.load()) return marketSampleFailure(PublicHttpsStatus::Cancelled);
-            if (std::chrono::steady_clock::now() >= limits.parentDeadline)
-                return marketSampleFailure(PublicHttpsStatus::Timeout);
-            if (!verified) {
-                auto failure = marketSampleFailure(PublicHttpsStatus::AssetIdentity);
-                failure.httpStatus = metadata.httpStatus;
-                return failure;
-            }
-            return state->sample(request, cancel, limits, epoch, provider);
+            auto result = verified ? state->sample(request, cancel, limits, epoch, provider) :
+                marketSampleFailure(PublicHttpsStatus::AssetIdentity);
+            if (!verified) result.httpStatus = metadata.httpStatus;
+            result.assetEvidence.emplace(PublicAssetEvidence{metadata.observedUtc, std::move(metadata.body)});
+            return result;
         }
         return state->client.get(request, cancel, limits);
     };

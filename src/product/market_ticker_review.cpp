@@ -2,10 +2,12 @@
 #include "hash.h"
 #include "json_dom.h"
 #include "local_review_archive.h"
+#include "market_asset_evidence.h"
 #include "market_data.h"
 #include "market_public_sample.h"
 #include "public_json_process.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #if defined(_WIN32)
@@ -18,13 +20,17 @@ namespace {
 constexpr size_t maxTickerFileBytes=64*1024;
 constexpr uint64_t maxUtc=253402300799ULL;
 constexpr size_t tickerBodyBytes=1024*1024, tickerReportBytes=8192;
-constexpr size_t tickerArchiveBytes=2*tickerBodyBytes+tickerReportBytes+1024;
+constexpr size_t tickerArchiveBytes=2*tickerBodyBytes+maxMarketAssetBodyBytes+tickerReportBytes+1024;
 constexpr uint64_t maxCaptureMs=120000;
 constexpr MarketFreshnessPolicy tickerCaptureV1Policy{120000,30000,false};
 constexpr std::string_view tickerArchiveHeader="CANARY-MARKET-TICKER-REVIEW-1\n";
 constexpr std::string_view tradeArchiveHeader="CANARY-MARKET-TRADE-REVIEW-1\n";
 constexpr std::string_view tickerSampleHeader="CANARY-MARKET-TICKER-SAMPLE-1\n";
 constexpr std::string_view tradeSampleHeader="CANARY-MARKET-TRADE-SAMPLE-1\n";
+constexpr std::string_view tickerEvidenceHeader="CANARY-MARKET-TICKER-REVIEW-2\n";
+constexpr std::string_view tradeEvidenceHeader="CANARY-MARKET-TRADE-REVIEW-2\n";
+constexpr std::string_view tickerSampleEvidenceHeader="CANARY-MARKET-TICKER-SAMPLE-2\n";
+constexpr std::string_view tradeSampleEvidenceHeader="CANARY-MARKET-TRADE-SAMPLE-2\n";
 
 std::optional<std::filesystem::path> reviewFile(MarketTickerAction action, int argc, const char *const *argv) {
     if (argc!=4) return {};
@@ -139,8 +145,15 @@ PublicQuoteReport renderTickerCapture(const PublicTickerCapture &capture, std::s
     return PublicQuoteReport::Incomplete;
 }
 
-PublicQuoteReport renderCapture(const PublicTickerCapture &capture,std::string &report,bool sample) {
-    return capture.trades ? renderPublicTradeSample(capture,report,sample) : renderTickerCapture(capture,report,sample);
+PublicQuoteReport renderCapture(const PublicTickerCapture &capture,std::string &report,bool sample,bool evidence) {
+    const auto result = capture.trades ? renderPublicTradeSample(capture,report,sample) : renderTickerCapture(capture,report,sample);
+    if (evidence && result != PublicQuoteReport::InvalidClock) {
+        const uint64_t unit = capture.trades ? 1000 : 1;
+        if (!market_detail::appendMarketAssetEvidence(report, "Gate Pearl asset", PublicFeed::GatePearlAsset,
+                capture.gate.response, capture.gate.sentUtc / unit, capture.gate.receivedUtc / unit))
+            return PublicQuoteReport::InvalidEvidence;
+    }
+    return result;
 }
 
 void encodeTickerReceipt(std::string &bytes,const PublicTickerReceipt &receipt) {
@@ -195,11 +208,21 @@ bool decodeSampleReceipt(const std::string &bytes,size_t &offset,PublicTickerRec
 const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::string &report) {
     using local_review_archive::readArchiveNumber;
     const auto raw=std::string_view(bytes);
-    const auto starts=[&](std::string_view header) { return raw.substr(0,header.size())==header; };
-    const bool trades=starts(tradeArchiveHeader) || starts(tradeSampleHeader);
-    const bool sample=starts(tickerSampleHeader) || starts(tradeSampleHeader);
-    const auto header=sample ? (trades ? tradeSampleHeader : tickerSampleHeader) :
-                              (trades ? tradeArchiveHeader : tickerArchiveHeader);
+    struct Format {
+        std::string_view header;
+        bool trades, sample, evidence;
+    };
+    constexpr Format formats[] = {
+        {tickerArchiveHeader, false, false, false}, {tradeArchiveHeader, true, false, false},
+        {tickerSampleHeader, false, true, false}, {tradeSampleHeader, true, true, false},
+        {tickerEvidenceHeader, false, false, true}, {tradeEvidenceHeader, true, false, true},
+        {tickerSampleEvidenceHeader, false, true, true}, {tradeSampleEvidenceHeader, true, true, true},
+    };
+    const auto format = std::find_if(std::begin(formats), std::end(formats), [&](const Format &candidate) {
+        return raw.substr(0, candidate.header.size()) == candidate.header;
+    });
+    if (format == std::end(formats)) return "ticker review archive unavailable or invalid";
+    const auto [header, trades, sample, evidence] = *format;
     auto offset=header.size();
     const auto clockLimit=trades ? market_detail::maxMarketUtcMs : maxUtc;
     int64_t started=0, cutoff=0, elapsed=0;
@@ -207,10 +230,10 @@ const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::str
     capture.trades=trades;
     std::string savedReport;
     const auto readReceipt=sample ? decodeSampleReceipt : decodeTickerReceipt;
-    if (!starts(header) ||
-        !readArchiveNumber(bytes,offset,clockLimit,started) || !readArchiveNumber(bytes,offset,clockLimit,cutoff) ||
+    if (!readArchiveNumber(bytes,offset,clockLimit,started) || !readArchiveNumber(bytes,offset,clockLimit,cutoff) ||
         !readArchiveNumber(bytes,offset,maxCaptureMs+1,elapsed) ||
         !readReceipt(bytes,offset,capture.gate,trades) || !readReceipt(bytes,offset,capture.kraken,trades) ||
+        (evidence && !market_detail::readMarketAssetEvidence(bytes, offset, maxUtc, capture.gate.response)) ||
         !local_review_archive::readArchivePart(bytes,offset,tickerReportBytes,savedReport) ||
         bytes.size()-offset!=65 || bytes.back()!='\n' ||
         bytes.compare(offset,64,sha256Hex(bytes.substr(0,offset)))!=0)
@@ -222,7 +245,8 @@ const char *replayTickerCapture(const std::string &bytes,uint64_t nowMs,std::str
     const auto *invalid=trades ? "invalid times or incomplete fresh trade pair at capture" :
                                  "invalid times or incomplete fresh ticker pair at capture";
     if (!now || now>clockLimit || capture.cutoffUtc>now) return invalid;
-    const auto rendered=renderCapture(capture,report,sample);
+    const auto rendered=renderCapture(capture,report,sample,evidence);
+    if (rendered == PublicQuoteReport::InvalidEvidence) return "saved Gate asset metadata evidence is invalid";
     if (rendered==PublicQuoteReport::InvalidClock || (!sample && rendered!=PublicQuoteReport::Complete)) return invalid;
     return report==savedReport?nullptr:"saved ticker report differs from the recalculated report";
 }
@@ -255,16 +279,17 @@ int savePublicTickerReview(const std::string &name, const PublicTickerCapture &c
     if (stopped()) return interrupted();
     std::string report;
     const auto bodyLimit=capture.trades ? maxPublicTradeBodyBytes : tickerBodyBytes;
-    const auto rendered=renderCapture(capture,report,saveIncomplete);
+    const auto rendered=renderCapture(capture,report,saveIncomplete,true);
     const bool valid=capture.gate.response.body.size()<=bodyLimit && capture.kraken.response.body.size()<=bodyLimit &&
         rendered!=PublicQuoteReport::InvalidClock && (saveIncomplete || rendered==PublicQuoteReport::Complete) &&
         report.size()<=tickerReportBytes;
     if (stopped()) return interrupted();
+    if (rendered == PublicQuoteReport::InvalidEvidence) return reportError("could not save quote: invalid Gate asset metadata evidence");
     if (!valid && saveIncomplete) return reportError("could not save quote sample: invalid clocks or responses");
     if (!valid) return reportError(capture.trades ? "could not save trade review: both valid, fresh, aligned trades required" :
         "could not save ticker review: both valid, fresh, aligned observations required");
-    std::string bytes(saveIncomplete ? (capture.trades ? tradeSampleHeader : tickerSampleHeader) :
-                                        (capture.trades ? tradeArchiveHeader : tickerArchiveHeader));
+    std::string bytes(saveIncomplete ? (capture.trades ? tradeSampleEvidenceHeader : tickerSampleEvidenceHeader) :
+                                        (capture.trades ? tradeEvidenceHeader : tickerEvidenceHeader));
     bytes+=std::to_string(capture.startedUtc)+'\n'+std::to_string(capture.cutoffUtc)+'\n'+
         std::to_string(capture.elapsedMs+1)+'\n';
     if (saveIncomplete) {
@@ -274,6 +299,7 @@ int savePublicTickerReview(const std::string &name, const PublicTickerCapture &c
         encodeTickerReceipt(bytes,capture.gate);
         encodeTickerReceipt(bytes,capture.kraken);
     }
+    market_detail::encodeMarketAssetEvidence(bytes, capture.gate.response);
     bytes+=std::to_string(report.size())+'\n'+report;
     const auto state=local_review_archive::saveWhileActive(name,tickerReviewExtension,
         bytes+sha256Hex(bytes)+'\n',tickerArchiveBytes,stopped);

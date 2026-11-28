@@ -150,10 +150,22 @@ def main(cli_path, fixture, capable):
         identity_scenario.write_text('perle', encoding='ascii')
         denied = run(*sample)
         assert denied.returncode == 3 and 'public market asset identity could not be verified' in denied.stdout
+        assert 'Gate Pearl asset metadata: identity refused' in denied.stdout
+        assert b'"chain":"SOL"' in archive.read_bytes()
         assert run('--open-review', archive).stdout == denied.stdout
         assert_requests(['2'])
         archive.unlink()
         assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+        identity_requests.unlink()
+        identity_scenario.write_text('limited', encoding='ascii')
+        unavailable_sample = run(*sample)
+        assert unavailable_sample.returncode == 3 and 'Gate Pearl asset metadata: unavailable' in unavailable_sample.stdout
+        assert 'HTTP 429 | Retry-After 5 s' in unavailable_sample.stdout
+        assert b'CMJSON1 10 429 0 5 0\n' in archive.read_bytes()
+        assert run('--open-review', archive).stdout == unavailable_sample.stdout
+        assert_requests(['2'])
+        assert identity_requests.read_text(encoding='ascii').splitlines() == ['12']
+        archive.unlink()
         identity_requests.unlink()
         identity_scenario.unlink()
 
@@ -184,7 +196,7 @@ def main(cli_path, fixture, capable):
             assert 'Historical public ticker capture' in captured.stdout and 'PRL/USD reference at capture: 2.45' in captured.stdout
             stored = archive.read_bytes()
             fields = BytesIO(stored)
-            assert fields.readline() == b'CANARY-MARKET-TICKER-REVIEW-1\n'
+            assert fields.readline() == b'CANARY-MARKET-TICKER-REVIEW-2\n'
             assert all(int(fields.readline()) > 0 for _ in range(3))
             for feed in ('0', '2'):
                 assert all(int(fields.readline()) > 0 for _ in range(4))
@@ -192,13 +204,30 @@ def main(cli_path, fixture, capable):
                 original = (install / ('ticker-body-' + feed)).read_bytes()
                 assert original.startswith(b'\t') and original.endswith(b'\r\n  ')
                 assert length == len(original) and fields.read(length) == original
+            evidence_start = fields.tell()
+            assert fields.readline() == b'2\n'
+            observed = int(fields.readline())
+            metadata = fields.read(int(fields.readline()))
+            assert metadata == (b'{"currency":"PEARL","name":"Pearl","chain":"PEARL","delisted":false,'
+                                b'"trade_disabled":false,"chains":[{"name":"PEARL","addr":""}]}')
+            evidence_end = fields.tell()
             assert fields.read(int(fields.readline())) == captured.stdout.encode('ascii')
+            assert f'Gate Pearl asset metadata: identity checked | observed UTC {observed}' in captured.stdout
             assert selected not in captured.stdout and selected.encode('ascii') not in stored
             assert_requests(['0', '2'])
             assert resolver_requests.read_text(encoding='ascii').splitlines() == [selected, selected]
             resolver_requests.unlink()
             replay = run('--open-review', str(archive))
             assert replay.returncode == 0 and replay.stdout == captured.stdout and not replay.stderr, replay
+            if selected == doh[1]:
+                invalid_metadata = metadata.replace(b'"name":"Pearl"', b'"name":"Other"')
+                for replacement in (b'1\n', f'2\n{observed + 3600}\n{len(metadata)}\n'.encode() + metadata,
+                                    f'2\n{observed}\n{len(invalid_metadata)}\n'.encode() + invalid_metadata):
+                    invalid = stored[:evidence_start] + replacement + stored[evidence_end:-65]
+                    archive.write_bytes(invalid + sha256(invalid).hexdigest().encode() + b'\n')
+                    denied = run('--open-review', archive)
+                    assert denied.returncode == 3 and not denied.stdout and 'saved Gate asset metadata evidence is invalid' in denied.stderr
+                archive.write_bytes(stored)
             assert archive.read_bytes() == stored and not requests.exists() and not resolver_requests.exists()
             assert not temporary.exists()
             repeated = run(*save)
@@ -273,7 +302,7 @@ def main(cli_path, fixture, capable):
             assert 'Historical public ticker sample' in captured.stdout and 'PRL/USD reference at capture: N/A' in captured.stdout
             assert saved_detail in captured.stdout, captured
             saved = archive.read_bytes()
-            assert saved.startswith(b'CANARY-MARKET-TICKER-SAMPLE-1\n')
+            assert saved.startswith(b'CANARY-MARKET-TICKER-SAMPLE-2\n')
             assert resolver.encode() not in saved and not temporary.exists()
             assert_requests(['0', '2'])
             assert resolver_requests.read_text(encoding='ascii').splitlines() == [resolver, resolver]
