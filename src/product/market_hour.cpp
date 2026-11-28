@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <set>
 #include <string_view>
 #if defined(_WIN32)
 #include <shellapi.h>
@@ -29,12 +30,14 @@ constexpr size_t maxReportBytes = 4 * 1024;
 constexpr size_t maxArchiveBytes = maxInputBytes + maxReportBytes + 256;
 constexpr size_t maxSampleResponseBytes = market_detail::marketHourBodyBytes + 128;
 constexpr size_t maxPublicArchiveBytes = 3 * maxSampleResponseBytes + maxMarketAssetBodyBytes + maxReportBytes + 512;
-static_assert(maxPublicArchiveBytes <= maxBoundedLocalFileBytes);
+constexpr size_t maxCombinedArchiveBytes = maxCombinedPublicHours * (maxPublicArchiveBytes + 16) + maxReportBytes + 512;
+static_assert(maxCombinedArchiveBytes <= maxBoundedLocalFileBytes);
 constexpr std::string_view archiveHeader = "CANARY-MARKET-HOUR-REVIEW-1\n";
 constexpr std::string_view publicArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-2\n";
 constexpr std::string_view fallbackArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-3\n";
 constexpr std::string_view sampleArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-4\n";
 constexpr std::string_view evidenceArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-5\n";
+constexpr std::string_view combinedArchiveHeader = "CANARY-MARKET-HOUR-REVIEW-6\n";
 constexpr char pearlSeriesId[] = "gate-pearl-mainnet-usdt-v1";
 constexpr char fxSeriesId[] = "kraken-usdt-usd-v1";
 constexpr char mexcSeriesId[] = "mexc-pearl-mainnet-usdt-v1";
@@ -404,7 +407,13 @@ bool decodePublicHourReview(const std::string &bytes, market_detail::PublicHourO
            (!original.kraken || original.coinbase.receivedUtc <= original.kraken->sentUtc);
 }
 
-const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::string &report) {
+struct VerifiedPublicHour {
+    uint64_t endUtc = 0, capturedUtc = 0;
+    std::vector<ReviewMinute> pearl, coinbase, kraken;
+};
+
+const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::string &report,
+                             VerifiedPublicHour *verified = nullptr) {
     using namespace market_detail;
     PublicHourOriginal original;
     std::string savedReport;
@@ -414,8 +423,8 @@ const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::stri
     if (cutoff > clock) return "saved review cutoff is in the future";
     const auto start = original.endUtc - marketHourSeconds;
     const bool captured = original.captureFallbackAllowed.has_value();
-    const auto pearl = decodePublicHourReply(original.pearl, HourFeed::MexcPearl, start, original.endUtc);
-    const auto coinbase = decodePublicHourReply(original.coinbase, HourFeed::CoinbaseFx, start, original.endUtc);
+    auto pearl = decodePublicHourReply(original.pearl, HourFeed::MexcPearl, start, original.endUtc);
+    auto coinbase = decodePublicHourReply(original.coinbase, HourFeed::CoinbaseFx, start, original.endUtc);
     if (!captured && (pearl.problem || coinbase.problem))
         return "saved public hour response unavailable or invalid";
     const bool eligibleFallback = canFallbackHourFx(pearl, coinbase);
@@ -436,7 +445,194 @@ const char *replayPublicHour(const std::string &bytes, uint64_t clock, std::stri
             original.pearl.response, original.pearl.sentUtc, original.pearl.receivedUtc))
         return "saved MEXC pair metadata evidence is invalid";
     if (savedReport != report) return "saved review report differs from the recalculated report";
+    if (verified) {
+        verified->endUtc = original.endUtc;
+        verified->capturedUtc = cutoff;
+        if (!pearl.problem) verified->pearl = std::move(pearl.minutes);
+        if (!coinbase.problem) verified->coinbase = std::move(coinbase.minutes);
+        if (!kraken.problem && kraken.minutes.size() == marketHourMinutes)
+            verified->kraken = std::move(kraken.minutes);
+    }
     return nullptr;
+}
+
+struct CombinedPublicReview {
+    uint64_t endUtc = 0, cutoffUtc = 0;
+    unsigned minutes = 0;
+    std::vector<std::string> originals;
+    std::string report;
+};
+
+struct CombinedMinutes {
+    struct Slot {
+        std::optional<ExactDecimal> close;
+        bool disputed = false;
+    };
+    explicit CombinedMinutes(unsigned count) : slots(count) {}
+    std::vector<Slot> slots;
+    unsigned disputes = 0;
+
+    void add(std::vector<ReviewMinute> &minutes, const MarketWindow &window) {
+        for (auto &minute : minutes) {
+            if (minute.startUtc < window.startUtc || minute.startUtc >= window.endUtc) continue;
+            auto &slot = slots[(minute.startUtc - window.startUtc) / 60];
+            if (slot.disputed) continue;
+            if (!slot.close) slot.close = std::move(minute.close);
+            else if (slot.close->compare(minute.close) != 0) {
+                slot.close.reset();
+                slot.disputed = true;
+                ++disputes;
+            }
+        }
+    }
+    std::vector<ReviewMinute> take(uint64_t start) {
+        std::vector<ReviewMinute> minutes;
+        for (auto &slot : slots) {
+            if (slot.close) minutes.push_back({start, std::move(*slot.close)});
+            start += 60;
+        }
+        return minutes;
+    }
+};
+
+const char *combinePublicReviews(const CombinedPublicReview &input, uint64_t clock, std::string &report,
+                                 bool &complete, const volatile sig_atomic_t *stop) {
+    using namespace market_detail;
+    const uint64_t duration = static_cast<uint64_t>(input.minutes) * 60;
+    if (!duration || input.endUtc <= duration || input.cutoffUtc < input.endUtc || input.cutoffUtc > clock)
+        return "invalid completed UTC window or review cutoff";
+    const auto spec = minuteWindowBounds(input.endUtc - duration, input.endUtc);
+    if (!spec.expected) return "invalid completed UTC window or review cutoff";
+    CombinedMinutes pearl(spec.expected), coinbase(spec.expected), kraken(spec.expected);
+    std::set<std::string> originals;
+    uint64_t lastCapture = 0;
+    for (const auto &bytes : input.originals) {
+        if (stop && *stop) return "local market review stopped";
+        if (std::string_view(bytes).substr(0, evidenceArchiveHeader.size()) != evidenceArchiveHeader)
+            return "combined review requires original public hour archives with pair metadata records";
+        VerifiedPublicHour hour;
+        std::string originalReport;
+        if (const auto *problem = replayPublicHour(bytes, input.cutoffUtc, originalReport, &hour)) return problem;
+        // The original replay checked the checksum and its canonical position.
+        if (!originals.insert(bytes.substr(bytes.size() - 65, 64)).second)
+            return "duplicate original public hour archive";
+        if (hour.endUtc <= spec.startUtc || hour.endUtc - marketHourSeconds >= spec.endUtc)
+            return "an original public hour does not overlap the requested window";
+        lastCapture = (std::max)(lastCapture, hour.capturedUtc);
+        pearl.add(hour.pearl, spec);
+        coinbase.add(hour.coinbase, spec);
+        kraken.add(hour.kraken, spec);
+    }
+    const auto prl = pearl.take(spec.startUtc), primary = coinbase.take(spec.startUtc), fallback = kraken.take(spec.startUtc);
+    const std::vector<ReviewMinute> *fx = nullptr;
+    if (primary.size() == spec.expected) fx = &primary;
+    else if (!coinbase.disputes && fallback.size() == spec.expected) fx = &fallback;
+    auto result = accumulateMinuteWindow(spec, prl, fx);
+    if (fx && result.status == MarketDataStatus::Arithmetic)
+        result = accumulateMinuteWindow<ReviewMinute>(spec, prl, nullptr);
+    complete = result.tokenUsd.has_value();
+    report = "Historical candidate from replayed public hour archives. Candle finality is unverified.\n";
+    report += "UTC seconds [" + std::to_string(spec.startUtc) + ", " + std::to_string(spec.endUtc) +
+        "). Historical review cutoff UTC " + std::to_string(input.cutoffUtc) + "\n";
+    report += "Original public hours " + std::to_string(originals.size()) +
+        ". Latest capture UTC " + std::to_string(lastCapture) + "\n";
+    const auto coverage = [&](const char *label, size_t count, unsigned disputed) {
+        report += std::string(label) + ": " + std::to_string(count) + "/" + std::to_string(spec.expected) +
+            " usable minutes";
+        if (disputed) report += ". Conflicting closes in " + std::to_string(disputed) +
+            (disputed == 1 ? " minute" : " minutes");
+        report += '\n';
+    };
+    coverage("MEXC Pearl mainnet PRL/USDT", prl.size(), pearl.disputes);
+    coverage("Coinbase USDT/USD", primary.size(), coinbase.disputes);
+    coverage("Kraken USDT/USD fallback", fallback.size(), kraken.disputes);
+    if (result.tokenUsdt) appendMean(report, "USDT per PRL", *result.tokenUsdt);
+    else report += "Mean USDT per PRL unavailable (complete nonconflicting coverage and exact arithmetic required)\n";
+    if (result.tokenUsd) {
+        report += fx == &fallback
+            ? "FX source for USD mean: Kraken USDT/USD (candidate, minute starts inferred at receipt)\n"
+            : "FX source for USD mean: Coinbase USDT/USD\n";
+        appendMean(report, "USD per PRL", *result.tokenUsd);
+    } else {
+        report += "Mean USD per PRL unavailable (complete aligned coverage from one FX source and exact arithmetic required)\n";
+    }
+    return nullptr;
+}
+
+std::string encodeCombinedReview(const CombinedPublicReview &review) {
+    std::string body(combinedArchiveHeader);
+    body += std::to_string(review.endUtc) + '\n' + std::to_string(review.minutes) + '\n' +
+        std::to_string(review.cutoffUtc) + '\n' + std::to_string(review.originals.size()) + '\n';
+    for (const auto &bytes : review.originals) body += std::to_string(bytes.size()) + '\n' + bytes;
+    body += std::to_string(review.report.size()) + '\n' + review.report;
+    return body + sha256Hex(body) + '\n';
+}
+
+bool decodeCombinedReview(const std::string &bytes, CombinedPublicReview &review) {
+    using local_review_archive::readArchiveNumber;
+    using local_review_archive::readArchivePart;
+    size_t offset = combinedArchiveHeader.size();
+    int64_t end = 0, minutes = 0, cutoff = 0, count = 0;
+    if (!readArchiveNumber(bytes, offset, marketUtcLimit, end) ||
+        !readArchiveNumber(bytes, offset, 719, minutes) ||
+        !readArchiveNumber(bytes, offset, marketUtcLimit, cutoff) ||
+        !readArchiveNumber(bytes, offset, maxCombinedPublicHours, count))
+        return false;
+    review.endUtc = static_cast<uint64_t>(end);
+    review.minutes = static_cast<unsigned>(minutes);
+    review.cutoffUtc = static_cast<uint64_t>(cutoff);
+    for (int64_t i = 0; i < count; ++i)
+        if (!readArchivePart(bytes, offset, maxPublicArchiveBytes, review.originals.emplace_back())) return false;
+    return readArchivePart(bytes, offset, maxReportBytes, review.report) &&
+        bytes.size() - offset == 65 && bytes.back() == '\n' &&
+        bytes.compare(offset, 64, sha256Hex(bytes.substr(0, offset))) == 0;
+}
+
+uint64_t localHourClock() {
+    const auto clock = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    return clock > 0 && static_cast<uint64_t>(clock) <= marketUtcLimit ? static_cast<uint64_t>(clock) : 0;
+}
+
+int writeHourReport(const std::string &report, int code = 0) {
+    if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
+        return refuse("could not write report", 1);
+    return code;
+}
+
+int reviewCombinedHours(const MarketHourOptions &options, const std::vector<std::filesystem::path> &paths,
+                        const volatile sig_atomic_t *stop) {
+    using local_review_archive::ReviewSave;
+    const auto stopped = [stop] { return stop && *stop; };
+    const auto cancelled = [] { return refuse("local market review stopped", 130); };
+    if (stopped()) return cancelled();
+    const auto clock = localHourClock();
+    if (!clock) return refuse("local UTC clock unavailable");
+    CombinedPublicReview review;
+    review.endUtc = options.windowEndUtc;
+    review.minutes = options.windowMinutes;
+    review.cutoffUtc = options.reviewCutoffUtc;
+    for (const auto &path : paths) {
+        if (stopped()) return cancelled();
+        if (!readLocalReviewInput(path, maxPublicArchiveBytes, review.originals.emplace_back()))
+            return refuse("original public hour archive unavailable or invalid");
+    }
+    bool complete = false;
+    if (const auto *problem = combinePublicReviews(review, clock, review.report, complete, stop))
+        return stopped() ? cancelled() : refuse(problem);
+    if (stopped()) return cancelled();
+    if (options.saveFlag) {
+        if (!complete) return refuse("could not save combined review: complete aligned coverage and exact means required");
+        if (review.report.size() > maxReportBytes) return refuse("review report exceeds archive bound");
+        const auto saved = local_review_archive::save(options.archiveName, marketReviewExtension,
+            encodeCombinedReview(review), maxCombinedArchiveBytes, stop);
+        if (saved == ReviewSave::Stopped) return cancelled();
+        if (saved == ReviewSave::Uncertain)
+            return refuse("archive publication or cleanup is uncertain; inspect the review and its temporary file");
+        if (saved != ReviewSave::Written)
+            return refuse("could not create the new review archive; any existing archive was preserved");
+    }
+    return writeHourReport(review.report, complete ? 0 : 3);
 }
 
 int reviewHour(const MarketHourOptions &options, const std::filesystem::path &path,
@@ -450,31 +646,39 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
     if (stopped()) return cancelled();
     HourReviewOriginal original;
     std::string bytes;
-    bool publicArchive = false;
+    bool publicArchive = false, combinedArchive = false;
     if (reopening) {
-        if (!readLocalReviewInput(path, maxPublicArchiveBytes, bytes))
+        if (!readLocalReviewInput(path, maxCombinedArchiveBytes, bytes))
             return refuse("review archive unavailable or invalid");
+        combinedArchive = std::string_view(bytes).substr(0, combinedArchiveHeader.size()) == combinedArchiveHeader;
         publicArchive = std::string_view(bytes).substr(0, publicArchiveHeader.size()) == publicArchiveHeader ||
                         std::string_view(bytes).substr(0, fallbackArchiveHeader.size()) == fallbackArchiveHeader ||
                         std::string_view(bytes).substr(0, sampleArchiveHeader.size()) == sampleArchiveHeader ||
                         std::string_view(bytes).substr(0, evidenceArchiveHeader.size()) == evidenceArchiveHeader;
-        if (!publicArchive && (bytes.size() > maxArchiveBytes || !decodeHourReview(bytes, original)))
+        if ((publicArchive && bytes.size() > maxPublicArchiveBytes) ||
+            (!publicArchive && !combinedArchive && (bytes.size() > maxArchiveBytes || !decodeHourReview(bytes, original))))
             return refuse("review archive unavailable or invalid");
     } else if (!readLocalReviewInput(path, maxInputBytes, original.input)) {
         return refuse("input file unavailable, oversized or unsuitable");
     }
 
     if (stopped()) return cancelled();
-    const auto clock = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    if (clock < 1 || static_cast<uint64_t>(clock) > marketUtcLimit)
-        return refuse("local UTC clock unavailable");
-    if (original.cutoff > clock) return refuse("saved review cutoff is in the future");
+    const auto clock = localHourClock();
+    if (!clock) return refuse("local UTC clock unavailable");
+    if (original.cutoff > static_cast<int64_t>(clock)) return refuse("saved review cutoff is in the future");
     if (!reopening) original.cutoff = clock;
 
     std::string report;
-    if (publicArchive) {
-        if (const auto *problem = replayPublicHour(bytes, static_cast<uint64_t>(clock), report))
+    if (combinedArchive) {
+        CombinedPublicReview combined;
+        if (!decodeCombinedReview(bytes, combined)) return refuse("combined review archive unavailable or invalid");
+        bool complete = false;
+        if (const auto *problem = combinePublicReviews(combined, clock, report, complete, stop))
+            return stopped() ? cancelled() : refuse(problem);
+        if (!complete || combined.report != report)
+            return refuse("saved combined report differs from the recalculated report");
+    } else if (publicArchive) {
+        if (const auto *problem = replayPublicHour(bytes, clock, report))
             return stopped() ? cancelled() : refuse(problem);
     } else {
         if (const char *problem = makeHourReport(original.input, static_cast<uint64_t>(original.cutoff), report))
@@ -496,9 +700,7 @@ int reviewHour(const MarketHourOptions &options, const std::filesystem::path &pa
         if (result != ReviewSave::Written)
             return refuse("could not create the new review archive; any existing archive was preserved");
     }
-    if (std::fwrite(report.data(), 1, report.size(), stdout) != report.size() || std::fflush(stdout) != 0)
-        return refuse("could not write report", 1);
-    return 0;
+    return writeHourReport(report);
 }
 
 }  // namespace
@@ -651,7 +853,12 @@ int commandMarketHour(const MarketHourOptions &options, int argc, const char *co
     try {
         const bool help = options.action == MarketHourAction::Help;
         const bool saving = options.action == MarketHourAction::Save;
-        if (argc != (help ? 3 : saving ? 6 : 4))
+        const bool combining = options.action == MarketHourAction::Combine;
+        constexpr int firstArchiveFlag = 9;
+        if (combining && (options.archiveCount < 1 || options.archiveCount > maxCombinedPublicHours))
+            return refuse("invalid arguments; use market-hour --help", 2);
+        const int afterArchives = firstArchiveFlag + 2 * options.archiveCount;
+        if (argc != (combining ? afterArchives + (options.saveFlag ? 2 : 0) : help ? 3 : saving ? 6 : 4))
             return refuse("invalid arguments; use market-hour --help", 2);
 #if defined(_WIN32)
         (void)argv;
@@ -665,22 +872,50 @@ int commandMarketHour(const MarketHourOptions &options, int argc, const char *co
         if (!args.values || count != argc || std::wstring_view(args.values[1]) != L"market-hour")
             return refuse("invalid arguments; use market-hour --help", 2);
         const auto option = std::wstring_view(args.values[2]);
-        const auto fileFlag = options.action == MarketHourAction::Open ? L"--open-review" : L"--file";
-        if (help ? option != L"--help" && option != L"-h" : option != fileFlag)
-            return refuse("invalid arguments; use market-hour --help", 2);
-        if (saving && (std::wstring_view(args.values[4]) != L"--save-review" ||
-                       std::wstring_view(args.values[5]) !=
-                           std::wstring(options.archiveName.begin(), options.archiveName.end())))
+        if (combining) {
+            if (option != L"--combine-public-hours" || std::wstring_view(args.values[3]) != L"--end-utc" ||
+                std::wstring_view(args.values[4]) != std::to_wstring(options.windowEndUtc) ||
+                std::wstring_view(args.values[5]) != L"--minutes" ||
+                std::wstring_view(args.values[6]) != std::to_wstring(options.windowMinutes) ||
+                std::wstring_view(args.values[7]) != L"--as-of-utc" ||
+                std::wstring_view(args.values[8]) != std::to_wstring(options.reviewCutoffUtc))
+                return refuse("invalid arguments; use market-hour --help", 2);
+            for (int i = firstArchiveFlag; i < afterArchives; i += 2)
+                if (std::wstring_view(args.values[i]) != L"--archive" || !args.values[i+1][0])
+                    return refuse("invalid arguments; use market-hour --help", 2);
+        } else {
+            const auto fileFlag = options.action == MarketHourAction::Open ? L"--open-review" : L"--file";
+            if (help ? option != L"--help" && option != L"-h" : option != fileFlag)
+                return refuse("invalid arguments; use market-hour --help", 2);
+        }
+        const int saveIndex = combining ? (options.saveFlag ? afterArchives : 0) : saving ? 4 : 0;
+        if (saveIndex && (std::wstring_view(args.values[saveIndex]) != L"--save-review" ||
+                          std::wstring_view(args.values[saveIndex+1]) !=
+                              std::wstring(options.archiveName.begin(), options.archiveName.end())))
             return refuse("invalid arguments; use market-hour --help", 2);
 #endif
+        if (combining) {
+            std::vector<std::filesystem::path> paths;
+            for (int i = firstArchiveFlag; i < afterArchives; i += 2) {
+#if defined(_WIN32)
+                paths.emplace_back(args.values[i+1]);
+#else
+                paths.emplace_back(argv[i+1]);
+#endif
+            }
+            return reviewCombinedHours(options, paths, stop);
+        }
         if (help) {
             std::printf("canary-miner market-hour --file FILE [--save-review NAME.cmh]\n"
                         "canary-miner market-hour --open-review FILE\n"
+                        "canary-miner market-hour --combine-public-hours --end-utc END --minutes N --as-of-utc CUTOFF\n"
+                        "    --archive FILE [--archive FILE ...] [--save-review NAME.cmh]\n"
                         "canary-miner market-hour --allow-public-candles [--kraken-fallback] [--dns-server IP|cloudflare-doh]\n"
                         "    [--save-review NAME.cmh | --save-sample NAME.cmh]\n"
                         "Request one hour from the installed HTTPS helper for MEXC Pearl/USDT and Coinbase USDT/USD.\n"
                         "With --kraken-fallback, request Kraken USDT/USD if the valid Coinbase hour has missing minutes and MEXC is complete.\n"
                         "Review an hour of user-declared UTC minute prices, offline.\n"
+                        "Combine up to 16 original public hour archives into 1 to 719 complete UTC minutes, offline.\n"
                         "Save a new archive in your trusted local folder. Open recalculates the original review.\n"
                         "JSON (up to 64 KiB): schema_version, end_utc, pearl, optional fx.\n"
                         "Local schema 3 requires fx (incomplete Coinbase) and kraken_fallback.\n"

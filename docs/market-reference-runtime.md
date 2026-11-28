@@ -370,6 +370,42 @@ Use a new ASCII basename in a trusted private local directory. `--save-review` k
 `--save-sample` and `--save-review` are mutually exclusive. Treat the archive as local market-data
 evidence, subject to the same provider access and use terms.
 
+### Combine saved public hours
+
+Use up to 16 original version 5 public hour archives to review 1 to 719
+consecutive UTC minutes, including the planned 480-minute lookback. Pass
+each original with its own `--archive FILE`. Set `END` to the exclusive UTC
+minute boundary and `CUTOFF` to a historical Unix second at or after the
+capture of every supplied archive.
+
+```text
+canary-miner market-hour --combine-public-hours --end-utc END --minutes 480 --as-of-utc CUTOFF --archive hour1.cmh --archive hour2.cmh ...
+```
+
+The command replays each original with its recorded timestamps and checks
+its checksum, metadata record, original coverage and saved report. Each
+archive must overlap the requested window. Identical close values for an
+overlapping minute count once. Conflicting closes remove that minute from the
+affected series. The report shows per-source coverage and conflict counts.
+
+A complete Pearl series supplies the exact USDT mean. USD also needs one
+complete, aligned FX series. Coinbase is preferred. A Coinbase gap can use
+Kraken only when complete, originally authorized Kraken hours cover the
+whole requested window. The command excludes disputed Coinbase windows from
+fallback selection. It multiplies PRL and FX closes minute by minute before
+summing them. Exit code 0 means both means are available. Code 3 indicates
+gaps, conflicts, invalid inputs or arithmetic bounds. Partial previews can
+still show the complete Pearl mean.
+
+Add `--save-review NAME.cmh` to save a complete result in a trusted private
+local directory. Version 6 embeds the original archive bytes, fixed window,
+review cutoff and calculated report. Reopen it with
+`market-hour --open-review FILE` to validate all original archives and
+recalculate the result without separate copies. Existing single-hour
+archives remain readable. The command performs no network requests and
+reports historical candidates. Provider qualification, current freshness
+and economic-mode admission have separate requirements.
+
 ### Choose a resolver for one public sample
 
 A public sample can use one explicitly selected DNS server if the deployment's resolver returns a
