@@ -106,6 +106,10 @@ class TariffSettingsPanel {
                         if(auto *history=state?member(*state,"history"):nullptr)history->items.clear();
                     }
                 }
+                if(changed&&(location.find(".contracted_capacity")!=std::string::npos||
+                    (location=="demand_charge"&&anyDemandRule("contracted_capacity")&&
+                     (name=="rate_per_kw"||name=="rate_per_kva"))))
+                    clearDemandTaxBase();
                 if(changedHistoryBasis&&clearDemandHistory())
                     message+=" Re-enter the prior monthly peaks for the new basis.";
                 if(openingChanged&&name=="imported_kwh"&&restrictedCredit(draft)){
@@ -142,7 +146,10 @@ class TariffSettingsPanel {
                 page=TariffSettingsPage::Browse;message=i18n::tariffNoticeEnglish(NoticeKey::Removed);
                 if(collectionName()=="seasons")reviewChangedSeasonalAllowance();
                 if(collectionName()=="eligible_periods")reviewChangedDemandPeriods();
-                if(collectionName()=="demand_charges")clearDemandTaxBase();
+                if(collectionName()=="demand_charges"){
+                    clearDemandTaxBase();
+                    refreshClockContract();
+                }
                 if(rateRows){
                     refreshClockContract();
                     reviewChangedComponents();
@@ -181,6 +188,7 @@ class TariffSettingsPanel {
         else if((key=='n'||key=='N')&&onConcurrentDemandToggle())toggleConcurrentDemand();
         else if((key=='r'||key=='R')&&onRatchetToggle())toggleRatchet();
         else if((key=='h'||key=='H')&&onRatchetToggle())toggleDemandPeriods();
+        else if((key=='c'||key=='C')&&onContractedDemandToggle())toggleContractedDemand();
         else if((key=='e'||key=='E')&&path()=="plan.export_payment")toggleExportSchedule();
         else if((key=='e'||key=='E')&&onExportToggle())toggleExportPayment();
         else if((key=='u'||key=='U')&&onRestrictedCreditToggle())toggleRestrictedCredit();
@@ -253,6 +261,7 @@ class TariffSettingsPanel {
             if(onTaxToggle())shortcuts+="[T] Ordered taxes ";
             if(onTaxAllocation())shortcuts+="[J] Tax period allocation ";
             if(onRatchetToggle())shortcuts+="[R] Historical demand floor [K] kW/kVA [H] Eligible periods ";
+            if(onContractedDemandToggle())shortcuts+="[C] Contracted capacity ";
             if(recurring())shortcuts+=i18n::tariffMonthlyEnglish(Key::Derive)+" ";
             if(onTariffClock()&&civilNamedTimeAvailable())shortcuts+="[Z] Named/UTC clock ";
             shortcuts+=i18n::tariffComparisonEnglish(i18n::TariffComparisonMessageKey::Hint)+" ";
@@ -365,6 +374,7 @@ class TariffSettingsPanel {
     bool inConcurrentRule()const{return route.size()>=3&&draft.members[route[0]].first=="demand_charges"&&path().find(".rule")!=std::string::npos;}
     bool onRatchetToggle()const{return (route.empty()&&selectedName()=="demand_charge")||
         (route.size()==3&&inConcurrentRule());}
+    bool onContractedDemandToggle()const{return onRatchetToggle()||path()=="demand_charge";}
     bool scheduledDemand()const{
         const auto *rule=draft.find("demand_charge");
         return rule&&rule->find("eligible_periods");
@@ -456,7 +466,7 @@ class TariffSettingsPanel {
         const bool namedRate=named(plan->find("clock"));
         const bool namedReset=named(policy->find("clock"));
         const auto *payment=exportRule(draft);
-        schema->text=concurrentDemand()?"18":scheduledDemand()?"17":hasSegmentedTaxes(draft)?"16":hasTaxes(draft)?"15":restrictedCredit(draft)?"13":payment?(payment->find("dynamic")?"14":"12"):apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
+        schema->text=anyDemandRule("contracted_capacity")?"19":concurrentDemand()?"18":scheduledDemand()?"17":hasSegmentedTaxes(draft)?"16":hasTaxes(draft)?"15":restrictedCredit(draft)?"13":payment?(payment->find("dynamic")?"14":"12"):apparentDemand()?"11":ratchet()?"10":demand()?"9":hasComponents(draft)?"8":seasonal()?"7":bimonthly()?"6":annual()?"5":namedRate||namedReset?"4":!recurring()?"1":
             policy->find("daily_fee_allocation")?"3":"2";
         if(auto *version=member(*opening,"time_database_version"))
             version->text=namedRate?tariffTzdbVersion:"explicit-fixed-clock";
@@ -859,6 +869,24 @@ class TariffSettingsPanel {
         message=wasScheduled?"Enter a new fixed export rate and publication time.":
             "Add export rate rows in UTC order and enter their publication times.";
     }
+    void toggleContractedDemand(){
+        const auto rulePath=inConcurrentRule()?path():"demand_charge";
+        auto &rule=inConcurrentRule()?*node():*member(draft,"demand_charge");
+        const char *rateField=rule.find("rate_per_kva")?"rate_per_kva":"rate_per_kw";
+        member(rule,rateField)->text.clear();
+        if(rule.find("contracted_capacity")){
+            eraseField(rule,"contracted_capacity");
+            message="Enter the rate applied to the full billable peak.";
+        }else{
+            JsonValue contract;
+            parseJsonStrict(R"({"capacity":"","rate_per_unit":""})",&contract,nullptr);
+            rule.members.emplace_back("contracted_capacity",std::move(contract));
+            message="Enter the excess demand rate, contracted capacity and capacity rate.";
+        }
+        focus(rulePath+"."+rateField);
+        clearDemandTaxBase();
+        refreshClockContract();
+    }
     void toggleDemandUnit(){
         if(restrictedCredit(draft)){
             message="Remove restricted credit to use apparent-power demand.";
@@ -886,6 +914,11 @@ class TariffSettingsPanel {
             }
         };
         replaceEmptyField(rule,useApparent?"rate_per_kw":"rate_per_kva",useApparent?"rate_per_kva":"rate_per_kw");
+        if(auto *contract=member(rule,"contracted_capacity")){
+            member(*contract,"capacity")->text.clear();
+            member(*contract,"rate_per_unit")->text.clear();
+            clearDemandTaxBase();
+        }
         if(namedRule)member(*state,"peak")->text.clear();
         else replaceEmptyField(opening,openingPeakField(),useApparent?"peak_demand_kva":"peak_demand_kw");
         if(useApparent)rule.members.emplace_back("power_factor_va_places",JsonValue{});
@@ -1132,8 +1165,14 @@ class TariffSettingsPanel {
         if(s=="rate_per_kwh"&&path().rfind("plan.export_payment.dynamic[",0)==0)
             return "Enter the amount per exported kWh in the plan currency. A negative rate charges for exports.";
         if(path()=="plan.export_payment"&&s=="rate_per_kwh")return "Enter the separate payment per exported kWh in the plan currency.";
+        if((s=="rate_per_kw"||s=="rate_per_kva")&&node()->find("contracted_capacity"))
+            return "Enter the rate per demand unit above the contracted capacity for this cycle.";
         if(s=="rate_per_kw")return "Enter the price per kW of the billable demand for this cycle.";
         if(s=="rate_per_kva")return "Enter the price per kVA of the billable demand for this cycle.";
+        if(s=="capacity"&&path().find(".contracted_capacity")!=std::string::npos)
+            return "Enter the positive contracted capacity in this rule's demand unit.";
+        if(s=="rate_per_unit"&&path().find(".contracted_capacity")!=std::string::npos)
+            return "Enter the charge per contracted demand unit for the whole cycle.";
         if(s=="power_factor_va_places")return "Leave blank for measured VA only. Enter 0 to 18 decimals for power-factor conversion.";
         if(s=="lookback_months")return "Enter one to twelve completed monthly cycles.";
         if(s=="fraction")return "Enter a positive fraction up to one. For 80 percent, use 0.8.";
@@ -1188,11 +1227,12 @@ class TariffSettingsPanel {
         using PanelKey=i18n::TariffPanelMessageKey;
         using MonthlyKey=i18n::TariffMonthlyMessageKey;
         const bool prorated=recurring()&&draft.find("reset_policy")->find("daily_fee_allocation");
+        const bool contracted=anyDemandRule("contracted_capacity");
         const auto cycleReview=bimonthly()?MonthlyKey::BimonthlyReview:annual()?MonthlyKey::AnnualReview:MonthlyKey::Review;
         review={i18n::tariffPanelEnglish(PanelKey::ReviewHeading),i18n::tariffPanelEnglish(PanelKey::NoActivation),
             i18n::tariffPanelEnglish(PanelKey::DeclaredForecast),recurring()?i18n::tariffMonthlyEnglish(cycleReview):i18n::tariffPanelEnglish(PanelKey::ResetLimit),
             exports(draft)?"Restricted export credits, eligibility and rollover are outside this separate-payment rule.":
-                demand()?"Demand uses complete UTC-grid windows. Capacity, export, prepaid and independent demand resets are excluded.":
+                demand()?"Demand uses complete UTC-grid windows and the supply cycle's reset.":
                 hasSegmentedTaxes(draft)?"Tax periods must cover the supply cycle without gaps.":
                 hasTaxes(draft)?"Each supply cycle needs one published tax period. Restricted closing credits use a separate declaration.":
                 prorated?i18n::tariffMonthlyEnglish(MonthlyKey::ProratedExclusions):i18n::tariffPanelEnglish(PanelKey::Excludes),
@@ -1210,8 +1250,10 @@ class TariffSettingsPanel {
             "Demand uses kVA and requires whole-meter apparent-power evidence. Energy uses active import in kWh.");
         if(concurrentDemand())review.insert(review.begin()+4,
             "Each charge has its own peak and opening key. The opening subtotal excludes all demand charges.");
-        else if(demand())review.insert(review.begin()+4,
+        else if(demand()&&!contracted)review.insert(review.begin()+4,
             "Peak demand is charged once per cycle. The opening subtotal excludes it. Review the plan and opening keys.");
+        if(contracted)review.insert(review.begin()+4,
+            "Contracted capacity is charged for the whole cycle. The demand rate applies to billable demand above capacity. The opening subtotal excludes these charges.");
         if(scheduledDemand())review.insert(review.begin()+4,
             "Demand uses only eligible periods in the plan clock, aligned to the UTC demand windows.");
         if(hasComponents(draft))review.insert(review.begin()+4,

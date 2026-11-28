@@ -91,6 +91,13 @@ struct DemandRatchet {
     unsigned lookbackMonths = 0;
     ExactDecimal fraction;
 };
+struct ContractedDemand {
+    ElectricityAmount capacity;
+    ExactDecimal ratePerUnit;
+};
+struct DemandChargeParts {
+    ElectricityAmount capacityFee, excessFee;
+};
 inline constexpr size_t maxDemandPeriods = 16, maxDemandCharges = 8;
 struct DemandPeriod {
     unsigned beginMinute = 0, endMinute = 1440, weekdayMask = 127, monthMask = 4095;
@@ -106,11 +113,10 @@ struct DemandChargeRule {
     bool apparentPower = false;
     std::optional<unsigned> powerFactorVaPlaces{};
     std::vector<DemandPeriod> eligiblePeriods{};  // empty uses all windows in the cycle
+    std::optional<ContractedDemand> contract{};
     bool apparent() const { return apparentPower; }
     const char *unit() const { return apparent() ? "kVA" : "kW"; }
-    bool charge(const ElectricityAmount &peak, ElectricityAmount *out) const {
-        return peak.numerator.multiply(ratePerUnit, &out->numerator);
-    }
+    bool charge(const ElectricityAmount &peak, ElectricityAmount *out, DemandChargeParts *parts = nullptr) const;
 };
 struct NamedDemandCharge {
     std::string key;

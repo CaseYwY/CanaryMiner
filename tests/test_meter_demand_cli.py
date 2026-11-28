@@ -158,6 +158,72 @@ def main(cli, bundle=None):
             totals(report, "0.030000", "0.170000")
             assert "Billed usage 0.020000 kWh" in report
 
+            # Contracted capacity charges once per cycle. Only peak demand above it uses the excess rate.
+            contracted = declaration(begin, rounded_end, minutes=30)
+            contracted["schema_version"] = 19
+            contracted["demand_charge"].update(rate_per_kw="4", contracted_capacity=dict(capacity="10", rate_per_unit="2"))
+            steps = [(begin, "0"), (halfway, "4"), (rounded_end, "10")]
+            prefix = review(contracted, register(steps[:2]), halfway, archive="capacity-prefix.cmr")
+            assert "Provisional cycle estimate 24.000000 USD" in prefix
+            assert "Excess demand fee 0.000000 USD" in prefix
+            prefix_bytes = (root / "capacity-prefix.cmr").read_bytes()
+            write(meter, register(steps))
+            extended = run("--extend-review", "capacity-prefix.cmr", "--intervals", meter,
+                           "--as-of-utc-ms", rounded_end, "--save-review", "capacity-final.cmr")
+            totals(extended, "12.000000", "38.000000")
+            assert "Contracted capacity 10.000000 kW" in extended
+            assert "Contracted capacity fee 20.000000 USD" in extended and "Excess demand fee 8.000000 USD" in extended
+            assert run("--open-review", "capacity-final.cmr") == extended
+            assert (root / "capacity-prefix.cmr").read_bytes() == prefix_bytes
+            totals(review(contracted, register([(begin, "0"), (rounded_end, "0")]), rounded_end),
+                   "0.000000", "20.000000")
+            review({**contracted, "schema_version": 9}, register(steps), rounded_end, error="saved tariff declaration")
+
+            taxed_capacity = copy.deepcopy(contracted)
+            taxed_capacity["opening"].update(through_utc_ms=halfway, imported_kwh="4",
+                                              accrued_subtotal="4", peak_demand_kw="8",
+                                              tax_bases=dict(energy="4", daily_fee="0", cycle_fee="0",
+                                                             demand="20", billed_kwh="0"))
+            taxed_capacity["plan"]["tax_periods"] = [dict(
+                begin_utc_ms=begin, end_utc_ms=rounded_end, published_utc_ms=begin,
+                rules=[dict(key="demand-tax", kind="fraction", rate="0.1", components=["demand"],
+                            included_in=[], prior_taxes=[])])]
+            totals(review(taxed_capacity, register(steps[1:]), rounded_end), "12.000000", "40.800000")
+            taxed_capacity["opening"]["tax_bases"]["demand"] = "0"
+            review(taxed_capacity, register(steps[1:]), rounded_end, error="saved tariff declaration")
+
+            mixed_capacity = concurrent(contracted, dict(window_minutes=30, offset_minutes=0,
+                                                        published_utc_ms=begin, rate_per_kw="1"))
+            mixed_capacity["schema_version"] = 19
+            totals(review(mixed_capacity, register(steps), rounded_end), "12.000000", "50.000000")
+            apparent_capacity = copy.deepcopy(contracted)
+            rule = apparent_capacity["demand_charge"]
+            rule["rate_per_kva"] = rule.pop("rate_per_kw")
+            rule["power_factor_va_places"] = None
+            apparent_capacity["opening"]["peak_demand_kva"] = apparent_capacity["opening"].pop("peak_demand_kw")
+            paired = modeled((begin, halfway, "8000"), (halfway, rounded_end, "12000"))
+            paired["schema_version"] = 4
+            for row, va in zip(paired["intervals"], ("11000", "15000")):
+                row["average_va"] = va
+            report = review(apparent_capacity, paired, rounded_end)
+            assert "Contracted capacity 10.000000 kVA" in report and "Cycle estimate at closing 50.000000 USD" in report
+
+            jan, feb, mar = (utc(f"2024-{month}-01T00:00:00") for month in ("01", "02", "03"))
+            recurring_capacity = declaration(jan, feb, reset=dict(monthly_day=1, clock=UTC), rates_end=mar, minutes=30)
+            recurring_capacity["schema_version"] = 19
+            recurring_capacity["demand_charge"]["contracted_capacity"] = dict(capacity="10", rate_per_unit="2")
+            report = review(recurring_capacity, register([(jan, "0"), (feb, "0"), (mar, "0")]), mar)
+            assert report.count("Cycle estimate at closing 20.000000 USD") == 2, report
+            history_capacity = declaration(feb, mar, reset=dict(monthly_day=1, clock=UTC), minutes=30)
+            history_capacity["schema_version"] = 19
+            history_capacity["demand_charge"].update(rate_per_kw="4",
+                contracted_capacity=dict(capacity="10", rate_per_unit="2"),
+                ratchet=dict(lookback_months=1, fraction="0.75"))
+            history_capacity["opening"]["demand_history"] = [dict(cycle_end_utc_ms=feb, peak_kw="20")]
+            report = review(history_capacity, register([(feb, "0"), (mar, "0")]), mar)
+            totals(report, "0.000000", "40.000000")
+            assert "Billable demand 15.000000 kW" in report and "Excess demand fee 20.000000 USD" in report
+
             # A v9 source can resolve demand and energy on different grids.
             quarter_hour = declaration(begin, rounded_end)
             quarter_hour["plan"]["rounding"] = "meter_import_half_hour_kwh_half_even_2"

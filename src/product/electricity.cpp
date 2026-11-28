@@ -189,7 +189,10 @@ ElectricityStatus validateDemandRule(const CivilClock &clock, const DemandCharge
     if (measured.numerator.negative() || rule.windowMinutes<5 ||
         rule.windowMinutes>60 || 60%rule.windowMinutes || rule.offsetMinutes>=rule.windowMinutes ||
         rule.ratePerUnit.negative() || !instant(rule.publishedUtcMs) ||
-        (rule.powerFactorVaPlaces && (!rule.apparent() || *rule.powerFactorVaPlaces>18))) return ElectricityStatus::Invalid;
+        (rule.powerFactorVaPlaces && (!rule.apparent() || *rule.powerFactorVaPlaces>18)) ||
+        (rule.contract && (rule.contract->capacity.numerator.negative() ||
+                           rule.contract->capacity.numerator.zero() || rule.contract->ratePerUnit.negative())))
+        return ElectricityStatus::Invalid;
     if (rule.ratchet) {
         const auto &ratchet=*rule.ratchet;
         if (!ratchet.lookbackMonths || ratchet.lookbackMonths>12 ||
@@ -1120,6 +1123,20 @@ bool billableDemand(const DemandChargeRule &rule,const BillOpening &opening,
     return billableDemand(rule, *opening.peakDemand, opening.demandHistory, peak, ratchetFloor);
 }
 
+bool DemandChargeRule::charge(const ElectricityAmount &peak, ElectricityAmount *out, DemandChargeParts *parts) const {
+    if (!contract) return peak.numerator.multiply(ratePerUnit, &out->numerator);
+    DemandChargeParts calculated;
+    const auto &capacity = contract->capacity.numerator;
+    ExactDecimal excess;
+    if ((peak.numerator.compare(capacity) > 0 && !peak.numerator.subtract(capacity, &excess)) ||
+        !capacity.multiply(contract->ratePerUnit, &calculated.capacityFee.numerator) ||
+        !excess.multiply(ratePerUnit, &calculated.excessFee.numerator) ||
+        !calculated.capacityFee.numerator.add(calculated.excessFee.numerator, &out->numerator))
+        return false;
+    if (parts) *parts = std::move(calculated);
+    return true;
+}
+
 bool billableDemand(const DemandChargeRule &rule, const ElectricityAmount &measured,
                     const std::vector<ElectricityAmount> &history,
                     ElectricityAmount &peak, ElectricityAmount &ratchetFloor) {
@@ -1276,13 +1293,20 @@ static BillEstimate evaluateBillImpl(const TariffPlan &p,const BillOpening &open
         if (status != ElectricityStatus::Ok) return status;
         ElectricityAmount nextBillable, openingBillable, floor;
         ExactDecimal increase, demandCharge;
-        // A new cycle has no posted demand subtotal yet, even if a ratchet floor already applies.
+        // A new cycle has no posted demand subtotal, even with a contract or ratchet floor.
+        const bool cycleStarted = opening.throughUtcMs != opening.cycleBeginUtcMs;
         if (!billableDemand(rule,measured,history,nextBillable,floor) ||
-            (opening.throughUtcMs!=opening.cycleBeginUtcMs &&
-             !billableDemand(rule,previous,history,openingBillable,floor)) ||
-            !nextBillable.numerator.subtract(openingBillable.numerator,&increase) ||
-            !increase.multiply(rule.ratePerUnit, &demandCharge) ||
-            !accumulateCharge(cost, state, TaxComponent::Demand, demandCharge)) return ElectricityStatus::Capacity;
+            (cycleStarted && !billableDemand(rule,previous,history,openingBillable,floor)))
+            return ElectricityStatus::Capacity;
+        if (rule.contract) {
+            ElectricityAmount nextCharge, openingCharge;
+            if (!rule.charge(nextBillable, &nextCharge) ||
+                (cycleStarted && !rule.charge(openingBillable, &openingCharge)) ||
+                !nextCharge.numerator.subtract(openingCharge.numerator, &demandCharge))
+                return ElectricityStatus::Capacity;
+        } else if (!nextBillable.numerator.subtract(openingBillable.numerator, &increase) ||
+                   !increase.multiply(rule.ratePerUnit, &demandCharge)) return ElectricityStatus::Capacity;
+        if (!accumulateCharge(cost, state, TaxComponent::Demand, demandCharge)) return ElectricityStatus::Capacity;
         return ElectricityStatus::Ok;
     };
     if (p.demandCharge) {

@@ -458,6 +458,52 @@ void demandWindows(JsonValue draft,const std::filesystem::path &target) {
     CHECK(savedBoth);
     if(!savedBoth)return;
     checkComparison(compareTariffCycles(decoded,{dec("8000"),dec("12000")},1,T),"0.000000","16.000000","16.000000");
+    {
+        TariffSettingsPanel contractedPanel;
+        contractedPanel.open(saved);
+        enter(contractedPanel,"demand_charges");
+        contractedPanel.key('\r',{},T/1000);
+        enter(contractedPanel,"rule");
+        CHECK(contractedPanel.render(120,28,ColorLevel::None).find("[C] Contracted capacity")!=std::string::npos);
+        contractedPanel.key('c',{},T/1000);
+        CHECK(contractedPanel.draft.find("schema_version")->text=="19");
+        CHECK(contractedPanel.draft.find("demand_charges")->items.front().find("rule")->find("rate_per_kw")->text.empty());
+        enter(contractedPanel,"rate_per_kw");type(contractedPanel,"5");
+        enter(contractedPanel,"contracted_capacity");
+        enter(contractedPanel,"capacity");type(contractedPanel,"9");
+        enter(contractedPanel,"rate_per_unit");type(contractedPanel,"2");
+        set(member(contractedPanel.draft,"opening"),"key",R"("contracted-opening")");
+        set(member(contractedPanel.draft,"plan"),"key",R"("contracted-plan")");
+        TariffDeclarationStore contractStore(target.parent_path()/"contracted-tariff.json");
+        JsonValue persistedContract;
+        CHECK(contractStore.load(&persistedContract,&reason)&&contractStore.save(saved,&reason));
+        contractedPanel.key('v',{},T/1000);
+        CHECK(contractedPanel.render(120,28,ColorLevel::None).find("Contracted capacity is charged for the whole cycle")!=std::string::npos);
+        contractedPanel.key('\r',[&](const JsonValue &value,std::string *error){return contractStore.save(value,error);},T/1000);
+        TariffDeclaration contract;
+        const bool contractedSaved=!contractedPanel.dirty()&&contractStore.load(&persistedContract,&reason)&&
+            decodeTariffDeclaration(persistedContract,&contract)&&contract.plan.demandCharges.size()==2&&
+            contract.plan.demandCharges[0].rule.contract.has_value();
+        CHECK(contractedSaved);
+        if(contractedSaved){
+            contractedPanel.open(persistedContract);
+            enter(contractedPanel,"demand_charges");
+            contractedPanel.key('\r',{},T/1000);
+            enter(contractedPanel,"rule");
+            contractedPanel.key('c',{},T/1000);
+            CHECK(contractedPanel.draft.find("schema_version")->text=="18");
+            CHECK(contractedPanel.draft.find("demand_charges")->items.front().find("rule")->find("rate_per_kw")->text.empty());
+
+            contractedPanel.open(persistedContract);
+            enter(contractedPanel,"demand_charges");
+            contractedPanel.key('a',{},T/1000);
+            contractedPanel.field=0;
+            contractedPanel.key('x',{},T/1000);
+            contractedPanel.key('\r',{},T/1000);
+            CHECK(contractedPanel.draft.find("schema_version")->text=="18");
+            CHECK(contractedPanel.draft.find("demand_charges")->items.size()==2);
+        }
+    }
     panel.open(saved);
     enter(panel,"demand_charges");
     panel.key('\r',{},T/1000);

@@ -29,7 +29,7 @@ The decoder calls `validateTariffOpening`, not a fake zero-power bill. This prov
 
 A saved opening is an offline scenario assertion, **not** an observed accumulator, recovered bill, source cursor, meter calibration or permission to reset an actual ledger. Qualified whole-meter/baseline telemetry and an isolated durable state owner remain runtime prerequisites. Editing the declaration does not rewrite measured history.
 
-Version 15 adds [ordered supply taxes](#apply-ordered-supply-taxes). Unsupported families include contracted capacity, reactive power, export netting and supplier-specific restricted export credits, live prepaid enrollment and debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions and other provider rounding rules. Supplier-specific tax rules require their own qualification.
+Version 15 adds [ordered supply taxes](#apply-ordered-supply-taxes). Unsupported families include reactive power, export netting and supplier-specific restricted export credits, live prepaid enrollment and debt, independent supplier tariff registers and automatic true-up, other proration, threshold revisions and other provider rounding rules. Supplier-specific tax rules require their own qualification.
 
 ## Apply ordered supply taxes
 
@@ -373,6 +373,33 @@ The bill lists both maxima in declaration order, adds their charges and
 counts the 7 kWh of imported energy once. The archive retains the exact rule
 and peak for each charge and reproduces the combined bill.
 
+### Charge for contracted capacity and excess demand
+
+Version 19 lets a demand rule declare `contracted_capacity` with a positive
+`capacity` and a nonnegative `rate_per_unit` for the whole billing cycle.
+The capacity uses the demand rule's kW or kVA unit. With a contract, the
+rule's outer `rate_per_kw` or `rate_per_kva` prices only the amount by
+which billable demand exceeds the contract. The measured peak, any eligible
+periods and any historical floor still use the rule's original definitions.
+
+In Settings press **C** on a single demand charge or within a concurrent
+demand rule to add the contract. Enter both rates. Adding or removing a
+contract clears the outer rate so you can enter it for the new pricing basis.
+Use a new plan and opening
+key when saving. A mid-cycle opening still excludes all demand fees from its
+declared subtotal. Its demand tax base, when required, includes the capacity
+fee and any excess already accrued from the established peak. The first
+complete review in each cycle accrues the capacity fee even at zero import.
+An extension adds only the increase in demand charge.
+
+A 10 kW contract at 2 per kW per cycle costs 20 for capacity. With a
+12 kW billable peak and an excess rate of 4 per kW, the excess costs 8.
+The report shows both components before the existing tax and subtotal rules.
+Archives keep the declared rates and the original meter evidence for replay.
+The declaration covers a single contract and two rates per demand rule for
+the whole cycle. Supplier-specific proration and other overage formulas
+require separate tariff rules and qualification.
+
 ### Use a historical demand floor
 
 Set a monthly reset and add a demand charge. In Settings, select `demand_charge` and press **R**.
@@ -399,8 +426,8 @@ comparison carries each scenario's actual history independently. Archive replay
 reconstructs the same history and verifies the exact floor and billable demand for
 each reviewed cycle.
 
-This covers T21 for one all-day maximum with consecutive monthly resets. Contracted
-capacity and independent reset schedules remain open.
+This covers T21 for one all-day maximum with consecutive monthly resets. A version 19
+contract can use the same historical floor. Independent reset schedules remain open.
 
 ### Charge for apparent demand in kVA
 
@@ -436,8 +463,9 @@ both starting registers and all covered observations, including the source of ea
 In the whole-meter comparison, supply watts and VA for each scenario as `8000/10000`. If
 the declaration permits conversion, `8000@0.8` is equivalent under that precision. The
 second line describes the complete meter with mining. Enter its apparent-power evidence
-independently. This covers T22. Tariffs that use kVA at the maximum kW window, reactive
-charges or contracted capacity require their own rule and supplier qualification.
+independently. This covers T22. Version 19 also supports a contract in kVA.
+Tariffs that use kVA at the maximum kW window or reactive charges require their own
+rule and supplier qualification.
 
 ### Price electricity exports separately
 
