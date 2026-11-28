@@ -28,6 +28,8 @@ finally:
 
 REVISION = 'abcdef0123456789abcdef0123456789abcdef01'
 OPENSSL = b'OpenSSL 3.5.9 license fixture\n'
+OPENSSL_35 = b'OpenSSL 3.5.9 29 Sep 2026\0'
+OPENSSL_41 = b'OpenSSL 4.1.0 23 Oct 2026\0'
 
 
 class CandidateTests(unittest.TestCase):
@@ -47,7 +49,7 @@ class CandidateTests(unittest.TestCase):
                     'CANARY_ENABLE_NAMED_TZDB:BOOL=OFF', 'CANARY_ENABLE_PUBLIC_HTTPS:BOOL=OFF',
                     *(f'{key}:BOOL=OFF' for key in CANDIDATE.REQUIRED_OFF)]
             cache.write_text('\n'.join(base), encoding='utf8')
-            CANDIDATE.check_cache(cache, 'linux')
+            self.assertEqual(CANDIDATE.check_cache(cache, 'linux'), '3.5.9')
             CANDIDATE.check_cache(cache, 'windows')
             with self.assertRaises(ValueError):
                 RELEASE.check_cache(cache)
@@ -69,6 +71,13 @@ class CandidateTests(unittest.TestCase):
                 cache.write_text('\n'.join(line for line in base if not line.startswith(key)), encoding='utf8')
                 with self.assertRaises(ValueError):
                     CANDIDATE.check_cache(cache, 'linux')
+            for version in ('4.1.0', '3.6.5', '4.1.1'):
+                cache.write_text('\n'.join(base).replace('INTERNAL=3.5.9', f'INTERNAL={version}'), encoding='utf8')
+                if version == '4.1.0':
+                    self.assertEqual(CANDIDATE.check_cache(cache, 'linux'), version)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'inventoried OpenSSL'):
+                        CANDIDATE.check_cache(cache, 'linux')
 
     def test_named_tzdb_requires_explicit_bundled_offline_build(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -187,7 +196,8 @@ class CandidateTests(unittest.TestCase):
         files = {name: f'data for {name}'.encode() for name in CANDIDATE.file_limits(platform)
                  if name != CANDIDATE.MANIFEST}
         if platform == 'linux':
-            files[CANDIDATE.OPENSSL_LICENSE] = OPENSSL
+            files[CANDIDATE.openssl_notice('3.5.9')] = OPENSSL
+            files['bin/canary_pool_tls_stream_worker'] += OPENSSL_35
         document = CANDIDATE.manifest(platform, REVISION, '2.40' if platform == 'linux' else None, files)
         files[CANDIDATE.MANIFEST] = json.dumps(document).encode()
         return files
@@ -279,11 +289,55 @@ class CandidateTests(unittest.TestCase):
                             self.assertEqual(stat.S_IMODE((prefix / tzdb['version']).stat().st_mode), 0o644)
 
     @staticmethod
-    def public_worker_payload(platform):
-        backend_name = b'Schannel\0' if platform == 'windows' else b'OpenSSL 3.5.9 '
+    def public_worker_payload(platform, version=OPENSSL_35):
+        backend_name = b'Schannel\0' if platform == 'windows' else version
         backend = (b'schannel: AcquireCredentialsHandle failed:' if platform == 'windows' else b'OpenSSL SSL_connect:')
         return (b'CMJSON1 libcurl\0CanaryMiner-PublicData/1\0' + backend_name + backend +
                 b'8.23.0\0' + b'1.34.9\0')
+
+    def test_linux_openssl41_binds_the_manifest_notice_and_both_workers(self):
+        platform = 'linux'
+        files, fixture_pin = self.named_payload(platform)
+        miner, _, pool, public = (f'bin/{name}' for name in CANDIDATE.images(platform, True))
+        old_notice = CANDIDATE.openssl_notice('3.5.9')
+        new_notice = CANDIDATE.openssl_notice('4.1.0')
+        files[new_notice] = files.pop(old_notice)
+        files[pool] = files[pool].replace(OPENSSL_35, OPENSSL_41)
+        files[miner] += CANDIDATE.PUBLIC_HTTPS_OPT_IN
+        files[public] = self.public_worker_payload(platform, OPENSSL_41)
+        source = Path(__file__).resolve().parents[1]
+        for name in CANDIDATE.PUBLIC_HTTPS_NOTICE_SHA256:
+            files[name] = (source / name).read_bytes()
+
+        def with_manifest(payload, version='4.1.0'):
+            payload = {name: value for name, value in payload.items() if name != CANDIDATE.MANIFEST}
+            document = CANDIDATE.manifest(platform, REVISION, '2.40', payload, named_tzdb=True,
+                                          public_https=True, openssl_version=version)
+            return {**payload, CANDIDATE.MANIFEST: json.dumps(document).encode()}
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(CANDIDATE.TZDB_INVENTORY_SHA256, {platform: fixture_pin}), \
+                patch.object(CANDIDATE, 'OPENSSL_LICENSE_SHA256', CANDIDATE.sha256(OPENSSL)):
+            archive = Path(directory) / 'candidate.tar.gz'
+            valid = with_manifest(files)
+            digest = self.archive(platform, valid, archive)
+            actual, document, _ = CANDIDATE.load(platform, archive, digest)
+            self.assertEqual(actual, valid)
+            self.assertEqual(document['tls_backend'], 'openssl-4.1.0-static')
+            self.assertEqual(document['public_https']['tls_backend'], document['tls_backend'])
+            for changed in (
+                with_manifest(files, '3.6.5'),
+                with_manifest(files, '3.5.9'),
+                with_manifest({**files, old_notice: OPENSSL}),
+                with_manifest({**files, new_notice: b'wrong license'}),
+                with_manifest({**files, pool: files[pool].replace(OPENSSL_41, OPENSSL_35)}),
+                with_manifest({**files, pool: files[pool] + OPENSSL_35}),
+                with_manifest({**files, public: self.public_worker_payload(platform)}),
+                with_manifest({**files, public: files[public] + b'OpenSSL 3.6.5 29 Sep 2026\0'}),
+            ):
+                digest = self.archive(platform, changed, archive)
+                with self.assertRaises(ValueError):
+                    CANDIDATE.load(platform, archive, digest)
 
     def test_public_https_install_refuses_mixed_native_images_and_wrong_inventory(self):
         for platform in ('windows', 'linux'):

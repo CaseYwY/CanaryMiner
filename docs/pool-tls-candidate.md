@@ -6,7 +6,7 @@ The candidate tool packages an enabled production SM120 build for installation a
 
 Build the `production-sm120` profile in Release mode with CUDA 13.1.115 and `CANARY_ENABLE_POOL_TLS_RUNTIME=ON`. Use a neutral build and toolkit path. Keep the original source revision, CMake cache, toolchain and output hashes in the build record. Pass that exact build directory and source revision to the packer. The release candidate archive records this declared revision and each file hash. Verify the revision against the external build record when accepting a candidate.
 
-The Linux candidate uses the inventoried static OpenSSL 3.5.9 build. Supply the unmodified `LICENSE.txt` from the verified 3.5.9 source. The tool checks the exact licence hash and TLS helper version marker. It requires the system x86-64 ELF loader and rejects unexpected shared-library dependencies and runtime search paths. For Windows, use the configured MSVC linker's sibling `dumpbin.exe`. The Windows candidate uses Schannel and depends on the supported x64 Visual C++ runtime.
+For Linux, use the inventoried static OpenSSL 4.1.0 build to enable [TLS 1.3 intermediate certificate status](pool-native-tls.md#linux-certificate-status-in-the-handshake). The installer also accepts candidates built with OpenSSL 3.5.9. Supply the unmodified `LICENSE.txt` from the selected release. The packer binds the version in the CMake cache to the manifest, licence path and TLS worker. It checks the exact licence hash and the linked version string. Archive verification repeats the version and licence checks. The packer requires the system x86-64 ELF loader and rejects unexpected shared libraries and runtime search paths. For Windows, use the configured MSVC linker's sibling `dumpbin.exe`. The Windows candidate uses Schannel and depends on the supported x64 Visual C++ runtime. [OpenSSL releases](https://openssl-library.org/source/)
 
 ```sh
 python3 -B packaging/release/tls_candidate.py pack --platform linux \
@@ -41,8 +41,8 @@ also disable the named backend and omit `--with-named-tzdb`.
 ## Candidate with opt-in public HTTPS
 
 Build the named tariff profile with `CANARY_ENABLE_PUBLIC_HTTPS=ON` and supply the reviewed static libcurl
-8.23.0 and c-ares 1.34.9 installation through `CMAKE_PREFIX_PATH`. Use Schannel on Windows and the pinned static
-OpenSSL 3.5.9 build on Linux for libcurl as well as the pool TLS worker. Set `CMAKE_SKIP_RPATH=ON` on Linux
+8.23.0 and c-ares 1.34.9 installation through `CMAKE_PREFIX_PATH`. Use Schannel on Windows and build
+libcurl with the same inventoried static OpenSSL version as the pool TLS worker on Linux. Set `CMAKE_SKIP_RPATH=ON` on Linux
 so the candidate uses system library paths. Build c-ares with `CARES_STATIC=ON` and
 `CARES_SHARED=OFF`. Build libcurl with `BUILD_STATIC_LIBS=ON`, `BUILD_SHARED_LIBS=OFF`, `ENABLE_ARES=ON`,
 `CURL_DISABLE_LDAP=ON` and `CURL_DISABLE_LDAPS=ON`. Supply c-ares to libcurl through its CMake prefix and omit

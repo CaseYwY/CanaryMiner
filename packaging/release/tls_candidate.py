@@ -41,7 +41,9 @@ PUBLIC_HTTPS_AGENT = b'CanaryMiner-PublicData/1\0'
 PUBLIC_DOH_SELECTOR = b'cloudflare-doh\0'
 CURL_VERSION = '8.23.0'
 CARES_VERSION = '1.34.9'
-LINUX_OPENSSL_VERSION = b'OpenSSL 3.5.9 '
+LINUX_OPENSSL_LTS = '3.5.9'
+LINUX_OPENSSL_BACKENDS = {f'openssl-{version}-static': version for version in (LINUX_OPENSSL_LTS, '4.1.0')}
+OPENSSL_VERSION_TEXT = re.compile(rb'OpenSSL ([0-9]+\.[0-9]+\.[0-9]+) [0-9]{1,2} [A-Z][a-z]{2} [0-9]{4}\x00')
 PUBLIC_HTTPS_NOTICE_SHA256 = {
     'LICENSES/curl-8.23.0.txt': '82f2f4427d6545ee5aaac4f0b80428da6cc8ba41c2cf5da3a03680ec327b9681',
     'LICENSES/c-ares-1.34.9.txt': '460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807',
@@ -73,7 +75,6 @@ LICENSE_FILES = (
     )),
 )
 RELEASE_FILES.update({f'LICENSES/{name}': f'LICENSES/{name}' for name in LICENSE_FILES})
-OPENSSL_LICENSE = 'LICENSES/OpenSSL-3.5.9.txt'
 OPENSSL_LICENSE_SHA256 = '7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a'
 MAX_TEXT_BYTES = 256 * 1024
 MAX_PACKAGE_BYTES = 96 * 1024 * 1024
@@ -130,14 +131,18 @@ def billing_watch_path(platform):
     return f'deploy/{BILLING_WATCH_FILES[platform]}'
 
 
+def openssl_notice(version):
+    return f'LICENSES/OpenSSL-{version}.txt'
+
+
 def file_limits(platform, named_tzdb=False, public_https=False, energy_runtime=False, billing_watch=False,
-                octopus_account=False):
+                octopus_account=False, openssl_version=LINUX_OPENSSL_LTS):
     return {**{f'bin/{name}': MAX_ARTIFACT_BYTES for name in images(platform, public_https, energy_runtime)},
             **dict.fromkeys(RELEASE_FILES, MAX_TEXT_BYTES),
             **dict.fromkeys(tzdb_paths(platform).values() if named_tzdb else (), MAX_TEXT_BYTES),
             **({billing_watch_path(platform): MAX_TEXT_BYTES} if billing_watch or octopus_account else {}),
             **dict.fromkeys(OCTOPUS_ACCOUNT_FILES if octopus_account else (), MAX_TEXT_BYTES),
-            **({OPENSSL_LICENSE: MAX_TEXT_BYTES} if platform == 'linux' else {}),
+            **({openssl_notice(openssl_version): MAX_TEXT_BYTES} if platform == 'linux' else {}),
             MANIFEST: MAX_TEXT_BYTES}
 
 
@@ -183,8 +188,12 @@ def check_cache(path, platform, named_tzdb=False, public_https=False, energy_run
     kind, bundled = keys.get(BUNDLED_TZDB, ('PATH', ''))
     if kind != 'PATH' or (not Path(bundled).is_absolute() if named_tzdb else bool(bundled)):
         raise ValueError('bundled tariff TZDB must match the selected candidate')
-    if platform == 'linux' and keys.get('_OPENSSL_VERSION') != ('INTERNAL', '3.5.9'):
-        raise ValueError('Linux candidate requires the inventoried OpenSSL 3.5.9 build')
+    if platform == 'linux':
+        kind, version = keys.get('_OPENSSL_VERSION', ('', ''))
+        if kind != 'INTERNAL' or version not in LINUX_OPENSSL_BACKENDS.values():
+            raise ValueError('Linux candidate requires an inventoried OpenSSL build')
+        return version
+    return None
 
 
 def check_tzdb(platform, files):
@@ -206,16 +215,24 @@ def check_public_https(platform, files, energy_runtime=False):
         raise ValueError('the candidate miner and public worker disagree on encrypted DNS')
     # The generic backend name also appears in the runtime's backend selection check.
     # Require strings from the selected libcurl implementation itself.
-    backend = ((b'schannel: AcquireCredentialsHandle failed:',) if platform == 'windows' else
-               (b'OpenSSL SSL_connect:', LINUX_OPENSSL_VERSION))
+    backend = b'schannel: AcquireCredentialsHandle failed:' if platform == 'windows' else b'OpenSSL SSL_connect:'
     versions = (CURL_VERSION.encode('ascii') + b'\0', CARES_VERSION.encode('ascii') + b'\0')
-    required = (PUBLIC_HTTPS_AGENT, b'CMJSON1 ', b'libcurl\0', *backend, *versions)
+    required = (PUBLIC_HTTPS_AGENT, b'CMJSON1 ', b'libcurl\0', backend, *versions)
     excluded = (b'fixture.test.invalid', b'MultiSSL\0')
     if not all(marker in data for marker in required) or any(marker in data for marker in excluded):
         raise ValueError('the candidate requires the inventoried production public HTTPS worker')
     for notice, expected in PUBLIC_HTTPS_NOTICE_SHA256.items():
         if sha256(files[notice].replace(b'\r\n', b'\n')) != expected:
             raise ValueError('public HTTPS notice does not match the inventoried dependency')
+
+
+def check_openssl(files, version, public_https):
+    if sha256(files[openssl_notice(version)]) != OPENSSL_LICENSE_SHA256:
+        raise ValueError('OpenSSL license does not match the inventoried version')
+    workers = (IMAGE_NAMES[2], PUBLIC_JSON_WORKER) if public_https else (IMAGE_NAMES[2],)
+    for worker in workers:
+        if set(OPENSSL_VERSION_TEXT.findall(files[f'bin/{worker}'])) != {version.encode('ascii')}:
+            raise ValueError('TLS worker OpenSSL version does not match the candidate')
 
 
 def check_energy_runtime(platform, files):
@@ -240,8 +257,8 @@ def check_energy_runtime(platform, files):
 
 
 def manifest(platform, revision, glibc, files, named_tzdb=False, public_https=False, energy_runtime=False,
-             billing_watch=False, octopus_account=False):
-    backend = 'schannel' if platform == 'windows' else 'openssl-3.5.9-static'
+             billing_watch=False, octopus_account=False, openssl_version=LINUX_OPENSSL_LTS):
+    backend = 'schannel' if platform == 'windows' else f'openssl-{openssl_version}-static'
     document = {
         'schema': NAMED_TZDB_SCHEMA if named_tzdb else SCHEMA,
         'platform': platform,
@@ -295,8 +312,17 @@ def validate(platform, files):
                   else public_https or schema == NAMED_TZDB_SCHEMA)
     if type(named_tzdb) is not bool or ((public_https or billing_watch) and not named_tzdb):
         raise ValueError('invalid candidate clock capability')
-    if set(files) != set(file_limits(platform, named_tzdb, public_https, energy_runtime, billing_watch, octopus_account)):
+    openssl_version = None
+    if platform == 'linux':
+        backend = document.get('tls_backend')
+        if not isinstance(backend, str) or backend not in LINUX_OPENSSL_BACKENDS:
+            raise ValueError('Linux candidate requires an inventoried OpenSSL backend')
+        openssl_version = LINUX_OPENSSL_BACKENDS[backend]
+    if set(files) != set(file_limits(platform, named_tzdb, public_https, energy_runtime, billing_watch, octopus_account,
+                                     openssl_version)):
         raise ValueError('candidate inventory mismatch')
+    if openssl_version is not None:
+        check_openssl(files, openssl_version, public_https)
     miner, preferences, stream_worker = images(platform)
     if billing_watch and BILLING_WATCH_QUIET not in files[f'bin/{miner}']:
         raise ValueError('billing watcher requires a miner with quiet watch support')
@@ -335,11 +361,9 @@ def validate(platform, files):
     if not valid_revision(revision) or not valid_glibc:
         raise ValueError('invalid candidate revision or runtime requirement')
     actual = manifest(platform, revision, glibc, {k: v for k, v in files.items() if k != MANIFEST},
-                      named_tzdb, public_https, energy_runtime, billing_watch, octopus_account)
+                      named_tzdb, public_https, energy_runtime, billing_watch, octopus_account, openssl_version)
     if document != actual:
         raise ValueError('candidate manifest or file hash mismatch')
-    if platform == 'linux' and sha256(files[OPENSSL_LICENSE]) != OPENSSL_LICENSE_SHA256:
-        raise ValueError('OpenSSL license does not match the inventoried version')
     return document
 
 
@@ -354,6 +378,8 @@ def load(platform, archive, expected=None):
         raise ValueError('candidate archive hash mismatch')
     files, limits = {}, file_limits(platform, named_tzdb=True, public_https=True, energy_runtime=True,
                                    billing_watch=True, octopus_account=True)
+    if platform == 'linux':
+        limits.update({openssl_notice(version): MAX_TEXT_BYTES for version in LINUX_OPENSSL_BACKENDS.values()})
     total = 0
 
     def add(name, size, mode, open_entry):
@@ -418,7 +444,7 @@ def pack(platform, build, revision, deny_file, tool, archive, openssl_license, n
         raise ValueError('candidate archive already exists')
     if (billing_watch or octopus_account) and not named_tzdb:
         raise ValueError('billing watch and account capture require the bundled tariff TZDB')
-    check_cache(build / 'CMakeCache.txt', platform, named_tzdb, public_https, energy_runtime)
+    openssl_version = check_cache(build / 'CMakeCache.txt', platform, named_tzdb, public_https, energy_runtime)
     files = {name: read_regular(source_tree / source, MAX_TEXT_BYTES)
              for name, source in RELEASE_FILES.items()}
     if billing_watch or octopus_account:
@@ -434,19 +460,17 @@ def pack(platform, build, revision, deny_file, tool, archive, openssl_license, n
         check_tzdb(platform, tzdb)
     if platform == 'linux':
         if openssl_license is None:
-            raise ValueError('the OpenSSL 3.5.9 license is required')
-        files[OPENSSL_LICENSE] = read_regular(openssl_license, MAX_TEXT_BYTES)
+            raise ValueError('the inventoried OpenSSL license is required')
+        files[openssl_notice(openssl_version)] = read_regular(openssl_license, MAX_TEXT_BYTES)
     elif openssl_license is not None:
         raise ValueError('Windows uses Schannel')
     floor, checked = verify_images(platform, build, source_tree, deny_file, tool, images(platform, public_https, energy_runtime),
                                    portable=True, payloads=files)
-    if platform == 'linux' and LINUX_OPENSSL_VERSION not in checked[IMAGE_NAMES[2]]:
-        raise ValueError('the static OpenSSL 3.5.9 image is required')
     files.update(tzdb)
     files.update({f'bin/{name}': data for name, data in checked.items()})
     glibc = '.'.join(map(str, floor)) if floor else None
     document = manifest(platform, revision, glibc, files, named_tzdb, public_https, energy_runtime,
-                        billing_watch, octopus_account)
+                        billing_watch, octopus_account, openssl_version)
     files[MANIFEST] = (json.dumps(document, indent=2, sort_keys=True) + '\n').encode('utf8')
     validate(platform, files)
     if sum(map(len, files.values())) > MAX_PACKAGE_BYTES:
