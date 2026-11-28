@@ -32,11 +32,14 @@ def certificate(now, name, issuer=None, *, features=(), responder=False, interme
         cert = cert.add_extension(x509.ExtendedKeyUsage([purpose]), critical=False)
         if not responder:
             cert = cert.add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
-        if features:
-            cert = cert.add_extension(x509.TLSFeature(features), critical=False)
-        if invalid_feature:
-            cert = cert.add_extension(x509.UnrecognizedExtension(ExtensionOID.TLS_FEATURE,
-                                      b"\x30\x03\x02\x01\x05\x00"), critical=False)
+    else:
+        cert = cert.add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False),
+                                  critical=True)
+    if features:
+        cert = cert.add_extension(x509.TLSFeature(features), critical=False)
+    if invalid_feature:
+        cert = cert.add_extension(x509.UnrecognizedExtension(ExtensionOID.TLS_FEATURE,
+                                  b"\x30\x03\x02\x01\x05\x00"), critical=False)
     return cert.sign(issuer[1] if issuer else key, hashes.SHA256()), key
 
 
@@ -143,6 +146,24 @@ def main(args):
     issuing_ca = certificate(now, "issuing-ocsp-fixture", issuer, intermediate=True)
     issued_leaf = certificate(now, "intermediate-issued-must-staple", issuing_ca, features=[status_request])
     issued_status = staple(issued_leaf[0], issuing_ca, past, future)
+    requiring_root = certificate(now, "status-requiring-root", features=[status_request])
+    requiring_ca = certificate(now, "requiring-issuer", issuer, intermediate=True, features=[status_request])
+    missing_ca = certificate(now, "issuer-without-root-feature", requiring_root, intermediate=True)
+    inherited_ca = certificate(now, "issuer-with-root-feature", requiring_root, intermediate=True,
+                               features=[status_request])
+    unsupported_ca = certificate(now, "issuer-unsupported-feature", issuer, intermediate=True,
+                                 features=[status_request_v2])
+    malformed_ca = certificate(now, "issuer-malformed-feature", issuer, intermediate=True, invalid_feature=True)
+    chains = [
+        ("issuer feature omitted", issuer, requiring_ca, (), False, False),
+        ("issuer feature omitted despite valid staple", issuer, requiring_ca, (), True, False),
+        ("issuer feature inherited with valid staple", issuer, requiring_ca, [status_request], True, True),
+        ("issuer feature inherited without staple", issuer, requiring_ca, [status_request], False, False),
+        ("trust anchor feature omitted by issuer", requiring_root, missing_ca, [status_request], True, False),
+        ("trust anchor feature inherited by whole chain", requiring_root, inherited_ca, [status_request], True, True),
+        ("unsupported issuer feature", issuer, unsupported_ca, [status_request], True, False),
+        ("malformed issuer feature", issuer, malformed_ca, [status_request], True, False),
+    ]
     good = staple(must[0], issuer, past, future)
     cases = [
         ("optional absent", plain, None, True),
@@ -179,7 +200,14 @@ def main(args):
                     assert result["tls"] == 4 and result["stage"] == 3, (protocol, label, result)
             result = inspect(args, Path(directory), issued_leaf, issuer[0], issued_status, protocol, chain=issuing_ca[0])
             assert result["ok"] == 1 and result["tls"] == 0, (protocol, "verified intermediate issuer", result)
-    print(f"Linux native OCSP stapling: {(len(cases) + 1) * 2} checks")
+            for label, root, ca, features, supply_staple, expected in chains:
+                child = certificate(now, label, ca, features=features)
+                response = staple(child[0], ca, past, future) if supply_staple else None
+                result = inspect(args, Path(directory), child, root[0], response, protocol, chain=ca[0])
+                assert result["ok"] == expected, (protocol, label, result)
+                if not expected:
+                    assert result["tls"] == 4 and result["stage"] == 3, (protocol, label, result)
+    print(f"Linux native OCSP stapling: {(len(cases) + len(chains) + 1) * 2} checks")
 
 
 if __name__ == "__main__":

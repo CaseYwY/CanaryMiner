@@ -121,6 +121,10 @@ The [native connection path](../pool-tls-check.md#native-connection-and-verifica
 
 The [opt-in Schannel verifier](../pool-schannel.md#separate-normal-and-explicit-development-trust) uses intermediate certificates received during the handshake as supporting material for the configured root and CRLs. The combined input remains bounded. The Windows loopback fixture checks accepted chains and rejects missing support, an untrusted root and intermediate revocation.
 
+## P-12y Enforce inherited TLS Feature declarations on Linux
+
+The [OpenSSL pool worker](../pool-native-tls.md#linux-certificate-status-in-the-handshake) validates TLS Feature declarations on its verified chain. Each issued certificate retains its signer's declared features, including a root's declaration when present. Missing inheritance, malformed declarations and an absent required leaf staple fail verification before the worker admits Stratum traffic. Leaf stapling and intermediate revocation remain separate checks.
+
 ## Current handoff
 
 - The fork contains P-01 at `ab208e8`; its source/tests and honest limitations are in `docs/settings-validation.md`.

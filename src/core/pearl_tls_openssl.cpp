@@ -34,14 +34,15 @@ bool dnsName(const std::string &name){
     return true;
 }
 
-bool requiresOcspStaple(X509 *leaf, bool &required) {
+bool readStaplingFeature(X509 *certificate, bool &required) {
+    required = false;
     int critical = -1;
     const std::unique_ptr<TLS_FEATURE, decltype(&TLS_FEATURE_free)> features(
-        static_cast<TLS_FEATURE *>(X509_get_ext_d2i(leaf, NID_tlsfeature, &critical, nullptr)), TLS_FEATURE_free);
+        static_cast<TLS_FEATURE *>(X509_get_ext_d2i(certificate, NID_tlsfeature, &critical, nullptr)), TLS_FEATURE_free);
     if (!features) return critical == -1;  // Absent extension, as opposed to an invalid or duplicated one.
     const int count = sk_ASN1_INTEGER_num(features.get());
     if (count < 1 || count > maximumTlsFeatures) return false;
-    auto *original = X509_get_ext(leaf, X509_get_ext_by_NID(leaf, NID_tlsfeature, -1));
+    auto *original = X509_get_ext(certificate, X509_get_ext_by_NID(certificate, NID_tlsfeature, -1));
     const std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)> canonical(
         X509V3_EXT_i2d(NID_tlsfeature, critical, features.get()), X509_EXTENSION_free);
     if (!original || !canonical ||
@@ -80,9 +81,20 @@ bool exactOcspEncoding(OCSP_BASICRESP *basic, const unsigned char *encoded, long
         std::equal(canonical.begin(), canonical.end(), encoded);
 }
 
-bool verifyOcspStaple(SSL *ssl, X509 *leaf, X509_STORE *trust) {
+bool verifyOcspStaple(SSL *ssl, X509_STORE *trust) {
+    auto *chain = SSL_get0_verified_chain(ssl);
+    const int chainLength = sk_X509_num(chain);
+    auto *leaf = sk_X509_value(chain, 0);
     bool required = false;
-    if (!requiresOcspStaple(leaf, required)) return false;
+    if (!leaf || !readStaplingFeature(leaf, required)) return false;
+    // RFC 7633 requires each issued certificate to retain its signer's declared features.
+    bool childRequiresStaple = required;
+    for (int i = 1; i < chainLength; ++i) {
+        bool issuerRequiresStaple = false;
+        if (!readStaplingFeature(sk_X509_value(chain, i), issuerRequiresStaple) ||
+            (issuerRequiresStaple && !childRequiresStaple)) return false;
+        childRequiresStaple = issuerRequiresStaple;
+    }
     unsigned char *encoded = nullptr;
     const long size = SSL_get_tlsext_status_ocsp_resp(ssl, &encoded);
     if (size == -1 && !encoded) return !required;
@@ -100,8 +112,7 @@ bool verifyOcspStaple(SSL *ssl, X509 *leaf, X509_STORE *trust) {
     if (responses < 1 || responses > maximumOcspEntries ||
         OCSP_BASICRESP_get_ext_by_critical(basic.get(), 1, -1) >= 0 ||
         !exactOcspEncoding(basic.get(), encoded, size)) return false;
-    auto *chain = SSL_get0_verified_chain(ssl);
-    auto *issuer = chain ? sk_X509_value(chain, 1) : nullptr;
+    auto *issuer = sk_X509_value(chain, 1);
     if (!issuer) return false;
 
     OCSP_SINGLERESP *match = nullptr;
@@ -184,8 +195,7 @@ struct OpenSslEngine final:PearlTlsEngine {
         ERR_clear_error();const int ret=SSL_do_handshake(ssl);const int err=SSL_get_error(ssl,ret);
         if(ret!=1)return mapped(err);
         if(SSL_get_verify_result(ssl)!=X509_V_OK){failure=E::Verification;return {K::Error,0};}
-        auto *peer=SSL_get0_peer_certificate(ssl);
-        if(!peer||!verifyOcspStaple(ssl,peer,SSL_CTX_get_cert_store(ctx))){failure=E::Verification;return {K::Error,0};}
+        if(!verifyOcspStaple(ssl,SSL_CTX_get_cert_store(ctx))){failure=E::Verification;return {K::Error,0};}
         return {K::Complete,0};
     }
     PearlTlsEngineStep send(const char *p,std::size_t size)override{
