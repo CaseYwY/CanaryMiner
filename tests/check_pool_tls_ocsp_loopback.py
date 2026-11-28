@@ -102,7 +102,7 @@ def probe_result(args, port, authority):
     return json.loads(result.stdout)
 
 
-def inspect(args, root, leaf, authority, response, protocol, chain=None):
+def inspect(args, root, leaf, authority, response, protocol, chain=None, *, issuer_response=None):
     cert_file, key_file, status_file = (root / name for name in ("leaf.pem", "server.key", "response.der"))
     cert_file.write_bytes(leaf[0].public_bytes(serialization.Encoding.PEM))
     key_file.write_bytes(leaf[1].private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -113,6 +113,10 @@ def inspect(args, root, leaf, authority, response, protocol, chain=None):
                "-cert", cert_file, "-key", key_file, protocol]
     if response is not None:
         command.extend(["-status_file", status_file])
+    if issuer_response is not None:
+        issuer_status_file = root / "issuer-response.der"
+        issuer_status_file.write_bytes(issuer_response)
+        command.extend(["-status_all", "-status_file", issuer_status_file])
     if chain is not None:
         chain_file = root / "chain.pem"
         chain_file.write_bytes(chain.public_bytes(serialization.Encoding.PEM))
@@ -128,6 +132,48 @@ def inspect(args, root, leaf, authority, response, protocol, chain=None):
                 except subprocess.TimeoutExpired:
                     server.kill()
                     server.wait(timeout=2)
+
+
+def check_intermediate_staples(args, directory, now, issuer, intermediate):
+    past, future = now - timedelta(hours=1), now + timedelta(hours=8)
+    leaf = certificate(now, "intermediate-staple-leaf", intermediate)
+    must = certificate(now, "intermediate-staple-must-leaf", intermediate,
+                       features=[x509.TLSFeatureType.status_request])
+    leaf_good = staple(leaf[0], intermediate, past, future)
+    leaf_revoked = staple(leaf[0], intermediate, past, future, state=ocsp.OCSPCertStatus.REVOKED)
+    ca_good = staple(intermediate[0], issuer, past, future)
+    ca_revoked = staple(intermediate[0], issuer, past, future, state=ocsp.OCSPCertStatus.REVOKED)
+    ca_unknown = staple(intermediate[0], issuer, past, future, state=ocsp.OCSPCertStatus.UNKNOWN)
+    ca_expired = staple(intermediate[0], issuer, now - timedelta(days=2), now - timedelta(days=1))
+    other_ca = certificate(now, "other-intermediate", issuer, intermediate=True)
+    # The server filters by serial and issuer name before writing the response.
+    # Keep both while changing the issuer key so this case reaches the worker.
+    alternate_issuer = certificate(now, issuer[0].subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value)
+    wrong_issuer = staple(intermediate[0], alternate_issuer, past, future)
+    wrong_signer = staple(intermediate[0], issuer, past, future, signer=other_ca)
+    delegate = certificate(now, "intermediate-status-delegate", issuer, responder=True)
+    cases = [
+        ("revoked intermediate", leaf, leaf_good, ca_revoked, False),
+        ("unknown intermediate", leaf, leaf_good, ca_unknown, False),
+        ("expired intermediate response", leaf, leaf_good, ca_expired, False),
+        ("intermediate response with a different issuer key", leaf, leaf_good, wrong_issuer, False),
+        ("unqualified intermediate responder", leaf, leaf_good, wrong_signer, False),
+        ("malformed intermediate response", leaf, leaf_good, staple_with_trailing_basic_data(ca_good), False),
+        ("good statuses for leaf and intermediate", leaf, leaf_good, ca_good, True),
+        ("delegated intermediate responder", leaf, leaf_good,
+         staple(intermediate[0], issuer, past, future, signer=delegate), True),
+        ("optional leaf without a status", leaf, None, ca_good, True),
+        ("optional leaf absent with a revoked intermediate", leaf, None, ca_revoked, False),
+        ("required leaf without a status", must, None, ca_good, False),
+        ("revoked leaf with a good intermediate", leaf, leaf_revoked, ca_good, False),
+    ]
+    for label, target, leaf_response, issuer_response, expected in cases:
+        result = inspect(args, directory, target, issuer[0], leaf_response, "-tls1_3",
+                         chain=intermediate[0], issuer_response=issuer_response)
+        assert result["ok"] == expected, (label, result)
+        if not expected:
+            assert result["tls"] == 4 and result["stage"] == 3, (label, result)
+    return len(cases)
 
 
 def main(args):
@@ -191,6 +237,7 @@ def main(args):
         ("fresh without next", must, staple(must[0], issuer, past, None), True),
         ("stale without next", must, staple(must[0], issuer, now - timedelta(days=2), None), False),
     ]
+    total = (len(cases) + len(chains) + 1) * 2
     with tempfile.TemporaryDirectory(prefix="pool-ocsp-", dir=args.scratch) as directory:
         for protocol in ("-tls1_2", "-tls1_3"):
             for label, leaf, response, expected in cases:
@@ -207,11 +254,14 @@ def main(args):
                 assert result["ok"] == expected, (protocol, label, result)
                 if not expected:
                     assert result["tls"] == 4 and result["stage"] == 3, (protocol, label, result)
-    print(f"Linux native OCSP stapling: {(len(cases) + len(chains) + 1) * 2} checks")
+        if args.multi_staple:
+            total += check_intermediate_staples(args, Path(directory), now, issuer, issuing_ca)
+    print(f"Linux native OCSP stapling: {total} checks")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     for arg in ("openssl", "probe", "worker", "scratch"):
         parser.add_argument(f"--{arg}", type=lambda value: Path(value).resolve(), required=True)
+    parser.add_argument("--multi-staple", action="store_true", help="also test TLS 1.3 with OpenSSL 3.6+ on both sides")
     main(parser.parse_args())
